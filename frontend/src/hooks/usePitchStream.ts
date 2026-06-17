@@ -1,0 +1,137 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { recordPitchFrame } from '../api/client';
+import { nextDemoPitchFrame } from '../domain/demoPitch';
+import type { PitchFrame } from '../domain/types';
+
+interface UsePitchStreamOptions {
+  enabled: boolean;
+  demoMode: boolean;
+  instrumentId: string;
+  referencePitch: number;
+  recording: boolean;
+  sessionId?: number;
+  onFrame?: (frame: PitchFrame) => void;
+}
+
+export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch, recording, sessionId, onFrame }: UsePitchStreamOptions) {
+  const [currentFrame, setCurrentFrame] = useState<PitchFrame | null>(null);
+  const [history, setHistory] = useState<PitchFrame[]>([]);
+  const [statusMessage, setStatusMessage] = useState('Demo mode is on, so pitch data is simulated.');
+  const [micActive, setMicActive] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const indexRef = useRef(0);
+  const recordingRef = useRef(recording);
+  const sessionIdRef = useRef(sessionId);
+  const onFrameRef = useRef(onFrame);
+
+  useEffect(() => {
+    recordingRef.current = recording;
+    sessionIdRef.current = sessionId;
+    onFrameRef.current = onFrame;
+  }, [recording, sessionId, onFrame]);
+
+  const handleFrame = useCallback((frame: PitchFrame) => {
+    setCurrentFrame(frame);
+    setHistory((old) => [frame, ...old.filter((item) => item.is_valid_for_recording)].slice(0, 8));
+    onFrameRef.current?.(frame);
+    if (recordingRef.current && sessionIdRef.current && frame.is_valid_for_recording) {
+      recordPitchFrame(sessionIdRef.current, frame).catch(() => {
+        setStatusMessage('Pitch is visible, but the backend could not save this frame.');
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!enabled || !demoMode) return;
+    setStatusMessage('Demo mode is on, so pitch data is simulated.');
+    const timer = window.setInterval(() => {
+      const frame = nextDemoPitchFrame(indexRef.current, instrumentId, referencePitch);
+      indexRef.current += 1;
+      handleFrame(frame);
+    }, 110);
+    return () => window.clearInterval(timer);
+  }, [demoMode, enabled, handleFrame, instrumentId, referencePitch]);
+
+  const stopMicrophone = useCallback(() => {
+    processorRef.current?.disconnect();
+    sourceRef.current?.disconnect();
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    wsRef.current?.close();
+    audioContextRef.current?.close().catch(() => undefined);
+    processorRef.current = null;
+    sourceRef.current = null;
+    mediaStreamRef.current = null;
+    audioContextRef.current = null;
+    wsRef.current = null;
+    setMicActive(false);
+  }, []);
+
+  const startMicrophone = useCallback(async () => {
+    if (demoMode) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
+      setStatusMessage('This browser does not support the audio APIs needed for live microphone tuning.');
+      return;
+    }
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${protocol}://${window.location.host}/ws/pitch`);
+      wsRef.current = ws;
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'pitch_frame') {
+            handleFrame(message.frame as PitchFrame);
+          } else if (message.type === 'error') {
+            setStatusMessage(message.message);
+          }
+        } catch {
+          setStatusMessage('The pitch stream returned an unreadable message.');
+        }
+      };
+      ws.onerror = () => setStatusMessage('The pitch WebSocket disconnected. Demo mode still works without the backend.');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      mediaStreamRef.current = stream;
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(2048, 1, 1);
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      sourceRef.current = source;
+      processorRef.current = processor;
+      processor.onaudioprocess = (event) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const pcm = Array.from(event.inputBuffer.getChannelData(0));
+        ws.send(
+          JSON.stringify({
+            type: 'audio_frame',
+            session_id: sessionIdRef.current,
+            instrument_id: instrumentId,
+            reference_pitch_hz: referencePitch,
+            sample_rate: audioContext.sampleRate,
+            pcm,
+          }),
+        );
+      };
+      setMicActive(true);
+      setStatusMessage('Microphone is connected. Play a steady note.');
+    } catch (error) {
+      setStatusMessage('Microphone permission was denied or no microphone was available.');
+      stopMicrophone();
+    }
+  }, [demoMode, handleFrame, instrumentId, referencePitch, stopMicrophone]);
+
+  useEffect(() => {
+    if (demoMode) {
+      stopMicrophone();
+    }
+    return () => stopMicrophone();
+  }, [demoMode, stopMicrophone]);
+
+  return { currentFrame, history, statusMessage, micActive, startMicrophone, stopMicrophone };
+}
+
