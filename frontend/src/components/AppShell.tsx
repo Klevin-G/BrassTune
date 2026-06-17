@@ -3,6 +3,7 @@ import { Activity, BarChart3, Gauge, GraduationCap, Home, MoreHorizontal, Music2
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { InstrumentSelector } from './InstrumentSelector';
+import { OnboardingFlow } from './OnboardingFlow';
 import { FloatingTabBar, StatusBadge } from './ui/AppPrimitives';
 
 const primaryNav = [
@@ -87,6 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="content">{children}</main>
+        <OnboardingFlow />
         <FloatingTabBar>
           {primaryNav.map((item) => (
             <NavLink

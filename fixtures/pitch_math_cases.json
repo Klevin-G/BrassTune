@@ -1,0 +1,38 @@
+[
+  {
+    "name": "A4 concert at 440",
+    "frequency_hz": 440.0,
+    "reference_pitch_hz": 440.0,
+    "instrument_id": "trombone",
+    "expected_concert_note": "A",
+    "expected_concert_octave": 4,
+    "expected_written_note": "A",
+    "expected_written_octave": 4,
+    "expected_nearest_midi": 69,
+    "expected_cents": 0.0
+  },
+  {
+    "name": "Concert C4 appears as written D4 on trumpet",
+    "frequency_hz": 261.625565,
+    "reference_pitch_hz": 440.0,
+    "instrument_id": "trumpet",
+    "expected_concert_note": "C",
+    "expected_concert_octave": 4,
+    "expected_written_note": "D",
+    "expected_written_octave": 4,
+    "expected_nearest_midi": 60,
+    "expected_cents": 0.0
+  },
+  {
+    "name": "A4 plus ten cents",
+    "frequency_hz": 442.548894,
+    "reference_pitch_hz": 440.0,
+    "instrument_id": "trombone",
+    "expected_concert_note": "A",
+    "expected_concert_octave": 4,
+    "expected_written_note": "A",
+    "expected_written_octave": 4,
+    "expected_nearest_midi": 69,
+    "expected_cents": 10.0
+  }
+]

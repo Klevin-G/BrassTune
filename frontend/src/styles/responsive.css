@@ -252,7 +252,8 @@
   .analytics-diagnosis-grid,
   .insight-grid,
   .recommendation-grid,
-  .session-card-grid {
+  .session-card-grid,
+  .calibration-readout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -408,7 +409,8 @@
   .analytics-main-grid,
   .analytics-chart-grid,
   .analytics-control-row,
-  .analytics-summary-strip {
+  .analytics-summary-strip,
+  .calibration-readout {
     grid-template-columns: 1fr;
   }
 
@@ -421,18 +423,42 @@
     gap: 10px;
   }
 
+  .calibration-frame-list {
+    display: grid;
+    gap: 10px;
+  }
+
   .advanced-table-toggle {
     display: block;
     margin-top: 12px;
   }
 
-  .desktop-note-table {
+  .desktop-note-table,
+  .compact-table-wrap {
     display: none;
   }
 
   .floating-tabbar a {
     min-width: 0;
     font-size: 0.62rem;
+  }
+
+  .onboarding-panel {
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  .onboarding-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .onboarding-actions > div,
+  .onboarding-actions .primary-button,
+  .onboarding-actions .ghost-button {
+    width: 100%;
   }
 }
 

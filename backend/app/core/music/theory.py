@@ -45,6 +45,8 @@ class PitchFrame:
     instrument_id: str
     reference_pitch_hz: float
     is_valid_for_recording: bool
+    save_eligibility_reason: str = "unknown"
+    detector_source: Optional[str] = None
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
@@ -120,6 +122,26 @@ def classify_tuning_status(
     return "sharp"
 
 
+def save_eligibility_reason(
+    status: str,
+    confidence: float,
+    rms: float,
+    frequency_hz: Optional[float],
+    in_instrument_range: bool = True,
+) -> str:
+    if status == "silence" or rms < 0.01:
+        return "silence"
+    if frequency_hz is None or frequency_hz <= 0:
+        return "unstable/no pitch lock"
+    if not in_instrument_range:
+        return "outside instrument range"
+    if confidence < MIN_RECORDING_CONFIDENCE:
+        return "confidence below 95%"
+    if status in ("flat", "in_tune", "sharp"):
+        return "valid for recording"
+    return "unstable/no pitch lock"
+
+
 def frequency_to_pitch_frame(
     frequency_hz: Optional[float],
     confidence: float,
@@ -127,6 +149,7 @@ def frequency_to_pitch_frame(
     timestamp_ms: int,
     instrument_id: str = "trumpet",
     reference_pitch_hz: float = DEFAULT_REFERENCE_PITCH_HZ,
+    detector_source: Optional[str] = None,
 ) -> PitchFrame:
     profile = get_instrument_profile(instrument_id)
     if frequency_hz is None or frequency_hz <= 0:
@@ -147,6 +170,8 @@ def frequency_to_pitch_frame(
             instrument_id=instrument_id,
             reference_pitch_hz=reference_pitch_hz,
             is_valid_for_recording=False,
+            save_eligibility_reason=save_eligibility_reason(status, confidence, rms, frequency_hz),
+            detector_source=detector_source,
         )
 
     if frequency_hz < profile.min_frequency_hz or frequency_hz > profile.max_frequency_hz:
@@ -167,6 +192,8 @@ def frequency_to_pitch_frame(
             instrument_id=instrument_id,
             reference_pitch_hz=reference_pitch_hz,
             is_valid_for_recording=False,
+            save_eligibility_reason=save_eligibility_reason(status, confidence, rms, frequency_hz, False),
+            detector_source=detector_source,
         )
 
     midi_float = frequency_to_midi(frequency_hz, reference_pitch_hz)
@@ -178,6 +205,7 @@ def frequency_to_pitch_frame(
     written = midi_to_note_name(written_midi, profile.preferred_note_spellings)
     status = classify_tuning_status(cents, confidence, rms)
     valid = status in ("flat", "in_tune", "sharp")
+    reason = save_eligibility_reason(status, confidence, rms, frequency_hz)
 
     return PitchFrame(
         timestamp_ms=timestamp_ms,
@@ -195,6 +223,8 @@ def frequency_to_pitch_frame(
         instrument_id=instrument_id,
         reference_pitch_hz=reference_pitch_hz,
         is_valid_for_recording=valid,
+        save_eligibility_reason=reason,
+        detector_source=detector_source,
     )
 
 

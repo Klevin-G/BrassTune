@@ -5,6 +5,14 @@ import type { PitchFrame } from '../domain/types';
 
 const AUDIO_FRAME_SIZE = 4096;
 
+export interface PitchStreamInfo {
+  frameSize: number;
+  sampleRate: number | null;
+  sentFrames: number;
+  droppedFrames: number;
+  detectorSource: string;
+}
+
 interface UsePitchStreamOptions {
   enabled: boolean;
   demoMode: boolean;
@@ -24,6 +32,13 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const [history, setHistory] = useState<PitchFrame[]>([]);
   const [statusMessage, setStatusMessage] = useState('Demo mode is on, so pitch data is simulated.');
   const [micActive, setMicActive] = useState(false);
+  const [streamInfo, setStreamInfo] = useState<PitchStreamInfo>({
+    frameSize: AUDIO_FRAME_SIZE,
+    sampleRate: null,
+    sentFrames: 0,
+    droppedFrames: 0,
+    detectorSource: 'browser_demo',
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -44,6 +59,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
 
   const handleFrame = useCallback((frame: PitchFrame) => {
     setCurrentFrame(frame);
+    setStreamInfo((old) => ({ ...old, detectorSource: frame.detector_source ?? (demoModeRef.current ? 'browser_demo' : old.detectorSource) }));
     setHistory((old) => [frame, ...old.filter((item) => item.is_valid_for_recording)].slice(0, 8));
     onFrameRef.current?.(frame);
     // Demo frames are generated in the browser, so the frontend persists them.
@@ -60,6 +76,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   useEffect(() => {
     if (!enabled || !demoMode) return;
     setStatusMessage('Demo mode is on, so pitch data is simulated.');
+    setStreamInfo((old) => ({ ...old, sampleRate: null, detectorSource: 'browser_demo' }));
     const timer = window.setInterval(() => {
       const frame = nextDemoPitchFrame(indexRef.current, instrumentId, referencePitch);
       indexRef.current += 1;
@@ -80,6 +97,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     audioContextRef.current = null;
     wsRef.current = null;
     setMicActive(false);
+    setStreamInfo((old) => ({ ...old, sampleRate: null, detectorSource: demoModeRef.current ? 'browser_demo' : 'backend detector unknown' }));
   }, []);
 
   const startMicrophone = useCallback(async () => {
@@ -109,6 +127,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
       mediaStreamRef.current = stream;
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
+      setStreamInfo((old) => ({ ...old, sampleRate: audioContext.sampleRate, detectorSource: 'backend detector unknown', sentFrames: 0, droppedFrames: 0 }));
       const source = audioContext.createMediaStreamSource(stream);
       const processor = audioContext.createScriptProcessor(AUDIO_FRAME_SIZE, 1, 1);
       source.connect(processor);
@@ -116,8 +135,12 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
       sourceRef.current = source;
       processorRef.current = processor;
       processor.onaudioprocess = (event) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
+        if (ws.readyState !== WebSocket.OPEN) {
+          setStreamInfo((old) => ({ ...old, droppedFrames: old.droppedFrames + 1 }));
+          return;
+        }
         const pcm = Array.from(event.inputBuffer.getChannelData(0));
+        setStreamInfo((old) => ({ ...old, sentFrames: old.sentFrames + 1 }));
         ws.send(
           JSON.stringify({
             type: 'audio_frame',
@@ -144,5 +167,5 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     return () => stopMicrophone();
   }, [demoMode, stopMicrophone]);
 
-  return { currentFrame, history, statusMessage, micActive, startMicrophone, stopMicrophone };
+  return { currentFrame, history, statusMessage, micActive, streamInfo, startMicrophone, stopMicrophone };
 }

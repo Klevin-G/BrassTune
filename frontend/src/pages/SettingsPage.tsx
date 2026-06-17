@@ -1,10 +1,28 @@
-import { Download, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { Bug, DatabaseBackup, Download, RefreshCcw, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { clearLocalSessions, exportUrl, repairDemoData, resetDemoData } from '../api/client';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { useAppSettings } from '../state/AppSettingsContext';
 
 export function SettingsPage() {
-  const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode } = useAppSettings();
+  const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
+  const [maintenanceStatus, setMaintenanceStatus] = useState('Ready');
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+
+  const runMaintenance = async (label: string, action: () => Promise<unknown>) => {
+    setBusyAction(label);
+    setMaintenanceStatus(`${label}...`);
+    try {
+      const result = await action();
+      setMaintenanceStatus(`${label} complete: ${JSON.stringify(result)}`);
+    } catch (error) {
+      setMaintenanceStatus(`${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
   return (
     <ScreenContainer>
@@ -35,9 +53,22 @@ export function SettingsPage() {
         <SectionCard title="Local utilities" eyebrow="MVP">
           <div className="insight-grid">
             <InsightCard
-              title="Export demo session"
+              title="Audio Lab"
+              detail="Developer testing"
+              body="Open the calibration readout for real-device microphone checks, save eligibility, and detector diagnostics."
+              icon={Bug}
+              tone="gold"
+            />
+            <InsightCard
+              title="Onboarding"
+              detail="First-run flow"
+              body="Reopen instrument setup, reference pitch, input mode, and the No lock versus unstable pitch explanation."
+              icon={SlidersHorizontal}
+            />
+            <InsightCard
+              title="Export all local data"
               detail="JSON"
-              body="Use the seeded demo session as a smoke-test export while iterating locally."
+              body="Download local users, sessions, samples, note events, and seeded ensemble metadata."
               icon={Download}
               tone="gold"
             />
@@ -50,9 +81,17 @@ export function SettingsPage() {
             />
           </div>
           <div className="settings-actions">
-            <a className="ghost-button" href="/api/export/session/1.json">
+            <Link className="primary-button" to="/settings/audio-lab">
+              <Bug size={18} />
+              Open Audio Lab
+            </Link>
+            <button className="ghost-button" type="button" onClick={openOnboarding}>
+              <SlidersHorizontal size={18} />
+              Reopen onboarding
+            </button>
+            <a className="ghost-button" href={exportUrl('/api/export/all.json')}>
               <Download size={18} />
-              Export demo
+              Export all data
             </a>
             <button className="ghost-button" type="button" onClick={() => localStorage.clear()}>
               <Trash2 size={18} />
@@ -61,6 +100,23 @@ export function SettingsPage() {
           </div>
         </SectionCard>
       </div>
+      <SectionCard title="Local data controls" eyebrow="Repair and reset">
+        <div className="settings-actions">
+          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Repair demo data', repairDemoData)}>
+            <RefreshCcw size={18} />
+            Repair demo data
+          </button>
+          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Reset demo data', resetDemoData)}>
+            <DatabaseBackup size={18} />
+            Reset demo data
+          </button>
+          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Clear sessions', clearLocalSessions)}>
+            <RotateCcw size={18} />
+            Clear sessions
+          </button>
+        </div>
+        <p className="settings-status">{maintenanceStatus}</p>
+      </SectionCard>
       <SectionCard title="Portability note" eyebrow="Swift-ready core">
         <InsightCard
           title="Pure domain logic stays portable"

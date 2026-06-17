@@ -13,6 +13,7 @@ from app.core.ensemble.analytics import calculate_ensemble_summary, generate_reh
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
 from app.db.database import get_db
+from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import GroupMember, NoteEvent, PitchSample, PracticeSession, User
 from app.schemas.schemas import PitchFrameIn, StartSessionRequest
 from app.services.serializers import event_to_dict, sample_to_dict, session_to_dict
@@ -285,6 +286,26 @@ def export_note_events_csv(session_id: int, db: Session = Depends(get_db)):
         data = event_to_dict(event)
         writer.writerow({key: data[key] for key in writer.fieldnames})
     return Response(output.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-note-events.csv" % session_id})
+
+
+@router.get("/export/all.json")
+def export_all_json(db: Session = Depends(get_db)):
+    return Response(export_all_data(db), media_type="application/json", headers={"Content-Disposition": "attachment; filename=brasstune-local-data.json"})
+
+
+@router.post("/admin/sessions/clear")
+def clear_local_sessions(db: Session = Depends(get_db)):
+    return {"cleared": clear_practice_data(db)}
+
+
+@router.post("/admin/demo-data/reset")
+def reset_local_demo_data(db: Session = Depends(get_db)):
+    return reset_demo_data(db)
+
+
+@router.post("/admin/demo-data/repair")
+def repair_local_demo_data(db: Session = Depends(get_db)):
+    return repair_demo_data(db)
 
 
 @router.get("/ensemble/summary")

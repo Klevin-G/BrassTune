@@ -1,0 +1,23 @@
+[
+  {
+    "name": "Trumpet in Bb raises written pitch by major second",
+    "instrument_id": "trumpet",
+    "concert_midi": 60,
+    "expected_written_midi": 62,
+    "expected_written_label": "D4"
+  },
+  {
+    "name": "Horn in F raises written pitch by perfect fifth",
+    "instrument_id": "horn",
+    "concert_midi": 60,
+    "expected_written_midi": 67,
+    "expected_written_label": "G4"
+  },
+  {
+    "name": "Trombone reads concert pitch",
+    "instrument_id": "trombone",
+    "concert_midi": 60,
+    "expected_written_midi": 60,
+    "expected_written_label": "C4"
+  }
+]

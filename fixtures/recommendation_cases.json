@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Sharp trumpet D5",
+    "instrument_id": "trumpet",
+    "note_stats": {
+      "note_label": "D5",
+      "avg_signed_cents": 14,
+      "avg_abs_cents": 15,
+      "stddev_cents": 4,
+      "duration_seconds": 10,
+      "in_tune_percentage": 42
+    },
+    "expected_category": "Sharp tendency",
+    "expected_related_note": "D5"
+  },
+  {
+    "name": "Unstable horn E5",
+    "instrument_id": "horn",
+    "note_stats": {
+      "note_label": "E5",
+      "avg_signed_cents": 1,
+      "avg_abs_cents": 9,
+      "stddev_cents": 13,
+      "duration_seconds": 8,
+      "in_tune_percentage": 58
+    },
+    "expected_category": "Inconsistent pitch",
+    "expected_related_note": "E5"
+  }
+]

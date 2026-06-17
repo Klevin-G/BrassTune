@@ -218,6 +218,7 @@ async function runViewport(browser, viewport) {
   const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, deviceScaleFactor: 1 });
   await context.addInitScript(() => {
     localStorage.clear();
+    localStorage.setItem('brasstune.onboardingComplete', 'true');
     window.__brasstuneErrors = [];
     window.addEventListener('unhandledrejection', (event) => {
       window.__brasstuneErrors.push(`Unhandled rejection: ${event.reason?.message || event.reason}`);

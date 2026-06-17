@@ -29,6 +29,8 @@ export interface PitchFrame {
   instrument_id: string;
   reference_pitch_hz: number;
   is_valid_for_recording: boolean;
+  save_eligibility_reason?: string | null;
+  detector_source?: string | null;
 }
 
 export interface PracticeSession {

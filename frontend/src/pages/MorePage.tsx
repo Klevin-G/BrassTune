@@ -1,4 +1,4 @@
-import { Activity, FileText, Music2, Settings, Users } from 'lucide-react';
+import { Activity, Bug, FileText, Music2, Settings, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 
@@ -7,6 +7,7 @@ const moreItems = [
   { to: '/progress', title: 'Progress', detail: 'See weekly pulse, improvement, and consistency.', icon: Activity },
   { to: '/ensemble', title: 'Ensemble', detail: 'Director briefing cards and rehearsal focus.', icon: Users },
   { to: '/settings', title: 'Settings', detail: 'Instrument, A4 reference, and demo preferences.', icon: Settings },
+  { to: '/settings/audio-lab', title: 'Audio Lab', detail: 'Developer calibration readout for real-device tuning tests.', icon: Bug },
 ];
 
 export function MorePage() {

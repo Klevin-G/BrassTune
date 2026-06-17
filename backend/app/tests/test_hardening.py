@@ -12,6 +12,7 @@ from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
 from app.core.pitch.detector import yin_pitch
 from app.db.database import Base
+from app.db.maintenance import repair_demo_data
 from app.db.seed import seed_demo_data
 from app.main import app
 from app.models.db import NoteEvent, PitchSample, PracticeSession, User
@@ -227,5 +228,21 @@ def test_fresh_seed_creates_recordable_samples_and_note_events():
         assert all(session.samples for session in sessions)
         assert all(session.note_events for session in sessions)
         assert db.query(PitchSample).filter(PitchSample.confidence < MIN_RECORDING_CONFIDENCE).count() == 0
+    finally:
+        db.close()
+
+
+def test_repair_demo_data_rebuilds_broken_seed_sessions():
+    db = _test_db()
+    try:
+        _session(db, 14, "trumpet", dt.datetime(2026, 6, 15))
+        result = repair_demo_data(db)
+        assert result["repaired"] is True
+        sessions = db.query(PracticeSession).all()
+        assert len(sessions) >= 7
+        assert db.query(PitchSample).count() > 0
+        assert db.query(NoteEvent).count() > 0
+        assert all(session.samples for session in sessions)
+        assert all(session.note_events for session in sessions)
     finally:
         db.close()

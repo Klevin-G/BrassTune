@@ -1,4 +1,6 @@
+import json
 import math
+from pathlib import Path
 
 from app.core.analytics.stats import calculate_most_improved_notes, heatmap_severity
 from app.core.instruments.profiles import get_instrument_profile
@@ -6,11 +8,19 @@ from app.core.music.theory import (
     calculate_cents_deviation,
     frequency_to_midi,
     frequency_to_pitch_frame,
+    midi_to_note_name,
     midi_to_frequency,
     transpose_concert_to_written,
 )
 from app.core.recommendations.rules import generate_note_recommendation
 from app.core.sessions.segmentation import compute_session_summary, segment_note_events
+
+ROOT_DIR = Path(__file__).resolve().parents[3]
+
+
+def _fixture(name: str):
+    with open(ROOT_DIR / "fixtures" / name, encoding="utf-8") as file:
+        return json.load(file)
 
 
 def test_a4_440_maps_to_a4_zero_cents():
@@ -118,10 +128,67 @@ def test_recommendation_rules():
     assert rec["related_note"] == "D5"
 
 
+def test_shared_pitch_math_fixtures():
+    for case in _fixture("pitch_math_cases.json"):
+        frame = frequency_to_pitch_frame(case["frequency_hz"], 0.99, 0.1, 0, case["instrument_id"], case["reference_pitch_hz"])
+        assert frame.concert_note_name == case["expected_concert_note"]
+        assert frame.concert_octave == case["expected_concert_octave"]
+        assert frame.written_note_name == case["expected_written_note"]
+        assert frame.written_octave == case["expected_written_octave"]
+        assert frame.nearest_midi == case["expected_nearest_midi"]
+        assert abs((frame.cents_deviation or 0) - case["expected_cents"]) < 0.05
+
+
+def test_shared_transposition_fixtures():
+    for case in _fixture("transposition_cases.json"):
+        profile = get_instrument_profile(case["instrument_id"])
+        written_midi = transpose_concert_to_written(case["concert_midi"], profile)
+        written = midi_to_note_name(written_midi, profile.preferred_note_spellings)
+        assert written_midi == case["expected_written_midi"]
+        assert "%s%s" % (written["note"], written["octave"]) == case["expected_written_label"]
+
+
+def test_shared_segmentation_fixtures():
+    for case in _fixture("note_segmentation_cases.json"):
+        frames = []
+        for item in case["frames"]:
+            frames.append(
+                {
+                    "timestamp_ms": item["timestamp_ms"],
+                    "frequency_hz": 440.0,
+                    "confidence": 0.99,
+                    "rms": 0.1,
+                    "midi_note_float": 69.0,
+                    "nearest_midi": 69,
+                    "concert_note_name": item["concert_note_name"],
+                    "concert_octave": item["concert_octave"],
+                    "written_note_name": item["written_note_name"],
+                    "written_octave": item["written_octave"],
+                    "cents_deviation": item["cents_deviation"],
+                    "tuning_status": item["tuning_status"],
+                    "instrument_id": "trumpet",
+                    "reference_pitch_hz": 440.0,
+                    "is_valid_for_recording": True,
+                }
+            )
+        events = segment_note_events(frames, max_merge_gap_ms=180, min_duration_ms=100)
+        assert len(events) == len(case["expected_events"])
+        for event, expected in zip(events, case["expected_events"]):
+            assert event["written_note"] == expected["written_note"]
+            assert event["written_octave"] == expected["written_octave"]
+            assert abs(event["avg_signed_cents"] - expected["avg_signed_cents"]) < 0.01
+
+
+def test_shared_recommendation_fixtures():
+    for case in _fixture("recommendation_cases.json"):
+        rec = generate_note_recommendation(case["note_stats"], get_instrument_profile(case["instrument_id"]))
+        assert rec["category"] == case["expected_category"]
+        assert rec["related_note"] == case["expected_related_note"]
+
+
 def test_most_improved_notes():
     improved = calculate_most_improved_notes(
         [{"note_label": "A4", "avg_abs_cents": 5, "duration_seconds": 8}],
         [{"note_label": "A4", "avg_abs_cents": 13, "duration_seconds": 9}],
     )
     assert improved[0]["improvement"] == 8
-

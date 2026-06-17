@@ -77,6 +77,8 @@ export function pitchFrameFromFrequency(
       instrument_id: instrumentId,
       reference_pitch_hz: referencePitch,
       is_valid_for_recording: false,
+      save_eligibility_reason: rms < 0.01 ? 'silence' : 'unstable/no pitch lock',
+      detector_source: 'browser_demo',
     };
   }
   const midi = frequencyToMidi(frequency, referencePitch);
@@ -101,5 +103,7 @@ export function pitchFrameFromFrequency(
     instrument_id: instrumentId,
     reference_pitch_hz: referencePitch,
     is_valid_for_recording: status === 'flat' || status === 'in_tune' || status === 'sharp',
+    save_eligibility_reason: status === 'flat' || status === 'in_tune' || status === 'sharp' ? 'valid for recording' : 'confidence below 95%',
+    detector_source: 'browser_demo',
   };
 }

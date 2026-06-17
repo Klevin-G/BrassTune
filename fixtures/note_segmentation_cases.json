@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Two separated written notes",
+    "frames": [
+      { "timestamp_ms": 0, "written_note_name": "D", "written_octave": 5, "concert_note_name": "C", "concert_octave": 5, "cents_deviation": 8.0, "tuning_status": "sharp" },
+      { "timestamp_ms": 110, "written_note_name": "D", "written_octave": 5, "concert_note_name": "C", "concert_octave": 5, "cents_deviation": 10.0, "tuning_status": "sharp" },
+      { "timestamp_ms": 220, "written_note_name": "D", "written_octave": 5, "concert_note_name": "C", "concert_octave": 5, "cents_deviation": 12.0, "tuning_status": "sharp" },
+      { "timestamp_ms": 520, "written_note_name": "G", "written_octave": 4, "concert_note_name": "F", "concert_octave": 4, "cents_deviation": -6.0, "tuning_status": "flat" },
+      { "timestamp_ms": 630, "written_note_name": "G", "written_octave": 4, "concert_note_name": "F", "concert_octave": 4, "cents_deviation": -4.0, "tuning_status": "in_tune" }
+    ],
+    "expected_events": [
+      { "written_note": "D", "written_octave": 5, "avg_signed_cents": 10.0 },
+      { "written_note": "G", "written_octave": 4, "avg_signed_cents": -5.0 }
+    ]
+  }
+]

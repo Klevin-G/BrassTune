@@ -100,3 +100,15 @@ export function getEnsembleSummary() {
 export function getEnsembleReport() {
   return request<any>('/api/ensemble/report');
 }
+
+export function clearLocalSessions() {
+  return request<{ cleared: Record<string, number> }>('/api/admin/sessions/clear', { method: 'POST' });
+}
+
+export function resetDemoData() {
+  return request<{ reset: boolean; cleared: Record<string, number>; sessions: number }>('/api/admin/demo-data/reset', { method: 'POST' });
+}
+
+export function repairDemoData() {
+  return request<{ repaired: boolean; reason?: string; cleared?: Record<string, number>; sessions?: number }>('/api/admin/demo-data/repair', { method: 'POST' });
+}

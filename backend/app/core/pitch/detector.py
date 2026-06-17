@@ -1,7 +1,7 @@
 import time
 from collections import deque
 from statistics import median
-from typing import Deque, Dict, Iterable, List, Optional, Tuple
+from typing import Deque, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -33,24 +33,24 @@ class PitchDetector:
         sample_rate: Optional[int] = None,
         min_frequency_hz: float = 30.0,
         max_frequency_hz: float = 2000.0,
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Union[float, str]]:
         samples = np.asarray(list(pcm), dtype=np.float32)
         if samples.size == 0:
-            return {"frequency_hz": 0.0, "confidence": 0.0, "rms": 0.0}
+            return {"frequency_hz": 0.0, "confidence": 0.0, "rms": 0.0, "detector_source": "none"}
         sr = sample_rate or self.sample_rate
         rms = float(np.sqrt(np.mean(np.square(samples))))
         if rms < 0.005:
-            return {"frequency_hz": 0.0, "confidence": 0.0, "rms": rms}
+            return {"frequency_hz": 0.0, "confidence": 0.0, "rms": rms, "detector_source": "silence"}
         if self._aubio_pitch is not None and sr == self.sample_rate:
             try:
                 freq = float(self._aubio_pitch(samples)[0])
                 confidence = float(self._aubio_pitch.get_confidence())
                 if freq > 0:
-                    return {"frequency_hz": freq, "confidence": max(0.0, min(confidence, 1.0)), "rms": rms}
+                    return {"frequency_hz": freq, "confidence": max(0.0, min(confidence, 1.0)), "rms": rms, "detector_source": "aubio"}
             except Exception:
                 pass
         freq, confidence = yin_pitch(samples, sr, min_frequency_hz, max_frequency_hz)
-        return {"frequency_hz": freq, "confidence": confidence, "rms": rms}
+        return {"frequency_hz": freq, "confidence": confidence, "rms": rms, "detector_source": "yin_fallback"}
 
     def estimate_frame(
         self,
@@ -62,14 +62,16 @@ class PitchDetector:
     ) -> PitchFrame:
         profile = get_instrument_profile(instrument_id)
         estimate = self.estimate(pcm, sample_rate, profile.min_frequency_hz, profile.max_frequency_hz)
-        freq = estimate["frequency_hz"] if estimate["frequency_hz"] > 0 else None
+        frequency_hz = float(estimate["frequency_hz"])
+        freq = frequency_hz if frequency_hz > 0 else None
         return frequency_to_pitch_frame(
             freq,
-            estimate["confidence"],
-            estimate["rms"],
+            float(estimate["confidence"]),
+            float(estimate["rms"]),
             int(timestamp_ms if timestamp_ms is not None else time.time() * 1000),
             instrument_id,
             reference_pitch_hz,
+            str(estimate["detector_source"]),
         )
 
 

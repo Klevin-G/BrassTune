@@ -26,6 +26,8 @@ class PitchFrameIn(BaseModel):
     instrument_id: str = "trumpet"
     reference_pitch_hz: float = 440.0
     is_valid_for_recording: bool = False
+    save_eligibility_reason: Optional[str] = None
+    detector_source: Optional[str] = None
 
 
 class AudioFrameIn(BaseModel):
@@ -35,4 +37,3 @@ class AudioFrameIn(BaseModel):
     reference_pitch_hz: float = 440.0
     sample_rate: int = 48000
     pcm: List[float] = Field(default_factory=list)
-

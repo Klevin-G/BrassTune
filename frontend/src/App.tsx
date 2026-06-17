@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import { AudioLabPage } from './pages/AudioLabPage';
 import { CoachPage } from './pages/CoachPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EnsemblePage } from './pages/EnsemblePage';
@@ -25,6 +26,8 @@ export default function App() {
         <Route path="/more" element={<MorePage />} />
         <Route path="/ensemble" element={<EnsemblePage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/audio-lab" element={<AudioLabPage />} />
+        <Route path="/dev/calibration" element={<AudioLabPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

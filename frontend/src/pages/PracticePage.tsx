@@ -5,6 +5,7 @@ import { SessionControls } from '../components/SessionControls';
 import { SignalMeter } from '../components/SignalMeter';
 import { TunerNeedle } from '../components/TunerNeedle';
 import { EmptyActionState, ScreenContainer, StatusBadge } from '../components/ui/AppPrimitives';
+import { describeSaveEligibility } from '../domain/pitchFrameStatus';
 import { usePitchStream } from '../hooks/usePitchStream';
 import { useSessionRecorder } from '../hooks/useSessionRecorder';
 import { useAppSettings } from '../state/AppSettingsContext';
@@ -24,6 +25,7 @@ export function PracticePage() {
   const start = () => recorder.start(`Practice ${new Date().toLocaleDateString()}`).catch((error) => recorder.setError(String(error)));
   const stop = () => recorder.stop().catch((error) => recorder.setError(String(error)));
   const latestValid = stream.history.find((frame) => frame.is_valid_for_recording);
+  const eligibility = describeSaveEligibility(stream.currentFrame);
 
   return (
     <ScreenContainer>
@@ -83,6 +85,18 @@ export function PracticePage() {
                 </div>
               </div>
               <p>Short blocks make the note-level analytics easier to trust and compare.</p>
+            </article>
+            <article className={`insight-card tone-${eligibility.tone}`}>
+              <div className="insight-heading">
+                <span className="insight-icon">
+                  <Mic size={18} />
+                </span>
+                <div>
+                  <h3>Save eligibility</h3>
+                  <span>{eligibility.label}</span>
+                </div>
+              </div>
+              <p>{eligibility.detail}</p>
             </article>
           </div>
           <div className="inline-panel">

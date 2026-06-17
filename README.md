@@ -123,6 +123,10 @@ Friendly failure states are shown for denied permission, missing browser audio A
 
 The browser streams 4096-sample audio frames to give the detector more context for steady notes. That adds a little live-tuner latency, but improves stability for low brass and noisy rooms.
 
+## Audio Calibration Lab
+
+Open `/settings/audio-lab` from Settings or More when validating real microphones. The lab shows raw frequency, note labels, cents, confidence, RMS, sample rate, frame size, detector source, save eligibility, invalid-frame reason, and recent frame history. It observes by default and only saves frames when its recording control is explicitly active.
+
 ## Aubio and Librosa
 
 The backend tries Aubio when it is installed, then falls back to a lightweight NumPy YIN-style detector if Aubio is unavailable. The MVP does not require Aubio to run locally.
@@ -163,6 +167,10 @@ npm run simulate:devices
 
 The device simulation starts the backend and frontend automatically if they are not already running. It saves the browser report to `docs/device-simulation-report.md` and screenshots to `docs/assets/device-simulation/`.
 
+GitHub Actions workflows run backend tests, frontend tests/build/audit, and a manual or scheduled device simulation artifact workflow.
+
+Shared JSON fixtures live in `fixtures/` for pitch math, transposition, segmentation, and recommendations. Pytest uses them now; future Swift/XCTest targets can reuse the same cases to keep the iPad app behavior aligned.
+
 ## Key API Routes
 
 - `GET /api/health`
@@ -179,6 +187,10 @@ The device simulation starts the backend and frontend automatically if they are 
 - `GET /api/export/session/{session_id}.csv`
 - `GET /api/export/session/{session_id}.json`
 - `GET /api/export/note-events/{session_id}.csv`
+- `GET /api/export/all.json`
+- `POST /api/admin/sessions/clear`
+- `POST /api/admin/demo-data/reset`
+- `POST /api/admin/demo-data/repair`
 - `GET /api/ensemble/summary`
 - `GET /api/ensemble/report`
 - `WS /ws/pitch`
