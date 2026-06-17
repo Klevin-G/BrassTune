@@ -1,21 +1,30 @@
-import { Activity, BarChart3, Gauge, GraduationCap, Home, Music2, Settings, SlidersHorizontal, Users } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { Activity, BarChart3, Gauge, GraduationCap, Home, MoreHorizontal, Music2, Settings, SlidersHorizontal, Users } from 'lucide-react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { InstrumentSelector } from './InstrumentSelector';
+import { FloatingTabBar, StatusBadge } from './ui/AppPrimitives';
 
-const nav = [
-  { to: '/', label: 'Dashboard', icon: Home },
+const primaryNav = [
+  { to: '/', label: 'Home', icon: Home },
   { to: '/practice', label: 'Practice', icon: Gauge },
-  { to: '/sessions', label: 'Sessions', icon: Music2 },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/progress', label: 'Progress', icon: Activity },
   { to: '/coach', label: 'Coach', icon: GraduationCap },
+  { to: '/more', label: 'More', icon: MoreHorizontal },
+];
+
+const secondaryNav = [
+  { to: '/sessions', label: 'Sessions', icon: Music2 },
+  { to: '/progress', label: 'Progress', icon: Activity },
   { to: '/ensemble', label: 'Ensemble', icon: Users },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children }: { children: ReactNode }) {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode } = useAppSettings();
+  const location = useLocation();
+  const moreActive = location.pathname === '/more' || secondaryNav.some((item) => location.pathname.startsWith(item.to));
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -29,9 +38,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </span>
         </NavLink>
         <nav className="nav-list" aria-label="Primary navigation">
-          {nav.map((item) => (
-            <NavLink to={item.to} key={item.to} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          {primaryNav.map((item) => (
+            <NavLink
+              to={item.to}
+              key={item.to}
+              className={({ isActive }) => `nav-item ${item.to === '/more' ? (moreActive ? 'active' : '') : isActive ? 'active' : ''}`}
+              end={item.to === '/'}
+            >
               <item.icon size={18} />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+        <p className="sidebar-section-label">More</p>
+        <nav className="secondary-nav" aria-label="Secondary navigation">
+          {secondaryNav.map((item) => (
+            <NavLink to={item.to} key={item.to} className={({ isActive }) => `secondary-nav-item ${isActive ? 'active' : ''}`}>
+              <item.icon size={17} />
               <span>{item.label}</span>
             </NavLink>
           ))}
@@ -40,8 +63,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="app-main">
         <header className="topbar">
           <div>
-            <p className="topbar-label">Local MVP</p>
-            <h1>BrassTune Analytics</h1>
+            <p className="topbar-label">Practice cockpit</p>
+            <h1>BrassTune</h1>
           </div>
           <div className="topbar-controls">
             <InstrumentSelector value={instrumentId} onChange={setInstrumentId} compact />
@@ -60,11 +83,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button className={`toggle ${demoMode ? 'on' : ''}`} onClick={() => setDemoMode(!demoMode)} type="button">
               Demo
             </button>
+            <StatusBadge tone={demoMode ? 'gold' : 'green'}>{demoMode ? 'Seeded audio' : 'Mic ready'}</StatusBadge>
           </div>
         </header>
         <main className="content">{children}</main>
+        <FloatingTabBar>
+          {primaryNav.map((item) => (
+            <NavLink
+              to={item.to}
+              key={item.to}
+              className={({ isActive }) => (item.to === '/more' ? (moreActive ? 'active' : '') : isActive ? 'active' : '')}
+              end={item.to === '/'}
+            >
+              <item.icon size={19} />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </FloatingTabBar>
       </div>
     </div>
   );
 }
-

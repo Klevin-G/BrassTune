@@ -1,0 +1,134 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #070a0f;
+  color: #f4f8fb;
+  --bg: #070a0f;
+  --bg-elevated: #0b1118;
+  --panel: rgba(15, 23, 32, 0.84);
+  --panel-solid: #111923;
+  --panel-strong: #172330;
+  --panel-warm: rgba(36, 28, 16, 0.78);
+  --line: rgba(164, 183, 202, 0.16);
+  --line-strong: rgba(214, 190, 133, 0.28);
+  --text: #f4f8fb;
+  --muted: #9dabbb;
+  --muted-2: #6f8091;
+  --gold: #d8a53f;
+  --gold-soft: #f0c970;
+  --gold-dim: #8d6f33;
+  --green: #6bd287;
+  --teal: #59c9b2;
+  --amber: #e5c45c;
+  --orange: #e58b43;
+  --red: #e25d5d;
+  --blue: #75b7ff;
+  --shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
+  --shadow-soft: 0 14px 36px rgba(0, 0, 0, 0.24);
+  --radius-sm: 14px;
+  --radius: 18px;
+  --radius-lg: 24px;
+  --radius-xl: 28px;
+  --tap: 44px;
+  --content-max: 1480px;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 64% -8%, rgba(216, 165, 63, 0.18), transparent 30rem),
+    radial-gradient(circle at 12% 28%, rgba(89, 201, 178, 0.08), transparent 24rem),
+    linear-gradient(180deg, #0a0f16 0%, #080c12 48%, #06090e 100%);
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.72), transparent 82%);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(240, 201, 112, 0.82);
+  outline-offset: 3px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: 0;
+}
+
+h1 {
+  margin-bottom: 10px;
+  font-size: clamp(2rem, 4vw, 4.35rem);
+  line-height: 0.94;
+}
+
+h2 {
+  margin-bottom: 10px;
+  font-size: 1.18rem;
+  line-height: 1.2;
+}
+
+h3 {
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+::selection {
+  color: #090d12;
+  background: var(--gold-soft);
+}

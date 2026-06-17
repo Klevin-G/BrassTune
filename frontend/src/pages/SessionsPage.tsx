@@ -1,46 +1,102 @@
-import { useEffect, useState } from 'react';
+import { CalendarDays, Gauge, Music2, Plus, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listSessions } from '../api/client';
+import { EmptyActionState, PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
 import type { PracticeSession } from '../domain/types';
+
+type SessionFilter = 'all' | 'week' | 'best' | 'work';
+
+function isThisWeek(dateText: string) {
+  const date = new Date(dateText);
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(now.getDate() - 7);
+  return date >= start;
+}
 
 export function SessionsPage() {
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
+  const [filter, setFilter] = useState<SessionFilter>('all');
+
   useEffect(() => {
     listSessions().then(setSessions).catch(() => setSessions([]));
   }, []);
+
+  const filtered = useMemo(() => {
+    if (filter === 'week') return sessions.filter((session) => isThisWeek(session.started_at));
+    if (filter === 'best') return sessions.filter((session) => session.in_tune_percentage >= 75);
+    if (filter === 'work') return sessions.filter((session) => session.average_abs_cents >= 12 || session.in_tune_percentage < 55);
+    return sessions;
+  }, [filter, sessions]);
+
   return (
-    <section className="panel wide">
-      <div className="section-heading">
-        <h2>Practice sessions</h2>
-        <Link to="/practice" className="primary-button">New session</Link>
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Instrument</th>
-              <th>Date</th>
-              <th>Notes</th>
-              <th>Avg Abs</th>
-              <th>In-Tune</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sessions.map((session) => (
-              <tr key={session.id}>
-                <td><Link to={`/sessions/${session.id}`}>{session.name}</Link></td>
-                <td>{session.instrument_id}</td>
-                <td>{new Date(session.started_at).toLocaleDateString()}</td>
-                <td>{session.notes_count}</td>
-                <td>{session.average_abs_cents.toFixed(1)}c</td>
-                <td>{Math.round(session.in_tune_percentage)}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <ScreenContainer>
+      <PageHeader
+        eyebrow="Sessions"
+        title="Practice timeline"
+        description="Review saved takes as evidence cards: date, instrument, note count, average error, and in-tune percentage."
+        action={
+          <Link to="/practice" className="primary-button">
+            <Plus size={18} />
+            New session
+          </Link>
+        }
+      />
+      <SectionCard title="Saved takes" eyebrow={`${filtered.length} visible`}>
+        <div className="chip-row">
+          <SelectionChip active={filter === 'all'} onClick={() => setFilter('all')}>All</SelectionChip>
+          <SelectionChip active={filter === 'week'} onClick={() => setFilter('week')}>This week</SelectionChip>
+          <SelectionChip active={filter === 'best'} onClick={() => setFilter('best')} tone="green">Best</SelectionChip>
+          <SelectionChip active={filter === 'work'} onClick={() => setFilter('work')} tone="red">Needs work</SelectionChip>
+        </div>
+        {filtered.length === 0 && (
+          <EmptyActionState title="No matching sessions" body="Try another filter or record a short practice take." icon={Music2} />
+        )}
+        <div className="session-card-grid">
+          {filtered.map((session) => (
+            <Link to={`/sessions/${session.id}`} className="session-timeline-card" key={session.id}>
+              <div className="timeline-heading">
+                <span className="insight-icon">
+                  <Music2 size={18} />
+                </span>
+                <div>
+                  <strong>{session.name}</strong>
+                  <span>{new Date(session.started_at).toLocaleString()}</span>
+                </div>
+              </div>
+              <div className="mini-stat-list">
+                <div className="mini-stat-row">
+                  <span>Instrument</span>
+                  <strong>{session.instrument_id}</strong>
+                </div>
+                <div className="mini-stat-row">
+                  <span>Notes</span>
+                  <strong>{session.notes_count}</strong>
+                </div>
+                <div className="mini-stat-row">
+                  <span>Avg abs</span>
+                  <strong>{session.average_abs_cents.toFixed(1)}c</strong>
+                </div>
+              </div>
+              <div className="timeline-row">
+                <span>
+                  <Gauge size={16} /> {Math.round(session.in_tune_percentage)}% in tune
+                </span>
+                <em>
+                  <CalendarDays size={15} /> {Math.round(session.duration_seconds)}s
+                </em>
+              </div>
+              <div className="timeline-row">
+                <span>
+                  <Sparkles size={16} /> Review analytics
+                </span>
+                <em>Open</em>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </SectionCard>
+    </ScreenContainer>
   );
 }
-

@@ -1,0 +1,280 @@
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+
+  .brand span:last-child,
+  .nav-item span,
+  .secondary-nav,
+  .sidebar-section-label {
+    display: none;
+  }
+
+  .brand,
+  .nav-item {
+    justify-content: center;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .practice-layout,
+  .two-column-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    display: block;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .topbar {
+    align-items: start;
+    padding: 14px 16px;
+  }
+
+  .topbar-controls {
+    justify-content: flex-end;
+  }
+
+  .topbar .select-wrap.compact span,
+  .control-inline {
+    display: none;
+  }
+
+  .content {
+    padding: 18px 14px 104px;
+  }
+
+  .page-header,
+  .today-focus-card,
+  .practice-plan-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header {
+    align-items: start;
+    min-height: 0;
+    padding: 22px;
+  }
+
+  .page-header-action {
+    justify-content: flex-start;
+  }
+
+  h1 {
+    font-size: 2.35rem;
+  }
+
+  .page-grid,
+  .recommendation-grid,
+  .insight-grid,
+  .more-grid,
+  .session-card-grid,
+  .three-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .today-focus-note {
+    width: 100%;
+    min-width: 0;
+    max-width: 220px;
+    justify-self: center;
+  }
+
+  .plan-steps,
+  .mini-stat-list {
+    grid-template-columns: 1fr;
+  }
+
+  .floating-tabbar {
+    position: fixed;
+    right: 12px;
+    bottom: 14px;
+    left: 12px;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    padding: 7px;
+    border: 1px solid rgba(240, 201, 112, 0.22);
+    border-radius: 24px;
+    background: rgba(6, 10, 15, 0.86);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(18px);
+  }
+
+  .bottom-action-bar {
+    bottom: 92px;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    min-height: 70px;
+  }
+
+  .topbar h1 {
+    font-size: 0.98rem;
+  }
+
+  .topbar-label {
+    font-size: 0.66rem;
+  }
+
+  .topbar-controls {
+    gap: 7px;
+  }
+
+  .topbar .toggle {
+    min-height: 38px;
+    padding: 0 11px;
+  }
+
+  .screen-container {
+    gap: 16px;
+  }
+
+  .section-card,
+  .panel,
+  .practice-plan,
+  .tuner-surface,
+  .today-focus-card {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .metric-tile,
+  .stat-card {
+    min-height: 118px;
+    padding: 14px;
+  }
+
+  .metric-tile strong,
+  .stat-card strong {
+    font-size: 1.45rem;
+  }
+
+  .tuner-surface {
+    min-height: 600px;
+    gap: 14px;
+  }
+
+  .note-display {
+    min-height: 210px;
+  }
+
+  .note-display strong {
+    font-size: clamp(4.6rem, 26vw, 8rem);
+  }
+
+  .needle-panel {
+    min-height: 190px;
+  }
+
+  .needle-arc {
+    height: 132px;
+  }
+
+  .needle {
+    height: 118px;
+  }
+
+  .signal-meter {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .session-controls,
+  .filter-row,
+  .button-row,
+  .chip-row,
+  .date-filter {
+    width: 100%;
+  }
+
+  .date-filter {
+    grid-template-columns: 1fr;
+  }
+
+  .session-controls .primary-button,
+  .session-controls .ghost-button,
+  .bottom-action-bar .primary-button,
+  .bottom-action-bar .ghost-button {
+    flex: 1 1 100%;
+  }
+
+  .heatmap {
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    gap: 8px;
+  }
+
+  .heat-cell {
+    border-radius: 14px;
+  }
+
+  .heat-cell span {
+    display: none;
+  }
+
+  .segmented-control {
+    width: 100%;
+    grid-auto-flow: row;
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .segmented-control button {
+    padding: 0 8px;
+  }
+
+  .floating-tabbar a {
+    min-width: 0;
+    font-size: 0.62rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .content {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar-controls .select-wrap {
+    max-width: 124px;
+  }
+
+  select {
+    width: 100%;
+  }
+
+  .floating-tabbar {
+    right: 8px;
+    left: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

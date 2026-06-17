@@ -1,19 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
+import { MetricTile } from './ui/AppPrimitives';
 
 export function StatCard({ label, value, detail, icon: Icon }: { label: string; value: string; detail?: string; icon?: LucideIcon }) {
-  return (
-    <section className="stat-card">
-      <div>
-        <p>{label}</p>
-        <strong>{value}</strong>
-        {detail && <span>{detail}</span>}
-      </div>
-      {Icon && (
-        <div className="stat-icon">
-          <Icon size={19} />
-        </div>
-      )}
-    </section>
-  );
+  return <MetricTile label={label} value={value} detail={detail} icon={Icon} />;
 }
-
