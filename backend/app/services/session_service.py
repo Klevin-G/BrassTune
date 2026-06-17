@@ -13,8 +13,19 @@ from app.services.serializers import sample_to_frame_dict, session_to_dict
 def get_or_create_default_user(db: Session) -> User:
     user = db.query(User).filter(User.id == 1).first()
     if user:
+        changed = False
+        if not user.username:
+            user.username = "avery"
+            changed = True
+        if not user.display_name:
+            user.display_name = user.name
+            changed = True
+        if changed:
+            db.add(user)
+            db.commit()
+            db.refresh(user)
         return user
-    user = User(id=1, name="Avery Brass", role="student", primary_instrument_id="trumpet")
+    user = User(id=1, username="avery", name="Avery Brass", display_name="Avery Brass", role="student", primary_instrument_id="trumpet")
     db.add(user)
     db.commit()
     db.refresh(user)

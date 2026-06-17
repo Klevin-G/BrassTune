@@ -59,6 +59,7 @@ export function pitchFrameFromFrequency(
   timestampMs: number,
   confidence = 0.97,
   rms = 0.08,
+  detectorSource = 'browser_demo',
 ): PitchFrame {
   if (!frequency || frequency <= 0 || rms < 0.01) {
     return {
@@ -78,7 +79,7 @@ export function pitchFrameFromFrequency(
       reference_pitch_hz: referencePitch,
       is_valid_for_recording: false,
       save_eligibility_reason: rms < 0.01 ? 'silence' : 'unstable/no pitch lock',
-      detector_source: 'browser_demo',
+      detector_source: detectorSource,
     };
   }
   const midi = frequencyToMidi(frequency, referencePitch);
@@ -104,6 +105,6 @@ export function pitchFrameFromFrequency(
     reference_pitch_hz: referencePitch,
     is_valid_for_recording: status === 'flat' || status === 'in_tune' || status === 'sharp',
     save_eligibility_reason: status === 'flat' || status === 'in_tune' || status === 'sharp' ? 'valid for recording' : 'confidence below 95%',
-    detector_source: 'browser_demo',
+    detector_source: detectorSource,
   };
 }

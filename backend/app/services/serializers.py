@@ -22,7 +22,57 @@ def session_to_dict(session) -> Dict[str, Any]:
         "average_signed_cents": session.average_signed_cents,
         "average_abs_cents": session.average_abs_cents,
         "in_tune_percentage": session.in_tune_percentage,
+        "audio_storage_provider": session.audio_storage_provider,
+        "audio_object_key": session.audio_object_key,
+        "audio_mime_type": session.audio_mime_type,
+        "audio_duration_seconds": session.audio_duration_seconds,
+        "audio_size_bytes": session.audio_size_bytes,
+        "audio_uploaded_at": iso(session.audio_uploaded_at),
+        "audio_available": bool(session.audio_object_key),
         "created_at": iso(session.created_at),
+    }
+
+
+def user_to_dict(user) -> Dict[str, Any]:
+    return {
+        "id": user.id,
+        "supabase_user_id": user.supabase_user_id,
+        "username": user.username,
+        "name": user.name,
+        "display_name": user.display_name or user.name,
+        "email": user.email,
+        "role": user.role,
+        "primary_instrument_id": user.primary_instrument_id,
+        "onboarding_completed_at": iso(user.onboarding_completed_at),
+        "created_at": iso(user.created_at),
+    }
+
+
+def group_to_dict(group, members=None) -> Dict[str, Any]:
+    payload = {
+        "id": group.id,
+        "name": group.name,
+        "director_user_id": group.director_user_id,
+        "created_at": iso(group.created_at),
+        "updated_at": iso(group.updated_at),
+    }
+    if members is not None:
+        payload["members"] = members
+    return payload
+
+
+def group_member_to_dict(member) -> Dict[str, Any]:
+    user = getattr(member, "user", None)
+    return {
+        "id": member.id,
+        "group_id": member.group_id,
+        "user_id": member.user_id,
+        "instrument_id": member.instrument_id,
+        "role_in_group": getattr(member, "role_in_group", "student"),
+        "status": getattr(member, "status", "active"),
+        "created_at": iso(member.created_at),
+        "username": getattr(user, "username", None),
+        "display_name": getattr(user, "display_name", None) or getattr(user, "name", None),
     }
 
 
@@ -93,4 +143,3 @@ def event_to_dict(event) -> Dict[str, Any]:
         "stability_score": event.stability_score,
         "created_at": iso(event.created_at),
     }
-

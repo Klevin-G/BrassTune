@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 class StartSessionRequest(BaseModel):
@@ -37,3 +37,46 @@ class AudioFrameIn(BaseModel):
     reference_pitch_hz: float = 440.0
     sample_rate: int = 48000
     pcm: List[float] = Field(default_factory=list)
+
+
+class UserProfileUpdate(BaseModel):
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    primary_instrument_id: Optional[str] = None
+    onboarding_completed: bool = False
+
+    @validator("username")
+    def username_format(cls, value):
+        if value is None:
+            return value
+        normalized = value.strip().lower()
+        if len(normalized) < 3 or len(normalized) > 32:
+            raise ValueError("Username must be 3-32 characters.")
+        allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
+        if any(char not in allowed for char in normalized):
+            raise ValueError("Username may contain letters, numbers, underscores, and hyphens.")
+        return normalized
+
+
+class CreateGroupRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+
+
+class AddMemberByUsernameRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    instrument_id: str
+    role_in_group: str = "student"
+
+    @validator("username")
+    def normalize_username(cls, value):
+        return value.strip().lower()
+
+
+class UpdateGroupMemberRequest(BaseModel):
+    instrument_id: Optional[str] = None
+    role_in_group: Optional[str] = None
+    status: Optional[str] = None
+
+
+class AudioUploadMetadata(BaseModel):
+    duration_seconds: Optional[float] = None

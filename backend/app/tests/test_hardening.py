@@ -1,5 +1,7 @@
 import datetime as dt
+import io
 import math
+import zipfile
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -200,6 +202,18 @@ def test_batch_save_commits_multiple_pitch_frames():
         db.close()
 
 
+def test_batch_sample_endpoint_saves_imported_media_frames():
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        frames = [
+            frequency_to_pitch_frame(midi_to_frequency(60), MIN_RECORDING_CONFIDENCE, 0.1, 0, "trumpet", 440.0).to_dict(),
+            frequency_to_pitch_frame(midi_to_frequency(62), MIN_RECORDING_CONFIDENCE, 0.1, 110, "trumpet", 440.0).to_dict(),
+        ]
+        response = client.post(f"/api/sessions/{session['id']}/samples/batch", json=frames)
+        assert response.status_code == 200
+        assert response.json()["saved"] == 2
+
+
 def test_low_confidence_pitch_frames_are_not_recordable_or_saved():
     low_confidence = MIN_RECORDING_CONFIDENCE - 0.01
     frame = frequency_to_pitch_frame(midi_to_frequency(69), low_confidence, 0.1, 0, "trombone", 440.0)
@@ -246,3 +260,76 @@ def test_repair_demo_data_rebuilds_broken_seed_sessions():
         assert all(session.note_events for session in sessions)
     finally:
         db.close()
+
+
+def test_production_mode_requires_auth(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    with TestClient(app) as client:
+        response = client.get("/api/sessions")
+    assert response.status_code == 401
+
+
+def test_user_cannot_access_another_users_session():
+    with TestClient(app) as client:
+        created = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        response = client.get(f"/api/sessions/{created['id']}", headers={"Authorization": "Bearer dev-user-2"})
+    assert response.status_code == 403
+
+
+def test_audio_upload_playback_and_bad_mime_are_validated():
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        bad = client.post(
+            f"/api/sessions/{session['id']}/audio",
+            content=b"not audio",
+            headers={"Content-Type": "text/plain"},
+        )
+        assert bad.status_code == 400
+        uploaded = client.post(
+            f"/api/sessions/{session['id']}/audio",
+            content=b"webm-audio-bytes",
+            headers={"Content-Type": "audio/webm", "X-Audio-Duration-Seconds": "2.5"},
+        )
+        assert uploaded.status_code == 200
+        assert uploaded.json()["audio"]["audio_available"] is True
+        playback = client.get(f"/api/sessions/{session['id']}/audio")
+        assert playback.status_code == 200
+        assert playback.content == b"webm-audio-bytes"
+
+
+def test_session_zip_contains_expected_files():
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        client.post(
+            f"/api/sessions/{session['id']}/audio",
+            content=b"zip-audio",
+            headers={"Content-Type": "audio/webm", "X-Audio-Duration-Seconds": "1"},
+        )
+        response = client.get(f"/api/export/session/{session['id']}.zip")
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = set(archive.namelist())
+    assert {"session.json", "pitch_samples.csv", "note_events.csv", "recommendations.json", "README.txt"}.issubset(names)
+    assert any(name.startswith("audio/") for name in names)
+
+
+def test_director_can_add_member_by_username_but_student_cannot():
+    with TestClient(app) as client:
+        student_response = client.post(
+            "/api/ensemble/groups/1/members/by-username",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"username": "maya", "instrument_id": "horn"},
+        )
+        assert student_response.status_code == 403
+        director_response = client.post(
+            "/api/ensemble/groups/1/members/by-username",
+            headers={"Authorization": "Bearer dev-user-2"},
+            json={"username": "maya", "instrument_id": "horn"},
+        )
+        assert director_response.status_code == 200
+        missing_response = client.post(
+            "/api/ensemble/groups/1/members/by-username",
+            headers={"Authorization": "Bearer dev-user-2"},
+            json={"username": "missing-player", "instrument_id": "horn"},
+        )
+        assert missing_response.status_code == 404

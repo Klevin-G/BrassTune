@@ -1,13 +1,15 @@
-import { Bug, DatabaseBackup, Download, RefreshCcw, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { Bug, DatabaseBackup, Download, LogIn, LogOut, RefreshCcw, RotateCcw, SlidersHorizontal, Trash2, UserRound } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { clearLocalSessions, exportUrl, repairDemoData, resetDemoData } from '../api/client';
+import { clearLocalSessions, downloadExport, repairDemoData, resetDemoData } from '../api/client';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 
 export function SettingsPage() {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
+  const auth = useAuth();
   const [maintenanceStatus, setMaintenanceStatus] = useState('Ready');
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
@@ -50,6 +52,30 @@ export function SettingsPage() {
             </label>
           </div>
         </SectionCard>
+        <SectionCard title="Profile" eyebrow={auth.isSignedIn ? 'Supabase account' : 'Guest demo'}>
+          <div className="account-card vertical">
+            <span className="insight-icon">
+              <UserRound size={18} />
+            </span>
+            <div>
+              <strong>{auth.profile?.display_name ?? auth.user?.email ?? 'Guest player'}</strong>
+              <em>{auth.profile?.username ? `@${auth.profile.username}` : 'Sign in to sync sessions and ensemble membership.'}</em>
+            </div>
+          </div>
+          <div className="settings-actions">
+            {auth.isSignedIn ? (
+              <button className="ghost-button" type="button" onClick={() => auth.signOut()}>
+                <LogOut size={18} />
+                Sign out
+              </button>
+            ) : (
+              <Link className="primary-button" to="/auth/sign-in">
+                <LogIn size={18} />
+                Sign in
+              </Link>
+            )}
+          </div>
+        </SectionCard>
         <SectionCard title="Local utilities" eyebrow="MVP">
           <div className="insight-grid">
             <InsightCard
@@ -89,10 +115,10 @@ export function SettingsPage() {
               <SlidersHorizontal size={18} />
               Reopen onboarding
             </button>
-            <a className="ghost-button" href={exportUrl('/api/export/all.json')}>
+            <button className="ghost-button" type="button" onClick={() => downloadExport('/api/export/all.zip', 'brasstune-export.zip')}>
               <Download size={18} />
               Export all data
-            </a>
+            </button>
             <button className="ghost-button" type="button" onClick={() => localStorage.clear()}>
               <Trash2 size={18} />
               Clear preferences

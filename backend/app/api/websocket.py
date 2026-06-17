@@ -1,11 +1,13 @@
 import json
 from collections import defaultdict
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
+from app.api.auth import auth_context_from_token
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.core.pitch.detector import PitchDetector
 from app.db.database import SessionLocal
+from app.models.db import PracticeSession
 from app.schemas.schemas import AudioFrameIn
 from app.services.session_service import save_pitch_frames, start_session, stop_session
 
@@ -17,6 +19,13 @@ async def pitch_socket(websocket: WebSocket):
     await websocket.accept()
     detector = PitchDetector()
     db = SessionLocal()
+    try:
+        auth = auth_context_from_token(db, websocket.query_params.get("token"))
+    except HTTPException as exc:
+        await websocket.send_json({"type": "error", "message": exc.detail})
+        await websocket.close()
+        db.close()
+        return
     pending_frames = defaultdict(list)
 
     def flush_session(session_id: int) -> None:
@@ -24,6 +33,12 @@ async def pitch_socket(websocket: WebSocket):
         if frames:
             save_pitch_frames(db, session_id, frames)
             pending_frames[session_id] = []
+
+    def can_write_session(session_id: int) -> bool:
+        session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
+        if session is None:
+            return False
+        return auth.user.role == "admin" or session.user_id == auth.user.id
 
     try:
         while True:
@@ -46,7 +61,7 @@ async def pitch_socket(websocket: WebSocket):
                     instrument_id,
                     message.get("name"),
                     float(message.get("reference_pitch_hz", 440.0)),
-                    int(message.get("user_id", 1)),
+                    auth.user.id,
                 )
                 await websocket.send_json({"type": "session_started", "session": {"id": session.id, "name": session.name}})
             elif msg_type == "stop_session":
@@ -65,6 +80,9 @@ async def pitch_socket(websocket: WebSocket):
                         continue
                     frame = detector.estimate_frame(payload.pcm, payload.sample_rate, payload.instrument_id, payload.reference_pitch_hz).to_dict()
                     if payload.session_id:
+                        if not can_write_session(payload.session_id):
+                            await websocket.send_json({"type": "error", "message": "You do not have access to this session."})
+                            continue
                         pending_frames[payload.session_id].append(frame)
                         if len(pending_frames[payload.session_id]) >= 12:
                             flush_session(payload.session_id)

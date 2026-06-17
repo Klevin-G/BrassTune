@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { Activity, BarChart3, Gauge, GraduationCap, Home, MoreHorizontal, Music2, Settings, SlidersHorizontal, Users } from 'lucide-react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { Activity, BarChart3, Gauge, GraduationCap, Home, LogIn, MoreHorizontal, Music2, Settings, SlidersHorizontal, UserRound, Users } from 'lucide-react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 import { InstrumentSelector } from './InstrumentSelector';
 import { OnboardingFlow } from './OnboardingFlow';
 import { FloatingTabBar, StatusBadge } from './ui/AppPrimitives';
@@ -23,6 +24,7 @@ const secondaryNav = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode } = useAppSettings();
+  const auth = useAuth();
   const location = useLocation();
   const moreActive = location.pathname === '/more' || secondaryNav.some((item) => location.pathname.startsWith(item.to));
 
@@ -85,6 +87,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               Demo
             </button>
             <StatusBadge tone={demoMode ? 'gold' : 'green'}>{demoMode ? 'Seeded audio' : 'Mic ready'}</StatusBadge>
+            {auth.isSignedIn ? (
+              <Link to="/settings" className="icon-button labeled" aria-label="Open profile settings">
+                <UserRound size={18} />
+                <span>{auth.profile?.username ?? 'Profile'}</span>
+              </Link>
+            ) : (
+              <Link to="/auth/sign-in" className="icon-button labeled" aria-label="Sign in">
+                <LogIn size={18} />
+                <span>Sign in</span>
+              </Link>
+            )}
           </div>
         </header>
         <main className="content">{children}</main>

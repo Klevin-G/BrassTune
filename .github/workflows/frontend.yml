@@ -6,7 +6,7 @@ on:
       - "frontend/**"
       - ".github/workflows/frontend.yml"
   push:
-    branches: [main]
+    branches: [main, swift-migration]
     paths:
       - "frontend/**"
       - ".github/workflows/frontend.yml"

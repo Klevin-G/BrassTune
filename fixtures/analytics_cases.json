@@ -1,0 +1,19 @@
+[
+  {
+    "note_label": "D5",
+    "events": [
+      { "duration_ms": 4000, "avg_signed_cents": 18.0, "avg_abs_cents": 18.0, "in_tune_percentage": 10.0 },
+      { "duration_ms": 4000, "avg_signed_cents": 10.0, "avg_abs_cents": 10.0, "in_tune_percentage": 55.0 }
+    ],
+    "expected_trend": "Mostly sharp",
+    "expected_problem_severity_min": 20
+  },
+  {
+    "note_label": "G4",
+    "events": [
+      { "duration_ms": 3000, "avg_signed_cents": -2.0, "avg_abs_cents": 2.0, "in_tune_percentage": 95.0 }
+    ],
+    "expected_trend": "Centered",
+    "expected_problem_severity_max": 10
+  }
+]

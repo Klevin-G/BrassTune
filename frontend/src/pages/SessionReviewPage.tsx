@@ -6,6 +6,7 @@ import { ExportButtons } from '../components/ExportButtons';
 import { HeatMapGrid } from '../components/HeatMapGrid';
 import { NoteStatsTable } from '../components/NoteStatsTable';
 import { RecommendationCard } from '../components/RecommendationCard';
+import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { LoadingSkeleton, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import type { NoteEvent, NoteStats, PracticeSession, Recommendation } from '../domain/types';
 
@@ -57,6 +58,9 @@ export function SessionReviewPage() {
         <MetricTile label="In tune" value={`${Math.round(session.in_tune_percentage)}%`} icon={Percent} tone="green" />
         <MetricTile label="Samples" value={`${session.samples_count}`} detail={`${Math.round(session.duration_seconds)}s`} icon={Timer} />
       </div>
+      <SectionCard title="Relisten" eyebrow={session.audio_available ? 'Session audio' : 'Playback unavailable'}>
+        <SessionAudioPlayer session={session} />
+      </SectionCard>
       <div className="two-column-grid">
         <SectionCard title="Session heat map" eyebrow="Written notes">
           <HeatMapGrid rows={heatmap} />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { recordPitchFrame } from '../api/client';
+import { pitchWebSocketUrl, recordPitchFrame } from '../api/client';
 import { nextDemoPitchFrame } from '../domain/demoPitch';
 import type { PitchFrame } from '../domain/types';
 
@@ -107,8 +107,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
       return;
     }
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${protocol}://${window.location.host}/ws/pitch`);
+      const ws = new WebSocket(await pitchWebSocketUrl());
       wsRef.current = ws;
       ws.onmessage = (event) => {
         try {

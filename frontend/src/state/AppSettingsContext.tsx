@@ -1,4 +1,6 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { updateCurrentUser } from '../api/client';
+import { useAuth } from './AuthContext';
 
 interface AppSettings {
   instrumentId: string;
@@ -17,6 +19,7 @@ interface AppSettings {
 const AppSettingsContext = createContext<AppSettings | null>(null);
 
 export function AppSettingsProvider({ children }: { children: React.ReactNode }) {
+  const auth = useAuth();
   const [instrumentId, setInstrumentId] = useState(() => localStorage.getItem('brasstune.instrument') ?? 'trumpet');
   const [referencePitch, setReferencePitchState] = useState(() => Number(localStorage.getItem('brasstune.referencePitch') ?? 440));
   const [demoMode, setDemoModeState] = useState(() => localStorage.getItem('brasstune.demoMode') !== 'false');
@@ -41,7 +44,16 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
     setOnboardingComplete(true);
     setOnboardingOpen(false);
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    updateCurrentUser({ onboarding_completed: true, primary_instrument_id: instrumentId }).catch(() => undefined);
   };
+
+  useEffect(() => {
+    if (auth.profile?.onboarding_completed_at) {
+      setOnboardingComplete(true);
+      setOnboardingOpen(false);
+      localStorage.setItem('brasstune.onboardingComplete', 'true');
+    }
+  }, [auth.profile?.onboarding_completed_at]);
 
   const value = useMemo(
     () => ({

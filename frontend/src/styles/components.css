@@ -30,6 +30,20 @@
   transform: translateY(-1px);
 }
 
+.icon-button.labeled {
+  gap: 7px;
+  width: auto;
+  min-height: 40px;
+  height: auto;
+  padding: 0 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.icon-first-action span {
+  font-weight: 900;
+}
+
 .ghost-button,
 .toggle,
 .selection-chip,
@@ -271,6 +285,28 @@ input {
   align-items: center;
   gap: 11px;
   margin-bottom: 10px;
+}
+
+.insight-heading > div,
+.rec-heading > div,
+.timeline-heading > div,
+.audio-player-heading > div,
+.account-card > div,
+.auth-panel > * {
+  min-width: 0;
+}
+
+.insight-card,
+.recommendation-card,
+.session-timeline-card,
+.audio-player-card,
+.auth-panel,
+.account-card {
+  overflow-wrap: anywhere;
+}
+
+.auth-layout .section-card {
+  overflow: hidden;
 }
 
 .insight-card p,
@@ -584,11 +620,29 @@ meter {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
   min-height: var(--tap);
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 15px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.timeline-row {
+  flex-wrap: wrap;
+}
+
+.timeline-row span,
+.timeline-row em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.button-row {
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
 }
 
 .history-row em,
@@ -603,6 +657,225 @@ meter {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid var(--line);
+}
+
+.auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(320px, 520px);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.auth-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 520px;
+  padding: 28px;
+  border: 1px solid rgba(216, 165, 63, 0.24);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 20% 20%, rgba(240, 201, 112, 0.16), transparent 18rem),
+    linear-gradient(180deg, rgba(21, 32, 45, 0.94), rgba(8, 13, 20, 0.94));
+}
+
+.auth-panel h1 {
+  max-width: 620px;
+  margin-top: 32px;
+  font-size: clamp(2.2rem, 5vw, 4.8rem);
+  line-height: 0.95;
+}
+
+.auth-form {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.auth-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.auth-switcher a,
+.timeline-row a {
+  color: var(--gold-soft);
+  font-weight: 800;
+}
+
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.account-card.vertical {
+  align-items: flex-start;
+}
+
+.account-card strong,
+.account-card em {
+  display: block;
+}
+
+.account-card em {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-style: normal;
+}
+
+.session-card-actions,
+.audio-player-heading,
+.ensemble-admin-grid {
+  display: flex;
+  gap: 12px;
+}
+
+.session-card-actions {
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.export-menu {
+  position: relative;
+}
+
+.export-menu summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--tap);
+  padding: 0 13px;
+  color: var(--text);
+  font-weight: 800;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.045);
+  cursor: pointer;
+}
+
+.export-menu .export-buttons {
+  position: absolute;
+  right: 0;
+  z-index: 5;
+  min-width: 210px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(9, 14, 21, 0.98);
+  box-shadow: var(--shadow);
+}
+
+.audio-player-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(107, 210, 135, 0.28);
+  border-radius: var(--radius);
+  background: rgba(107, 210, 135, 0.08);
+}
+
+.audio-player-card.compact {
+  margin-top: 12px;
+}
+
+.audio-player-card.unavailable {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.audio-player-card audio {
+  width: 100%;
+  min-width: 0;
+}
+
+.audio-player-heading {
+  align-items: center;
+}
+
+.audio-player-heading strong,
+.audio-player-heading em {
+  display: block;
+}
+
+.audio-player-heading em {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-style: normal;
+}
+
+.ensemble-admin-grid {
+  align-items: start;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+}
+
+.roster-list {
+  display: grid;
+  gap: 8px;
+}
+
+.compact-field {
+  min-width: min(240px, 100%);
+}
+
+.local-media-import {
+  display: grid;
+  gap: 12px;
+}
+
+.local-media-import p {
+  margin: 0;
+}
+
+.import-progress {
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(216, 165, 63, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.import-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--gold-soft), var(--green));
+  transition: width 160ms ease;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .heatmap {
@@ -873,12 +1146,19 @@ td a {
 .empty-action-state {
   display: grid;
   place-items: center;
+  min-width: 0;
   min-height: 230px;
   padding: 24px;
   text-align: center;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.025);
+}
+
+.empty-action-state h3,
+.empty-action-state p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .empty-action-state span {
@@ -932,6 +1212,8 @@ td a {
 .session-timeline-card {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .session-timeline-card:hover {
@@ -1196,6 +1478,10 @@ td a {
 
 .audio-lab-grid {
   align-items: start;
+}
+
+.audio-lab-grid .insight-grid {
+  grid-template-columns: 1fr;
 }
 
 .calibration-readout {

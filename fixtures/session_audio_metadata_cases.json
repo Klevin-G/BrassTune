@@ -1,0 +1,22 @@
+[
+  {
+    "session_id": 42,
+    "user_id": 7,
+    "storage_provider": "local",
+    "object_key": "7/42/recording.webm",
+    "mime_type": "audio/webm",
+    "duration_seconds": 30.5,
+    "size_bytes": 245760,
+    "playback_available": true
+  },
+  {
+    "session_id": 43,
+    "user_id": 7,
+    "storage_provider": null,
+    "object_key": null,
+    "mime_type": null,
+    "duration_seconds": null,
+    "size_bytes": null,
+    "playback_available": false
+  }
+]

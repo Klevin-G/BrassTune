@@ -1,4 +1,4 @@
-import { Mic, Square, Timer, Video } from 'lucide-react';
+import { Circle, Mic, Square, Timer } from 'lucide-react';
 
 export function SessionControls({
   recording,
@@ -21,14 +21,14 @@ export function SessionControls({
   const seconds = String(elapsedSeconds % 60).padStart(2, '0');
   return (
     <div className="session-controls">
-      <button className="primary-button" onClick={recording ? onStop : onStart} type="button">
-        {recording ? <Square size={18} /> : <Video size={18} />}
-        {recording ? 'Stop recording' : 'Start recording'}
+      <button className="primary-button icon-first-action" aria-label={recording ? 'Stop recording' : 'Start recording'} onClick={recording ? onStop : onStart} type="button">
+        {recording ? <Square size={18} /> : <Circle size={18} />}
+        <span>{recording ? 'Stop' : 'Record'}</span>
       </button>
       {!demoMode && (
-        <button className="ghost-button" onClick={onMicStart} disabled={micActive} type="button">
+        <button className="ghost-button icon-first-action" aria-label={micActive ? 'Microphone is live' : 'Enable microphone'} onClick={onMicStart} disabled={micActive} type="button">
           <Mic size={18} />
-          {micActive ? 'Mic live' : 'Use microphone'}
+          <span>{micActive ? 'Mic live' : 'Mic'}</span>
         </button>
       )}
       <div className="timer-chip">
@@ -38,4 +38,3 @@ export function SessionControls({
     </div>
   );
 }
-

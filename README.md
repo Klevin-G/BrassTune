@@ -7,9 +7,10 @@ The project includes:
 - React + TypeScript + Vite frontend
 - Python + FastAPI backend
 - SQLite persistence with SQLAlchemy
-- Real pitch math, transposition, note event segmentation, analytics, heat maps, exports, and deterministic recommendations
+- Real pitch math, transposition, note event segmentation, analytics, heat maps, exports, relistenable audio, and deterministic recommendations
 - WebSocket pitch streaming with Aubio support when installed and a NumPy autocorrelation fallback
 - Demo mode so the tuner and recording flow work without a microphone
+- Optional Supabase Auth/Storage/Postgres production integration
 - Seeded local data for dashboard, progress, coach, and ensemble views
 
 ## Project Structure
@@ -40,6 +41,12 @@ backend/
 
 docs/
   architecture.md
+  deployment.md
+  supabase-integration.md
+  security-review.md
+  phone-microphone-test-report.md
+  manual-test-plan.md
+  swift-migration-plan.md
   swift-porting-notes.md
   pitch-detection-notes.md
 ```
@@ -69,7 +76,7 @@ cd backend
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -106,6 +113,8 @@ Demo mode is enabled by default. It simulates believable brass pitch patterns, i
 
 Start a recording in demo mode, wait a few seconds, then stop. The frontend stores valid demo pitch frames through the REST API and the session review page will show real computed analytics.
 
+Demo recordings also generate a short synthetic WAV so Sessions and Session Review can exercise relisten/playback UI without a real microphone.
+
 Pitch frames must reach at least 95% confidence before the app treats them as recordable tuning data. Lower-confidence demo or live frames show as unstable/no-lock instead of being saved into session analytics.
 
 `No lock` means the detector confidence is too low to trust, so the frame is excluded from recordings. `Unstable pitch` means the detector has a high-confidence lock, but the player's cents values vary enough over time for analytics to flag a stability problem.
@@ -122,6 +131,37 @@ Recording persistence is single-source:
 Friendly failure states are shown for denied permission, missing browser audio APIs, backend/WebSocket disconnects, silence, and unstable pitch.
 
 The browser streams 4096-sample audio frames to give the detector more context for steady notes. That adds a little live-tuner latency, but improves stability for low brass and noisy rooms.
+
+When recording, the browser also captures playback audio with `MediaRecorder`. On stop, audio uploads to `POST /api/sessions/{id}/audio`. Local MVP mode stores files under `backend/data/audio/`; Supabase mode stores private objects in the `session-audio` bucket and serves signed playback URLs through the backend.
+
+## Local Video and Audio Imports
+
+Practice includes a local media import panel for students who record in the native Camera app or already have a video in Photos/Files.
+
+- Choose a local audio/video file, or use the `Camera` button on mobile to open the native camera picker.
+- BrassTune decodes the media audio in the browser and runs local YIN-style pitch detection.
+- The original video/audio file is not uploaded or stored by BrassTune.
+- Only derived pitch frames are saved into the normal session analytics pipeline.
+- The local MVP analyzes the first few minutes of a file to keep phone browsers responsive.
+
+If a browser cannot decode a specific video container, export audio or use a browser-supported MP4/WebM/M4A file.
+
+## Auth and Production Mode
+
+Local development still works as a guest demo. In production, set `APP_ENV=production` and configure Supabase env vars so private endpoints require a Bearer token.
+
+Frontend Supabase env vars:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+Backend Supabase env vars:
+
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `SUPABASE_PUBLISHABLE_KEY`
+
+See `docs/supabase-integration.md` for Auth, Storage, database, and security notes.
 
 ## Audio Calibration Lab
 
@@ -168,8 +208,9 @@ npm run simulate:devices
 The device simulation starts the backend and frontend automatically if they are not already running. It saves the browser report to `docs/device-simulation-report.md` and screenshots to `docs/assets/device-simulation/`.
 
 GitHub Actions workflows run backend tests, frontend tests/build/audit, and a manual or scheduled device simulation artifact workflow.
+The security workflow runs frontend audit, backend dependency audit, Bandit, and Gitleaks.
 
-Shared JSON fixtures live in `fixtures/` for pitch math, transposition, segmentation, and recommendations. Pytest uses them now; future Swift/XCTest targets can reuse the same cases to keep the iPad app behavior aligned.
+Shared JSON fixtures live in `fixtures/` for pitch math, transposition, segmentation, analytics, recommendations, and session audio metadata. Pytest uses them now; `swift/BrassTuneCore` already reads pitch math and transposition fixtures.
 
 ## Key API Routes
 
@@ -186,25 +227,55 @@ Shared JSON fixtures live in `fixtures/` for pitch math, transposition, segmenta
 - `GET /api/practice-plan`
 - `GET /api/export/session/{session_id}.csv`
 - `GET /api/export/session/{session_id}.json`
+- `GET /api/export/session/{session_id}.zip`
+- `GET /api/export/session/{session_id}/audio`
 - `GET /api/export/note-events/{session_id}.csv`
 - `GET /api/export/all.json`
+- `GET /api/export/all.zip`
+- `POST /api/sessions/{session_id}/audio`
+- `GET /api/sessions/{session_id}/audio`
 - `POST /api/admin/sessions/clear`
 - `POST /api/admin/demo-data/reset`
 - `POST /api/admin/demo-data/repair`
+- `POST /api/dev/repair-demo-data`
+- `GET /api/users/me`
+- `PATCH /api/users/me`
+- `POST /api/users/me/clear-sessions`
+- `GET /api/users/me/export.zip`
+- `POST /api/ensemble/groups`
+- `GET /api/ensemble/groups`
+- `POST /api/ensemble/groups/{group_id}/members/by-username`
 - `GET /api/ensemble/summary`
 - `GET /api/ensemble/report`
 - `WS /ws/pitch`
 
+## Deployment
+
+Repo-side deployment scaffolding is included:
+
+- `vercel.json` for the Vercel frontend
+- `render.yaml` for the Render backend
+- `supabase/migrations/20260617_brasstune_production_readiness.sql`
+- `docs/deployment.md`
+
+The expected hosted backend URL is `https://brasstune.onrender.com`. Set `VITE_API_BASE_URL` and `VITE_WS_BASE_URL` in Vercel for phone testing.
+
 ## Known Limitations
 
-- Authentication is intentionally omitted; the MVP uses a default local user and seeded demo users.
+- Supabase Auth is wired, but live sign-up/sign-in requires Supabase env vars and project configuration.
 - Pitch detection quality depends on microphone, room noise, and browser audio frame timing. Session analytics now reject pitch frames below 95% confidence rather than storing questionable tuning data.
 - The fallback detector has synthetic tone tests and interpolation, but Aubio or a tuned native detector is still preferred for production tuning accuracy.
 - Analytics date filters apply to session `started_at`, and progress improvement compares the selected/current period against the previous equivalent period.
 - Heat maps return the full written instrument range, with unrecorded notes shown as insufficient data.
 - API paths that persist or analyze instrument-specific data reject unknown `instrument_id` values with HTTP 400 instead of silently treating them as trumpet.
-- Ensemble Mode is scaffolded with seeded local data rather than full class management workflows.
+- Ensemble Mode now has group and add-by-username APIs, but invitations and full school roster administration remain future work.
+- Real iPhone/iPad microphone behavior still requires manual testing; see `docs/phone-microphone-test-report.md`.
 
 ## Future iOS Direction
 
-The backend core modules are intentionally plain functions and data-driven profiles. See `docs/swift-porting-notes.md` for how to map the pitch math, `PitchFrame`, `NoteEvent`, analytics, recommendations, and persistence into Swift.
+The backend core modules are intentionally plain functions and data-driven profiles. See `docs/swift-porting-notes.md` and `docs/swift-migration-plan.md`. A starter Swift package lives at `swift/BrassTuneCore` and can be tested with:
+
+```powershell
+cd swift\BrassTuneCore
+swift test
+```

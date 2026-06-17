@@ -10,10 +10,16 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    supabase_user_id = Column(String, nullable=True, unique=True, index=True)
+    username = Column(String, nullable=True, unique=True, index=True)
     name = Column(String, nullable=False)
+    display_name = Column(String, nullable=True)
+    email = Column(String, nullable=True, index=True)
     role = Column(String, nullable=False, default="student")
     primary_instrument_id = Column(String, nullable=False, default="trumpet")
+    onboarding_completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
     sessions = relationship("PracticeSession", back_populates="user")
 
@@ -44,6 +50,12 @@ class PracticeSession(Base):
     average_signed_cents = Column(Float, nullable=False, default=0.0)
     average_abs_cents = Column(Float, nullable=False, default=0.0)
     in_tune_percentage = Column(Float, nullable=False, default=0.0)
+    audio_storage_provider = Column(String, nullable=True)
+    audio_object_key = Column(String, nullable=True)
+    audio_mime_type = Column(String, nullable=True)
+    audio_duration_seconds = Column(Float, nullable=True)
+    audio_size_bytes = Column(Integer, nullable=True)
+    audio_uploaded_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
 
     user = relationship("User", back_populates="sessions")
@@ -109,6 +121,7 @@ class Group(Base):
     name = Column(String, nullable=False)
     director_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
     members = relationship("GroupMember", back_populates="group", cascade="all, delete-orphan")
 
@@ -120,9 +133,25 @@ class GroupMember(Base):
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     instrument_id = Column(String, nullable=False)
+    role_in_group = Column(String, nullable=False, default="student")
+    status = Column(String, nullable=False, default="active")
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
 
     group = relationship("Group", back_populates="members")
+    user = relationship("User")
+
+
+class Invitation(Base):
+    __tablename__ = "invitations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    invited_username = Column(String, nullable=False)
+    invited_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    invited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+    accepted_at = Column(DateTime, nullable=True)
 
 
 class Recommendation(Base):
@@ -139,4 +168,3 @@ class Recommendation(Base):
     message = Column(Text, nullable=False)
     suggestions_json = Column(Text, nullable=False, default="[]")
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
-

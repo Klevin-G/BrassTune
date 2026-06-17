@@ -1,11 +1,14 @@
-import { ArrowRight, Gauge, History, Mic, Timer } from 'lucide-react';
+import { ArrowRight, Gauge, History, Mic, Play, Timer, UploadCloud } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { LocalMediaImportPanel } from '../components/LocalMediaImportPanel';
 import { NoteDisplay } from '../components/NoteDisplay';
 import { SessionControls } from '../components/SessionControls';
 import { SignalMeter } from '../components/SignalMeter';
+import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { TunerNeedle } from '../components/TunerNeedle';
 import { EmptyActionState, ScreenContainer, StatusBadge } from '../components/ui/AppPrimitives';
 import { describeSaveEligibility } from '../domain/pitchFrameStatus';
+import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { usePitchStream } from '../hooks/usePitchStream';
 import { useSessionRecorder } from '../hooks/useSessionRecorder';
 import { useAppSettings } from '../state/AppSettingsContext';
@@ -13,6 +16,7 @@ import { useAppSettings } from '../state/AppSettingsContext';
 export function PracticePage() {
   const { instrumentId, referencePitch, demoMode } = useAppSettings();
   const recorder = useSessionRecorder(instrumentId, referencePitch);
+  const audioRecorder = useAudioRecorder();
   const stream = usePitchStream({
     enabled: true,
     demoMode,
@@ -22,8 +26,27 @@ export function PracticePage() {
     sessionId: recorder.activeSession?.id,
   });
 
-  const start = () => recorder.start(`Practice ${new Date().toLocaleDateString()}`).catch((error) => recorder.setError(String(error)));
-  const stop = () => recorder.stop().catch((error) => recorder.setError(String(error)));
+  const start = async () => {
+    try {
+      const session = await recorder.start(`Practice ${new Date().toLocaleDateString()}`);
+      await audioRecorder.start(session.id, demoMode);
+    } catch (error) {
+      recorder.setError(String(error));
+    }
+  };
+  const stop = async () => {
+    try {
+      const sessionId = recorder.activeSession?.id;
+      if (sessionId) {
+        await audioRecorder.stopAndUpload(sessionId, demoMode);
+      }
+      const summary = await recorder.stop();
+      return summary;
+    } catch (error) {
+      recorder.setError(String(error));
+      return null;
+    }
+  };
   const latestValid = stream.history.find((frame) => frame.is_valid_for_recording);
   const eligibility = describeSaveEligibility(stream.currentFrame);
 
@@ -98,6 +121,18 @@ export function PracticePage() {
               </div>
               <p>{eligibility.detail}</p>
             </article>
+            <article className={`insight-card ${audioRecorder.status === 'failed' ? 'tone-red' : audioRecorder.status === 'uploaded' ? 'tone-green' : ''}`}>
+              <div className="insight-heading">
+                <span className="insight-icon">
+                  <UploadCloud size={18} />
+                </span>
+                <div>
+                  <h3>Relisten audio</h3>
+                  <span>{audioRecorder.status}</span>
+                </div>
+              </div>
+              <p>{audioRecorder.error ?? 'Audio is captured for playback when a recording stops.'}</p>
+            </article>
           </div>
           <div className="inline-panel">
             <div className="section-card-heading">
@@ -123,6 +158,9 @@ export function PracticePage() {
               ))}
             </div>
           </div>
+          <div className="inline-panel">
+            <LocalMediaImportPanel instrumentId={instrumentId} referencePitch={referencePitch} />
+          </div>
           {recorder.lastSummary && (
             <div className="saved-session-card">
               <div className="insight-heading">
@@ -135,6 +173,12 @@ export function PracticePage() {
                 </div>
               </div>
               <p>{recorder.lastSummary.average_abs_cents.toFixed(1)} cents average absolute error, {Math.round(recorder.lastSummary.in_tune_percentage)}% in tune.</p>
+              {recorder.lastSummary.audio_available && <SessionAudioPlayer session={recorder.lastSummary} compact />}
+              {!recorder.lastSummary.audio_available && audioRecorder.status === 'uploaded' && (
+                <p className="muted-copy">
+                  <Play size={15} /> Audio uploaded. Open review for playback.
+                </p>
+              )}
               <Link to={`/sessions/${recorder.lastSummary.id}`} className="primary-button">
                 Review session
                 <ArrowRight size={18} />

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AudioLabPage } from './pages/AudioLabPage';
+import { AuthPage } from './pages/AuthPage';
 import { CoachPage } from './pages/CoachPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EnsemblePage } from './pages/EnsemblePage';
@@ -28,6 +29,10 @@ export default function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/audio-lab" element={<AudioLabPage />} />
         <Route path="/dev/calibration" element={<AudioLabPage />} />
+        <Route path="/auth/sign-in" element={<AuthPage mode="sign-in" />} />
+        <Route path="/auth/sign-up" element={<AuthPage mode="sign-up" />} />
+        <Route path="/auth/reset-password" element={<AuthPage mode="reset" />} />
+        <Route path="/auth/callback" element={<AuthPage mode="callback" />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

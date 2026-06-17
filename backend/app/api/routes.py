@@ -2,22 +2,25 @@ import csv
 import datetime as dt
 import io
 import json
-from typing import Optional
+import zipfile
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
+from app.api.auth import AuthContext, get_auth_context, require_roles
 from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics
 from app.core.ensemble.analytics import calculate_ensemble_summary, generate_rehearsal_report
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
 from app.db.database import get_db
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
-from app.models.db import GroupMember, NoteEvent, PitchSample, PracticeSession, User
-from app.schemas.schemas import PitchFrameIn, StartSessionRequest
-from app.services.serializers import event_to_dict, sample_to_dict, session_to_dict
-from app.services.session_service import save_pitch_frame, start_session, stop_session
+from app.models.db import Group, GroupMember, NoteEvent, PitchSample, PracticeSession, User
+from app.schemas.schemas import AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
+from app.services.audio_storage import attach_audio_to_session, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
+from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, sample_to_dict, session_to_dict, user_to_dict
+from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 
 router = APIRouter(prefix="/api")
 
@@ -57,6 +60,118 @@ def _parse_date_end(value: Optional[str], field_name: str) -> Optional[dt.dateti
     return parsed
 
 
+def _session_or_404(db: Session, session_id: int) -> PracticeSession:
+    session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+def _can_access_session(user: User, session: PracticeSession) -> bool:
+    return user.role == "admin" or session.user_id == user.id
+
+
+def _require_session_access(db: Session, session_id: int, auth: AuthContext) -> PracticeSession:
+    session = _session_or_404(db, session_id)
+    if not _can_access_session(auth.user, session):
+        raise HTTPException(status_code=403, detail="You do not have access to this session.")
+    return session
+
+
+def _group_or_404(db: Session, group_id: int) -> Group:
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return group
+
+
+def _can_manage_group(user: User, group: Group) -> bool:
+    return user.role == "admin" or group.director_user_id == user.id
+
+
+def _require_group_manager(db: Session, group_id: int, auth: AuthContext) -> Group:
+    group = _group_or_404(db, group_id)
+    if not _can_manage_group(auth.user, group):
+        raise HTTPException(status_code=403, detail="Only the group director or admin can modify this ensemble.")
+    return group
+
+
+def _analytics_user_id(auth: AuthContext, requested_user_id: Optional[int]) -> int:
+    if auth.user.role == "admin" and requested_user_id:
+        return requested_user_id
+    return auth.user.id
+
+
+def _require_local_demo_or_admin(auth: AuthContext) -> None:
+    if auth.user.role == "admin" or auth.is_guest:
+        return
+    raise HTTPException(status_code=403, detail="This maintenance action is limited to local demo or admin users.")
+
+
+def _session_json_payload(db: Session, session: PracticeSession):
+    return {
+        "session": session_to_dict(session),
+        "samples": [sample_to_dict(sample) for sample in db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()],
+        "note_events": [event_to_dict(event) for event in db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()],
+    }
+
+
+def _samples_csv_text(samples) -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "timestamp_ms",
+            "frequency_hz",
+            "confidence",
+            "rms",
+            "concert_note",
+            "concert_octave",
+            "written_note",
+            "written_octave",
+            "cents_deviation",
+            "tuning_status",
+            "is_valid_for_recording",
+        ],
+    )
+    writer.writeheader()
+    for sample in samples:
+        data = sample_to_dict(sample)
+        writer.writerow({key: data[key] for key in writer.fieldnames})
+    return output.getvalue()
+
+
+def _note_events_csv_text(events) -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "note_label",
+            "written_note",
+            "written_octave",
+            "duration_ms",
+            "sample_count",
+            "avg_signed_cents",
+            "avg_abs_cents",
+            "median_cents",
+            "stddev_cents",
+            "in_tune_percentage",
+            "stability_score",
+        ],
+    )
+    writer.writeheader()
+    for event in events:
+        data = event_to_dict(event)
+        writer.writerow({key: data[key] for key in writer.fieldnames})
+    return output.getvalue()
+
+
+def _schema_dict(model):
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 @router.get("/health")
 def health():
     return {"ok": True, "service": "BrassTune Analytics API"}
@@ -68,31 +183,67 @@ def instruments():
 
 
 @router.get("/users/current")
-def current_user(db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == 1).first()
-    if user is None:
-        raise HTTPException(status_code=404, detail="Default local user was not seeded.")
-    return {"id": user.id, "name": user.name, "role": user.role, "primary_instrument_id": user.primary_instrument_id, "created_at": user.created_at.isoformat()}
+def current_user(auth: AuthContext = Depends(get_auth_context)):
+    return user_to_dict(auth.user)
+
+
+@router.get("/users/me")
+def users_me(auth: AuthContext = Depends(get_auth_context)):
+    return user_to_dict(auth.user)
+
+
+@router.patch("/users/me")
+def update_user_profile(payload: UserProfileUpdate, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    user = auth.user
+    if payload.primary_instrument_id:
+        _validate_instrument(payload.primary_instrument_id)
+        user.primary_instrument_id = payload.primary_instrument_id
+    if payload.display_name:
+        user.display_name = payload.display_name.strip()[:80]
+        user.name = user.display_name
+    if payload.username:
+        existing = db.query(User).filter(User.username == payload.username, User.id != user.id).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="Username is already taken.")
+        user.username = payload.username
+    if payload.onboarding_completed:
+        user.onboarding_completed_at = user.onboarding_completed_at or dt.datetime.utcnow()
+    user.updated_at = dt.datetime.utcnow()
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user_to_dict(user)
 
 
 @router.post("/sessions/start")
-def start_practice_session(payload: StartSessionRequest, db: Session = Depends(get_db)):
+def start_practice_session(payload: StartSessionRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _validate_instrument(payload.instrument_id)
-    session = start_session(db, payload.instrument_id, payload.name, payload.reference_pitch_hz, payload.user_id)
+    session = start_session(db, payload.instrument_id, payload.name, payload.reference_pitch_hz, auth.user.id)
     return session_to_dict(session)
 
 
 @router.post("/sessions/{session_id}/samples")
-def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depends(get_db)):
+def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_session_access(db, session_id, auth)
     _validate_instrument(frame.instrument_id)
-    sample = save_pitch_frame(db, session_id, frame.dict())
+    sample = save_pitch_frame(db, session_id, _schema_dict(frame))
     if sample is None:
         return {"saved": False, "reason": "Frame was invalid, silent, or session was not found."}
     return {"saved": True, "sample": sample_to_dict(sample)}
 
 
+@router.post("/sessions/{session_id}/samples/batch")
+def add_session_samples_batch(session_id: int, frames: List[PitchFrameIn], db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_session_access(db, session_id, auth)
+    for frame in frames:
+        _validate_instrument(frame.instrument_id)
+    samples = save_pitch_frames(db, session_id, [_schema_dict(frame) for frame in frames])
+    return {"saved": len(samples), "rejected": max(0, len(frames) - len(samples))}
+
+
 @router.post("/sessions/{session_id}/stop")
-def stop_practice_session(session_id: int, db: Session = Depends(get_db)):
+def stop_practice_session(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_session_access(db, session_id, auth)
     session = stop_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -100,16 +251,17 @@ def stop_practice_session(session_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/sessions")
-def list_sessions(db: Session = Depends(get_db)):
-    rows = db.query(PracticeSession).order_by(PracticeSession.started_at.desc()).all()
+def list_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    query = db.query(PracticeSession)
+    if auth.user.role != "admin":
+        query = query.filter(PracticeSession.user_id == auth.user.id)
+    rows = query.order_by(PracticeSession.started_at.desc()).all()
     return [session_to_dict(row) for row in rows]
 
 
 @router.get("/sessions/{session_id}")
-def get_session(session_id: int, db: Session = Depends(get_db)):
-    session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+def get_session(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    session = _require_session_access(db, session_id, auth)
     return {
         **session_to_dict(session),
         "samples_count": db.query(PitchSample).filter(PitchSample.session_id == session_id).count(),
@@ -118,27 +270,67 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/sessions/{session_id}/samples")
-def get_samples(session_id: int, db: Session = Depends(get_db)):
+def get_samples(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_session_access(db, session_id, auth)
     samples = db.query(PitchSample).filter(PitchSample.session_id == session_id).order_by(PitchSample.timestamp_ms.asc()).all()
     return [sample_to_dict(sample) for sample in samples]
 
 
 @router.get("/sessions/{session_id}/note-events")
-def get_note_events(session_id: int, db: Session = Depends(get_db)):
+def get_note_events(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_session_access(db, session_id, auth)
     events = db.query(NoteEvent).filter(NoteEvent.session_id == session_id).order_by(NoteEvent.started_at_ms.asc()).all()
     return [event_to_dict(event) for event in events]
 
 
 @router.get("/sessions/{session_id}/analytics")
-def get_session_analytics(session_id: int, db: Session = Depends(get_db)):
-    session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+def get_session_analytics(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    session = _require_session_access(db, session_id, auth)
     events = db.query(NoteEvent).filter(NoteEvent.session_id == session_id).all()
     note_stats = calculate_note_stats([event_to_dict(event) for event in events])
     profile = get_instrument_profile(session.instrument_id)
     recommendations = generate_session_recommendations(session_to_dict(session), note_stats)
     return {"session": session_to_dict(session), "note_stats": note_stats, "heatmap": build_instrument_heatmap(note_stats, profile), "recommendations": recommendations, "instrument": profile.to_dict()}
+
+
+@router.post("/sessions/{session_id}/audio")
+async def upload_session_audio(
+    session_id: int,
+    request: Request,
+    content_type: Optional[str] = Header(default=None),
+    x_audio_duration_seconds: Optional[float] = Header(default=None),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_auth_context),
+):
+    session = _require_session_access(db, session_id, auth)
+    data, mime_type = read_audio_bytes(await request.body(), content_type or "")
+    attach_audio_to_session(session, data, mime_type, x_audio_duration_seconds)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return {"uploaded": True, "audio": session_to_dict(session)}
+
+
+@router.get("/sessions/{session_id}/audio")
+def get_session_audio(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    session = _require_session_access(db, session_id, auth)
+    if not session.audio_object_key:
+        raise HTTPException(status_code=404, detail="No audio was saved for this session.")
+    if session.audio_storage_provider == "supabase":
+        return RedirectResponse(create_supabase_signed_url(session.audio_object_key))
+    path = local_audio_path(session.audio_object_key)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Audio file is missing from local storage.")
+    return FileResponse(path, media_type=session.audio_mime_type or "application/octet-stream", filename=path.name)
+
+
+@router.delete("/sessions/{session_id}/audio")
+def delete_session_audio(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    session = _require_session_access(db, session_id, auth)
+    delete_audio_for_session(session)
+    db.add(session)
+    db.commit()
+    return {"deleted": True}
 
 
 def _filtered_sessions(
@@ -186,48 +378,54 @@ def analytics_notes(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     _validate_optional_instrument(instrument_id)
+    scoped_user_id = _analytics_user_id(auth, user_id)
     parsed_from = _parse_date_start(date_from, "date_from")
     parsed_to = _parse_date_end(date_to, "date_to")
-    events = _filtered_events(db, user_id, instrument_id, parsed_from, parsed_to)
+    events = _filtered_events(db, scoped_user_id, instrument_id, parsed_from, parsed_to)
     return calculate_note_stats([event_to_dict(event) for event in events])
 
 
 @router.get("/analytics/progress")
 def analytics_progress(
-    user_id: int = 1,
+    user_id: Optional[int] = 1,
     instrument_id: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     _validate_optional_instrument(instrument_id)
+    scoped_user_id = _analytics_user_id(auth, user_id)
     parsed_from = _parse_date_start(date_from, "date_from")
     parsed_to = _parse_date_end(date_to, "date_to")
-    sessions = _filtered_sessions(db, user_id, instrument_id, parsed_from, parsed_to)
+    sessions = _filtered_sessions(db, scoped_user_id, instrument_id, parsed_from, parsed_to)
     period = calculate_period_bounds(parsed_from, parsed_to)
-    current_events = _filtered_events(db, user_id, instrument_id, period["current_start"], period["current_end"])
-    previous_events = _filtered_events(db, user_id, instrument_id, period["previous_start"], period["previous_end"])
+    current_events = _filtered_events(db, scoped_user_id, instrument_id, period["current_start"], period["current_end"])
+    previous_events = _filtered_events(db, scoped_user_id, instrument_id, period["previous_start"], period["previous_end"])
     current_stats = calculate_note_stats([event_to_dict(event) for event in current_events])
     previous_stats = calculate_note_stats([event_to_dict(event) for event in previous_events])
-    payload = calculate_progress_metrics(user_id, sessions, current_stats, previous_stats)
+    payload = calculate_progress_metrics(scoped_user_id, sessions, current_stats, previous_stats)
     payload["period"] = {key: value.isoformat() for key, value in period.items()}
     return payload
 
 
 @router.get("/analytics/heatmap")
 def analytics_heatmap(
-    user_id: int = 1,
+    user_id: Optional[int] = 1,
     instrument_id: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     _validate_optional_instrument(instrument_id)
+    scoped_user_id = _analytics_user_id(auth, user_id)
     parsed_from = _parse_date_start(date_from, "date_from")
     parsed_to = _parse_date_end(date_to, "date_to")
-    events = _filtered_events(db, user_id, instrument_id, parsed_from, parsed_to)
+    events = _filtered_events(db, scoped_user_id, instrument_id, parsed_from, parsed_to)
     stats = calculate_note_stats([event_to_dict(event) for event in events])
     if instrument_id:
         return build_instrument_heatmap(stats, require_instrument_profile(instrument_id))
@@ -235,88 +433,274 @@ def analytics_heatmap(
 
 
 @router.get("/recommendations")
-def recommendations(user_id: int = 1, instrument_id: str = "trumpet", db: Session = Depends(get_db)):
+def recommendations(user_id: Optional[int] = 1, instrument_id: str = "trumpet", db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _validate_instrument(instrument_id)
-    events = _filtered_events(db, user_id, instrument_id)
+    events = _filtered_events(db, _analytics_user_id(auth, user_id), instrument_id)
     stats = calculate_note_stats([event_to_dict(event) for event in events])
     return generate_recommendations(stats, get_instrument_profile(instrument_id))
 
 
 @router.get("/practice-plan")
-def practice_plan(user_id: int = 1, instrument_id: str = "trumpet", db: Session = Depends(get_db)):
+def practice_plan(user_id: Optional[int] = 1, instrument_id: str = "trumpet", db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _validate_instrument(instrument_id)
-    events = _filtered_events(db, user_id, instrument_id)
+    events = _filtered_events(db, _analytics_user_id(auth, user_id), instrument_id)
     stats = calculate_note_stats([event_to_dict(event) for event in events])
     problem_notes = sorted(stats, key=lambda row: float(row.get("problem_severity", 0)), reverse=True)
     return generate_practice_plan(problem_notes, get_instrument_profile(instrument_id))
 
 
 @router.get("/export/session/{session_id}.csv")
-def export_session_csv(session_id: int, db: Session = Depends(get_db)):
+def export_session_csv(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_session_access(db, session_id, auth)
     samples = db.query(PitchSample).filter(PitchSample.session_id == session_id).order_by(PitchSample.timestamp_ms.asc()).all()
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=["timestamp_ms", "frequency_hz", "confidence", "rms", "concert_note", "concert_octave", "written_note", "written_octave", "cents_deviation", "tuning_status"])
-    writer.writeheader()
-    for sample in samples:
-        data = sample_to_dict(sample)
-        writer.writerow({key: data[key] for key in writer.fieldnames})
-    return Response(output.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-samples.csv" % session_id})
+    return Response(_samples_csv_text(samples), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-samples.csv" % session_id})
 
 
 @router.get("/export/session/{session_id}.json")
-def export_session_json(session_id: int, db: Session = Depends(get_db)):
-    session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    payload = {
-        "session": session_to_dict(session),
-        "samples": [sample_to_dict(sample) for sample in db.query(PitchSample).filter(PitchSample.session_id == session_id).order_by(PitchSample.timestamp_ms.asc()).all()],
-        "note_events": [event_to_dict(event) for event in db.query(NoteEvent).filter(NoteEvent.session_id == session_id).order_by(NoteEvent.started_at_ms.asc()).all()],
-    }
+def export_session_json(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    session = _require_session_access(db, session_id, auth)
+    payload = _session_json_payload(db, session)
     return Response(json.dumps(payload, indent=2), media_type="application/json", headers={"Content-Disposition": "attachment; filename=session-%s.json" % session_id})
 
 
 @router.get("/export/note-events/{session_id}.csv")
-def export_note_events_csv(session_id: int, db: Session = Depends(get_db)):
+def export_note_events_csv(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_session_access(db, session_id, auth)
     events = db.query(NoteEvent).filter(NoteEvent.session_id == session_id).order_by(NoteEvent.started_at_ms.asc()).all()
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=["note_label", "duration_ms", "sample_count", "avg_signed_cents", "avg_abs_cents", "median_cents", "stddev_cents", "in_tune_percentage", "stability_score"])
-    writer.writeheader()
-    for event in events:
-        data = event_to_dict(event)
-        writer.writerow({key: data[key] for key in writer.fieldnames})
-    return Response(output.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-note-events.csv" % session_id})
+    return Response(_note_events_csv_text(events), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-note-events.csv" % session_id})
+
+
+@router.get("/export/session/{session_id}/audio")
+def export_session_audio(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    return get_session_audio(session_id, db, auth)
+
+
+@router.get("/export/session/{session_id}.zip")
+def export_session_zip(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    session = _require_session_access(db, session_id, auth)
+    payload = _session_json_payload(db, session)
+    recommendations = generate_session_recommendations(session_to_dict(session), calculate_note_stats(payload["note_events"]))
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("session.json", json.dumps(payload, indent=2))
+        archive.writestr("pitch_samples.csv", _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session_id).order_by(PitchSample.timestamp_ms.asc()).all()))
+        archive.writestr("note_events.csv", _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session_id).order_by(NoteEvent.started_at_ms.asc()).all()))
+        archive.writestr("recommendations.json", json.dumps(recommendations, indent=2))
+        archive.writestr(
+            "README.txt",
+            "BrassTune session export. pitch_samples.csv contains detector frames; note_events.csv contains segmented note statistics; recommendations.json contains generated practice guidance.",
+        )
+        if session.audio_object_key and session.audio_storage_provider == "local":
+            path = local_audio_path(session.audio_object_key)
+            if path.exists():
+                archive.write(path, "audio/%s" % path.name)
+    buffer.seek(0)
+    return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=session-%s-export.zip" % session_id})
 
 
 @router.get("/export/all.json")
-def export_all_json(db: Session = Depends(get_db)):
+def export_all_json(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    if auth.user.role != "admin" and auth.user.id != 1:
+        raise HTTPException(status_code=403, detail="Full local export is limited to local demo/admin users.")
     return Response(export_all_data(db), media_type="application/json", headers={"Content-Disposition": "attachment; filename=brasstune-local-data.json"})
 
 
+@router.get("/export/all.zip")
+def export_all_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    query = db.query(PracticeSession)
+    if auth.user.role != "admin":
+        query = query.filter(PracticeSession.user_id == auth.user.id)
+    sessions = query.order_by(PracticeSession.started_at.asc()).all()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("README.txt", "BrassTune all-data export for the authenticated user/admin scope.")
+        archive.writestr("sessions.json", json.dumps([session_to_dict(session) for session in sessions], indent=2))
+        for session in sessions:
+            folder = "sessions/%s" % session.id
+            payload = _session_json_payload(db, session)
+            archive.writestr("%s/session.json" % folder, json.dumps(payload, indent=2))
+            archive.writestr("%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
+            archive.writestr("%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
+            if session.audio_object_key and session.audio_storage_provider == "local":
+                path = local_audio_path(session.audio_object_key)
+                if path.exists():
+                    archive.write(path, "%s/audio/%s" % (folder, path.name))
+    buffer.seek(0)
+    return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=brasstune-export.zip"})
+
+
 @router.post("/admin/sessions/clear")
-def clear_local_sessions(db: Session = Depends(get_db)):
+def clear_local_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_local_demo_or_admin(auth)
     return {"cleared": clear_practice_data(db)}
 
 
 @router.post("/admin/demo-data/reset")
-def reset_local_demo_data(db: Session = Depends(get_db)):
+def reset_local_demo_data(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_local_demo_or_admin(auth)
     return reset_demo_data(db)
 
 
 @router.post("/admin/demo-data/repair")
-def repair_local_demo_data(db: Session = Depends(get_db)):
+def repair_local_demo_data(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_local_demo_or_admin(auth)
     return repair_demo_data(db)
 
 
-@router.get("/ensemble/summary")
-def ensemble_summary(group_id: int = 1, db: Session = Depends(get_db)):
-    member_ids = [member.user_id for member in db.query(GroupMember).filter(GroupMember.group_id == group_id).all()]
+@router.post("/dev/repair-demo-data")
+def repair_demo_data_dev(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_local_demo_or_admin(auth)
+    return repair_demo_data(db)
+
+
+@router.post("/users/me/clear-sessions")
+def clear_my_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    sessions = db.query(PracticeSession).filter(PracticeSession.user_id == auth.user.id).all()
+    deleted = len(sessions)
+    for session in sessions:
+        delete_audio_for_session(session)
+        db.delete(session)
+    db.commit()
+    return {"cleared": {"practice_sessions": deleted}}
+
+
+@router.get("/users/me/export.zip")
+def export_me_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    return export_all_zip(db, auth)
+
+
+def _group_member_ids(db: Session, group_id: int):
+    return [member.user_id for member in db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()]
+
+
+def _can_view_group(user: User, group: Group, db: Session) -> bool:
+    if _can_manage_group(user, group):
+        return True
+    return db.query(GroupMember).filter(GroupMember.group_id == group.id, GroupMember.user_id == user.id, GroupMember.status == "active").first() is not None
+
+
+@router.post("/ensemble/groups")
+def create_ensemble_group(payload: CreateGroupRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(require_roles("director", "admin"))):
+    group = Group(name=payload.name.strip(), director_user_id=auth.user.id)
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+    return group_to_dict(group)
+
+
+@router.get("/ensemble/groups")
+def list_ensemble_groups(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    if auth.user.role == "admin":
+        groups = db.query(Group).order_by(Group.name.asc()).all()
+    elif auth.user.role == "director":
+        groups = db.query(Group).filter(Group.director_user_id == auth.user.id).order_by(Group.name.asc()).all()
+    else:
+        group_ids = [row.group_id for row in db.query(GroupMember).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").all()]
+        groups = db.query(Group).filter(Group.id.in_(group_ids)).order_by(Group.name.asc()).all() if group_ids else []
+    return [group_to_dict(group) for group in groups]
+
+
+@router.get("/ensemble/groups/{group_id}")
+def get_ensemble_group(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    group = _group_or_404(db, group_id)
+    if not _can_view_group(auth.user, group, db):
+        raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
+    members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group_id).order_by(GroupMember.created_at.asc()).all()
+    return group_to_dict(group, [group_member_to_dict(member) for member in members])
+
+
+@router.get("/ensemble/groups/{group_id}/members")
+def get_ensemble_members(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    group = _group_or_404(db, group_id)
+    if not _can_view_group(auth.user, group, db):
+        raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
+    members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group_id).all()
+    return [group_member_to_dict(member) for member in members]
+
+
+@router.post("/ensemble/groups/{group_id}/members/by-username")
+def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_group_manager(db, group_id, auth)
+    _validate_instrument(payload.instrument_id)
+    if payload.role_in_group not in {"student", "assistant", "director"}:
+        raise HTTPException(status_code=400, detail="Invalid role_in_group.")
+    user = db.query(User).filter(User.username == payload.username).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="No user exists with that username.")
+    existing = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    if existing:
+        existing.instrument_id = payload.instrument_id
+        existing.role_in_group = payload.role_in_group
+        existing.status = "active"
+        member = existing
+    else:
+        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=payload.instrument_id, role_in_group=payload.role_in_group, status="active")
+        db.add(member)
+    db.commit()
+    db.refresh(member)
+    return group_member_to_dict(db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.id == member.id).first())
+
+
+@router.patch("/ensemble/groups/{group_id}/members/{member_id}")
+def update_ensemble_member(group_id: int, member_id: int, payload: UpdateGroupMemberRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_group_manager(db, group_id, auth)
+    member = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.id == member_id).first()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Group member not found.")
+    if payload.instrument_id:
+        _validate_instrument(payload.instrument_id)
+        member.instrument_id = payload.instrument_id
+    if payload.role_in_group:
+        if payload.role_in_group not in {"student", "assistant", "director"}:
+            raise HTTPException(status_code=400, detail="Invalid role_in_group.")
+        member.role_in_group = payload.role_in_group
+    if payload.status:
+        if payload.status not in {"active", "invited", "removed"}:
+            raise HTTPException(status_code=400, detail="Invalid member status.")
+        member.status = payload.status
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+    return group_member_to_dict(db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.id == member.id).first())
+
+
+@router.delete("/ensemble/groups/{group_id}/members/{member_id}")
+def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    _require_group_manager(db, group_id, auth)
+    member = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.id == member_id).first()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Group member not found.")
+    member.status = "removed"
+    db.add(member)
+    db.commit()
+    return {"removed": True}
+
+
+@router.get("/ensemble/groups/{group_id}/summary")
+def ensemble_group_summary(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    group = _group_or_404(db, group_id)
+    if not _can_view_group(auth.user, group, db):
+        raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
+    member_ids = _group_member_ids(db, group_id)
     sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
     return calculate_ensemble_summary(group_id, sessions)
 
 
-@router.get("/ensemble/report")
-def ensemble_report(group_id: int = 1, db: Session = Depends(get_db)):
-    member_ids = [member.user_id for member in db.query(GroupMember).filter(GroupMember.group_id == group_id).all()]
+@router.get("/ensemble/groups/{group_id}/report")
+def ensemble_group_report(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    group = _group_or_404(db, group_id)
+    if not _can_view_group(auth.user, group, db):
+        raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
+    member_ids = _group_member_ids(db, group_id)
     sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
     return generate_rehearsal_report(group_id, sessions)
+
+
+@router.get("/ensemble/summary")
+def ensemble_summary(group_id: int = 1, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    return ensemble_group_summary(group_id, db, auth)
+
+
+@router.get("/ensemble/report")
+def ensemble_report(group_id: int = 1, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    return ensemble_group_report(group_id, db, auth)

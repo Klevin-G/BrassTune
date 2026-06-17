@@ -1,6 +1,7 @@
-import { Activity, Bug, FileText, Music2, Settings, Users } from 'lucide-react';
+import { Activity, Bug, FileText, LogIn, LogOut, Music2, Settings, UserRound, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
+import { useAuth } from '../state/AuthContext';
 
 const moreItems = [
   { to: '/sessions', title: 'Sessions', detail: 'Review practice history and open saved takes.', icon: Music2 },
@@ -11,6 +12,7 @@ const moreItems = [
 ];
 
 export function MorePage() {
+  const auth = useAuth();
   return (
     <ScreenContainer>
       <PageHeader
@@ -31,6 +33,28 @@ export function MorePage() {
               </span>
             </Link>
           ))}
+        </div>
+      </SectionCard>
+      <SectionCard title="Account" eyebrow={auth.isSignedIn ? 'Signed in' : 'Guest demo'}>
+        <div className="account-card">
+          <span className="insight-icon">
+            <UserRound size={18} />
+          </span>
+          <div>
+            <strong>{auth.profile?.display_name ?? auth.user?.email ?? 'Guest player'}</strong>
+            <em>{auth.profile?.username ? `@${auth.profile.username}` : 'Local demo mode'}</em>
+          </div>
+          {auth.isSignedIn ? (
+            <button className="ghost-button" type="button" onClick={() => auth.signOut()}>
+              <LogOut size={17} />
+              Sign out
+            </button>
+          ) : (
+            <Link className="primary-button" to="/auth/sign-in">
+              <LogIn size={17} />
+              Sign in
+            </Link>
+          )}
         </div>
       </SectionCard>
       <SectionCard title="Quick export" eyebrow="Local MVP">

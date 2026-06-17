@@ -29,14 +29,17 @@ const viewports = [
   { name: 'Ultra-wide desktop', slug: 'ultra-wide-desktop', width: 2560, height: 1440, kind: 'wide-desktop' },
 ];
 
-const routesVisited = ['Home', 'Practice', 'Session Review', 'Analytics', 'Coach', 'Sessions', 'Progress', 'Ensemble', 'More', 'Settings'];
+const routesVisited = ['Home', 'Auth', 'Onboarding', 'Practice', 'Session Review', 'Analytics', 'Coach', 'Sessions', 'Progress', 'Ensemble', 'More', 'Settings', 'Audio Lab'];
 
 const screenshotPlan = new Map([
   ['tiny-phone:practice', 'tiny-phone-practice.png'],
   ['iphone-modern:home', 'phone-home.png'],
+  ['iphone-modern:auth', 'phone-auth.png'],
+  ['iphone-modern:onboarding', 'phone-onboarding.png'],
   ['iphone-modern:practice', 'phone-practice.png'],
   ['iphone-modern:analytics', 'phone-analytics.png'],
   ['iphone-modern:session-review', 'phone-session-review.png'],
+  ['iphone-modern:sessions', 'phone-session-playback.png'],
   ['ipad-portrait:practice', 'ipad-portrait-practice.png'],
   ['ipad-landscape:practice', 'ipad-landscape-practice.png'],
   ['ipad-landscape:analytics', 'ipad-landscape-analytics.png'],
@@ -46,6 +49,7 @@ const screenshotPlan = new Map([
   ['ultra-wide-desktop:analytics', 'ultrawide-analytics-dashboard.png'],
   ['laptop:session-review', 'desktop-session-review.png'],
   ['laptop:ensemble', 'desktop-ensemble.png'],
+  ['laptop:audio-lab', 'audio-lab.png'],
 ]);
 
 function sleep(ms) {
@@ -202,7 +206,7 @@ async function assertSideBySide(page, selector, issues, label) {
 async function saveScreenshot(page, viewport, key, screenshots) {
   const fileName = screenshotPlan.get(`${viewport.slug}:${key}`);
   if (!fileName) return;
-  await page.screenshot({ path: path.join(screenshotDir, fileName), fullPage: true });
+  await page.screenshot({ path: path.join(screenshotDir, fileName), fullPage: key !== 'sessions' });
   screenshots.push(fileName);
 }
 
@@ -239,6 +243,17 @@ async function runViewport(browser, viewport) {
     await gotoAndCheck(page, viewport, '/', 'Home', issues);
     await saveScreenshot(page, viewport, 'home', screenshots);
 
+    await gotoAndCheck(page, viewport, '/auth/sign-in', 'Auth', issues);
+    await saveScreenshot(page, viewport, 'auth', screenshots);
+    if (viewport.slug === 'iphone-modern') {
+      await gotoAndCheck(page, viewport, '/settings', 'Settings onboarding trigger', issues);
+      await page.getByRole('button', { name: /reopen onboarding/i }).click();
+      await page.waitForSelector('.onboarding-panel', { state: 'visible' });
+      await assertNoHorizontalOverflow(page, issues, `${viewport.name} Onboarding`);
+      await saveScreenshot(page, viewport, 'onboarding', screenshots);
+      await page.getByRole('button', { name: /skip/i }).click();
+    }
+
     await gotoAndCheck(page, viewport, '/practice', 'Practice', issues);
     await assertTunerDominant(page, viewport, issues, `${viewport.name} Practice`);
     if (viewport.kind === 'tablet-landscape') await assertSideBySide(page, '.practice-layout', issues, `${viewport.name} Practice`);
@@ -256,6 +271,9 @@ async function runViewport(browser, viewport) {
     await page.waitForURL(/\/sessions\/\d+/);
     await page.waitForLoadState('networkidle');
     await page.waitForSelector('.two-column-grid', { state: 'visible', timeout: 15000 });
+    await page.waitForSelector('.audio-player-card', { state: 'visible', timeout: 15000 }).catch(() => {
+      issues.push(`${viewport.name} Session Review: playback UI did not appear after demo recording`);
+    });
     await assertNoHorizontalOverflow(page, issues, `${viewport.name} Session Review`);
     if (viewport.kind === 'tablet-landscape') await assertSideBySide(page, '.two-column-grid', issues, `${viewport.name} Session Review`);
     await saveScreenshot(page, viewport, 'session-review', screenshots);
@@ -272,11 +290,14 @@ async function runViewport(browser, viewport) {
 
     await gotoAndCheck(page, viewport, '/coach', 'Coach', issues);
     await gotoAndCheck(page, viewport, '/sessions', 'Sessions', issues);
+    await saveScreenshot(page, viewport, 'sessions', screenshots);
     await gotoAndCheck(page, viewport, '/progress', 'Progress', issues);
     await gotoAndCheck(page, viewport, '/ensemble', 'Ensemble', issues);
     await saveScreenshot(page, viewport, 'ensemble', screenshots);
     await gotoAndCheck(page, viewport, '/more', 'More', issues);
     await gotoAndCheck(page, viewport, '/settings', 'Settings', issues);
+    await gotoAndCheck(page, viewport, '/settings/audio-lab', 'Audio Lab', issues);
+    await saveScreenshot(page, viewport, 'audio-lab', screenshots);
   } catch (error) {
     issues.push(`Fatal simulation error: ${error.message}`);
   } finally {
@@ -309,6 +330,7 @@ async function writeReport(results) {
   lines.push('', '## Remaining Risks', '');
   lines.push('- Playwright Chromium covers layout and interaction behavior, but not Safari/WebKit rendering differences on physical iPad hardware.');
   lines.push('- Demo recording creates local sample sessions during simulation; this is expected for the current local MVP database.');
+  lines.push('- CI cannot exercise native iOS camera pickers or choose a physical local video from Photos; those checks remain in the manual phone test plan.');
   lines.push('- Tables are intentionally allowed to scroll horizontally only inside `.table-wrap` when the advanced mobile table is opened.');
   await fs.writeFile(reportPath, `${lines.join('\n')}\n`);
 }

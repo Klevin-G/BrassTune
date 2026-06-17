@@ -48,7 +48,7 @@ class PitchDetector:
                 if freq > 0:
                     return {"frequency_hz": freq, "confidence": max(0.0, min(confidence, 1.0)), "rms": rms, "detector_source": "aubio"}
             except Exception:
-                pass
+                self._aubio_pitch = None
         freq, confidence = yin_pitch(samples, sr, min_frequency_hz, max_frequency_hz)
         return {"frequency_hz": freq, "confidence": confidence, "rms": rms, "detector_source": "yin_fallback"}
 

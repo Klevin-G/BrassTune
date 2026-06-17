@@ -1,6 +1,6 @@
-import { Activity, Bug, Gauge, Mic, Radio, Save, Settings2, Waves } from 'lucide-react';
+import { Activity, Bug, Clipboard, Gauge, Mic, Radio, Save, Settings2, Waves } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { getInstruments } from '../api/client';
+import { getInstruments, pitchWebSocketUrl } from '../api/client';
 import { SessionControls } from '../components/SessionControls';
 import { SignalMeter } from '../components/SignalMeter';
 import { MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
@@ -23,6 +23,9 @@ function centsLabel(value?: number | null) {
 export function AudioLabPage() {
   const { instrumentId, referencePitch, demoMode } = useAppSettings();
   const [profiles, setProfiles] = useState<InstrumentProfile[]>([]);
+  const [permissionState, setPermissionState] = useState('unknown');
+  const [wsUrl, setWsUrl] = useState('');
+  const apiBase = import.meta.env.VITE_API_BASE_URL || `${window.location.origin}`;
   const recorder = useSessionRecorder(instrumentId, referencePitch);
   const stream = usePitchStream({
     enabled: true,
@@ -35,6 +38,13 @@ export function AudioLabPage() {
 
   useEffect(() => {
     getInstruments().then(setProfiles).catch(() => undefined);
+    pitchWebSocketUrl().then(setWsUrl).catch(() => setWsUrl('unavailable'));
+    if (navigator.permissions?.query) {
+      navigator.permissions.query({ name: 'microphone' as PermissionName }).then((result) => {
+        setPermissionState(result.state);
+        result.onchange = () => setPermissionState(result.state);
+      }).catch(() => setPermissionState('unknown'));
+    }
   }, []);
 
   const profile = useMemo(() => profiles.find((item) => item.id === instrumentId) ?? null, [profiles, instrumentId]);
@@ -43,6 +53,21 @@ export function AudioLabPage() {
 
   const start = () => recorder.start(`Calibration lab ${new Date().toLocaleDateString()}`).catch((error) => recorder.setError(String(error)));
   const stop = () => recorder.stop().catch((error) => recorder.setError(String(error)));
+  const copyDiagnostics = () => {
+    const payload = {
+      apiBase,
+      wsUrl,
+      permissionState,
+      demoMode,
+      micActive: stream.micActive,
+      streamInfo: stream.streamInfo,
+      frame,
+      eligibility,
+      instrumentId,
+      referencePitch,
+    };
+    navigator.clipboard?.writeText(JSON.stringify(payload, null, 2)).catch(() => undefined);
+  };
 
   return (
     <ScreenContainer>
@@ -92,6 +117,30 @@ export function AudioLabPage() {
 
         <SectionCard title="Audio pipeline" eyebrow="Browser and backend">
           <div className="insight-grid">
+            <article className="insight-card">
+              <div className="insight-heading">
+                <span className="insight-icon">
+                  <Radio size={18} />
+                </span>
+                <div>
+                  <h3>Backend URL</h3>
+                  <span>{apiBase}</span>
+                </div>
+              </div>
+              <p>REST API target for phone-hosted testing.</p>
+            </article>
+            <article className="insight-card">
+              <div className="insight-heading">
+                <span className="insight-icon">
+                  <Waves size={18} />
+                </span>
+                <div>
+                  <h3>WebSocket URL</h3>
+                  <span>{wsUrl || 'checking'}</span>
+                </div>
+              </div>
+              <p>Uses VITE_WS_BASE_URL in production, otherwise the current host.</p>
+            </article>
             <article className="insight-card tone-gold">
               <div className="insight-heading">
                 <span className="insight-icon">
@@ -122,11 +171,11 @@ export function AudioLabPage() {
                   <Mic size={18} />
                 </span>
                 <div>
-                  <h3>Dropped frames</h3>
-                  <span>{stream.streamInfo.droppedFrames}</span>
+                  <h3>Mic permission</h3>
+                  <span>{permissionState}</span>
                 </div>
               </div>
-              <p>{stream.streamInfo.sentFrames} PCM frames sent during this mic connection.</p>
+              <p>{stream.streamInfo.sentFrames} PCM frames sent; {stream.streamInfo.droppedFrames} dropped.</p>
             </article>
           </div>
 
@@ -136,6 +185,10 @@ export function AudioLabPage() {
               Start microphone monitor
             </button>
           )}
+          <button className="ghost-button" type="button" onClick={copyDiagnostics}>
+            <Clipboard size={18} />
+            Copy frame diagnostics
+          </button>
 
           <div className="inline-panel">
             <div className="section-card-heading">

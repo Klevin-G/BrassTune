@@ -1,11 +1,13 @@
-import { CalendarDays, Gauge, Music2, Plus, Sparkles } from 'lucide-react';
+import { CalendarDays, Download, Gauge, Music2, Plus, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listSessions } from '../api/client';
+import { ExportButtons } from '../components/ExportButtons';
+import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { EmptyActionState, PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
 import type { PracticeSession } from '../domain/types';
 
-type SessionFilter = 'all' | 'week' | 'best' | 'work';
+type SessionFilter = 'all' | 'week' | 'audio' | 'best' | 'work';
 
 function isThisWeek(dateText: string) {
   const date = new Date(dateText);
@@ -25,6 +27,7 @@ export function SessionsPage() {
 
   const filtered = useMemo(() => {
     if (filter === 'week') return sessions.filter((session) => isThisWeek(session.started_at));
+    if (filter === 'audio') return sessions.filter((session) => session.audio_available);
     if (filter === 'best') return sessions.filter((session) => session.in_tune_percentage >= 75);
     if (filter === 'work') return sessions.filter((session) => session.average_abs_cents >= 12 || session.in_tune_percentage < 55);
     return sessions;
@@ -47,6 +50,7 @@ export function SessionsPage() {
         <div className="chip-row">
           <SelectionChip active={filter === 'all'} onClick={() => setFilter('all')}>All</SelectionChip>
           <SelectionChip active={filter === 'week'} onClick={() => setFilter('week')}>This week</SelectionChip>
+          <SelectionChip active={filter === 'audio'} onClick={() => setFilter('audio')} tone="green">With audio</SelectionChip>
           <SelectionChip active={filter === 'best'} onClick={() => setFilter('best')} tone="green">Best</SelectionChip>
           <SelectionChip active={filter === 'work'} onClick={() => setFilter('work')} tone="red">Needs work</SelectionChip>
         </div>
@@ -55,7 +59,7 @@ export function SessionsPage() {
         )}
         <div className="session-card-grid">
           {filtered.map((session) => (
-            <Link to={`/sessions/${session.id}`} className="session-timeline-card" key={session.id}>
+            <article className="session-timeline-card" key={session.id}>
               <div className="timeline-heading">
                 <span className="insight-icon">
                   <Music2 size={18} />
@@ -91,9 +95,23 @@ export function SessionsPage() {
                 <span>
                   <Sparkles size={16} /> Review analytics
                 </span>
-                <em>Open</em>
+                <Link to={`/sessions/${session.id}`}>Open</Link>
               </div>
-            </Link>
+              <SessionAudioPlayer session={session} compact />
+              <div className="session-card-actions">
+                <Link to={`/sessions/${session.id}`} className="ghost-button">
+                  <Sparkles size={16} />
+                  Review
+                </Link>
+                <details className="export-menu">
+                  <summary>
+                    <Download size={16} />
+                    Export
+                  </summary>
+                  <ExportButtons sessionId={session.id} />
+                </details>
+              </div>
+            </article>
           ))}
         </div>
       </SectionCard>

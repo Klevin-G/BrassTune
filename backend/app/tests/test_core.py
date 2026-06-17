@@ -2,7 +2,7 @@ import json
 import math
 from pathlib import Path
 
-from app.core.analytics.stats import calculate_most_improved_notes, heatmap_severity
+from app.core.analytics.stats import calculate_most_improved_notes, calculate_note_stats, heatmap_severity
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import (
     calculate_cents_deviation,
@@ -184,6 +184,51 @@ def test_shared_recommendation_fixtures():
         rec = generate_note_recommendation(case["note_stats"], get_instrument_profile(case["instrument_id"]))
         assert rec["category"] == case["expected_category"]
         assert rec["related_note"] == case["expected_related_note"]
+
+
+def test_shared_analytics_fixtures():
+    for case in _fixture("analytics_cases.json"):
+        note = case["note_label"][:-1]
+        octave = int(case["note_label"][-1])
+        events = []
+        for index, item in enumerate(case["events"]):
+            events.append(
+                {
+                    "id": index,
+                    "session_id": 1,
+                    "instrument_id": "trumpet",
+                    "written_note": note,
+                    "written_octave": octave,
+                    "note_label": case["note_label"],
+                    "concert_note": note,
+                    "concert_octave": octave,
+                    "duration_ms": item["duration_ms"],
+                    "duration_seconds": item["duration_ms"] / 1000,
+                    "sample_count": 20,
+                    "avg_signed_cents": item["avg_signed_cents"],
+                    "avg_abs_cents": item["avg_abs_cents"],
+                    "median_cents": item["avg_signed_cents"],
+                    "stddev_cents": 3,
+                    "min_cents": item["avg_signed_cents"] - 2,
+                    "max_cents": item["avg_signed_cents"] + 2,
+                    "in_tune_percentage": item["in_tune_percentage"],
+                    "stability_score": 90,
+                }
+            )
+        stats = calculate_note_stats(events)[0]
+        assert stats["trend"] == case["expected_trend"]
+        if "expected_problem_severity_min" in case:
+            assert stats["problem_severity"] >= case["expected_problem_severity_min"]
+        if "expected_problem_severity_max" in case:
+            assert stats["problem_severity"] <= case["expected_problem_severity_max"]
+
+
+def test_shared_session_audio_metadata_fixtures():
+    cases = _fixture("session_audio_metadata_cases.json")
+    assert cases[0]["object_key"] == "7/42/recording.webm"
+    assert cases[0]["playback_available"] is True
+    assert cases[1]["object_key"] is None
+    assert cases[1]["playback_available"] is False
 
 
 def test_most_improved_notes():
