@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.api.routes import _filtered_events
 from app.core.analytics.stats import build_instrument_heatmap, calculate_most_improved_notes, calculate_note_stats
 from app.core.instruments.profiles import get_instrument_profile
-from app.core.music.theory import frequency_to_pitch_frame, midi_to_frequency
+from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
 from app.core.pitch.detector import yin_pitch
 from app.db.database import Base
 from app.main import app
@@ -171,7 +171,7 @@ def test_yin_fallback_clean_tones_are_accurate():
     for frequency, min_freq, max_freq in cases:
         samples = 0.8 * np.sin(2 * math.pi * frequency * t)
         estimated, confidence = yin_pitch(samples, sample_rate, min_freq, max_freq)
-        assert confidence > 0.8
+        assert confidence >= MIN_RECORDING_CONFIDENCE
         assert abs(1200 * math.log2(estimated / frequency)) < 3.0
 
 
@@ -194,5 +194,22 @@ def test_batch_save_commits_multiple_pitch_frames():
         frame_b = frequency_to_pitch_frame(midi_to_frequency(62), 0.95, 0.1, 110, "trumpet", 440.0).to_dict()
         samples = save_pitch_frames(db, session.id, [frame_a, frame_b])
         assert len(samples) == 2
+    finally:
+        db.close()
+
+
+def test_low_confidence_pitch_frames_are_not_recordable_or_saved():
+    low_confidence = MIN_RECORDING_CONFIDENCE - 0.01
+    frame = frequency_to_pitch_frame(midi_to_frequency(69), low_confidence, 0.1, 0, "trombone", 440.0)
+    assert frame.tuning_status == "unstable"
+    assert frame.is_valid_for_recording is False
+
+    db = _test_db()
+    try:
+        session = _session(db, 13, "trombone", dt.datetime(2026, 6, 15))
+        forged = frequency_to_pitch_frame(midi_to_frequency(69), MIN_RECORDING_CONFIDENCE, 0.1, 0, "trombone", 440.0).to_dict()
+        forged["confidence"] = low_confidence
+        forged["is_valid_for_recording"] = True
+        assert save_pitch_frames(db, session.id, [forged]) == []
     finally:
         db.close()

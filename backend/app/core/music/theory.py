@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from app.core.instruments.profiles import InstrumentProfile, get_instrument_profile
 
 DEFAULT_REFERENCE_PITCH_HZ = 440.0
+MIN_RECORDING_CONFIDENCE = 0.95
 NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 NOTE_NAME_TO_INDEX = {
     "C": 0,
@@ -106,7 +107,7 @@ def classify_tuning_status(
     confidence: float,
     rms: float,
     rms_threshold: float = 0.01,
-    confidence_threshold: float = 0.58,
+    confidence_threshold: float = MIN_RECORDING_CONFIDENCE,
 ) -> str:
     if rms < rms_threshold:
         return "silence"

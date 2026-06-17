@@ -28,6 +28,25 @@
   }
 }
 
+@media (min-width: 1800px) {
+  :root {
+    --content-max: 1720px;
+  }
+
+  .analytics-main-grid {
+    grid-template-columns: minmax(0, 2.15fr) minmax(420px, 0.85fr);
+  }
+
+  .analytics-heatmap-card .heatmap {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  }
+
+  .analytics-chart-grid,
+  .two-column-grid {
+    gap: 22px;
+  }
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: 88px minmax(0, 1fr);
@@ -438,6 +457,158 @@
   .floating-tabbar {
     right: 8px;
     left: 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .topbar {
+    padding: 12px 10px;
+  }
+
+  .topbar h1 {
+    font-size: 0.9rem;
+  }
+
+  .topbar-controls {
+    gap: 5px;
+  }
+
+  .topbar-controls .select-wrap {
+    max-width: 108px;
+  }
+
+  .topbar .toggle {
+    min-height: 36px;
+    padding: 0 8px;
+  }
+
+  .content {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .section-card,
+  .panel,
+  .practice-plan,
+  .tuner-surface,
+  .today-focus-card {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .page-header {
+    padding: 18px;
+  }
+
+  h1 {
+    font-size: 1.95rem;
+  }
+
+  .note-display {
+    min-height: 132px;
+    gap: 6px;
+    padding: 16px;
+  }
+
+  .note-display strong {
+    font-size: clamp(4.65rem, 29vw, 6rem);
+  }
+
+  .note-display span {
+    font-size: 1.08rem;
+  }
+
+  .note-meta {
+    gap: 8px;
+  }
+
+  .note-meta span {
+    font-size: 0.78rem;
+  }
+
+  .needle-panel {
+    min-height: 132px;
+  }
+
+  .heatmap {
+    grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+    gap: 6px;
+  }
+
+  .heat-cell {
+    min-height: 52px;
+    padding: 8px 6px;
+  }
+
+  .segmented-control button,
+  .primary-button,
+  .ghost-button {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .floating-tabbar {
+    right: 6px;
+    bottom: 8px;
+    left: 6px;
+    gap: 2px;
+    padding: 5px;
+    border-radius: 18px;
+  }
+
+  .floating-tabbar a {
+    gap: 2px;
+    min-height: 46px;
+    font-size: 0.56rem;
+  }
+
+  .floating-tabbar svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .tuner-surface .session-controls {
+    position: static;
+    bottom: auto;
+  }
+
+  .tuner-header {
+    gap: 8px;
+  }
+
+  .tuner-header h1 {
+    margin-bottom: 4px;
+    font-size: 1.55rem;
+  }
+
+  .tuner-header p:not(.eyebrow) {
+    display: none;
+  }
+
+  .record-dot {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+  }
+
+  .tuner-header {
+    order: 1;
+  }
+
+  .note-display {
+    order: 2;
+  }
+
+  .tuner-surface .session-controls {
+    order: 3;
+  }
+
+  .needle-panel {
+    order: 4;
+  }
+
+  .signal-meter {
+    order: 5;
   }
 }
 

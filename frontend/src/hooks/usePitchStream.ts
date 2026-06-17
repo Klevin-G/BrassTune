@@ -3,6 +3,8 @@ import { recordPitchFrame } from '../api/client';
 import { nextDemoPitchFrame } from '../domain/demoPitch';
 import type { PitchFrame } from '../domain/types';
 
+const AUDIO_FRAME_SIZE = 4096;
+
 interface UsePitchStreamOptions {
   enabled: boolean;
   demoMode: boolean;
@@ -108,7 +110,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
       const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(2048, 1, 1);
+      const processor = audioContext.createScriptProcessor(AUDIO_FRAME_SIZE, 1, 1);
       source.connect(processor);
       processor.connect(audioContext.destination);
       sourceRef.current = source;

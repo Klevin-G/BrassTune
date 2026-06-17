@@ -106,6 +106,8 @@ Demo mode is enabled by default. It simulates believable brass pitch patterns, i
 
 Start a recording in demo mode, wait a few seconds, then stop. The frontend stores valid demo pitch frames through the REST API and the session review page will show real computed analytics.
 
+Pitch frames must reach at least 95% confidence before the app treats them as recordable tuning data. Lower-confidence demo or live frames show as unstable/no-lock instead of being saved into session analytics.
+
 ## Microphone Mode
 
 Turn off Demo in the top bar or Settings, then use the Practice page's microphone button. The browser asks for microphone permission and streams mono PCM frames to `WS /ws/pitch`.
@@ -116,6 +118,8 @@ Recording persistence is single-source:
 - Microphone mode sends PCM to the WebSocket; the backend detects pitch and batch-saves valid frames when `session_id` is present.
 
 Friendly failure states are shown for denied permission, missing browser audio APIs, backend/WebSocket disconnects, silence, and unstable pitch.
+
+The browser streams 4096-sample audio frames to give the detector more context for steady notes. That adds a little live-tuner latency, but improves stability for low brass and noisy rooms.
 
 ## Aubio and Librosa
 
@@ -180,7 +184,7 @@ The device simulation starts the backend and frontend automatically if they are 
 ## Known Limitations
 
 - Authentication is intentionally omitted; the MVP uses a default local user and seeded demo users.
-- Pitch detection quality depends on microphone, room noise, and browser audio frame timing.
+- Pitch detection quality depends on microphone, room noise, and browser audio frame timing. Session analytics now reject pitch frames below 95% confidence rather than storing questionable tuning data.
 - The fallback detector has synthetic tone tests and interpolation, but Aubio or a tuned native detector is still preferred for production tuning accuracy.
 - Analytics date filters apply to session `started_at`, and progress improvement compares the selected/current period against the previous equivalent period.
 - Heat maps return the full written instrument range, with unrecorded notes shown as insufficient data.

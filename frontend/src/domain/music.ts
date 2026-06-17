@@ -29,6 +29,8 @@ export const demoProfileTransposition: Record<string, number> = {
   tuba: 0,
 };
 
+export const MIN_RECORDING_CONFIDENCE = 0.95;
+
 export function midiToFrequency(midi: number, referencePitch = 440): number {
   return referencePitch * 2 ** ((midi - 69) / 12);
 }
@@ -55,7 +57,7 @@ export function pitchFrameFromFrequency(
   instrumentId: string,
   referencePitch: number,
   timestampMs: number,
-  confidence = 0.92,
+  confidence = 0.97,
   rms = 0.08,
 ): PitchFrame {
   if (!frequency || frequency <= 0 || rms < 0.01) {
@@ -81,7 +83,8 @@ export function pitchFrameFromFrequency(
   const nearest = Math.round(midi);
   const concert = midiToNote(nearest);
   const written = midiToNote(nearest + (demoProfileTransposition[instrumentId] ?? 0));
-  const status = confidence < 0.58 ? 'unstable' : Math.abs(centsHint) <= 5 ? 'in_tune' : centsHint < -5 ? 'flat' : 'sharp';
+  const status =
+    confidence < MIN_RECORDING_CONFIDENCE ? 'unstable' : Math.abs(centsHint) <= 5 ? 'in_tune' : centsHint < -5 ? 'flat' : 'sharp';
   return {
     timestamp_ms: timestampMs,
     frequency_hz: frequency,
@@ -100,4 +103,3 @@ export function pitchFrameFromFrequency(
     is_valid_for_recording: status === 'flat' || status === 'in_tune' || status === 'sharp',
   };
 }
-

@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.instruments.profiles import require_instrument_profile
-from app.core.music.theory import transpose_concert_to_written
+from app.core.music.theory import MIN_RECORDING_CONFIDENCE, transpose_concert_to_written
 from app.core.sessions.segmentation import compute_session_summary, segment_note_events
 from app.models.db import NoteEvent, PitchSample, PracticeSession, User
 from app.services.serializers import sample_to_frame_dict, session_to_dict
@@ -47,13 +47,16 @@ def _sample_from_frame(session: PracticeSession, frame: Dict[str, object]) -> Op
         return None
     if frame.get("frequency_hz") is None or frame.get("cents_deviation") is None:
         return None
+    confidence = float(frame.get("confidence") or 0)
+    if confidence < MIN_RECORDING_CONFIDENCE:
+        return None
     nearest_midi = int(frame.get("nearest_midi") or 0)
     written_midi = transpose_concert_to_written(nearest_midi, require_instrument_profile(str(frame.get("instrument_id") or session.instrument_id)))
     return PitchSample(
         session_id=session.id,
         timestamp_ms=int(frame.get("timestamp_ms") or 0),
         frequency_hz=float(frame.get("frequency_hz") or 0),
-        confidence=float(frame.get("confidence") or 0),
+        confidence=confidence,
         rms=float(frame.get("rms") or 0),
         concert_midi_float=float(frame.get("midi_note_float") or nearest_midi),
         concert_nearest_midi=nearest_midi,

@@ -540,6 +540,14 @@ input {
   min-height: 48px;
 }
 
+.signal-meter > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 meter {
   width: 100%;
   height: 12px;

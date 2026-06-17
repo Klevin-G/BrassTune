@@ -15,19 +15,24 @@ const apiUrl = 'http://127.0.0.1:8000/api/instruments';
 const isWindows = process.platform === 'win32';
 
 const viewports = [
+  { name: 'Tiny phone', slug: 'tiny-phone', width: 320, height: 568, kind: 'phone' },
   { name: 'Phone small', slug: 'phone-small', width: 360, height: 740, kind: 'phone' },
   { name: 'iPhone modern', slug: 'iphone-modern', width: 393, height: 852, kind: 'phone' },
   { name: 'Large phone', slug: 'large-phone', width: 430, height: 932, kind: 'phone' },
+  { name: 'Foldable narrow tablet', slug: 'foldable-narrow-tablet', width: 540, height: 720, kind: 'phone' },
   { name: 'iPad portrait', slug: 'ipad-portrait', width: 768, height: 1024, kind: 'tablet-portrait' },
   { name: 'iPad landscape', slug: 'ipad-landscape', width: 1024, height: 768, kind: 'tablet-landscape' },
   { name: 'iPad Pro landscape', slug: 'ipad-pro-landscape', width: 1366, height: 1024, kind: 'desktop' },
   { name: 'Laptop', slug: 'laptop', width: 1440, height: 900, kind: 'desktop' },
   { name: 'Wide desktop analytics', slug: 'wide-desktop', width: 1728, height: 1117, kind: 'wide-desktop' },
+  { name: 'Desktop HD', slug: 'desktop-hd', width: 1920, height: 1080, kind: 'wide-desktop' },
+  { name: 'Ultra-wide desktop', slug: 'ultra-wide-desktop', width: 2560, height: 1440, kind: 'wide-desktop' },
 ];
 
 const routesVisited = ['Home', 'Practice', 'Session Review', 'Analytics', 'Coach', 'Sessions', 'Progress', 'Ensemble', 'More', 'Settings'];
 
 const screenshotPlan = new Map([
+  ['tiny-phone:practice', 'tiny-phone-practice.png'],
   ['iphone-modern:home', 'phone-home.png'],
   ['iphone-modern:practice', 'phone-practice.png'],
   ['iphone-modern:analytics', 'phone-analytics.png'],
@@ -38,6 +43,7 @@ const screenshotPlan = new Map([
   ['laptop:home', 'desktop-home.png'],
   ['laptop:practice', 'desktop-practice.png'],
   ['wide-desktop:analytics', 'desktop-analytics-dashboard.png'],
+  ['ultra-wide-desktop:analytics', 'ultrawide-analytics-dashboard.png'],
   ['laptop:session-review', 'desktop-session-review.png'],
   ['laptop:ensemble', 'desktop-ensemble.png'],
 ]);
@@ -284,7 +290,7 @@ async function writeReport(results) {
     '',
     `Generated: ${new Date().toISOString()}`,
     '',
-    'Browser plugin path was unavailable in this Codex environment, so the committed Playwright harness was used for browser automation.',
+    'The committed Playwright harness was used for repeatable multi-viewport browser automation.',
     '',
     '## Summary',
     '',

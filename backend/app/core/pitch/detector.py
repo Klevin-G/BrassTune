@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 class PitchDetector:
-    def __init__(self, sample_rate: int = 48000, frame_size: int = 2048):
+    def __init__(self, sample_rate: int = 48000, frame_size: int = 4096):
         self.sample_rate = sample_rate
         self.frame_size = frame_size
         self._aubio_pitch = None
