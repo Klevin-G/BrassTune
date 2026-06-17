@@ -39,7 +39,6 @@ export function PracticePage() {
           </div>
           <NoteDisplay frame={stream.currentFrame} />
           <TunerNeedle frame={stream.currentFrame} />
-          <SignalMeter frame={stream.currentFrame} />
           <SessionControls
             recording={recorder.recording}
             elapsedSeconds={recorder.elapsedSeconds}
@@ -49,6 +48,7 @@ export function PracticePage() {
             onStop={stop}
             onMicStart={stream.startMicrophone}
           />
+          <SignalMeter frame={stream.currentFrame} />
           {recorder.error && <div className="alert">{recorder.error}</div>}
         </section>
         <aside className="section-card side-panel">

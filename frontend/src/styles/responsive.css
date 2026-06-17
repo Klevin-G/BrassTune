@@ -1,3 +1,33 @@
+@media (min-width: 1200px) {
+  .analytics-dashboard .page-header {
+    min-height: 148px;
+  }
+
+  .analytics-main-grid {
+    grid-template-columns: minmax(0, 1.86fr) minmax(360px, 0.95fr);
+  }
+
+  .analytics-heatmap-card .heatmap {
+    grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  }
+
+  .analytics-heatmap-card .heat-cell {
+    min-height: 72px;
+  }
+
+  .analytics-diagnosis-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .analytics-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analytics-controls .section-card-heading {
+    align-items: center;
+  }
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: 88px minmax(0, 1fr);
@@ -17,11 +47,6 @@
 
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .practice-layout,
-  .two-column-grid {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -66,6 +91,18 @@
 
   .page-header-action {
     justify-content: flex-start;
+  }
+
+  .practice-layout,
+  .two-column-grid,
+  .analytics-main-grid,
+  .analytics-chart-grid,
+  .analytics-control-row {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-inspector-card {
+    position: static;
   }
 
   h1 {
@@ -113,6 +150,108 @@
   .bottom-action-bar {
     bottom: 92px;
   }
+
+  .tuner-surface .session-controls {
+    position: sticky;
+    bottom: 94px;
+    z-index: 21;
+    padding: 8px;
+    border: 1px solid rgba(240, 201, 112, 0.22);
+    border-radius: 20px;
+    background: rgba(7, 10, 15, 0.86);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(18px);
+  }
+}
+
+@media (min-width: 741px) and (max-width: 1180px) {
+  .content {
+    padding: 24px;
+  }
+
+  .section-card,
+  .panel,
+  .practice-plan {
+    padding: 18px;
+  }
+
+  .practice-layout {
+    grid-template-columns: minmax(0, 1.48fr) minmax(300px, 0.82fr);
+    gap: 16px;
+  }
+
+  .tuner-surface {
+    min-height: auto;
+  }
+
+  .note-display {
+    min-height: 230px;
+  }
+
+  .note-display strong {
+    font-size: clamp(5rem, 11vw, 8rem);
+  }
+
+  .two-column-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+  }
+
+  .analytics-main-grid {
+    grid-template-columns: minmax(0, 1.3fr) minmax(285px, 0.8fr);
+  }
+
+  .analytics-diagnosis-grid,
+  .insight-grid,
+  .recommendation-grid,
+  .session-card-grid,
+  .analytics-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plan-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 741px) and (max-width: 860px) {
+  .content {
+    padding: 22px 22px 112px;
+  }
+
+  .practice-layout,
+  .two-column-grid,
+  .analytics-main-grid,
+  .analytics-chart-grid,
+  .analytics-control-row {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .analytics-diagnosis-grid,
+  .insight-grid,
+  .recommendation-grid,
+  .session-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analytics-inspector-card {
+    position: static;
+  }
+
+  .page-header {
+    padding: 24px;
+  }
+
+  .note-display {
+    min-height: 260px;
+  }
+
+  .note-display strong {
+    font-size: clamp(6.4rem, 16vw, 9rem);
+  }
 }
 
 @media (max-width: 640px) {
@@ -135,6 +274,10 @@
   .topbar .toggle {
     min-height: 38px;
     padding: 0 11px;
+  }
+
+  .topbar .status-badge {
+    display: none;
   }
 
   .screen-container {
@@ -167,28 +310,33 @@
   }
 
   .tuner-surface {
-    min-height: 600px;
+    min-height: auto;
+    grid-template-rows: auto auto auto auto auto;
     gap: 14px;
   }
 
   .note-display {
-    min-height: 210px;
+    min-height: 178px;
   }
 
   .note-display strong {
-    font-size: clamp(4.6rem, 26vw, 8rem);
+    font-size: clamp(4.2rem, 24vw, 7.2rem);
   }
 
   .needle-panel {
-    min-height: 190px;
+    min-height: 148px;
   }
 
   .needle-arc {
-    height: 132px;
+    height: 112px;
   }
 
   .needle {
-    height: 118px;
+    height: 100px;
+  }
+
+  .needle-zone {
+    height: 92px;
   }
 
   .signal-meter {
@@ -236,6 +384,31 @@
 
   .segmented-control button {
     padding: 0 8px;
+  }
+
+  .analytics-main-grid,
+  .analytics-chart-grid,
+  .analytics-control-row,
+  .analytics-summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-inspector-card {
+    position: static;
+  }
+
+  .note-card-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .advanced-table-toggle {
+    display: block;
+    margin-top: 12px;
+  }
+
+  .desktop-note-table {
+    display: none;
   }
 
   .floating-tabbar a {

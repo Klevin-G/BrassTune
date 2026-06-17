@@ -156,10 +156,16 @@
 .screen-container {
   display: grid;
   gap: 20px;
+  min-width: 0;
 }
 
 .screen-container-compact {
   gap: 16px;
+}
+
+.screen-container > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .page-grid {
@@ -172,7 +178,6 @@
 .stats-grid,
 .hero-panel,
 .practice-plan,
-.page-header,
 .screen-wide {
   grid-column: 1 / -1;
 }
@@ -192,6 +197,7 @@
     linear-gradient(120deg, rgba(216, 165, 63, 0.2), transparent 38%),
     linear-gradient(180deg, rgba(22, 33, 45, 0.92), rgba(10, 15, 22, 0.88));
   box-shadow: var(--shadow);
+  width: 100%;
 }
 
 .page-header::after {
@@ -296,10 +302,31 @@
 .recommendation-grid,
 .insight-grid,
 .more-grid,
-.session-card-grid {
+.session-card-grid,
+.analytics-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.analytics-main-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(340px, 0.75fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.analytics-control-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.analytics-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .floating-tabbar {

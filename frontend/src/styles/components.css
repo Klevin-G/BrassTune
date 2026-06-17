@@ -207,6 +207,25 @@ input {
     rgba(255, 255, 255, 0.025);
 }
 
+.analytics-summary-strip .metric-tile {
+  min-height: 88px;
+  padding: 14px;
+}
+
+.analytics-summary-strip .metric-tile strong {
+  font-size: 1.4rem;
+}
+
+.analytics-inspector-card {
+  position: sticky;
+  top: 96px;
+}
+
+.inspector-action {
+  width: 100%;
+  margin-top: 14px;
+}
+
 .action-tile {
   display: flex;
   align-items: center;
@@ -969,6 +988,72 @@ td a {
   display: block;
   margin-top: 5px;
   font-size: 1rem;
+}
+
+.note-card-list,
+.advanced-table-toggle {
+  display: none;
+}
+
+.note-stat-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.note-stat-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.note-stat-heading strong {
+  font-size: 1.5rem;
+}
+
+.note-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.note-stat-grid div {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.note-stat-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.note-stat-grid b {
+  display: block;
+  margin-top: 4px;
+}
+
+.advanced-table-toggle summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 13px;
+  color: var(--gold-soft);
+  font-weight: 800;
+  border: 1px solid rgba(216, 165, 63, 0.25);
+  border-radius: 15px;
+  background: rgba(216, 165, 63, 0.08);
+  cursor: pointer;
+}
+
+.advanced-table-toggle .table-wrap {
+  margin-top: 10px;
 }
 
 .floating-tabbar a {
