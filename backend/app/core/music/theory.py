@@ -6,6 +6,25 @@ from app.core.instruments.profiles import InstrumentProfile, get_instrument_prof
 
 DEFAULT_REFERENCE_PITCH_HZ = 440.0
 NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+NOTE_NAME_TO_INDEX = {
+    "C": 0,
+    "C#": 1,
+    "Db": 1,
+    "D": 2,
+    "D#": 3,
+    "Eb": 3,
+    "E": 4,
+    "F": 5,
+    "F#": 6,
+    "Gb": 6,
+    "G": 7,
+    "G#": 8,
+    "Ab": 8,
+    "A": 9,
+    "A#": 10,
+    "Bb": 10,
+    "B": 11,
+}
 
 
 @dataclass
@@ -45,6 +64,31 @@ def midi_to_note_name(midi_note: int, spelling_preference=None) -> Dict[str, obj
     pitch_class = midi_note % 12
     octave = midi_note // 12 - 1
     return {"note": names[pitch_class], "octave": octave, "pitch_class": pitch_class}
+
+
+def note_label_to_midi(note_label: str) -> int:
+    if len(note_label) < 2:
+        raise ValueError("Invalid note label: %s" % note_label)
+    has_accidental = len(note_label) >= 3 and note_label[1] in ("#", "b")
+    note = note_label[:2] if has_accidental else note_label[:1]
+    octave = int(note_label[2:] if has_accidental else note_label[1:])
+    try:
+        pitch_class = NOTE_NAME_TO_INDEX[note]
+    except KeyError as exc:
+        raise ValueError("Invalid note name: %s" % note) from exc
+    return (octave + 1) * 12 + pitch_class
+
+
+def midi_range_from_labels(range_label: str) -> range:
+    try:
+        start_label, end_label = range_label.split("-", 1)
+    except ValueError as exc:
+        raise ValueError("Range must look like F#3-C6") from exc
+    start = note_label_to_midi(start_label.strip())
+    end = note_label_to_midi(end_label.strip())
+    if end < start:
+        raise ValueError("Range end must be above range start")
+    return range(start, end + 1)
 
 
 def calculate_cents_deviation(frequency_hz: float, target_frequency_hz: float) -> float:
@@ -157,4 +201,3 @@ def note_label(note: Optional[str], octave: Optional[int]) -> str:
     if note is None or octave is None:
         return "-"
     return "%s%s" % (note, octave)
-

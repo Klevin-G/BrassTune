@@ -177,6 +177,16 @@ def get_instrument_profile(instrument_id: str) -> InstrumentProfile:
         return INSTRUMENT_PROFILES["trumpet"]
 
 
+def is_valid_instrument_id(instrument_id: str) -> bool:
+    return instrument_id in INSTRUMENT_PROFILES
+
+
+def require_instrument_profile(instrument_id: str) -> InstrumentProfile:
+    try:
+        return INSTRUMENT_PROFILES[instrument_id]
+    except KeyError as exc:
+        raise ValueError("Unknown instrument_id: %s" % instrument_id) from exc
+
+
 def get_all_profiles() -> List[InstrumentProfile]:
     return list(INSTRUMENT_PROFILES.values())
-

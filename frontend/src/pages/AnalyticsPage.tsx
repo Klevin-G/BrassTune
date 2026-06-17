@@ -12,12 +12,13 @@ export function AnalyticsPage() {
   const { instrumentId, setInstrumentId } = useAppSettings();
   const [stats, setStats] = useState<NoteStats[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
+  const [range, setRange] = useState({ date_from: '', date_to: '' });
   useEffect(() => {
-    Promise.all([getNoteStats(instrumentId), getHeatmap(instrumentId)]).then(([noteData, heatmapData]) => {
+    Promise.all([getNoteStats(instrumentId, range), getHeatmap(instrumentId, range)]).then(([noteData, heatmapData]) => {
       setStats(noteData);
       setHeatmap(heatmapData);
     });
-  }, [instrumentId]);
+  }, [instrumentId, range]);
   const worst = [...stats].sort((a, b) => b.problem_severity - a.problem_severity).slice(0, 8);
   return (
     <div className="page-grid">
@@ -26,7 +27,7 @@ export function AnalyticsPage() {
           <h2>Note analytics</h2>
           <div className="filter-row">
             <InstrumentSelector value={instrumentId} onChange={setInstrumentId} compact />
-            <DateRangeFilter />
+            <DateRangeFilter value={range} onChange={setRange} />
           </div>
         </div>
         <HeatMapGrid rows={heatmap} />
@@ -53,4 +54,3 @@ export function AnalyticsPage() {
     </div>
   );
 }
-

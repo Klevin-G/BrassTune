@@ -1,15 +1,16 @@
 import csv
+import datetime as dt
 import io
 import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
-from app.core.analytics.stats import build_heatmap, calculate_note_stats, calculate_progress_metrics
+from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics
 from app.core.ensemble.analytics import calculate_ensemble_summary, generate_rehearsal_report
-from app.core.instruments.profiles import get_all_profiles, get_instrument_profile
+from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
 from app.db.database import get_db
 from app.models.db import GroupMember, NoteEvent, PitchSample, PracticeSession, User
@@ -18,6 +19,41 @@ from app.services.serializers import event_to_dict, sample_to_dict, session_to_d
 from app.services.session_service import save_pitch_frame, start_session, stop_session
 
 router = APIRouter(prefix="/api")
+
+
+def _bad_instrument(instrument_id: str) -> HTTPException:
+    return HTTPException(status_code=400, detail="Unknown instrument_id: %s" % instrument_id)
+
+
+def _validate_instrument(instrument_id: str) -> None:
+    if not is_valid_instrument_id(instrument_id):
+        raise _bad_instrument(instrument_id)
+
+
+def _validate_optional_instrument(instrument_id: Optional[str]) -> None:
+    if instrument_id:
+        _validate_instrument(instrument_id)
+
+
+def _parse_date_start(value: Optional[str], field_name: str) -> Optional[dt.datetime]:
+    if not value:
+        return None
+    try:
+        return dt.datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            return dt.datetime.combine(dt.date.fromisoformat(value), dt.time.min)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="%s must be ISO date or datetime" % field_name) from exc
+
+
+def _parse_date_end(value: Optional[str], field_name: str) -> Optional[dt.datetime]:
+    parsed = _parse_date_start(value, field_name)
+    if parsed is None:
+        return None
+    if "T" not in value:
+        return parsed + dt.timedelta(days=1)
+    return parsed
 
 
 @router.get("/health")
@@ -40,12 +76,14 @@ def current_user(db: Session = Depends(get_db)):
 
 @router.post("/sessions/start")
 def start_practice_session(payload: StartSessionRequest, db: Session = Depends(get_db)):
+    _validate_instrument(payload.instrument_id)
     session = start_session(db, payload.instrument_id, payload.name, payload.reference_pitch_hz, payload.user_id)
     return session_to_dict(session)
 
 
 @router.post("/sessions/{session_id}/samples")
 def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depends(get_db)):
+    _validate_instrument(frame.instrument_id)
     sample = save_pitch_frame(db, session_id, frame.dict())
     if sample is None:
         return {"saved": False, "reason": "Frame was invalid, silent, or session was not found."}
@@ -99,25 +137,45 @@ def get_session_analytics(session_id: int, db: Session = Depends(get_db)):
     note_stats = calculate_note_stats([event_to_dict(event) for event in events])
     profile = get_instrument_profile(session.instrument_id)
     recommendations = generate_session_recommendations(session_to_dict(session), note_stats)
-    return {"session": session_to_dict(session), "note_stats": note_stats, "heatmap": build_heatmap(note_stats), "recommendations": recommendations, "instrument": profile.to_dict()}
+    return {"session": session_to_dict(session), "note_stats": note_stats, "heatmap": build_instrument_heatmap(note_stats, profile), "recommendations": recommendations, "instrument": profile.to_dict()}
 
 
-def _filtered_sessions(db: Session, user_id: Optional[int], instrument_id: Optional[str]):
+def _filtered_sessions(
+    db: Session,
+    user_id: Optional[int],
+    instrument_id: Optional[str],
+    date_from: Optional[dt.datetime] = None,
+    date_to: Optional[dt.datetime] = None,
+):
     query = db.query(PracticeSession)
     if user_id:
         query = query.filter(PracticeSession.user_id == user_id)
     if instrument_id:
         query = query.filter(PracticeSession.instrument_id == instrument_id)
+    if date_from:
+        query = query.filter(PracticeSession.started_at >= date_from)
+    if date_to:
+        query = query.filter(PracticeSession.started_at < date_to)
     return query.order_by(PracticeSession.started_at.asc()).all()
 
 
-def _filtered_events(db: Session, user_id: Optional[int], instrument_id: Optional[str]):
+def _filtered_events(
+    db: Session,
+    user_id: Optional[int],
+    instrument_id: Optional[str],
+    date_from: Optional[dt.datetime] = None,
+    date_to: Optional[dt.datetime] = None,
+):
     query = db.query(NoteEvent).join(PracticeSession, PracticeSession.id == NoteEvent.session_id)
     if user_id:
         query = query.filter(PracticeSession.user_id == user_id)
     if instrument_id:
         query = query.filter(NoteEvent.instrument_id == instrument_id)
-    return query.all()
+    if date_from:
+        query = query.filter(PracticeSession.started_at >= date_from)
+    if date_to:
+        query = query.filter(PracticeSession.started_at < date_to)
+    return query.order_by(PracticeSession.started_at.asc(), NoteEvent.started_at_ms.asc()).all()
 
 
 @router.get("/analytics/notes")
@@ -128,30 +186,56 @@ def analytics_notes(
     date_to: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    events = _filtered_events(db, user_id, instrument_id)
+    _validate_optional_instrument(instrument_id)
+    parsed_from = _parse_date_start(date_from, "date_from")
+    parsed_to = _parse_date_end(date_to, "date_to")
+    events = _filtered_events(db, user_id, instrument_id, parsed_from, parsed_to)
     return calculate_note_stats([event_to_dict(event) for event in events])
 
 
 @router.get("/analytics/progress")
-def analytics_progress(user_id: int = 1, instrument_id: Optional[str] = None, db: Session = Depends(get_db)):
-    sessions = _filtered_sessions(db, user_id, instrument_id)
-    events = _filtered_events(db, user_id, instrument_id)
-    note_stats = calculate_note_stats([event_to_dict(event) for event in events])
-    midpoint = max(1, len(events) // 2)
-    previous_stats = calculate_note_stats([event_to_dict(event) for event in events[:midpoint]])
-    current_stats = calculate_note_stats([event_to_dict(event) for event in events[midpoint:]]) if len(events) > 1 else note_stats
-    return calculate_progress_metrics(user_id, sessions, current_stats, previous_stats)
+def analytics_progress(
+    user_id: int = 1,
+    instrument_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    _validate_optional_instrument(instrument_id)
+    parsed_from = _parse_date_start(date_from, "date_from")
+    parsed_to = _parse_date_end(date_to, "date_to")
+    sessions = _filtered_sessions(db, user_id, instrument_id, parsed_from, parsed_to)
+    period = calculate_period_bounds(parsed_from, parsed_to)
+    current_events = _filtered_events(db, user_id, instrument_id, period["current_start"], period["current_end"])
+    previous_events = _filtered_events(db, user_id, instrument_id, period["previous_start"], period["previous_end"])
+    current_stats = calculate_note_stats([event_to_dict(event) for event in current_events])
+    previous_stats = calculate_note_stats([event_to_dict(event) for event in previous_events])
+    payload = calculate_progress_metrics(user_id, sessions, current_stats, previous_stats)
+    payload["period"] = {key: value.isoformat() for key, value in period.items()}
+    return payload
 
 
 @router.get("/analytics/heatmap")
-def analytics_heatmap(user_id: int = 1, instrument_id: Optional[str] = None, db: Session = Depends(get_db)):
-    events = _filtered_events(db, user_id, instrument_id)
+def analytics_heatmap(
+    user_id: int = 1,
+    instrument_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    _validate_optional_instrument(instrument_id)
+    parsed_from = _parse_date_start(date_from, "date_from")
+    parsed_to = _parse_date_end(date_to, "date_to")
+    events = _filtered_events(db, user_id, instrument_id, parsed_from, parsed_to)
     stats = calculate_note_stats([event_to_dict(event) for event in events])
+    if instrument_id:
+        return build_instrument_heatmap(stats, require_instrument_profile(instrument_id))
     return build_heatmap(stats)
 
 
 @router.get("/recommendations")
 def recommendations(user_id: int = 1, instrument_id: str = "trumpet", db: Session = Depends(get_db)):
+    _validate_instrument(instrument_id)
     events = _filtered_events(db, user_id, instrument_id)
     stats = calculate_note_stats([event_to_dict(event) for event in events])
     return generate_recommendations(stats, get_instrument_profile(instrument_id))
@@ -159,6 +243,7 @@ def recommendations(user_id: int = 1, instrument_id: str = "trumpet", db: Sessio
 
 @router.get("/practice-plan")
 def practice_plan(user_id: int = 1, instrument_id: str = "trumpet", db: Session = Depends(get_db)):
+    _validate_instrument(instrument_id)
     events = _filtered_events(db, user_id, instrument_id)
     stats = calculate_note_stats([event_to_dict(event) for event in events])
     problem_notes = sorted(stats, key=lambda row: float(row.get("problem_severity", 0)), reverse=True)
@@ -214,4 +299,3 @@ def ensemble_report(group_id: int = 1, db: Session = Depends(get_db)):
     member_ids = [member.user_id for member in db.query(GroupMember).filter(GroupMember.group_id == group_id).all()]
     sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
     return generate_rehearsal_report(group_id, sessions)
-

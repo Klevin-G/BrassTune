@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.instruments.profiles import get_instrument_profile
+from app.core.instruments.profiles import require_instrument_profile
 from app.core.music.theory import transpose_concert_to_written
 from app.core.sessions.segmentation import compute_session_summary, segment_note_events
 from app.models.db import NoteEvent, PitchSample, PracticeSession, User
@@ -22,11 +22,12 @@ def get_or_create_default_user(db: Session) -> User:
 
 
 def start_session(db: Session, instrument_id: str, name: Optional[str], reference_pitch_hz: float, user_id: int = 1) -> PracticeSession:
+    profile = require_instrument_profile(instrument_id)
     user = db.query(User).filter(User.id == user_id).first() or get_or_create_default_user(db)
     session = PracticeSession(
         user_id=user.id,
         instrument_id=instrument_id,
-        name=name or "%s practice" % get_instrument_profile(instrument_id).display_name,
+        name=name or "%s practice" % profile.display_name,
         reference_pitch_hz=reference_pitch_hz,
         started_at=dt.datetime.utcnow(),
     )
@@ -37,17 +38,19 @@ def start_session(db: Session, instrument_id: str, name: Optional[str], referenc
 
 
 def save_pitch_frame(db: Session, session_id: int, frame: Dict[str, object]) -> Optional[PitchSample]:
-    session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
-    if session is None:
-        return None
+    samples = save_pitch_frames(db, session_id, [frame])
+    return samples[0] if samples else None
+
+
+def _sample_from_frame(session: PracticeSession, frame: Dict[str, object]) -> Optional[PitchSample]:
     if not frame.get("is_valid_for_recording"):
         return None
     if frame.get("frequency_hz") is None or frame.get("cents_deviation") is None:
         return None
     nearest_midi = int(frame.get("nearest_midi") or 0)
-    written_midi = transpose_concert_to_written(nearest_midi, get_instrument_profile(str(frame.get("instrument_id") or session.instrument_id)))
-    sample = PitchSample(
-        session_id=session_id,
+    written_midi = transpose_concert_to_written(nearest_midi, require_instrument_profile(str(frame.get("instrument_id") or session.instrument_id)))
+    return PitchSample(
+        session_id=session.id,
         timestamp_ms=int(frame.get("timestamp_ms") or 0),
         frequency_hz=float(frame.get("frequency_hz") or 0),
         confidence=float(frame.get("confidence") or 0),
@@ -63,10 +66,26 @@ def save_pitch_frame(db: Session, session_id: int, frame: Dict[str, object]) -> 
         tuning_status=str(frame.get("tuning_status") or "unstable"),
         is_valid_for_recording=1,
     )
-    db.add(sample)
+
+
+def save_pitch_frames(db: Session, session_id: int, frames: List[Dict[str, object]]) -> List[PitchSample]:
+    session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
+    if session is None:
+        return []
+    samples = []
+    for frame in frames:
+        sample = _sample_from_frame(session, frame)
+        if sample is not None:
+            samples.append(sample)
+    if not samples:
+        return []
+    # Live recording can send many frames per second. Batch insert keeps SQLite
+    # responsive while the single-frame endpoint remains convenient for demo mode.
+    db.add_all(samples)
     db.commit()
-    db.refresh(sample)
-    return sample
+    for sample in samples:
+        db.refresh(sample)
+    return samples
 
 
 def rebuild_note_events(db: Session, session: PracticeSession) -> List[NoteEvent]:
@@ -138,4 +157,3 @@ def stop_session(db: Session, session_id: int) -> Optional[PracticeSession]:
 
 def session_payload(session: PracticeSession) -> Dict[str, object]:
     return session_to_dict(session)
-

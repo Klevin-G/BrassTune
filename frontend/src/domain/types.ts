@@ -89,6 +89,7 @@ export interface NoteStats {
   trend: string;
   severity: string;
   problem_severity: number;
+  has_data?: boolean;
   severity_color?: 'insufficient' | 'green' | 'yellow' | 'orange' | 'red';
   recommendation_summary?: string;
 }
@@ -128,6 +129,7 @@ export interface ProgressMetrics {
   worst_notes: NoteStats[];
   most_consistently_sharp_notes: NoteStats[];
   most_consistently_flat_notes: NoteStats[];
+  period?: Record<string, string>;
 }
 
 export interface PracticePlan {
@@ -136,4 +138,3 @@ export interface PracticePlan {
   steps: Array<{ minutes: number; label: string; detail: string }>;
   coach_message: string;
 }
-

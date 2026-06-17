@@ -5,6 +5,7 @@ from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
+from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import PitchFrame, frequency_to_pitch_frame
 
 try:
@@ -26,7 +27,13 @@ class PitchDetector:
             except Exception:
                 self._aubio_pitch = None
 
-    def estimate(self, pcm: Iterable[float], sample_rate: Optional[int] = None) -> Dict[str, float]:
+    def estimate(
+        self,
+        pcm: Iterable[float],
+        sample_rate: Optional[int] = None,
+        min_frequency_hz: float = 30.0,
+        max_frequency_hz: float = 2000.0,
+    ) -> Dict[str, float]:
         samples = np.asarray(list(pcm), dtype=np.float32)
         if samples.size == 0:
             return {"frequency_hz": 0.0, "confidence": 0.0, "rms": 0.0}
@@ -42,7 +49,7 @@ class PitchDetector:
                     return {"frequency_hz": freq, "confidence": max(0.0, min(confidence, 1.0)), "rms": rms}
             except Exception:
                 pass
-        freq, confidence = autocorrelation_pitch(samples, sr)
+        freq, confidence = yin_pitch(samples, sr, min_frequency_hz, max_frequency_hz)
         return {"frequency_hz": freq, "confidence": confidence, "rms": rms}
 
     def estimate_frame(
@@ -53,7 +60,8 @@ class PitchDetector:
         reference_pitch_hz: float,
         timestamp_ms: Optional[int] = None,
     ) -> PitchFrame:
-        estimate = self.estimate(pcm, sample_rate)
+        profile = get_instrument_profile(instrument_id)
+        estimate = self.estimate(pcm, sample_rate, profile.min_frequency_hz, profile.max_frequency_hz)
         freq = estimate["frequency_hz"] if estimate["frequency_hz"] > 0 else None
         return frequency_to_pitch_frame(
             freq,
@@ -65,30 +73,76 @@ class PitchDetector:
         )
 
 
-def autocorrelation_pitch(samples: np.ndarray, sample_rate: int) -> Tuple[float, float]:
+def yin_pitch(
+    samples: np.ndarray,
+    sample_rate: int,
+    min_frequency_hz: float = 30.0,
+    max_frequency_hz: float = 2000.0,
+    threshold: float = 0.14,
+) -> Tuple[float, float]:
     samples = samples.astype(np.float32)
     samples = samples - float(np.mean(samples))
     if samples.size < 64:
         return 0.0, 0.0
-    windowed = samples * np.hanning(samples.size)
-    corr = np.correlate(windowed, windowed, mode="full")[samples.size - 1 :]
-    if corr[0] <= 0:
+    peak = float(np.max(np.abs(samples)))
+    if peak <= 0:
         return 0.0, 0.0
-    min_freq = 30.0
-    max_freq = 2000.0
-    min_lag = max(1, int(sample_rate / max_freq))
-    max_lag = min(len(corr) - 1, int(sample_rate / min_freq))
-    if max_lag <= min_lag:
+    samples = samples / peak
+    min_tau = max(2, int(sample_rate / max_frequency_hz))
+    max_tau = min(samples.size - 2, int(sample_rate / min_frequency_hz))
+    if max_tau <= min_tau:
         return 0.0, 0.0
-    segment = corr[min_lag:max_lag]
-    if segment.size == 0:
+
+    difference = np.zeros(max_tau + 1, dtype=np.float64)
+    for tau in range(1, max_tau + 1):
+        delta = samples[:-tau] - samples[tau:]
+        difference[tau] = float(np.dot(delta, delta))
+
+    cmnd = np.ones(max_tau + 1, dtype=np.float64)
+    cumulative = 0.0
+    for tau in range(1, max_tau + 1):
+        cumulative += difference[tau]
+        cmnd[tau] = difference[tau] * tau / cumulative if cumulative > 0 else 1.0
+
+    tau = 0
+    for candidate in range(min_tau, max_tau):
+        if cmnd[candidate] < threshold:
+            while candidate + 1 <= max_tau and cmnd[candidate + 1] < cmnd[candidate]:
+                candidate += 1
+            tau = candidate
+            break
+    if tau == 0:
+        search = cmnd[min_tau : max_tau + 1]
+        if search.size == 0:
+            return 0.0, 0.0
+        tau = int(np.argmin(search) + min_tau)
+        if cmnd[tau] > 0.55:
+            return 0.0, max(0.0, min(1.0 - float(cmnd[tau]), 1.0))
+
+    refined_tau = _parabolic_tau(cmnd, tau)
+    if refined_tau <= 0:
         return 0.0, 0.0
-    lag = int(np.argmax(segment) + min_lag)
-    peak = float(corr[lag])
-    confidence = max(0.0, min(peak / float(corr[0]), 1.0))
-    if confidence < 0.25:
+    frequency = float(sample_rate / refined_tau)
+    confidence = max(0.0, min(1.0 - float(cmnd[tau]), 1.0))
+    if confidence < 0.25 or frequency < min_frequency_hz or frequency > max_frequency_hz:
         return 0.0, confidence
-    return float(sample_rate / lag), confidence
+    return frequency, confidence
+
+
+def _parabolic_tau(values: np.ndarray, tau: int) -> float:
+    if tau <= 0 or tau >= len(values) - 1:
+        return float(tau)
+    left = float(values[tau - 1])
+    center = float(values[tau])
+    right = float(values[tau + 1])
+    denominator = left - 2 * center + right
+    if abs(denominator) < 1e-12:
+        return float(tau)
+    return float(tau + 0.5 * (left - right) / denominator)
+
+
+def autocorrelation_pitch(samples: np.ndarray, sample_rate: int) -> Tuple[float, float]:
+    return yin_pitch(samples, sample_rate)
 
 
 def smooth_pitch_frames(frames: List[PitchFrame], window_size: int = 5) -> List[PitchFrame]:
@@ -114,4 +168,3 @@ def detect_stable_note(frames: List[PitchFrame], required_frames: int = 3) -> Op
     if all(label == first for label in labels):
         return first  # type: ignore[return-value]
     return None
-

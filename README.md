@@ -83,17 +83,22 @@ Demo mode is enabled by default. It simulates believable brass pitch patterns, i
 - C5 unstable
 - A4 improving in seeded progress data
 
-Start a recording in demo mode, wait a few seconds, then stop. The frontend stores valid demo pitch frames through the backend and the session review page will show real computed analytics.
+Start a recording in demo mode, wait a few seconds, then stop. The frontend stores valid demo pitch frames through the REST API and the session review page will show real computed analytics.
 
 ## Microphone Mode
 
 Turn off Demo in the top bar or Settings, then use the Practice page's microphone button. The browser asks for microphone permission and streams mono PCM frames to `WS /ws/pitch`.
 
+Recording persistence is single-source:
+
+- Demo mode generates `PitchFrame` objects in the browser and saves them through `POST /api/sessions/{id}/samples`.
+- Microphone mode sends PCM to the WebSocket; the backend detects pitch and batch-saves valid frames when `session_id` is present.
+
 Friendly failure states are shown for denied permission, missing browser audio APIs, backend/WebSocket disconnects, silence, and unstable pitch.
 
 ## Aubio and Librosa
 
-The backend tries Aubio when it is installed, then falls back to NumPy autocorrelation if Aubio is unavailable. The MVP does not require Aubio to run locally.
+The backend tries Aubio when it is installed, then falls back to a lightweight NumPy YIN-style detector if Aubio is unavailable. The MVP does not require Aubio to run locally.
 
 Optional install:
 
@@ -142,7 +147,10 @@ npm run build
 
 - Authentication is intentionally omitted; the MVP uses a default local user and seeded demo users.
 - Pitch detection quality depends on microphone, room noise, and browser audio frame timing.
-- The fallback autocorrelation detector is practical for local MVP use, but a native mobile app should use a tuned YIN/autocorrelation implementation or native pitch library.
+- The fallback detector has synthetic tone tests and interpolation, but Aubio or a tuned native detector is still preferred for production tuning accuracy.
+- Analytics date filters apply to session `started_at`, and progress improvement compares the selected/current period against the previous equivalent period.
+- Heat maps return the full written instrument range, with unrecorded notes shown as insufficient data.
+- API paths that persist or analyze instrument-specific data reject unknown `instrument_id` values with HTTP 400 instead of silently treating them as trumpet.
 - Ensemble Mode is scaffolded with seeded local data rather than full class management workflows.
 
 ## Future iOS Direction

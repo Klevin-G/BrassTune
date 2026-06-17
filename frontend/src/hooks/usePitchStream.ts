@@ -13,6 +13,10 @@ interface UsePitchStreamOptions {
   onFrame?: (frame: PitchFrame) => void;
 }
 
+export function shouldPersistFrameFromFrontend(demoMode: boolean, recording: boolean, sessionId: number | undefined, frame: PitchFrame) {
+  return demoMode && recording && Boolean(sessionId) && frame.is_valid_for_recording;
+}
+
 export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch, recording, sessionId, onFrame }: UsePitchStreamOptions) {
   const [currentFrame, setCurrentFrame] = useState<PitchFrame | null>(null);
   const [history, setHistory] = useState<PitchFrame[]>([]);
@@ -27,19 +31,25 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const recordingRef = useRef(recording);
   const sessionIdRef = useRef(sessionId);
   const onFrameRef = useRef(onFrame);
+  const demoModeRef = useRef(demoMode);
 
   useEffect(() => {
     recordingRef.current = recording;
     sessionIdRef.current = sessionId;
     onFrameRef.current = onFrame;
-  }, [recording, sessionId, onFrame]);
+    demoModeRef.current = demoMode;
+  }, [recording, sessionId, onFrame, demoMode]);
 
   const handleFrame = useCallback((frame: PitchFrame) => {
     setCurrentFrame(frame);
     setHistory((old) => [frame, ...old.filter((item) => item.is_valid_for_recording)].slice(0, 8));
     onFrameRef.current?.(frame);
-    if (recordingRef.current && sessionIdRef.current && frame.is_valid_for_recording) {
-      recordPitchFrame(sessionIdRef.current, frame).catch(() => {
+    // Demo frames are generated in the browser, so the frontend persists them.
+    // Microphone frames are detected and saved by the backend WebSocket when a
+    // session_id is present; POSTing them here would double-save the same frame.
+    const currentSessionId = sessionIdRef.current;
+    if (shouldPersistFrameFromFrontend(demoModeRef.current, recordingRef.current, currentSessionId, frame) && currentSessionId !== undefined) {
+      recordPitchFrame(currentSessionId, frame).catch(() => {
         setStatusMessage('Pitch is visible, but the backend could not save this frame.');
       });
     }
@@ -134,4 +144,3 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
 
   return { currentFrame, history, statusMessage, micActive, startMicrophone, stopMicrophone };
 }
-

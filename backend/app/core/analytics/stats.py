@@ -3,6 +3,9 @@ import statistics
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from app.core.instruments.profiles import InstrumentProfile
+from app.core.music.theory import midi_range_from_labels, midi_to_note_name
+
 
 def _value(row, key, default=None):
     if isinstance(row, dict):
@@ -116,6 +119,46 @@ def build_heatmap(note_stats: Iterable[Dict[str, object]]) -> List[Dict[str, obj
     ]
 
 
+def build_instrument_heatmap(note_stats: Iterable[Dict[str, object]], instrument_profile: InstrumentProfile) -> List[Dict[str, object]]:
+    stats_by_label = {str(stat["note_label"]): stat for stat in note_stats}
+    cells: List[Dict[str, object]] = []
+    for midi in midi_range_from_labels(instrument_profile.typical_range_written):
+        note = midi_to_note_name(midi, instrument_profile.preferred_note_spellings)
+        label = "%s%s" % (note["note"], note["octave"])
+        stat = stats_by_label.get(label)
+        if stat:
+            cell = {
+                **stat,
+                "has_data": True,
+                "severity_color": heatmap_severity(stat),
+                "recommendation_summary": _summary_for_stat(stat),
+            }
+        else:
+            cell = {
+                "written_note": note["note"],
+                "written_octave": note["octave"],
+                "note_label": label,
+                "avg_signed_cents": 0.0,
+                "avg_abs_cents": 0.0,
+                "median_cents": 0.0,
+                "stddev_cents": 0.0,
+                "in_tune_percentage": 0.0,
+                "duration_ms": 0.0,
+                "duration_seconds": 0.0,
+                "sample_count": 0,
+                "event_count": 0,
+                "stability_score": 0.0,
+                "trend": "Insufficient data",
+                "severity": "insufficient data",
+                "problem_severity": 0.0,
+                "has_data": False,
+                "severity_color": "insufficient",
+                "recommendation_summary": "No recorded attempts yet",
+            }
+        cells.append(cell)
+    return cells
+
+
 def _summary_for_stat(stat: Dict[str, object]) -> str:
     trend = classify_note_trend(stat)
     avg = abs(float(stat.get("avg_signed_cents", 0)))
@@ -194,6 +237,30 @@ def calculate_most_improved_notes(current_period: Iterable[Dict[str, object]], p
     return sorted(improved, key=lambda row: float(row["improvement"]), reverse=True)
 
 
+def calculate_period_bounds(
+    date_from: Optional[dt.datetime] = None,
+    date_to: Optional[dt.datetime] = None,
+    as_of: Optional[dt.datetime] = None,
+) -> Dict[str, dt.datetime]:
+    current_end = date_to or as_of or dt.datetime.utcnow()
+    if date_from:
+        current_start = date_from
+        period_length = current_end - current_start
+        if period_length.total_seconds() <= 0:
+            period_length = dt.timedelta(days=7)
+    else:
+        period_length = dt.timedelta(days=7)
+        current_start = current_end - period_length
+    previous_end = current_start
+    previous_start = previous_end - period_length
+    return {
+        "current_start": current_start,
+        "current_end": current_end,
+        "previous_start": previous_start,
+        "previous_end": previous_end,
+    }
+
+
 def calculate_practice_consistency(sessions: Iterable[object], today: Optional[dt.date] = None) -> Dict[str, object]:
     today = today or dt.date.today()
     week_start = today - dt.timedelta(days=today.weekday())
@@ -246,4 +313,3 @@ def calculate_progress_metrics(user_id: int, sessions: Iterable[object], current
         "most_consistently_sharp_notes": sharp,
         "most_consistently_flat_notes": flat,
     }
-
