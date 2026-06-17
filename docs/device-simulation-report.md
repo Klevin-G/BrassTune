@@ -1,6 +1,6 @@
 # Device Simulation Report
 
-Generated: 2026-06-17T17:10:00.767Z
+Generated: 2026-06-17T18:06:53.694Z
 
 Browser plugin path was unavailable in this Codex environment, so the committed Playwright harness was used for browser automation.
 

@@ -12,6 +12,7 @@ const screenshotDir = path.join(rootDir, 'docs', 'assets', 'device-simulation');
 const reportPath = path.join(rootDir, 'docs', 'device-simulation-report.md');
 const appUrl = 'http://127.0.0.1:5173';
 const apiUrl = 'http://127.0.0.1:8000/api/instruments';
+const isWindows = process.platform === 'win32';
 
 const viewports = [
   { name: 'Phone small', slug: 'phone-small', width: 360, height: 740, kind: 'phone' },
@@ -64,21 +65,37 @@ async function waitFor(url, label, timeoutMs = 20000) {
 }
 
 function spawnServer(command, args, cwd) {
-  const child = spawn(command, args, { cwd, stdio: 'pipe', shell: false });
+  const child = spawn(command, args, { cwd, stdio: 'pipe', shell: false, windowsHide: true });
   child.stdout.on('data', () => {});
   child.stderr.on('data', () => {});
   return child;
 }
 
+async function exists(filePath) {
+  return fs.access(filePath).then(() => true).catch(() => false);
+}
+
+async function backendServerCommand() {
+  const venvPython = isWindows
+    ? path.join(backendDir, '.venv', 'Scripts', 'python.exe')
+    : path.join(backendDir, '.venv', 'bin', 'python');
+  if (await exists(venvPython)) {
+    return { command: venvPython, args: ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'] };
+  }
+  if (isWindows) {
+    return { command: 'py', args: ['-3', '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'] };
+  }
+  return { command: 'python3', args: ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'] };
+}
+
 async function ensureServers() {
   const started = [];
   if (!(await isReachable(apiUrl))) {
-    const uvicornPath = path.join(backendDir, '.venv', 'bin', 'uvicorn');
-    const command = await fs.access(uvicornPath).then(() => uvicornPath).catch(() => 'uvicorn');
-    started.push(spawnServer(command, ['app.main:app', '--host', '127.0.0.1', '--port', '8000'], backendDir));
+    const backend = await backendServerCommand();
+    started.push(spawnServer(backend.command, backend.args, backendDir));
   }
   if (!(await isReachable(appUrl))) {
-    started.push(spawnServer('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173'], frontendDir));
+    started.push(spawnServer(isWindows ? 'npm.cmd' : 'npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173'], frontendDir));
   }
   await waitFor(apiUrl, 'FastAPI');
   await waitFor(appUrl, 'Vite');

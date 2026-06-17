@@ -44,29 +44,50 @@ docs/
   pitch-detection-notes.md
 ```
 
+## Windows Setup
+
+These commands assume Windows PowerShell from the project root.
+
+```powershell
+cd C:\path\to\BrassTune
+```
+
+Install Python 3.11+ and Node.js 20+ first. Then open two PowerShell windows.
+
+If PowerShell blocks virtualenv activation, run this once in that PowerShell window:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
 ## Backend Setup
 
-```bash
+PowerShell window 1:
+
+```powershell
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 The backend initializes SQLite and seeds demo data on startup. The database file is created at `backend/data/brasstune.db`.
 
 Run the seed script manually if needed:
 
-```bash
+```powershell
 cd backend
-source .venv/bin/activate
+.\.venv\Scripts\Activate.ps1
 python -m app.db.seed
 ```
 
 ## Frontend Setup
 
-```bash
+PowerShell window 2:
+
+```powershell
 cd frontend
 npm install
 npm run dev
@@ -102,26 +123,39 @@ The backend tries Aubio when it is installed, then falls back to a lightweight N
 
 Optional install:
 
-```bash
-pip install aubio librosa
+```powershell
+python -m pip install aubio librosa
 ```
 
 On some systems Aubio may need native build tools. If installation fails, keep using the fallback detector.
 
 ## Tests
 
-```bash
+Backend tests:
+
+```powershell
 cd backend
-source .venv/bin/activate
-pytest
+.\.venv\Scripts\Activate.ps1
+python -m pytest
 ```
 
-Frontend build check:
+Frontend unit tests, build, and audit:
 
-```bash
+```powershell
 cd frontend
+npm test
 npm run build
+npm audit --omit=dev
 ```
+
+Full device simulation:
+
+```powershell
+cd frontend
+npm run simulate:devices
+```
+
+The device simulation starts the backend and frontend automatically if they are not already running. It saves the browser report to `docs/device-simulation-report.md` and screenshots to `docs/assets/device-simulation/`.
 
 ## Key API Routes
 

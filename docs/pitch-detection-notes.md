@@ -8,8 +8,8 @@ If `aubio` is installed, `PitchDetector` uses Aubio's YIN implementation and ask
 
 Optional install:
 
-```bash
-pip install aubio librosa
+```powershell
+python -m pip install aubio librosa
 ```
 
 `librosa` is not required by the current runtime path, but it is useful for future offline analysis and validation notebooks.
@@ -50,4 +50,3 @@ With a clean sustained tone and stable microphone signal, Aubio should be able t
 - Add browser-side noise floor calibration.
 - Persist aggregate silence and unstable counts for richer practice feedback.
 - Compare native Swift pitch detection fixtures against backend fixtures before port launch.
-
