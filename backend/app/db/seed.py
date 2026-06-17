@@ -6,11 +6,12 @@ from typing import Dict, List, Tuple
 from sqlalchemy.orm import Session
 
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile
-from app.core.music.theory import frequency_to_pitch_frame, midi_to_frequency
+from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
 from app.models.db import Group, GroupMember, InstrumentProfileModel, PracticeSession, User
 from app.services.session_service import rebuild_note_events, save_pitch_frame, stop_session
 
 NOTE_INDEX = {"C": 0, "C#": 1, "Db": 1, "D": 2, "Eb": 3, "D#": 3, "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "Ab": 8, "G#": 8, "A": 9, "Bb": 10, "A#": 10, "B": 11}
+DEMO_RECORDING_CONFIDENCE = max(MIN_RECORDING_CONFIDENCE, 0.97)
 
 
 def note_to_midi(label: str) -> int:
@@ -78,7 +79,7 @@ def _make_sample_frames(
         for _ in range(18):
             cents = random.gauss(cents_center, jitter)
             freq = midi_to_frequency(concert_midi, reference_pitch_hz) * (2 ** (cents / 1200.0))
-            frame = frequency_to_pitch_frame(freq, 0.91, 0.08, ts, instrument_id, reference_pitch_hz).to_dict()
+            frame = frequency_to_pitch_frame(freq, DEMO_RECORDING_CONFIDENCE, 0.08, ts, instrument_id, reference_pitch_hz).to_dict()
             frames.append(frame)
             ts += 110
         ts += 180
@@ -138,4 +139,3 @@ if __name__ == "__main__":
         seed_demo_data(database)
     finally:
         database.close()
-

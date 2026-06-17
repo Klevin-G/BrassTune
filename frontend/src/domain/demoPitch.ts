@@ -1,4 +1,4 @@
-import { demoProfileTransposition, midiToFrequency, noteLabelToMidi, pitchFrameFromFrequency } from './music';
+import { MIN_RECORDING_CONFIDENCE, demoProfileTransposition, midiToFrequency, noteLabelToMidi, pitchFrameFromFrequency } from './music';
 import type { PitchFrame } from './types';
 
 const patterns: Record<string, Array<{ note: string; center: number; spread: number }>> = {
@@ -51,6 +51,6 @@ export function nextDemoPitchFrame(index: number, instrumentId: string, referenc
   const writtenMidi = noteLabelToMidi(current.note);
   const concertMidi = writtenMidi - (demoProfileTransposition[instrumentId] ?? 0);
   const frequency = midiToFrequency(concertMidi, referencePitch) * 2 ** (cents / 1200);
-  const confidence = current.spread > 9 ? 0.9 : 0.97 + Math.min(0.02, Math.max(0, 5 - Math.abs(noise)) / 250);
+  const confidence = current.spread > 9 ? MIN_RECORDING_CONFIDENCE + 0.01 : 0.97 + Math.min(0.02, Math.max(0, 5 - Math.abs(noise)) / 250);
   return pitchFrameFromFrequency(frequency, cents, instrumentId, referencePitch, index * 110, confidence, 0.07 + Math.abs(noise) / 400);
 }

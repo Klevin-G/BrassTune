@@ -108,6 +108,8 @@ Start a recording in demo mode, wait a few seconds, then stop. The frontend stor
 
 Pitch frames must reach at least 95% confidence before the app treats them as recordable tuning data. Lower-confidence demo or live frames show as unstable/no-lock instead of being saved into session analytics.
 
+`No lock` means the detector confidence is too low to trust, so the frame is excluded from recordings. `Unstable pitch` means the detector has a high-confidence lock, but the player's cents values vary enough over time for analytics to flag a stability problem.
+
 ## Microphone Mode
 
 Turn off Demo in the top bar or Settings, then use the Practice page's microphone button. The browser asks for microphone permission and streams mono PCM frames to `WS /ws/pitch`.
