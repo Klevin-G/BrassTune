@@ -1,0 +1,290 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A0000010000000000000001 /* BrassTuneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000101 /* BrassTuneApp.swift */; };
+		1A0000010000000000000002 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000102 /* Models.swift */; };
+		1A0000010000000000000003 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000103 /* AppModel.swift */; };
+		1A0000010000000000000004 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000104 /* APIClient.swift */; };
+		1A0000010000000000000005 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000105 /* AuthService.swift */; };
+		1A0000010000000000000006 /* NativeAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000106 /* NativeAudioEngine.swift */; };
+		1A0000010000000000000007 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000107 /* AppRootView.swift */; };
+		1A0000010000000000000008 /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000108 /* SettingsViews.swift */; };
+		1A0000010000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000109 /* Assets.xcassets */; };
+		1A0000010000000000000010 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000110 /* PrivacyInfo.xcprivacy */; };
+		1A0000010000000000000011 /* BrassTuneCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000000301 /* BrassTuneCore */; };
+		1A0000010000000000000012 /* BrassTuneAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000111 /* BrassTuneAppTests.swift */; };
+		1A0000010000000000000013 /* BrassTuneCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000000301 /* BrassTuneCore */; };
+		1A0000010000000000000014 /* BrassTuneAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000112 /* BrassTuneAppUITests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1A0000010000000000000201 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0000010000000000000401 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A0000010000000000000501;
+			remoteInfo = BrassTuneApp;
+		};
+		1A0000010000000000000202 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0000010000000000000401 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A0000010000000000000501;
+			remoteInfo = BrassTuneApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1A0000010000000000000101 /* BrassTuneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrassTuneApp.swift; sourceTree = "<group>"; };
+		1A0000010000000000000102 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		1A0000010000000000000103 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		1A0000010000000000000104 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		1A0000010000000000000105 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		1A0000010000000000000106 /* NativeAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAudioEngine.swift; sourceTree = "<group>"; };
+		1A0000010000000000000107 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
+		1A0000010000000000000108 /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
+		1A0000010000000000000109 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A0000010000000000000110 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		1A0000010000000000000111 /* BrassTuneAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrassTuneAppTests.swift; sourceTree = "<group>"; };
+		1A0000010000000000000112 /* BrassTuneAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrassTuneAppUITests.swift; sourceTree = "<group>"; };
+		1A0000010000000000000113 /* BrassTuneApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BrassTuneApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000010000000000000114 /* BrassTuneAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrassTuneAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000010000000000000115 /* BrassTuneAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrassTuneAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A0000010000000000000601 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (1A0000010000000000000011 /* BrassTuneCore in Frameworks */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0000010000000000000602 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (1A0000010000000000000013 /* BrassTuneCore in Frameworks */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0000010000000000000603 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A0000010000000000000701 = {
+			isa = PBXGroup;
+			children = (
+				1A0000010000000000000702 /* BrassTuneApp */,
+				1A0000010000000000000704 /* BrassTuneAppTests */,
+				1A0000010000000000000705 /* BrassTuneAppUITests */,
+				1A0000010000000000000703 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1A0000010000000000000702 /* BrassTuneApp */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000010000000000000101 /* BrassTuneApp.swift */,
+				1A0000010000000000000102 /* Models.swift */,
+				1A0000010000000000000103 /* AppModel.swift */,
+				1A0000010000000000000104 /* APIClient.swift */,
+				1A0000010000000000000105 /* AuthService.swift */,
+				1A0000010000000000000106 /* NativeAudioEngine.swift */,
+				1A0000010000000000000107 /* AppRootView.swift */,
+				1A0000010000000000000108 /* SettingsViews.swift */,
+				1A0000010000000000000706 /* Resources */,
+			);
+			path = BrassTuneApp;
+			sourceTree = "<group>";
+		};
+		1A0000010000000000000703 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000010000000000000113 /* BrassTuneApp.app */,
+				1A0000010000000000000114 /* BrassTuneAppTests.xctest */,
+				1A0000010000000000000115 /* BrassTuneAppUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1A0000010000000000000704 /* BrassTuneAppTests */ = {
+			isa = PBXGroup;
+			children = (1A0000010000000000000111 /* BrassTuneAppTests.swift */);
+			path = BrassTuneAppTests;
+			sourceTree = "<group>";
+		};
+		1A0000010000000000000705 /* BrassTuneAppUITests */ = {
+			isa = PBXGroup;
+			children = (1A0000010000000000000112 /* BrassTuneAppUITests.swift */);
+			path = BrassTuneAppUITests;
+			sourceTree = "<group>";
+		};
+		1A0000010000000000000706 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000010000000000000109 /* Assets.xcassets */,
+				1A0000010000000000000110 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A0000010000000000000501 /* BrassTuneApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0000010000000000000802 /* Build configuration list for PBXNativeTarget "BrassTuneApp" */;
+			buildPhases = (
+				1A0000010000000000000901 /* Sources */,
+				1A0000010000000000000601 /* Frameworks */,
+				1A0000010000000000000902 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = BrassTuneApp;
+			packageProductDependencies = (1A0000010000000000000301 /* BrassTuneCore */);
+			productName = BrassTuneApp;
+			productReference = 1A0000010000000000000113 /* BrassTuneApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		1A0000010000000000000502 /* BrassTuneAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0000010000000000000803 /* Build configuration list for PBXNativeTarget "BrassTuneAppTests" */;
+			buildPhases = (
+				1A0000010000000000000903 /* Sources */,
+				1A0000010000000000000602 /* Frameworks */,
+				1A0000010000000000000904 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (1A0000010000000000000203 /* PBXTargetDependency */);
+			name = BrassTuneAppTests;
+			packageProductDependencies = (1A0000010000000000000301 /* BrassTuneCore */);
+			productName = BrassTuneAppTests;
+			productReference = 1A0000010000000000000114 /* BrassTuneAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		1A0000010000000000000503 /* BrassTuneAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0000010000000000000804 /* Build configuration list for PBXNativeTarget "BrassTuneAppUITests" */;
+			buildPhases = (
+				1A0000010000000000000905 /* Sources */,
+				1A0000010000000000000603 /* Frameworks */,
+				1A0000010000000000000906 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (1A0000010000000000000204 /* PBXTargetDependency */);
+			name = BrassTuneAppUITests;
+			productName = BrassTuneAppUITests;
+			productReference = 1A0000010000000000000115 /* BrassTuneAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A0000010000000000000401 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					1A0000010000000000000501 = {CreatedOnToolsVersion = 26.2;};
+					1A0000010000000000000502 = {CreatedOnToolsVersion = 26.2; TestTargetID = 1A0000010000000000000501;};
+					1A0000010000000000000503 = {CreatedOnToolsVersion = 26.2; TestTargetID = 1A0000010000000000000501;};
+				};
+			};
+			buildConfigurationList = 1A0000010000000000000801 /* Build configuration list for PBXProject "BrassTuneApp" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = 1A0000010000000000000701;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (1A0000010000000000000300 /* XCLocalSwiftPackageReference "../BrassTuneCore" */);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1A0000010000000000000703 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A0000010000000000000501 /* BrassTuneApp */,
+				1A0000010000000000000502 /* BrassTuneAppTests */,
+				1A0000010000000000000503 /* BrassTuneAppUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A0000010000000000000902 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000010000000000000009 /* Assets.xcassets in Resources */,
+				1A0000010000000000000010 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0000010000000000000904 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		1A0000010000000000000906 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A0000010000000000000901 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000010000000000000001 /* BrassTuneApp.swift in Sources */,
+				1A0000010000000000000002 /* Models.swift in Sources */,
+				1A0000010000000000000003 /* AppModel.swift in Sources */,
+				1A0000010000000000000004 /* APIClient.swift in Sources */,
+				1A0000010000000000000005 /* AuthService.swift in Sources */,
+				1A0000010000000000000006 /* NativeAudioEngine.swift in Sources */,
+				1A0000010000000000000007 /* AppRootView.swift in Sources */,
+				1A0000010000000000000008 /* SettingsViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0000010000000000000903 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (1A0000010000000000000012 /* BrassTuneAppTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+		1A0000010000000000000905 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (1A0000010000000000000014 /* BrassTuneAppUITests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1A0000010000000000000203 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 1A0000010000000000000501 /* BrassTuneApp */; targetProxy = 1A0000010000000000000201 /* PBXContainerItemProxy */; };
+		1A0000010000000000000204 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 1A0000010000000000000501 /* BrassTuneApp */; targetProxy = 1A0000010000000000000202 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1A0000010000000000000A01 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CODE_SIGNING_ALLOWED = NO; CURRENT_PROJECT_VERSION = 1; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_OPTIMIZATION_LEVEL = 0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 6.0; VERSIONING_SYSTEM = "apple-generic";}; name = Debug; };
+		1A0000010000000000000A02 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CODE_SIGNING_ALLOWED = NO; CURRENT_PROJECT_VERSION = 1; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 6.0; VALIDATE_PRODUCT = YES; VERSIONING_SYSTEM = "apple-generic";}; name = Release; };
+		1A0000010000000000000A03 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGNING_ALLOWED = NO; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = BrassTune; INFOPLIST_KEY_NSMicrophoneUsageDescription = "BrassTune uses the microphone to analyze brass pitch while you are actively tuning or recording."; INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.brasstune.BrassTuneApp.dev; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2";}; name = Debug; };
+		1A0000010000000000000A04 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGNING_ALLOWED = NO; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = BrassTune; INFOPLIST_KEY_NSMicrophoneUsageDescription = "BrassTune uses the microphone to analyze brass pitch while you are actively tuning or recording."; INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.brasstune.BrassTuneApp.dev; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2";}; name = Release; };
+		1A0000010000000000000A05 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.brasstune.BrassTuneAppTests.dev; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BrassTuneApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BrassTuneApp";}; name = Debug; };
+		1A0000010000000000000A06 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.brasstune.BrassTuneAppTests.dev; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BrassTuneApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BrassTuneApp";}; name = Release; };
+		1A0000010000000000000A07 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.brasstune.BrassTuneAppUITests.dev; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TEST_TARGET_NAME = BrassTuneApp;}; name = Debug; };
+		1A0000010000000000000A08 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.brasstune.BrassTuneAppUITests.dev; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TEST_TARGET_NAME = BrassTuneApp;}; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A0000010000000000000801 /* Build configuration list for PBXProject "BrassTuneApp" */ = {isa = XCConfigurationList; buildConfigurations = (1A0000010000000000000A01 /* Debug */, 1A0000010000000000000A02 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		1A0000010000000000000802 /* Build configuration list for PBXNativeTarget "BrassTuneApp" */ = {isa = XCConfigurationList; buildConfigurations = (1A0000010000000000000A03 /* Debug */, 1A0000010000000000000A04 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		1A0000010000000000000803 /* Build configuration list for PBXNativeTarget "BrassTuneAppTests" */ = {isa = XCConfigurationList; buildConfigurations = (1A0000010000000000000A05 /* Debug */, 1A0000010000000000000A06 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		1A0000010000000000000804 /* Build configuration list for PBXNativeTarget "BrassTuneAppUITests" */ = {isa = XCConfigurationList; buildConfigurations = (1A0000010000000000000A07 /* Debug */, 1A0000010000000000000A08 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1A0000010000000000000300 /* XCLocalSwiftPackageReference "../BrassTuneCore" */ = {isa = XCLocalSwiftPackageReference; relativePath = ../BrassTuneCore; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A0000010000000000000301 /* BrassTuneCore */ = {isa = XCSwiftPackageProductDependency; package = 1A0000010000000000000300 /* XCLocalSwiftPackageReference "../BrassTuneCore" */; productName = BrassTuneCore; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1A0000010000000000000401 /* Project object */;
+}

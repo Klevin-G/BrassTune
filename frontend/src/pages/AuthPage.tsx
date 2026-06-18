@@ -1,5 +1,5 @@
-import { ArrowRight, LogIn, Mail, ShieldCheck, UserPlus } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { ArrowRight, KeyRound, LogIn, Mail, ShieldCheck, UserPlus } from 'lucide-react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
@@ -10,6 +10,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [instrumentId, setInstrumentId] = useState('trumpet');
@@ -17,6 +18,13 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const [busy, setBusy] = useState(false);
 
   const isSignup = mode === 'sign-up';
+
+  useEffect(() => {
+    if (mode !== 'callback') return;
+    const params = new URLSearchParams(window.location.search || window.location.hash.replace(/^#/, '?'));
+    const error = params.get('error_description') || params.get('error');
+    setMessage(error ? `Sign-in was not completed: ${error}` : 'Supabase is restoring your session. Continue when the session is ready.');
+  }, [mode]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -29,8 +37,13 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
       } else if (mode === 'sign-up') {
         await auth.signUp({ email, password, username, displayName, primaryInstrumentId: instrumentId });
         setMessage('Account created. If email confirmation is enabled, confirm your email before signing in.');
+      } else if (auth.isSignedIn && newPassword) {
+        await auth.updatePassword(newPassword);
+        setMessage('Password updated. Use the new password the next time you sign in.');
+        setNewPassword('');
       } else {
-        setMessage('Password reset is configured in Supabase. Use the Supabase dashboard email templates for production redirects.');
+        await auth.requestPasswordReset(email);
+        setMessage('Password reset email sent. Open the link on this device to choose a new password.');
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Authentication failed.');
@@ -43,7 +56,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     return (
       <ScreenContainer>
         <SectionCard title="Finishing sign in" eyebrow="Auth callback">
-          <p className="muted-copy">Supabase will restore the browser session automatically. You can return to BrassTune once the session is ready.</p>
+          <p className="muted-copy" role="status">{message ?? 'Supabase will restore the browser session automatically.'}</p>
           <Link className="primary-button" to="/">
             Continue
             <ArrowRight size={18} />
@@ -82,7 +95,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
           <form className="auth-form" onSubmit={onSubmit}>
             <label>
               Email
-              <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={mode !== 'reset'} placeholder="you@example.com" />
+              <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={!auth.isSignedIn || mode !== 'reset'} placeholder="you@example.com" />
             </label>
             {mode !== 'reset' && (
               <label>
@@ -103,12 +116,24 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
               </>
             )}
+            {mode === 'reset' && auth.isSignedIn && (
+              <label>
+                New password
+                <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" minLength={8} placeholder="Minimum 8 characters" />
+              </label>
+            )}
             <button className="primary-button" disabled={busy || !auth.configured} type="submit">
-              {isSignup ? <UserPlus size={18} /> : <LogIn size={18} />}
-              {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
+              {isSignup ? <UserPlus size={18} /> : mode === 'reset' ? <KeyRound size={18} /> : <LogIn size={18} />}
+              {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' && auth.isSignedIn && newPassword ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
             </button>
           </form>
-          {message && <div className="alert">{message}</div>}
+          {mode !== 'reset' && (
+            <button className="ghost-button full-width-action" disabled={busy || !auth.configured} type="button" onClick={() => auth.signInWithApple().catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in failed.'))}>
+              <ShieldCheck size={18} />
+              Continue with Apple
+            </button>
+          )}
+          {message && <div className="alert" role="status">{message}</div>}
           <div className="auth-switcher">
             {isSignup ? <Link to="/auth/sign-in">Already have an account?</Link> : <Link to="/auth/sign-up">Create an account</Link>}
             <Link to="/auth/reset-password">Reset password</Link>

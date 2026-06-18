@@ -12,8 +12,10 @@ export function SettingsPage() {
   const auth = useAuth();
   const [maintenanceStatus, setMaintenanceStatus] = useState('Ready');
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
 
-  const runMaintenance = async (label: string, action: () => Promise<unknown>) => {
+  const runMaintenance = async (label: string, action: () => Promise<unknown>, confirmation?: string) => {
+    if (confirmation && !window.confirm(confirmation)) return;
     setBusyAction(label);
     setMaintenanceStatus(`${label}...`);
     try {
@@ -24,6 +26,11 @@ export function SettingsPage() {
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const deleteAccount = async () => {
+    await runMaintenance('Delete account', () => auth.deleteAccount(deleteConfirmation), 'This permanently deletes your BrassTune account data and owned ensembles according to the documented policy. Continue?');
+    setDeleteConfirmation('');
   };
 
   return (
@@ -75,6 +82,10 @@ export function SettingsPage() {
               </Link>
             )}
           </div>
+          <div className="settings-actions">
+            <Link className="ghost-button" to="/privacy">Privacy</Link>
+            <Link className="ghost-button" to="/terms">Terms</Link>
+          </div>
         </SectionCard>
         <SectionCard title="Local utilities" eyebrow="MVP">
           <div className="insight-grid">
@@ -119,7 +130,7 @@ export function SettingsPage() {
               <Download size={18} />
               Export all data
             </button>
-            <button className="ghost-button" type="button" onClick={() => localStorage.clear()}>
+            <button className="ghost-button" type="button" onClick={() => window.confirm('Clear browser preferences on this device?') && localStorage.clear()}>
               <Trash2 size={18} />
               Clear preferences
             </button>
@@ -132,16 +143,33 @@ export function SettingsPage() {
             <RefreshCcw size={18} />
             Repair demo data
           </button>
-          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Reset demo data', resetDemoData)}>
+          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Reset demo data', resetDemoData, 'Reset seeded demo data for this environment?')}>
             <DatabaseBackup size={18} />
             Reset demo data
           </button>
-          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Clear sessions', clearLocalSessions)}>
+          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Clear sessions', clearLocalSessions, 'Delete your saved practice sessions and recordings?')}>
             <RotateCcw size={18} />
             Clear sessions
           </button>
         </div>
-        <p className="settings-status">{maintenanceStatus}</p>
+        <p className="settings-status" aria-live="polite">{maintenanceStatus}</p>
+      </SectionCard>
+      <SectionCard title="Delete account" eyebrow="Account lifecycle">
+        <p className="muted-copy">Export your data first. Deletion removes your profile, sessions, pitch samples, note events, recommendations, group memberships, and owned ensembles. Teacher-owned groups are deleted with their memberships and invitations.</p>
+        <div className="settings-actions">
+          <button className="ghost-button" type="button" onClick={() => downloadExport('/api/users/me/export.zip', 'brasstune-account-export.zip')}>
+            <Download size={18} />
+            Export account data
+          </button>
+        </div>
+        <label className="field">
+          <span>Type delete my account</span>
+          <input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} placeholder="delete my account" />
+        </label>
+        <button className="ghost-button danger-action" type="button" disabled={!auth.isSignedIn || busyAction !== null || deleteConfirmation.trim().toLowerCase() !== 'delete my account'} onClick={deleteAccount}>
+          <Trash2 size={18} />
+          Delete account
+        </button>
       </SectionCard>
       <SectionCard title="Portability note" eyebrow="Swift-ready core">
         <InsightCard

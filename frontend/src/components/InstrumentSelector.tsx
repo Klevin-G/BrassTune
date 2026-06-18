@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getInstruments } from '../api/client';
 import type { InstrumentProfile } from '../domain/types';
 
-export function InstrumentSelector({ value, onChange, compact = false }: { value: string; onChange: (value: string) => void; compact?: boolean }) {
+export function InstrumentSelector({ value, onChange, compact = false, label = 'Instrument' }: { value: string; onChange: (value: string) => void; compact?: boolean; label?: string }) {
   const [instruments, setInstruments] = useState<InstrumentProfile[]>([]);
   useEffect(() => {
     getInstruments()
@@ -19,8 +19,8 @@ export function InstrumentSelector({ value, onChange, compact = false }: { value
   }, []);
   return (
     <label className={`select-wrap ${compact ? 'compact' : ''}`}>
-      {!compact && <span>Instrument</span>}
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
+      {!compact && <span>{label}</span>}
+      <select value={value} onChange={(event) => onChange(event.target.value)} aria-label={compact ? label : undefined}>
         {instruments.map((instrument) => (
           <option value={instrument.id} key={instrument.id}>
             {instrument.display_name}
@@ -30,4 +30,3 @@ export function InstrumentSelector({ value, onChange, compact = false }: { value
     </label>
   );
 }
-

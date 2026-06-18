@@ -1,5 +1,5 @@
 import { ArrowRight, CheckCircle2, Gauge, Mic, Music2, SlidersHorizontal, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { InstrumentSelector } from './InstrumentSelector';
@@ -26,9 +26,42 @@ export function OnboardingFlow() {
     closeOnboarding,
   } = useAppSettings();
   const [step, setStep] = useState(0);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const navigate = useNavigate();
   const CurrentIcon = steps[step].icon;
   const progress = useMemo(() => `${step + 1} / ${steps.length}`, [step]);
+
+  useEffect(() => {
+    if (!onboardingOpen) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeOnboarding();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      returnFocusRef.current?.focus();
+    };
+  }, [closeOnboarding, onboardingOpen]);
 
   if (!onboardingOpen) return null;
 
@@ -42,9 +75,9 @@ export function OnboardingFlow() {
   };
 
   return (
-    <div className="onboarding-backdrop" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+    <div className="onboarding-backdrop" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" ref={dialogRef}>
       <section className="onboarding-panel">
-        <button className="icon-button onboarding-close" type="button" aria-label="Close onboarding" onClick={closeOnboarding}>
+        <button className="icon-button onboarding-close" type="button" aria-label="Close onboarding" onClick={closeOnboarding} ref={closeButtonRef}>
           <X size={18} />
         </button>
         <div className="onboarding-progress">

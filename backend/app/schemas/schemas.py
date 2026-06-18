@@ -2,6 +2,9 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, validator
 
+MAX_PCM_SAMPLES = 16384
+MAX_BATCH_PITCH_FRAMES = 1000
+
 
 class StartSessionRequest(BaseModel):
     instrument_id: str = "trumpet"
@@ -35,8 +38,14 @@ class AudioFrameIn(BaseModel):
     session_id: Optional[int] = None
     instrument_id: str = "trumpet"
     reference_pitch_hz: float = 440.0
-    sample_rate: int = 48000
+    sample_rate: int = Field(default=48000, ge=8000, le=192000)
     pcm: List[float] = Field(default_factory=list)
+
+    @validator("pcm")
+    def pcm_size(cls, value):
+        if len(value) > MAX_PCM_SAMPLES:
+            raise ValueError("PCM frame is too large.")
+        return value
 
 
 class UserProfileUpdate(BaseModel):
@@ -80,3 +89,7 @@ class UpdateGroupMemberRequest(BaseModel):
 
 class AudioUploadMetadata(BaseModel):
     duration_seconds: Optional[float] = None
+
+
+class AccountDeletionRequest(BaseModel):
+    confirmation: str = Field(min_length=6, max_length=120)

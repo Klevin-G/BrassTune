@@ -14,27 +14,47 @@ export function EnsemblePage() {
   const [newGroupName, setNewGroupName] = useState('');
   const [memberUsername, setMemberUsername] = useState('');
   const [ensembleStatus, setEnsembleStatus] = useState('');
+  const [loading, setLoading] = useState(true);
   const { instrumentId } = useAppSettings();
   const auth = useAuth();
   const canManage = auth.profile?.role === 'director' || auth.profile?.role === 'admin';
 
   useEffect(() => {
-    Promise.all([getEnsembleSummary(), getEnsembleReport(), getEnsembleGroups()]).then(([summaryData, reportData, groupsData]) => {
+    getEnsembleGroups()
+      .then((groupsData) => {
+        setGroups(groupsData);
+        if (groupsData[0]) {
+          return selectGroup(groupsData[0].id);
+        }
+        setSummary(null);
+        setReport(null);
+        return undefined;
+      })
+      .catch((error) => setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensembles.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const selectGroup = async (groupId: number) => {
+    setLoading(true);
+    try {
+      const [group, summaryData, reportData] = await Promise.all([getEnsembleGroup(groupId), getEnsembleSummary(groupId), getEnsembleReport(groupId)]);
+      setSelectedGroup(group);
       setSummary(summaryData);
       setReport(reportData);
-      setGroups(groupsData);
-      if (groupsData[0]) {
-        getEnsembleGroup(groupsData[0].id).then(setSelectedGroup).catch(() => undefined);
-      }
-    });
-  }, []);
+      setEnsembleStatus('');
+    } catch (error) {
+      setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensemble data.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const createGroup = async () => {
     if (!newGroupName.trim()) return;
     try {
       const group = await createEnsembleGroup(newGroupName);
       setGroups((old) => [group, ...old]);
-      setSelectedGroup(group);
+      await selectGroup(group.id);
       setNewGroupName('');
       setEnsembleStatus('Group created.');
     } catch (error) {
@@ -46,8 +66,7 @@ export function EnsemblePage() {
     if (!selectedGroup?.id || !memberUsername.trim()) return;
     try {
       await addEnsembleMemberByUsername(selectedGroup.id, { username: memberUsername, instrument_id: instrumentId, role_in_group: 'student' });
-      const group = await getEnsembleGroup(selectedGroup.id);
-      setSelectedGroup(group);
+      await selectGroup(selectedGroup.id);
       setMemberUsername('');
       setEnsembleStatus('Member added.');
     } catch (error) {
@@ -72,7 +91,7 @@ export function EnsemblePage() {
         <div className="ensemble-admin-grid">
           <div className="mini-stat-list">
             {groups.map((group) => (
-              <button className="mini-stat-row button-row" type="button" key={group.id} onClick={() => getEnsembleGroup(group.id).then(setSelectedGroup)}>
+              <button className="mini-stat-row button-row" type="button" key={group.id} onClick={() => selectGroup(group.id)} disabled={loading}>
                 <span>{group.name}</span>
                 <strong>{selectedGroup?.id === group.id ? 'Open' : 'View'}</strong>
               </button>
@@ -110,7 +129,7 @@ export function EnsemblePage() {
                 </button>
               </div>
             )}
-            {ensembleStatus && <p className="settings-status">{ensembleStatus}</p>}
+            {ensembleStatus && <p className="settings-status" aria-live="polite">{ensembleStatus}</p>}
           </div>
         </div>
       </SectionCard>

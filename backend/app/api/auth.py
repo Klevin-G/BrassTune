@@ -24,6 +24,7 @@ USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,32}$")
 class AuthContext:
     user: User
     is_guest: bool = False
+    access_token: Optional[str] = None
 
 
 def local_auth_enabled() -> bool:
@@ -131,6 +132,51 @@ def _fetch_supabase_user(token: str) -> dict:
         raise HTTPException(status_code=503, detail="Could not validate Supabase token.") from exc
 
 
+def _supabase_service_key() -> str:
+    key = os.getenv("SUPABASE_SECRET_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="SUPABASE_SECRET_KEY is required for account deletion.")
+    return key
+
+
+def supabase_global_sign_out(token: Optional[str]) -> bool:
+    if not token or token.startswith("dev-user-"):
+        return False
+    service_key = _supabase_service_key()
+    request = urllib.request.Request(
+        _supabase_endpoint("/auth/v1/logout?scope=global"),
+        data=b"{}",
+        method="POST",
+        headers={"apikey": service_key, "Authorization": "Bearer %s" % token, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10):  # nosec B310 - URL is validated as Supabase HTTPS/local dev HTTP.
+            return True
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Supabase session revocation failed.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Could not reach Supabase to revoke sessions.") from exc
+
+
+def delete_supabase_identity(supabase_user_id: Optional[str]) -> bool:
+    if not supabase_user_id:
+        return False
+    service_key = _supabase_service_key()
+    encoded_user_id = urllib.parse.quote(supabase_user_id, safe="")
+    request = urllib.request.Request(
+        _supabase_endpoint("/auth/v1/admin/users/%s" % encoded_user_id),
+        method="DELETE",
+        headers={"apikey": service_key, "Authorization": "Bearer %s" % service_key},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10):  # nosec B310 - URL is validated as Supabase HTTPS/local dev HTTP.
+            return True
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Supabase identity deletion failed.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Could not reach Supabase to delete the identity.") from exc
+
+
 def _dev_token_user(db: Session, token: str) -> Optional[User]:
     if not local_auth_enabled() or not token.startswith("dev-user-"):
         return None
@@ -150,9 +196,9 @@ def auth_context_from_token(db: Session, token: Optional[str]) -> AuthContext:
     if token:
         dev_user = _dev_token_user(db, token)
         if dev_user is not None:
-            return AuthContext(user=dev_user, is_guest=False)
+            return AuthContext(user=dev_user, is_guest=False, access_token=token)
         payload = _fetch_supabase_user(token)
-        return AuthContext(user=_sync_supabase_user(db, payload), is_guest=False)
+        return AuthContext(user=_sync_supabase_user(db, payload), is_guest=False, access_token=token)
     if local_auth_enabled():
         user = get_or_create_default_user(db)
         if not user.username:
@@ -161,7 +207,7 @@ def auth_context_from_token(db: Session, token: Optional[str]) -> AuthContext:
             db.add(user)
             db.commit()
             db.refresh(user)
-        return AuthContext(user=user, is_guest=True)
+        return AuthContext(user=user, is_guest=True, access_token=None)
     raise HTTPException(status_code=401, detail="Authentication required.")
 
 

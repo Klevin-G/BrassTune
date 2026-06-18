@@ -1,6 +1,7 @@
 import datetime as dt
 import io
 import math
+import asyncio
 import zipfile
 
 import numpy as np
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.routes import _filtered_events
+from app.api.routes import _filtered_events, _read_limited_body
 from app.core.analytics.stats import build_instrument_heatmap, calculate_most_improved_notes, calculate_note_stats
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
@@ -17,7 +18,9 @@ from app.db.database import Base
 from app.db.maintenance import repair_demo_data
 from app.db.seed import seed_demo_data
 from app.main import app
-from app.models.db import NoteEvent, PitchSample, PracticeSession, User
+from app.models.db import Group, GroupMember, NoteEvent, PitchSample, PracticeSession, User
+from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES
+from app.services.audio_storage import delete_audio_for_session
 from app.services.session_service import save_pitch_frames
 
 
@@ -333,3 +336,103 @@ def test_director_can_add_member_by_username_but_student_cannot():
             json={"username": "missing-player", "instrument_id": "horn"},
         )
         assert missing_response.status_code == 404
+
+
+def test_websocket_stop_session_requires_owner_or_admin():
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/sessions/start",
+            headers={"Authorization": "Bearer dev-user-3"},
+            json={"instrument_id": "horn", "reference_pitch_hz": 440},
+        ).json()
+        with client.websocket_connect("/ws/pitch?token=dev-user-1") as websocket:
+            websocket.send_json({"type": "stop_session", "session_id": created["id"]})
+            message = websocket.receive_json()
+        assert message["type"] == "error"
+        assert "access" in message["message"].lower()
+        session = client.get(f"/api/sessions/{created['id']}", headers={"Authorization": "Bearer dev-user-3"}).json()
+        assert session["ended_at"] is None
+
+
+def test_websocket_pcm_frame_size_is_limited():
+    oversized_pcm = [0.0] * 20000
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_json({"type": "audio_frame", "instrument_id": "trumpet", "sample_rate": 48000, "pcm": oversized_pcm})
+            message = websocket.receive_json()
+    assert message["type"] == "error"
+    assert "too large" in message["message"].lower()
+
+
+def test_batch_pitch_frame_size_is_limited():
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        frame = frequency_to_pitch_frame(midi_to_frequency(60), MIN_RECORDING_CONFIDENCE, 0.1, 0, "trumpet", 440.0).to_dict()
+        response = client.post(f"/api/sessions/{session['id']}/samples/batch", json=[frame] * (MAX_BATCH_PITCH_FRAMES + 1))
+    assert response.status_code == 413
+
+
+def test_limited_body_reader_rejects_before_unbounded_accumulation():
+    class FakeRequest:
+        async def stream(self):
+            yield b"abc"
+            yield b"def"
+
+    try:
+        asyncio.run(_read_limited_body(FakeRequest(), max_bytes=5))
+        assert False, "Expected HTTPException"
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 413
+
+
+def test_signed_in_student_cannot_use_full_json_export_bypass():
+    with TestClient(app) as client:
+        response = client.get("/api/export/all.json", headers={"Authorization": "Bearer dev-user-1"})
+    assert response.status_code == 403
+
+
+def test_supabase_audio_delete_is_called_before_metadata_is_cleared(monkeypatch):
+    db = _test_db()
+    calls = []
+    try:
+        session = _session(db, 50, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "50/%s/recording.webm" % session.id
+        session.audio_mime_type = "audio/webm"
+
+        def fake_delete(object_key):
+            calls.append(object_key)
+
+        monkeypatch.setattr("app.services.audio_storage._delete_supabase_object", fake_delete)
+        delete_audio_for_session(session)
+        assert calls == ["50/%s/recording.webm" % session.id]
+        assert session.audio_object_key is None
+        assert session.audio_storage_provider is None
+    finally:
+        db.close()
+
+
+def test_account_deletion_removes_sessions_audio_and_teacher_owned_group():
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            headers={"Authorization": "Bearer dev-user-2"},
+            json={"instrument_id": "trombone", "reference_pitch_hz": 440},
+        ).json()
+        upload = client.post(
+            f"/api/sessions/{session['id']}/audio",
+            headers={"Authorization": "Bearer dev-user-2", "Content-Type": "audio/webm"},
+            content=b"delete-me",
+        )
+        assert upload.status_code == 200
+        response = client.request(
+            "DELETE",
+            "/api/users/me",
+            headers={"Authorization": "Bearer dev-user-2"},
+            json={"confirmation": "delete my account"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["deleted"] is True
+        assert payload["counts"]["teacher_owned_groups"] >= 1
+        assert client.get("/api/ensemble/groups/1", headers={"Authorization": "Bearer dev-user-1"}).status_code in {403, 404}

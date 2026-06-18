@@ -27,10 +27,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const location = useLocation();
   const moreActive = location.pathname === '/more' || secondaryNav.some((item) => location.pathname.startsWith(item.to));
+  const authRoute = location.pathname.startsWith('/auth/');
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell ${authRoute ? 'auth-shell' : ''}`}>
+      {!authRoute && <aside className="sidebar">
         <NavLink to="/" className="brand">
           <span className="brand-mark">
             <SlidersHorizontal size={19} />
@@ -62,9 +63,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
-      </aside>
+      </aside>}
       <div className="app-main">
-        <header className="topbar">
+        {!authRoute && <header className="topbar">
           <div>
             <p className="topbar-label">Practice cockpit</p>
             <h1>BrassTune</h1>
@@ -99,10 +100,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             )}
           </div>
-        </header>
+        </header>}
         <main className="content">{children}</main>
         <OnboardingFlow />
-        <FloatingTabBar>
+        {!authRoute && <FloatingTabBar>
           {primaryNav.map((item) => (
             <NavLink
               to={item.to}
@@ -114,7 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span>{item.label}</span>
             </NavLink>
           ))}
-        </FloatingTabBar>
+        </FloatingTabBar>}
       </div>
     </div>
   );

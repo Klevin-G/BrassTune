@@ -9,6 +9,9 @@ const moreItems = [
   { to: '/ensemble', title: 'Ensemble', detail: 'Director briefing cards and rehearsal focus.', icon: Users },
   { to: '/settings', title: 'Settings', detail: 'Instrument, A4 reference, and demo preferences.', icon: Settings },
   { to: '/settings/audio-lab', title: 'Audio Lab', detail: 'Developer calibration readout for real-device tuning tests.', icon: Bug },
+  { to: '/privacy', title: 'Privacy', detail: 'Data use, export, deletion, and recording handling.', icon: FileText },
+  { to: '/terms', title: 'Terms', detail: 'Use rules for practice analytics and account data.', icon: FileText },
+  { to: '/support', title: 'Support', detail: 'Help guidance for accounts, recording, playback, and ensembles.', icon: FileText },
 ];
 
 export function MorePage() {

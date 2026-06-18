@@ -8,11 +8,12 @@ function signedCents(value: number | null | undefined) {
 export function NoteDisplay({ frame }: { frame: PitchFrame | null }) {
   const note = frame?.written_note_name ? `${frame.written_note_name}${frame.written_octave}` : '--';
   const concert = frame?.concert_note_name ? `${frame.concert_note_name}${frame.concert_octave}` : '--';
+  const cents = signedCents(frame?.cents_deviation);
   return (
-    <section className={`note-display ${frame?.tuning_status ?? 'silence'}`}>
+    <section className={`note-display ${frame?.tuning_status ?? 'silence'}`} aria-live="polite" aria-label={`Written note ${note}, ${cents}, status ${frame?.tuning_status ?? 'no lock'}`}>
       <p>Written note</p>
       <strong>{note}</strong>
-      <span>{signedCents(frame?.cents_deviation)}</span>
+      <span>{cents}</span>
       <div className="note-meta">
         <span>Concert {concert}</span>
         <span>{frame?.frequency_hz ? `${frame.frequency_hz.toFixed(1)} Hz` : 'No clear pitch'}</span>
@@ -20,4 +21,3 @@ export function NoteDisplay({ frame }: { frame: PitchFrame | null }) {
     </section>
   );
 }
-

@@ -1,5 +1,6 @@
 import json
 from collections import defaultdict
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -40,6 +41,14 @@ async def pitch_socket(websocket: WebSocket):
             return False
         return auth.user.role == "admin" or session.user_id == auth.user.id
 
+    def session_for_write(session_id: int) -> Optional[PracticeSession]:
+        session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
+        if session is None:
+            return None
+        if auth.user.role == "admin" or session.user_id == auth.user.id:
+            return session
+        raise HTTPException(status_code=403, detail="You do not have access to this session.")
+
     try:
         while True:
             raw = await websocket.receive_text()
@@ -66,8 +75,16 @@ async def pitch_socket(websocket: WebSocket):
                 await websocket.send_json({"type": "session_started", "session": {"id": session.id, "name": session.name}})
             elif msg_type == "stop_session":
                 session_id = int(message.get("session_id", 0))
+                try:
+                    writable_session = session_for_write(session_id)
+                except HTTPException as exc:
+                    await websocket.send_json({"type": "error", "message": exc.detail})
+                    continue
+                if writable_session is None:
+                    await websocket.send_json({"type": "error", "message": "Session not found."})
+                    continue
                 flush_session(session_id)
-                session = stop_session(db, session_id)
+                session = stop_session(db, writable_session.id)
                 if session is None:
                     await websocket.send_json({"type": "error", "message": "Session not found."})
                 else:

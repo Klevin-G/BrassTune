@@ -31,7 +31,7 @@ export function SessionControls({
           <span>{micActive ? 'Mic live' : 'Mic'}</span>
         </button>
       )}
-      <div className="timer-chip">
+      <div className="timer-chip" role="timer" aria-live="polite" aria-label={`Recording timer ${minutes} minutes ${seconds} seconds`}>
         <Timer size={17} />
         {minutes}:{seconds}
       </div>

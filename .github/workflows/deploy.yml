@@ -15,7 +15,7 @@ on:
 
 jobs:
   deploy-frontend:
-    if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'frontend' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'frontend') }}
     runs-on: ubuntu-latest
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -42,7 +42,7 @@ jobs:
         run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
 
   deploy-backend:
-    if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'backend' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'backend') }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy hook

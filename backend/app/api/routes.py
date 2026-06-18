@@ -9,16 +9,16 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.auth import AuthContext, get_auth_context, require_roles
+from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
 from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics
 from app.core.ensemble.analytics import calculate_ensemble_summary, generate_rehearsal_report
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
 from app.db.database import get_db
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
-from app.models.db import Group, GroupMember, NoteEvent, PitchSample, PracticeSession, User
-from app.schemas.schemas import AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import attach_audio_to_session, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
+from app.models.db import Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, User
+from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
+from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 
@@ -172,6 +172,26 @@ def _schema_dict(model):
     return model.dict()
 
 
+def _write_session_audio_to_archive(archive: zipfile.ZipFile, session: PracticeSession, folder: str) -> None:
+    audio = audio_bytes_for_export(session)
+    if audio is None:
+        return
+    filename, data = audio
+    archive_path = "audio/%s" % filename if folder in {"", "."} else "%s/audio/%s" % (folder, filename)
+    archive.writestr(archive_path, data)
+
+
+async def _read_limited_body(request: Request, max_bytes: int = MAX_AUDIO_UPLOAD_BYTES) -> bytes:
+    chunks = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail="Audio upload is too large.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.get("/health")
 def health():
     return {"ok": True, "service": "BrassTune Analytics API"}
@@ -235,6 +255,8 @@ def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depen
 @router.post("/sessions/{session_id}/samples/batch")
 def add_session_samples_batch(session_id: int, frames: List[PitchFrameIn], db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_session_access(db, session_id, auth)
+    if len(frames) > MAX_BATCH_PITCH_FRAMES:
+        raise HTTPException(status_code=413, detail="Too many pitch frames in one request.")
     for frame in frames:
         _validate_instrument(frame.instrument_id)
     samples = save_pitch_frames(db, session_id, [_schema_dict(frame) for frame in frames])
@@ -303,7 +325,7 @@ async def upload_session_audio(
     auth: AuthContext = Depends(get_auth_context),
 ):
     session = _require_session_access(db, session_id, auth)
-    data, mime_type = read_audio_bytes(await request.body(), content_type or "")
+    data, mime_type = read_audio_bytes(await _read_limited_body(request), content_type or "")
     attach_audio_to_session(session, data, mime_type, x_audio_duration_seconds)
     db.add(session)
     db.commit()
@@ -490,17 +512,14 @@ def export_session_zip(session_id: int, db: Session = Depends(get_db), auth: Aut
             "README.txt",
             "BrassTune session export. pitch_samples.csv contains detector frames; note_events.csv contains segmented note statistics; recommendations.json contains generated practice guidance.",
         )
-        if session.audio_object_key and session.audio_storage_provider == "local":
-            path = local_audio_path(session.audio_object_key)
-            if path.exists():
-                archive.write(path, "audio/%s" % path.name)
+        _write_session_audio_to_archive(archive, session, ".")
     buffer.seek(0)
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=session-%s-export.zip" % session_id})
 
 
 @router.get("/export/all.json")
 def export_all_json(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    if auth.user.role != "admin" and auth.user.id != 1:
+    if auth.user.role != "admin" and not auth.is_guest:
         raise HTTPException(status_code=403, detail="Full local export is limited to local demo/admin users.")
     return Response(export_all_data(db), media_type="application/json", headers={"Content-Disposition": "attachment; filename=brasstune-local-data.json"})
 
@@ -521,10 +540,7 @@ def export_all_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(ge
             archive.writestr("%s/session.json" % folder, json.dumps(payload, indent=2))
             archive.writestr("%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
             archive.writestr("%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
-            if session.audio_object_key and session.audio_storage_provider == "local":
-                path = local_audio_path(session.audio_object_key)
-                if path.exists():
-                    archive.write(path, "%s/audio/%s" % (folder, path.name))
+            _write_session_audio_to_archive(archive, session, folder)
     buffer.seek(0)
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=brasstune-export.zip"})
 
@@ -567,6 +583,50 @@ def clear_my_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends
 @router.get("/users/me/export.zip")
 def export_me_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     return export_all_zip(db, auth)
+
+
+@router.delete("/users/me")
+def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    confirmation = payload.confirmation.strip().lower()
+    if confirmation not in {"delete", "delete my account"}:
+        raise HTTPException(status_code=400, detail='Type "delete my account" to confirm account deletion.')
+    user = auth.user
+    user_id = user.id
+    supabase_user_id = user.supabase_user_id
+    sessions = db.query(PracticeSession).filter(PracticeSession.user_id == user_id).all()
+    owned_groups = db.query(Group).filter(Group.director_user_id == user_id).all()
+    group_ids = [group.id for group in owned_groups]
+    deleted_counts = {
+        "practice_sessions": len(sessions),
+        "teacher_owned_groups": len(owned_groups),
+        "group_memberships": db.query(GroupMember).filter(GroupMember.user_id == user_id).count(),
+        "invitations": db.query(Invitation).filter((Invitation.invited_user_id == user_id) | (Invitation.invited_by_user_id == user_id)).count(),
+        "recommendations": db.query(Recommendation).filter(Recommendation.user_id == user_id).count(),
+    }
+    for session in sessions:
+        delete_audio_for_session(session)
+        db.delete(session)
+    if group_ids:
+        db.query(Invitation).filter(Invitation.group_id.in_(group_ids)).delete(synchronize_session=False)
+        db.query(GroupMember).filter(GroupMember.group_id.in_(group_ids)).delete(synchronize_session=False)
+        db.query(Group).filter(Group.id.in_(group_ids)).delete(synchronize_session=False)
+    db.query(Invitation).filter((Invitation.invited_user_id == user_id) | (Invitation.invited_by_user_id == user_id)).delete(synchronize_session=False)
+    db.query(GroupMember).filter(GroupMember.user_id == user_id).delete(synchronize_session=False)
+    db.query(Recommendation).filter(Recommendation.user_id == user_id).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
+    supabase_sessions_revoked = False
+    supabase_identity_deleted = False
+    if not auth.is_guest and supabase_user_id:
+        supabase_sessions_revoked = supabase_global_sign_out(auth.access_token)
+        supabase_identity_deleted = delete_supabase_identity(supabase_user_id)
+    return {
+        "deleted": True,
+        "counts": deleted_counts,
+        "supabase_sessions_revoked": supabase_sessions_revoked,
+        "supabase_identity_deleted": supabase_identity_deleted,
+        "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
+    }
 
 
 def _group_member_ids(db: Session, group_id: int):

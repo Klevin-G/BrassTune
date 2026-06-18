@@ -6,6 +6,7 @@ import { AuthPage } from './pages/AuthPage';
 import { CoachPage } from './pages/CoachPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EnsemblePage } from './pages/EnsemblePage';
+import { LegalPage } from './pages/LegalPage';
 import { MorePage } from './pages/MorePage';
 import { PracticePage } from './pages/PracticePage';
 import { ProgressPage } from './pages/ProgressPage';
@@ -28,6 +29,9 @@ export default function App() {
         <Route path="/ensemble" element={<EnsemblePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/audio-lab" element={<AudioLabPage />} />
+        <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+        <Route path="/terms" element={<LegalPage kind="terms" />} />
+        <Route path="/support" element={<LegalPage kind="support" />} />
         <Route path="/dev/calibration" element={<AudioLabPage />} />
         <Route path="/auth/sign-in" element={<AuthPage mode="sign-in" />} />
         <Route path="/auth/sign-up" element={<AuthPage mode="sign-up" />} />

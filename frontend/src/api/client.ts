@@ -183,12 +183,14 @@ export function getPracticePlan(instrumentId: string) {
   return request<PracticePlan>(`/api/practice-plan?instrument_id=${instrumentId}`);
 }
 
-export function getEnsembleSummary() {
-  return request<any>('/api/ensemble/summary');
+export function getEnsembleSummary(groupId?: number) {
+  const params = queryString({ group_id: groupId });
+  return request<any>(`/api/ensemble/summary${params}`);
 }
 
-export function getEnsembleReport() {
-  return request<any>('/api/ensemble/report');
+export function getEnsembleReport(groupId?: number) {
+  const params = queryString({ group_id: groupId });
+  return request<any>(`/api/ensemble/report${params}`);
 }
 
 export function getEnsembleGroups() {
@@ -213,6 +215,19 @@ export function updateEnsembleMember(groupId: number, memberId: number, payload:
 
 export function clearLocalSessions() {
   return request<{ cleared: Record<string, number> }>('/api/users/me/clear-sessions', { method: 'POST' });
+}
+
+export function deleteMyAccount(confirmation: string) {
+  return request<{
+    deleted: boolean;
+    counts: Record<string, number>;
+    supabase_sessions_revoked: boolean;
+    supabase_identity_deleted: boolean;
+    teacher_owned_group_policy: string;
+  }>('/api/users/me', {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmation }),
+  });
 }
 
 export function resetDemoData() {

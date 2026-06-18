@@ -1,6 +1,6 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { getCurrentUser, setAuthTokenProvider } from '../api/client';
+import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/client';
 import { supabase, supabaseConfigured } from '../lib/supabase';
 
 interface BackendProfile {
@@ -30,7 +30,11 @@ interface AuthState {
   isSignedIn: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
+  signInWithApple: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  deleteAccount: (confirmation: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -61,11 +65,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshProfile().finally(() => setLoading(false));
       return () => setAuthTokenProvider(null);
     }
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session ?? null);
-      setUser(data.session?.user ?? null);
-      refreshProfile().finally(() => setLoading(false));
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        setSession(data.session ?? null);
+        setUser(data.session?.user ?? null);
+        refreshProfile().finally(() => setLoading(false));
+      })
+      .catch(() => {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
+      });
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
@@ -101,6 +113,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshProfile();
   }, [refreshProfile]);
 
+  const signInWithApple = useCallback(async () => {
+    if (!supabase) throw new Error('Supabase Auth is not configured for this environment.');
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'apple',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) throw error;
+  }, []);
+
+  const requestPasswordReset = useCallback(async (email: string) => {
+    if (!supabase) throw new Error('Supabase Auth is not configured for this environment.');
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/reset-password`,
+    });
+    if (error) throw error;
+  }, []);
+
+  const updatePassword = useCallback(async (password: string) => {
+    if (!supabase) throw new Error('Supabase Auth is not configured for this environment.');
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+  }, []);
+
   const signOut = useCallback(async () => {
     if (supabase) {
       await supabase.auth.signOut();
@@ -109,6 +146,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     await refreshProfile();
   }, [refreshProfile]);
+
+  const deleteAccount = useCallback(async (confirmation: string) => {
+    await deleteMyAccount(confirmation);
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+  }, []);
 
   const value = useMemo<AuthState>(
     () => ({
@@ -120,10 +167,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSignedIn: Boolean(session),
       signIn,
       signUp,
+      signInWithApple,
+      requestPasswordReset,
+      updatePassword,
       signOut,
+      deleteAccount,
       refreshProfile,
     }),
-    [loading, profile, refreshProfile, session, signIn, signOut, signUp, user],
+    [deleteAccount, loading, profile, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

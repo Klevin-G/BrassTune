@@ -13,7 +13,7 @@ app = FastAPI(title="BrassTune Analytics API", version="0.1.0")
 
 def cors_origins():
     configured = os.getenv("CORS_ALLOWED_ORIGINS") or os.getenv("FRONTEND_ORIGIN")
-    origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    origins = [] if os.getenv("APP_ENV", "local").lower() == "production" else ["http://localhost:5173", "http://127.0.0.1:5173"]
     if configured:
         origins.extend([item.strip() for item in configured.split(",") if item.strip()])
     return sorted(set(origins))

@@ -65,23 +65,23 @@ export function LocalMediaImportPanel({
         Upload a video from Photos/Files or use the phone camera picker. BrassTune decodes audio in the browser, saves derived pitch frames, and leaves the source media on your device.
       </p>
       <div className="settings-actions">
-        <button className="ghost-button" type="button" disabled={busy} onClick={() => libraryInputRef.current?.click()}>
+        <label className={`ghost-button file-action ${busy ? 'disabled' : ''}`}>
           <Upload size={17} />
           Choose file
-        </button>
-        <button className="ghost-button" type="button" disabled={busy} onClick={() => cameraInputRef.current?.click()}>
+          <input ref={libraryInputRef} className="visually-hidden" type="file" accept="audio/*,video/*" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label="Choose local audio or video file" />
+        </label>
+        <label className={`ghost-button file-action ${busy ? 'disabled' : ''}`}>
           <Camera size={17} />
           Camera
-        </button>
+          <input ref={cameraInputRef} className="visually-hidden" type="file" accept="video/*" capture="environment" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label="Record or choose a camera video" />
+        </label>
       </div>
-      <input ref={libraryInputRef} className="visually-hidden" type="file" accept="audio/*,video/*" onChange={(event) => analyzeFile(event.target.files?.[0])} />
-      <input ref={cameraInputRef} className="visually-hidden" type="file" accept="video/*" capture="environment" onChange={(event) => analyzeFile(event.target.files?.[0])} />
       {busy && (
         <div className="import-progress" aria-label="Local media analysis progress">
           <span style={{ width: `${Math.round(progress * 100)}%` }} />
         </div>
       )}
-      <p className="settings-status">{status}</p>
+      <p className="settings-status" aria-live="polite">{status}</p>
       {summary && (
         <div className="saved-session-card compact">
           <div className="insight-heading">
