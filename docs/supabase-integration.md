@@ -50,13 +50,17 @@ Uploaded source videos are different: BrassTune does not store them in Supabase.
 
 Local development uses SQLite. Production can use Supabase Postgres via `DATABASE_URL` or `BRASSTUNE_DATABASE_URL`.
 
-Migration scaffold:
+Migrations:
 
 ```text
+supabase/migrations/20260616_brasstune_baseline.sql
 supabase/migrations/20260617_brasstune_production_readiness.sql
+supabase/migrations/20260618_lock_down_rls_auto_enable.sql
 ```
 
-Supabase changed Data API exposure behavior in 2026, so after applying migrations verify exposed schema grants deliberately. Keep RLS enabled on public tables.
+`20260616_brasstune_baseline.sql` is the clean-database schema baseline. `20260617_brasstune_production_readiness.sql` remains additive for existing deployments, and `20260618_lock_down_rls_auto_enable.sql` revokes public execution from the drifted helper RPC reported by Supabase advisors.
+
+Supabase changed Data API exposure behavior in 2026, so after applying migrations verify exposed schema grants deliberately. Keep RLS enabled on public tables and do not add broad browser grants until direct browser-to-table access is designed.
 
 ## Security Notes
 

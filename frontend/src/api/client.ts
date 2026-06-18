@@ -1,7 +1,8 @@
 import type { InstrumentProfile, NoteEvent, NoteStats, PitchFrame, PracticePlan, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
-const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? '';
+const HOSTED_RENDER_API_BASE = 'https://brasstune.onrender.com';
+const CONFIGURED_API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+const CONFIGURED_WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? '';
 let authTokenProvider: (() => Promise<string | null>) | null = null;
 
 export interface DateRangeParams {
@@ -27,7 +28,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...(await authHeaders()),
     ...(options?.headers ?? {}),
   };
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${apiBase()}${path}`, {
     headers,
     ...options,
   });
@@ -38,10 +39,31 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export const exportUrl = (path: string) => `${API_BASE}${path}`;
+function cleanBase(base: string) {
+  return base.replace(/\/+$/, '');
+}
+
+function isVercelHostedApp() {
+  if (typeof window === 'undefined') return false;
+  const hostname = window.location.hostname || window.location.host.split(':')[0];
+  return hostname.endsWith('.vercel.app');
+}
+
+function apiBase() {
+  if (CONFIGURED_API_BASE) return cleanBase(CONFIGURED_API_BASE);
+  return isVercelHostedApp() ? HOSTED_RENDER_API_BASE : '';
+}
+
+function wsBase() {
+  if (CONFIGURED_WS_BASE) return cleanBase(CONFIGURED_WS_BASE);
+  const base = apiBase();
+  return base ? base.replace(/^http/, 'ws') : '';
+}
+
+export const exportUrl = (path: string) => `${apiBase()}${path}`;
 
 export async function pitchWebSocketUrl() {
-  const base = WS_BASE || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  const base = wsBase() || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
   const url = new URL('/ws/pitch', base);
   return url.toString();
 }
@@ -134,7 +156,7 @@ export function sessionAudioUrl(sessionId: number | string) {
 }
 
 export async function downloadExport(path: string, filename: string) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: await authHeaders() });
+  const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -150,7 +172,7 @@ export async function downloadExport(path: string, filename: string) {
 }
 
 export async function objectUrlFor(path: string) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: await authHeaders() });
+  const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }

@@ -1,9 +1,11 @@
 import datetime as dt
+import importlib.util
 import io
 import json
 import math
 import asyncio
 import zipfile
+from pathlib import Path
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -40,6 +42,12 @@ def test_sqlite_engine_uses_busy_timeout_for_browser_ci_contention():
         journal_mode = str(connection.exec_driver_sql("PRAGMA journal_mode").scalar()).lower()
     assert busy_timeout_ms >= 30000
     assert journal_mode in {"wal", "memory"}
+
+
+def test_backend_requirements_install_uvicorn_websocket_protocol():
+    requirements = (Path(__file__).resolve().parents[2] / "requirements.txt").read_text()
+    assert "uvicorn[standard]" in requirements or "websockets" in requirements or "wsproto" in requirements
+    assert importlib.util.find_spec("websockets") or importlib.util.find_spec("wsproto")
 
 
 def _session(db, user_id: int, instrument_id: str, started_at: dt.datetime):

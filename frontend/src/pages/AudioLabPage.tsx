@@ -139,7 +139,7 @@ export function AudioLabPage() {
                   <span>{wsUrl || 'checking'}</span>
                 </div>
               </div>
-              <p>Uses VITE_WS_BASE_URL in production, otherwise the current host.</p>
+              <p>Live microphone sessions connect to the secure tuning stream for this environment.</p>
             </article>
             <article className="insight-card tone-gold">
               <div className="insight-heading">

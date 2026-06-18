@@ -1,0 +1,8 @@
+{
+  "name": "brasstune-release-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke:hosted": "node scripts/hosted-smoke.mjs"
+  }
+}
