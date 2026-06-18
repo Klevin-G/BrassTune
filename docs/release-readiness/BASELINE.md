@@ -47,7 +47,7 @@ No secret values were printed or committed. Local/example config names observed:
 | Area | Command | Result |
 |---|---|---|
 | Backend | `cd backend && python -m pytest` | Failed: `python` command not found. |
-| Backend | `cd backend && .venv/bin/python -m pytest` | Passed after fixes: `46 passed, 5 warnings`. |
+| Backend | `cd backend && .venv/bin/python -m pytest` | Passed after fixes: `47 passed, 5 warnings`. |
 | Frontend | `cd frontend && npm test` | Passed: `15 tests` across `5` files. |
 | Frontend | `cd frontend && npm run build` | Passed; Vite emitted the pre-existing large chunk warning. |
 | Frontend | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities`. |

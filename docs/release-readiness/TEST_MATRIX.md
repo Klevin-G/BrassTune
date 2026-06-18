@@ -2,7 +2,7 @@
 
 | Journey/Gate | Persona | Environment | Automation | Command | Result | Evidence | Blocker |
 |---|---|---|---|---|---|---|---|
-| Backend regression suite | API users | Local venv | Pytest | `cd backend && .venv/bin/python -m pytest` | Passed: `46 passed` | Terminal output | None |
+| Backend regression suite | API users | Local venv | Pytest | `cd backend && .venv/bin/python -m pytest` | Passed: `47 passed` | Terminal output | None |
 | Web unit tests | Web user | Local | Vitest | `cd frontend && npm test` | Passed: `15 tests` | Terminal output | None |
 | Web build/typecheck | Web app | Local | npm/Vite | `cd frontend && npm run build` | Passed | Terminal output | Large chunk warning only |
 | Frontend dependency audit | Web app | Local | npm audit | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities` | Terminal output | None |

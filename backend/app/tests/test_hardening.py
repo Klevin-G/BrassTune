@@ -16,7 +16,7 @@ from app.core.analytics.stats import build_instrument_heatmap, calculate_most_im
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
 from app.core.pitch.detector import yin_pitch
-from app.db.database import Base
+from app.db.database import Base, DATABASE_URL, engine
 from app.db.maintenance import clear_practice_data, repair_demo_data
 from app.db.seed import seed_demo_data
 from app.main import app
@@ -30,6 +30,16 @@ def _test_db():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine)()
+
+
+def test_sqlite_engine_uses_busy_timeout_for_browser_ci_contention():
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+    with engine.connect() as connection:
+        busy_timeout_ms = connection.exec_driver_sql("PRAGMA busy_timeout").scalar()
+        journal_mode = str(connection.exec_driver_sql("PRAGMA journal_mode").scalar()).lower()
+    assert busy_timeout_ms >= 30000
+    assert journal_mode in {"wal", "memory"}
 
 
 def _session(db, user_id: int, instrument_id: str, started_at: dt.datetime):
