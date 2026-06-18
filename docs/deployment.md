@@ -47,10 +47,12 @@ Required Render env vars:
 - `APP_ENV=production`
 - `FRONTEND_ORIGIN`
 - `CORS_ALLOWED_ORIGINS`
+- `CORS_ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app`
 - `BRASSTUNE_DATABASE_URL` or `DATABASE_URL`
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_JWKS_URL`
 - `SESSION_AUDIO_STORAGE_BACKEND=supabase`
 - `SUPABASE_STORAGE_BUCKET=session-audio`
 
@@ -77,6 +79,11 @@ Use secret stores only. Do not commit values.
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 - `RENDER_DEPLOY_HOOK_URL`
+- `RENDER_API_KEY`
+- `RENDER_SERVICE_ID`
+
+The manual deployment workflow lives at `.github/workflows/deploy.yml`.
+Use `workflow_dispatch` with `target=frontend`, `backend`, or `all`.
 
 ## Phone Testing
 

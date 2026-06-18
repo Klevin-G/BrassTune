@@ -74,8 +74,8 @@ async function waitFor(url, label, timeoutMs = 20000) {
   throw new Error(`${label} did not become reachable at ${url}`);
 }
 
-function spawnServer(command, args, cwd) {
-  const child = spawn(command, args, { cwd, stdio: 'pipe', shell: false, windowsHide: true });
+function spawnServer(command, args, cwd, env = {}) {
+  const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, stdio: 'pipe', shell: false, windowsHide: true });
   child.stdout.on('data', () => {});
   child.stderr.on('data', () => {});
   return child;
@@ -105,7 +105,12 @@ async function ensureServers() {
     started.push(spawnServer(backend.command, backend.args, backendDir));
   }
   if (!(await isReachable(appUrl))) {
-    started.push(spawnServer(isWindows ? 'npm.cmd' : 'npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173'], frontendDir));
+    started.push(spawnServer(isWindows ? 'npm.cmd' : 'npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173'], frontendDir, {
+      VITE_API_BASE_URL: 'http://127.0.0.1:8000',
+      VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_PUBLISHABLE_KEY: '',
+    }));
   }
   await waitFor(apiUrl, 'FastAPI');
   await waitFor(appUrl, 'Vite');
