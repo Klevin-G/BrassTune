@@ -17,6 +17,9 @@ jobs:
   deploy-frontend:
     if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'frontend' }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}

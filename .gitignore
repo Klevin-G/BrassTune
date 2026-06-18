@@ -17,3 +17,5 @@ swift/**/.build/
 !**/.env.example
 .agents/
 skills-lock.json
+.vercel/
+**/.vercel/
