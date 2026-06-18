@@ -21,10 +21,11 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
   if (kind === 'support') {
     return (
       <ScreenContainer>
-        <PageHeader eyebrow="Support" title="Support" description="Use this page for in-app support guidance while owner-operated support channels are finalized for release metadata." />
+        <PageHeader eyebrow="Support" title="Support" description="Get help with accounts, recording, playback, exports, and ensemble access." />
         <SectionCard title="Getting help">
-          <p>Students should contact the teacher, director, or organization that provided BrassTune access. Local demo users can use Settings to repair or reset seeded data.</p>
+          <p>Students should contact the teacher, director, or organization that provided BrassTune access.</p>
           <p>For account deletion, export, sign-in, microphone permission, recording, playback, and ensemble access issues, include the affected screen and approximate time of the issue.</p>
+          <p>The public support URL and owner-operated contact channel must be supplied before App Store submission.</p>
         </SectionCard>
       </ScreenContainer>
     );

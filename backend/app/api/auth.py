@@ -69,9 +69,12 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
     email = payload.get("email")
     metadata = payload.get("user_metadata") or {}
     app_metadata = payload.get("app_metadata") or {}
+    requested_role = app_metadata.get("role") if app_metadata.get("role") in {"student", "director", "admin"} else None
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
+    matched_by_email = False
     if user is None and email:
         user = db.query(User).filter(User.email == email).first()
+        matched_by_email = user is not None
     if user is None:
         preferred_username = metadata.get("username") or (email.split("@")[0] if email else "player")
         user = User(
@@ -80,7 +83,7 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             username=_unique_username(db, preferred_username),
             name=metadata.get("display_name") or metadata.get("name") or email or "BrassTune Player",
             display_name=metadata.get("display_name") or metadata.get("name"),
-            role=app_metadata.get("role") or "student",
+            role=requested_role or "student",
             primary_instrument_id=metadata.get("primary_instrument_id") if is_valid_instrument_id(metadata.get("primary_instrument_id", "")) else "trumpet",
         )
         db.add(user)
@@ -94,8 +97,10 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             user.username = _unique_username(db, metadata["username"], user.id)
         if is_valid_instrument_id(metadata.get("primary_instrument_id", "")):
             user.primary_instrument_id = metadata["primary_instrument_id"]
-        if app_metadata.get("role") in {"student", "director", "admin"}:
-            user.role = app_metadata["role"]
+        if requested_role:
+            user.role = requested_role
+        elif matched_by_email and user.role in {"director", "admin"}:
+            user.role = "student"
     user.updated_at = dt.datetime.utcnow()
     db.commit()
     db.refresh(user)

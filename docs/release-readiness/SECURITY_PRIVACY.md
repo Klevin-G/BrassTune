@@ -22,15 +22,18 @@
 - JWT/Supabase auth context maps users through `supabase_user_id` or local dev tokens.
 - Production local-auth defaults are disabled unless explicitly allowed.
 - Backend server-side checks enforce session, audio, analytics, recommendation, export, and ensemble scoping.
-- WebSocket `stop_session` now requires session ownership/admin.
+- WebSocket URLs no longer carry bearer tokens; signed-in clients send an initial auth message and `stop_session` requires session ownership/admin.
 - Audio upload and PCM payload sizes are capped.
 - Supabase storage delete/read helpers avoid exposing upstream error bodies.
-- Account deletion requires confirmation and removes sessions, audio, memberships, invitations, recommendations, teacher-owned groups, user row, and Supabase identity/session when configured.
+- Account export includes account profile, sessions, memberships, owned groups, invitations, recommendations, and session files for the authenticated user.
+- Account deletion requires confirmation, preflights Supabase identity/session cleanup when configured, and removes sessions, audio, memberships, invitations, recommendations, teacher-owned groups, and user row.
 - Frontend account deletion requires export action visibility and exact confirmation text.
+- Aggregate ensemble summary/report endpoints require group manager access; active student members can view their group but not aggregate reports.
 
 ## Known Risks
 
-- WebSocket auth currently uses a query-string token. Prefer a short-lived WebSocket ticket or first-message auth before production scale.
-- Supabase revocation/deletion occurs after local DB commit; failures return error but local data may already be deleted. Add outbox/retry for stronger operational guarantees.
-- Hosted Render WebSocket route currently fails with `404`; production tuner WebSocket cannot be called verified until deployment/routing is fixed.
+- Account deletion is not yet a durable deletion saga; add a tombstone/outbox/retry worker for stronger operational guarantees.
+- Hosted Render WebSocket route currently fails at connection level; production tuner WebSocket cannot be verified until deployment/routing is fixed and this branch is deployed.
 - Live Supabase deletion/export was not tested because disposable live credentials were not provided.
+- Supabase advisor reports live-project drift: `public.rls_auto_enable()` is executable by `anon`/`authenticated`; this needs owner-approved remote remediation.
+- The current Supabase migration is not a complete clean-database baseline because it assumes app tables already exist.

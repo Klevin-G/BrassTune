@@ -7,8 +7,8 @@ const moreItems = [
   { to: '/sessions', title: 'Sessions', detail: 'Review practice history and open saved takes.', icon: Music2 },
   { to: '/progress', title: 'Progress', detail: 'See weekly pulse, improvement, and consistency.', icon: Activity },
   { to: '/ensemble', title: 'Ensemble', detail: 'Director briefing cards and rehearsal focus.', icon: Users },
-  { to: '/settings', title: 'Settings', detail: 'Instrument, A4 reference, and demo preferences.', icon: Settings },
-  { to: '/settings/audio-lab', title: 'Audio Lab', detail: 'Developer calibration readout for real-device tuning tests.', icon: Bug },
+  { to: '/settings', title: 'Settings', detail: 'Instrument, A4 reference, and practice preferences.', icon: Settings },
+  { to: '/settings/audio-lab', title: 'Audio Lab', detail: 'Microphone and detector diagnostics for live tuning checks.', icon: Bug },
   { to: '/privacy', title: 'Privacy', detail: 'Data use, export, deletion, and recording handling.', icon: FileText },
   { to: '/terms', title: 'Terms', detail: 'Use rules for practice analytics and account data.', icon: FileText },
   { to: '/support', title: 'Support', detail: 'Help guidance for accounts, recording, playback, and ensembles.', icon: FileText },
@@ -38,14 +38,14 @@ export function MorePage() {
           ))}
         </div>
       </SectionCard>
-      <SectionCard title="Account" eyebrow={auth.isSignedIn ? 'Signed in' : 'Guest demo'}>
+      <SectionCard title="Account" eyebrow={auth.isSignedIn ? 'Signed in' : 'Guest practice'}>
         <div className="account-card">
           <span className="insight-icon">
             <UserRound size={18} />
           </span>
           <div>
             <strong>{auth.profile?.display_name ?? auth.user?.email ?? 'Guest player'}</strong>
-            <em>{auth.profile?.username ? `@${auth.profile.username}` : 'Local demo mode'}</em>
+            <em>{auth.profile?.username ? `@${auth.profile.username}` : 'Guest practice mode'}</em>
           </div>
           {auth.isSignedIn ? (
             <button className="ghost-button" type="button" onClick={() => auth.signOut()}>
@@ -60,7 +60,7 @@ export function MorePage() {
           )}
         </div>
       </SectionCard>
-      <SectionCard title="Quick export" eyebrow="Local MVP">
+      <SectionCard title="Quick export" eyebrow="Reports">
         <div className="insight-grid">
           <article className="insight-card tone-gold">
             <div className="insight-heading">

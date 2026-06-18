@@ -7,9 +7,9 @@ MAX_BATCH_PITCH_FRAMES = 1000
 
 
 class StartSessionRequest(BaseModel):
-    instrument_id: str = "trumpet"
-    name: Optional[str] = None
-    reference_pitch_hz: float = 440.0
+    instrument_id: str = Field(default="trumpet", max_length=40)
+    name: Optional[str] = Field(default=None, max_length=120)
+    reference_pitch_hz: float = Field(default=440.0, ge=400.0, le=480.0)
     user_id: int = 1
 
 
@@ -39,7 +39,7 @@ class AudioFrameIn(BaseModel):
     instrument_id: str = "trumpet"
     reference_pitch_hz: float = 440.0
     sample_rate: int = Field(default=48000, ge=8000, le=192000)
-    pcm: List[float] = Field(default_factory=list)
+    pcm: List[float] = Field(default_factory=list, max_length=MAX_PCM_SAMPLES)
 
     @validator("pcm")
     def pcm_size(cls, value):

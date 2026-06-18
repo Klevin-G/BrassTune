@@ -43,11 +43,12 @@ export const exportUrl = (path: string) => `${API_BASE}${path}`;
 export async function pitchWebSocketUrl() {
   const base = WS_BASE || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
   const url = new URL('/ws/pitch', base);
-  const token = authTokenProvider ? await authTokenProvider() : null;
-  if (token) {
-    url.searchParams.set('token', token);
-  }
   return url.toString();
+}
+
+export async function pitchWebSocketAuthPayload() {
+  const token = authTokenProvider ? await authTokenProvider() : null;
+  return token ? { type: 'authenticate', token } : null;
 }
 
 function queryString(params: Record<string, string | number | undefined>) {

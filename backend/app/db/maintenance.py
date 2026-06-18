@@ -5,15 +5,19 @@ from sqlalchemy.orm import Session
 
 from app.db.seed import seed_demo_data
 from app.models.db import Group, GroupMember, InstrumentProfileModel, NoteEvent, PitchSample, PracticeSession, User
+from app.services.audio_storage import delete_audio_for_session
 from app.services.serializers import event_to_dict, sample_to_dict, session_to_dict
 
 
 def clear_practice_data(db: Session) -> Dict[str, int]:
+    sessions = db.query(PracticeSession).all()
     counts = {
         "note_events": db.query(NoteEvent).count(),
         "pitch_samples": db.query(PitchSample).count(),
-        "practice_sessions": db.query(PracticeSession).count(),
+        "practice_sessions": len(sessions),
     }
+    for session in sessions:
+        delete_audio_for_session(session)
     db.query(NoteEvent).delete()
     db.query(PitchSample).delete()
     db.query(PracticeSession).delete()

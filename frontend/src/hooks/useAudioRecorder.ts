@@ -43,12 +43,17 @@ export function useAudioRecorder() {
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const startedAtRef = useRef<number>(0);
+  const startPromiseRef = useRef<Promise<void> | null>(null);
+  const stopPromiseRef = useRef<Promise<unknown> | null>(null);
 
   const start = useCallback(async (sessionId: number, demoMode: boolean) => {
+    if (startPromiseRef.current) return startPromiseRef.current;
+    if (status === 'recording') return undefined;
     setError(null);
     setLastSessionId(sessionId);
     startedAtRef.current = Date.now();
     chunksRef.current = [];
+    const promise = (async () => {
     if (demoMode) {
       setStatus('recording');
       return;
@@ -71,12 +76,19 @@ export function useAudioRecorder() {
     } catch {
       setStatus('unavailable');
       setError('Microphone permission was denied, so this session may not include playback audio.');
+    } finally {
+      startPromiseRef.current = null;
     }
-  }, []);
+    })();
+    startPromiseRef.current = promise;
+    return promise;
+  }, [status]);
 
   const stopAndUpload = useCallback(async (sessionId: number, demoMode: boolean) => {
+    if (stopPromiseRef.current) return stopPromiseRef.current;
     const durationSeconds = Math.max(1, (Date.now() - startedAtRef.current) / 1000);
     setStatus('uploading');
+    const promise = (async () => {
     try {
       let blob: Blob;
       if (demoMode) {
@@ -104,7 +116,11 @@ export function useAudioRecorder() {
       recorderRef.current = null;
       streamRef.current = null;
       chunksRef.current = [];
+      stopPromiseRef.current = null;
     }
+    })();
+    stopPromiseRef.current = promise;
+    return promise;
   }, []);
 
   return { status, error, lastSessionId, start, stopAndUpload };

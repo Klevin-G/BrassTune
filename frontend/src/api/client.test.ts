@@ -18,11 +18,12 @@ describe('API client runtime URLs', () => {
     expect(await pitchWebSocketUrl()).toBe('wss://app.example.test/ws/pitch');
   });
 
-  it('passes auth token through the WebSocket query string', async () => {
-    const { pitchWebSocketUrl, setAuthTokenProvider } = await loadClient();
+  it('keeps auth tokens out of the WebSocket URL', async () => {
+    const { pitchWebSocketAuthPayload, pitchWebSocketUrl, setAuthTokenProvider } = await loadClient();
     vi.stubGlobal('window', { location: { protocol: 'http:', host: 'localhost:5173' } });
     setAuthTokenProvider(async () => 'dev-user-1');
-    expect(await pitchWebSocketUrl()).toBe('ws://localhost:5173/ws/pitch?token=dev-user-1');
+    expect(await pitchWebSocketUrl()).toBe('ws://localhost:5173/ws/pitch');
+    expect(await pitchWebSocketAuthPayload()).toEqual({ type: 'authenticate', token: 'dev-user-1' });
   });
 
   it('uses configured WebSocket base when provided', async () => {

@@ -10,6 +10,7 @@ import { useAuth } from '../state/AuthContext';
 export function SettingsPage() {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
   const auth = useAuth();
+  const internalToolsEnabled = import.meta.env.VITE_ENABLE_INTERNAL_TOOLS === 'true';
   const [maintenanceStatus, setMaintenanceStatus] = useState('Ready');
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
@@ -33,12 +34,20 @@ export function SettingsPage() {
     setDeleteConfirmation('');
   };
 
+  const clearPreferences = () => {
+    if (!window.confirm('Clear BrassTune preferences on this device?')) return;
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith('brasstune.'))
+      .forEach((key) => localStorage.removeItem(key));
+    setMaintenanceStatus('Preferences cleared on this device.');
+  };
+
   return (
     <ScreenContainer>
       <PageHeader
         eyebrow="Settings"
         title="Practice preferences"
-        description="Keep the tuner behavior explicit: instrument transposition, reference pitch, demo mode, and local export utilities."
+        description="Keep the tuner behavior explicit: instrument transposition, reference pitch, guided audio, account access, export, and deletion controls."
         meta={<StatusBadge tone="gold">{instrumentId}</StatusBadge>}
       />
       <div className="two-column-grid">
@@ -59,7 +68,7 @@ export function SettingsPage() {
             </label>
           </div>
         </SectionCard>
-        <SectionCard title="Profile" eyebrow={auth.isSignedIn ? 'Supabase account' : 'Guest demo'}>
+        <SectionCard title="Profile" eyebrow={auth.isSignedIn ? 'Account' : 'Guest practice'}>
           <div className="account-card vertical">
             <span className="insight-icon">
               <UserRound size={18} />
@@ -85,14 +94,15 @@ export function SettingsPage() {
           <div className="settings-actions">
             <Link className="ghost-button" to="/privacy">Privacy</Link>
             <Link className="ghost-button" to="/terms">Terms</Link>
+            <Link className="ghost-button" to="/support">Support</Link>
           </div>
         </SectionCard>
-        <SectionCard title="Local utilities" eyebrow="MVP">
+        <SectionCard title="Practice tools" eyebrow="Device and data">
           <div className="insight-grid">
             <InsightCard
               title="Audio Lab"
-              detail="Developer testing"
-              body="Open the calibration readout for real-device microphone checks, save eligibility, and detector diagnostics."
+              detail="Microphone checks"
+              body="Open the calibration readout for microphone checks, save eligibility, and detector diagnostics."
               icon={Bug}
               tone="gold"
             />
@@ -105,7 +115,7 @@ export function SettingsPage() {
             <InsightCard
               title="Export all local data"
               detail="JSON"
-              body="Download local users, sessions, samples, note events, and seeded ensemble metadata."
+              body="Download the practice data available to this browser or account scope."
               icon={Download}
               tone="gold"
             />
@@ -130,30 +140,33 @@ export function SettingsPage() {
               <Download size={18} />
               Export all data
             </button>
-            <button className="ghost-button" type="button" onClick={() => window.confirm('Clear browser preferences on this device?') && localStorage.clear()}>
+            <button className="ghost-button" type="button" onClick={clearPreferences}>
               <Trash2 size={18} />
               Clear preferences
             </button>
           </div>
         </SectionCard>
       </div>
-      <SectionCard title="Local data controls" eyebrow="Repair and reset">
-        <div className="settings-actions">
-          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Repair demo data', repairDemoData)}>
-            <RefreshCcw size={18} />
-            Repair demo data
-          </button>
-          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Reset demo data', resetDemoData, 'Reset seeded demo data for this environment?')}>
-            <DatabaseBackup size={18} />
-            Reset demo data
-          </button>
-          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Clear sessions', clearLocalSessions, 'Delete your saved practice sessions and recordings?')}>
-            <RotateCcw size={18} />
-            Clear sessions
-          </button>
-        </div>
-        <p className="settings-status" aria-live="polite">{maintenanceStatus}</p>
-      </SectionCard>
+      {internalToolsEnabled && (
+        <SectionCard title="Internal data controls" eyebrow="Maintenance">
+          <div className="settings-actions">
+            <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Repair demo data', repairDemoData)}>
+              <RefreshCcw size={18} />
+              Repair demo data
+            </button>
+            <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Reset demo data', resetDemoData, 'Reset generated practice data for this environment?')}>
+              <DatabaseBackup size={18} />
+              Reset demo data
+            </button>
+            <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Clear sessions', clearLocalSessions, 'Delete your saved practice sessions and recordings?')}>
+              <RotateCcw size={18} />
+              Clear sessions
+            </button>
+          </div>
+          <p className="settings-status" aria-live="polite">{maintenanceStatus}</p>
+        </SectionCard>
+      )}
+      {!internalToolsEnabled && <p className="settings-status" aria-live="polite">{maintenanceStatus}</p>}
       <SectionCard title="Delete account" eyebrow="Account lifecycle">
         <p className="muted-copy">Export your data first. Deletion removes your profile, sessions, pitch samples, note events, recommendations, group memberships, and owned ensembles. Teacher-owned groups are deleted with their memberships and invitations.</p>
         <div className="settings-actions">

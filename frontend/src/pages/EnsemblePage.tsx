@@ -19,6 +19,27 @@ export function EnsemblePage() {
   const auth = useAuth();
   const canManage = auth.profile?.role === 'director' || auth.profile?.role === 'admin';
 
+  const selectGroup = async (groupId: number) => {
+    setLoading(true);
+    try {
+      const group = await getEnsembleGroup(groupId);
+      setSelectedGroup(group);
+      if (canManage) {
+        const [summaryData, reportData] = await Promise.all([getEnsembleSummary(groupId), getEnsembleReport(groupId)]);
+        setSummary(summaryData);
+        setReport(reportData);
+      } else {
+        setSummary(null);
+        setReport(null);
+      }
+      setEnsembleStatus('');
+    } catch (error) {
+      setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensemble data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     getEnsembleGroups()
       .then((groupsData) => {
@@ -32,22 +53,7 @@ export function EnsemblePage() {
       })
       .catch((error) => setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensembles.'))
       .finally(() => setLoading(false));
-  }, []);
-
-  const selectGroup = async (groupId: number) => {
-    setLoading(true);
-    try {
-      const [group, summaryData, reportData] = await Promise.all([getEnsembleGroup(groupId), getEnsembleSummary(groupId), getEnsembleReport(groupId)]);
-      setSelectedGroup(group);
-      setSummary(summaryData);
-      setReport(reportData);
-      setEnsembleStatus('');
-    } catch (error) {
-      setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensemble data.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [canManage]);
 
   const createGroup = async () => {
     if (!newGroupName.trim()) return;
@@ -79,7 +85,7 @@ export function EnsemblePage() {
       <PageHeader
         eyebrow="Ensemble"
         title="Director briefing"
-        description="A local report view for seeing section-level intonation tendencies and turning them into a rehearsal focus."
+        description="A report view for seeing section-level intonation tendencies and turning them into a rehearsal focus."
         action={
           <button className="primary-button" onClick={() => window.print()} type="button">
             <Printer size={18} />
@@ -148,7 +154,7 @@ export function EnsemblePage() {
         <InsightCard
           title="Briefing summary"
           detail="Director handoff"
-          body={report?.recommended_rehearsal_focus ?? 'Seed data will populate the rehearsal focus when the backend is running.'}
+          body={report?.recommended_rehearsal_focus ?? 'Ensemble data will populate the rehearsal focus when enough active member sessions are available.'}
           icon={FileText}
           tone="gold"
         />
@@ -162,7 +168,7 @@ export function EnsemblePage() {
         <InsightCard
           title="Priority lens"
           detail="Top problem notes"
-          body="The table below ranks note issues by severity across the seeded ensemble sessions."
+          body="The table below ranks note issues by severity across active ensemble sessions."
           icon={Target}
           tone="amber"
         />

@@ -7,6 +7,7 @@ Only items requiring owner/legal/account/hardware access are listed here.
 3. Configure Sign in with Apple capability, Apple Services ID/native callbacks, Supabase Apple provider, and Supabase redirect allowlist.
 4. Provide disposable live Supabase test credentials/project for email sign-up, duplicate handling, weak password, confirmation, reset, Apple OAuth, token refresh, account deletion, storage deletion, and identity cleanup tests.
 5. Authorize Render deployment/routing investigation for the hosted WebSocket `404` and rerun authenticated production WebSocket smoke.
-6. Confirm Vercel/Render/Supabase alert ownership, log access, backup/restore expectations, and incident contacts.
-7. Run the physical-device protocol on supported iPhone/iPad hardware with real brass instruments.
-8. Create App Store review demo account or approve demo mode and review notes.
+6. Authorize Supabase live-project remediation for the public `SECURITY DEFINER` RPC advisor finding and confirm exact production/preview CORS origins.
+7. Confirm Vercel/Render/Supabase alert ownership, log access, backup/restore expectations, and incident contacts.
+8. Run the physical-device protocol on supported iPhone/iPad hardware with real brass instruments.
+9. Create App Store review demo account or approve demo mode and review notes.

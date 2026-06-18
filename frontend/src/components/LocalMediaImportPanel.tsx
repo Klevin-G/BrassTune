@@ -1,4 +1,4 @@
-import { Camera, CheckCircle2, FileVideo, Upload } from 'lucide-react';
+import { Camera, CheckCircle2, FileVideo, Square, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { recordPitchFrames, startSession, stopSession } from '../api/client';
@@ -16,6 +16,7 @@ export function LocalMediaImportPanel({
 }) {
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [status, setStatus] = useState('Ready for local video or audio analysis.');
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -23,18 +24,23 @@ export function LocalMediaImportPanel({
 
   const analyzeFile = async (file?: File | null) => {
     if (!file) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let startedSession: PracticeSession | null = null;
     setBusy(true);
     setProgress(0);
     setSummary(null);
     setStatus('Decoding local media. The original file is not uploaded or stored.');
     try {
-      const analysis = await analyzeLocalMediaFile(file, instrumentId, referencePitch, setProgress);
+      const analysis = await analyzeLocalMediaFile(file, instrumentId, referencePitch, setProgress, controller.signal);
       const validFrames = analysis.frames.filter((frame) => frame.is_valid_for_recording);
       if (validFrames.length === 0) {
         setStatus('No recording-quality pitch frames were found in this local media file.');
         return;
       }
       const session = await startSession(instrumentId, referencePitch, `Imported ${file.name}`);
+      startedSession = session;
       setStatus(`Saving ${validFrames.length} analyzed pitch frames. Source media remains local.`);
       await recordPitchFrames(session.id, validFrames);
       const stopped = await stopSession(session.id);
@@ -42,12 +48,22 @@ export function LocalMediaImportPanel({
       onImported?.(stopped);
       setStatus(`Analyzed ${Math.round(analysis.analyzedSeconds)}s from ${file.name}. Video/audio was not stored by BrassTune.`);
     } catch (error) {
+      if (startedSession) {
+        stopSession(startedSession.id).catch(() => undefined);
+      }
       setStatus(error instanceof Error ? error.message : 'Local media analysis failed.');
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
       if (libraryInputRef.current) libraryInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
     }
+  };
+
+  const cancel = () => {
+    abortRef.current?.abort();
+    setStatus('Local media analysis was canceled.');
+    setBusy(false);
   };
 
   return (
@@ -68,13 +84,19 @@ export function LocalMediaImportPanel({
         <label className={`ghost-button file-action ${busy ? 'disabled' : ''}`}>
           <Upload size={17} />
           Choose file
-          <input ref={libraryInputRef} className="visually-hidden" type="file" accept="audio/*,video/*" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label="Choose local audio or video file" />
+          <input ref={libraryInputRef} className="visually-hidden" type="file" accept="audio/*,video/mp4,video/webm,video/quicktime" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label="Choose local audio or video file" />
         </label>
         <label className={`ghost-button file-action ${busy ? 'disabled' : ''}`}>
           <Camera size={17} />
           Camera
           <input ref={cameraInputRef} className="visually-hidden" type="file" accept="video/*" capture="environment" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label="Record or choose a camera video" />
         </label>
+        {busy && (
+          <button className="ghost-button" type="button" onClick={cancel}>
+            <Square size={17} />
+            Cancel
+          </button>
+        )}
       </div>
       {busy && (
         <div className="import-progress" aria-label="Local media analysis progress">

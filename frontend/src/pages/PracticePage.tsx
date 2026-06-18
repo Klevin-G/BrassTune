@@ -1,4 +1,5 @@
 import { ArrowRight, Gauge, History, Mic, Play, Timer, UploadCloud } from 'lucide-react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LocalMediaImportPanel } from '../components/LocalMediaImportPanel';
 import { NoteDisplay } from '../components/NoteDisplay';
@@ -17,6 +18,7 @@ export function PracticePage() {
   const { instrumentId, referencePitch, demoMode } = useAppSettings();
   const recorder = useSessionRecorder(instrumentId, referencePitch);
   const audioRecorder = useAudioRecorder();
+  const [transitionBusy, setTransitionBusy] = useState(false);
   const stream = usePitchStream({
     enabled: true,
     demoMode,
@@ -27,14 +29,20 @@ export function PracticePage() {
   });
 
   const start = async () => {
+    if (transitionBusy || recorder.busy || recorder.recording) return;
+    setTransitionBusy(true);
     try {
       const session = await recorder.start(`Practice ${new Date().toLocaleDateString()}`);
       await audioRecorder.start(session.id, demoMode);
     } catch (error) {
       recorder.setError(String(error));
+    } finally {
+      setTransitionBusy(false);
     }
   };
   const stop = async () => {
+    if (transitionBusy || recorder.busy || !recorder.activeSession) return null;
+    setTransitionBusy(true);
     try {
       const sessionId = recorder.activeSession?.id;
       if (sessionId) {
@@ -45,6 +53,8 @@ export function PracticePage() {
     } catch (error) {
       recorder.setError(String(error));
       return null;
+    } finally {
+      setTransitionBusy(false);
     }
   };
   const latestValid = stream.history.find((frame) => frame.is_valid_for_recording);
@@ -69,6 +79,7 @@ export function PracticePage() {
             elapsedSeconds={recorder.elapsedSeconds}
             demoMode={demoMode}
             micActive={stream.micActive}
+            busy={transitionBusy || recorder.busy || audioRecorder.status === 'uploading'}
             onStart={start}
             onStop={stop}
             onMicStart={stream.startMicrophone}

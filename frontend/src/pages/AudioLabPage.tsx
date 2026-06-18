@@ -72,12 +72,12 @@ export function AudioLabPage() {
   return (
     <ScreenContainer>
       <PageHeader
-        eyebrow="Developer audio QA"
+        eyebrow="Audio diagnostics"
         title="Audio Calibration Lab"
-        description="A testing surface for real-device microphone validation. It explains every pitch frame before it reaches analytics."
+        description="Check microphone permission, detector confidence, save eligibility, and frame delivery before recording a take."
         meta={
           <>
-            <StatusBadge tone="gold">Testing tool</StatusBadge>
+            <StatusBadge tone="gold">Diagnostics</StatusBadge>
             <StatusBadge tone={eligibility.tone}>{eligibility.label}</StatusBadge>
           </>
         }
@@ -204,6 +204,7 @@ export function AudioLabPage() {
               elapsedSeconds={recorder.elapsedSeconds}
               demoMode={demoMode}
               micActive={stream.micActive}
+              busy={recorder.busy}
               onStart={start}
               onStop={stop}
               onMicStart={stream.startMicrophone}

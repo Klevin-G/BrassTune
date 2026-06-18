@@ -545,6 +545,75 @@ def export_all_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(ge
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=brasstune-export.zip"})
 
 
+def _iso(value):
+    return value.isoformat() if value else None
+
+
+def _recommendation_to_dict(row: Recommendation):
+    return {
+        "id": row.id,
+        "session_id": row.session_id,
+        "note_event_id": row.note_event_id,
+        "written_note": row.written_note,
+        "written_octave": row.written_octave,
+        "severity": row.severity,
+        "title": row.title,
+        "message": row.message,
+        "suggestions": json.loads(row.suggestions_json or "[]"),
+        "created_at": _iso(row.created_at),
+    }
+
+
+def _invitation_to_dict(row: Invitation):
+    return {
+        "id": row.id,
+        "group_id": row.group_id,
+        "invited_username": row.invited_username,
+        "invited_user_id": row.invited_user_id,
+        "invited_by_user_id": row.invited_by_user_id,
+        "status": row.status,
+        "created_at": _iso(row.created_at),
+        "accepted_at": _iso(row.accepted_at),
+    }
+
+
+def _account_export_zip(db: Session, auth: AuthContext):
+    user = auth.user
+    sessions = db.query(PracticeSession).filter(PracticeSession.user_id == user.id).order_by(PracticeSession.started_at.asc()).all()
+    memberships = db.query(GroupMember).filter(GroupMember.user_id == user.id).order_by(GroupMember.group_id.asc()).all()
+    owned_groups = db.query(Group).filter(Group.director_user_id == user.id).order_by(Group.id.asc()).all()
+    invitations = (
+        db.query(Invitation)
+        .filter((Invitation.invited_user_id == user.id) | (Invitation.invited_by_user_id == user.id))
+        .order_by(Invitation.created_at.asc())
+        .all()
+    )
+    recommendations = db.query(Recommendation).filter(Recommendation.user_id == user.id).order_by(Recommendation.created_at.asc()).all()
+    account = user_to_dict(user)
+    account["email"] = user.email
+    account["supabase_user_id"] = user.supabase_user_id
+    account["created_at"] = _iso(user.created_at)
+    account["updated_at"] = _iso(user.updated_at)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("README.txt", "BrassTune account export for the authenticated user. Source recordings are included only for this user's sessions when available.")
+        archive.writestr("account.json", json.dumps(account, indent=2))
+        archive.writestr("sessions.json", json.dumps([session_to_dict(session) for session in sessions], indent=2))
+        archive.writestr("memberships.json", json.dumps([group_member_to_dict(member) for member in memberships], indent=2))
+        archive.writestr("owned_groups.json", json.dumps([group_to_dict(group) for group in owned_groups], indent=2))
+        archive.writestr("invitations.json", json.dumps([_invitation_to_dict(row) for row in invitations], indent=2))
+        archive.writestr("recommendations.json", json.dumps([_recommendation_to_dict(row) for row in recommendations], indent=2))
+        for session in sessions:
+            folder = "sessions/%s" % session.id
+            payload = _session_json_payload(db, session)
+            archive.writestr("%s/session.json" % folder, json.dumps(payload, indent=2))
+            archive.writestr("%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
+            archive.writestr("%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
+            _write_session_audio_to_archive(archive, session, folder)
+    buffer.seek(0)
+    return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=brasstune-account-export.zip"})
+
+
 @router.post("/admin/sessions/clear")
 def clear_local_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_local_demo_or_admin(auth)
@@ -582,7 +651,7 @@ def clear_my_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends
 
 @router.get("/users/me/export.zip")
 def export_me_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    return export_all_zip(db, auth)
+    return _account_export_zip(db, auth)
 
 
 @router.delete("/users/me")
@@ -603,6 +672,11 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
         "invitations": db.query(Invitation).filter((Invitation.invited_user_id == user_id) | (Invitation.invited_by_user_id == user_id)).count(),
         "recommendations": db.query(Recommendation).filter(Recommendation.user_id == user_id).count(),
     }
+    supabase_sessions_revoked = False
+    supabase_identity_deleted = False
+    if not auth.is_guest and supabase_user_id:
+        supabase_sessions_revoked = supabase_global_sign_out(auth.access_token)
+        supabase_identity_deleted = delete_supabase_identity(supabase_user_id)
     for session in sessions:
         delete_audio_for_session(session)
         db.delete(session)
@@ -615,11 +689,6 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
     db.query(Recommendation).filter(Recommendation.user_id == user_id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
-    supabase_sessions_revoked = False
-    supabase_identity_deleted = False
-    if not auth.is_guest and supabase_user_id:
-        supabase_sessions_revoked = supabase_global_sign_out(auth.access_token)
-        supabase_identity_deleted = delete_supabase_identity(supabase_user_id)
     return {
         "deleted": True,
         "counts": deleted_counts,
@@ -738,9 +807,7 @@ def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(
 
 @router.get("/ensemble/groups/{group_id}/summary")
 def ensemble_group_summary(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    group = _group_or_404(db, group_id)
-    if not _can_view_group(auth.user, group, db):
-        raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
+    _require_group_manager(db, group_id, auth)
     member_ids = _group_member_ids(db, group_id)
     sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
     return calculate_ensemble_summary(group_id, sessions)
@@ -748,9 +815,7 @@ def ensemble_group_summary(group_id: int, db: Session = Depends(get_db), auth: A
 
 @router.get("/ensemble/groups/{group_id}/report")
 def ensemble_group_report(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    group = _group_or_404(db, group_id)
-    if not _can_view_group(auth.user, group, db):
-        raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
+    _require_group_manager(db, group_id, auth)
     member_ids = _group_member_ids(db, group_id)
     sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
     return generate_rehearsal_report(group_id, sessions)

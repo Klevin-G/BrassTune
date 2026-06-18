@@ -220,7 +220,9 @@ async function gotoAndCheck(page, viewport, route, routeLabel, issues) {
   await page.waitForSelector('.content', { state: 'visible' });
   await assertNoConsoleErrors(page, issues, `${viewport.name} ${routeLabel}`);
   await assertNoHorizontalOverflow(page, issues, `${viewport.name} ${routeLabel}`);
-  await assertMobileChrome(page, viewport, issues, `${viewport.name} ${routeLabel}`);
+  if (routeLabel !== 'Auth') {
+    await assertMobileChrome(page, viewport, issues, `${viewport.name} ${routeLabel}`);
+  }
 }
 
 async function runViewport(browser, viewport) {

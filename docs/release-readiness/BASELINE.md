@@ -7,10 +7,10 @@ Date: 2026-06-18
 - Working directory: `/Users/aryasalem/Downloads/BrassTune`
 - Current branch: `arya/release-readiness-hardening`
 - Starting deployed branch verified: `main`
-- Current HEAD at baseline: `652a787c2e643542dfac5911820a2fed01885622`
+- Current HEAD at continuation baseline: `a77a669460aece83f395f7acda879a67e54f0c12`
 - Merge base with `main`: `652a787c2e643542dfac5911820a2fed01885622`
 - `swift-migration` fact: local branch exists at `2d44e24...` and is behind `main`; current work stayed on a new release branch from `main`.
-- Dirty state at start of implementation: clean before release branch work; dirty state now contains intentional source, workflow, native app, E2E, AGENTS, and release-readiness doc changes.
+- Dirty state at start of continuation: clean. Current dirty state contains intentional source, workflow, browser evidence, and release-readiness doc changes.
 
 ## Toolchain
 
@@ -31,7 +31,7 @@ Date: 2026-06-18
 - `.github/workflows/security.yml`
 - `.github/workflows/device-simulation.yml`
 - `.github/workflows/deploy.yml`
-- Added in this pass: `.github/workflows/swift.yml`
+- Existing workflow set was preserved and hardened with permissions, timeouts, browser artifacts, and dynamic simulator selection.
 
 ## Config Names Only
 
@@ -47,18 +47,20 @@ No secret values were printed or committed. Local/example config names observed:
 | Area | Command | Result |
 |---|---|---|
 | Backend | `cd backend && python -m pytest` | Failed: `python` command not found. |
-| Backend | `cd backend && .venv/bin/python -m pytest` | Passed after fixes: `41 passed, 5 warnings`. |
-| Frontend | `cd frontend && npm test` | Passed: `13 tests` across `5` files. |
+| Backend | `cd backend && .venv/bin/python -m pytest` | Passed after fixes: `46 passed, 5 warnings`. |
+| Frontend | `cd frontend && npm test` | Passed: `15 tests` across `5` files. |
 | Frontend | `cd frontend && npm run build` | Passed; Vite emitted the pre-existing large chunk warning. |
 | Frontend | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities`. |
-| Browser | `cd frontend && npm run e2e` | Passed after adding Playwright journeys: `24 passed` across Chromium, Firefox, WebKit, mobile Chromium. |
+| Browser | `cd frontend && npm run e2e:local` | Passed: `35 passed`, `10 skipped` across Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. |
 | Device simulation | `cd frontend && npm run simulate:devices` | Passed and updated `docs/device-simulation-report.md` plus screenshots. |
 | Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3 tests`. |
-| Native Debug build | `xcodebuild ... -configuration Debug ... clean build` | Passed on iPhone 17 simulator. |
-| Native Release build | `xcodebuild ... -configuration Release ... clean build` | Passed on iPhone 17 simulator. |
-| Native iPad Debug build | `xcodebuild ... iPad Pro 11-inch (M5) ... clean build` | Passed. |
-| Native app unit tests | `xcodebuild test ... -only-testing:BrassTuneAppTests` | Passed on a fresh temporary iPhone 17 simulator: `3 tests`. |
-| Native UI smoke | `xcodebuild test ... -only-testing:BrassTuneAppUITests/...` | Passed on a fresh temporary iPhone 17 simulator: `1 test`. |
+| Hosted browser smoke | `cd frontend && E2E_BASE_URL=... E2E_API_BASE_URL=... E2E_WS_BASE_URL=... npm run e2e:hosted` | Passed: `15 passed`. Strict branch-content checks remain post-deploy. |
+| Native project list | `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj` | Passed; schemes `BrassTuneApp`, `BrassTuneCore`. |
+| Native Debug/unit/UI | `xcodebuild test ... -only-testing:BrassTuneAppTests -only-testing:BrassTuneAppUITests/...` | Passed on dynamically selected iPhone simulator: `3 unit`, `1 UI`. |
+| Native Release build | `xcodebuild ... -configuration Release ... CODE_SIGNING_ALLOWED=NO build` | Passed on dynamically selected iPhone simulator. |
+| Security | `gitleaks git --redact=100 --verbose .` | Passed: 25 commits scanned, no leaks found. |
+| Security | `pip-audit ...` | Passed: no known vulnerabilities found, five documented ignores. |
+| Security | `bandit -r app -x app/tests` | Passed: no issues identified. |
 
 ## Hosted Smoke
 
@@ -68,4 +70,4 @@ No secret values were printed or committed. Local/example config names observed:
 | Vercel deep link | `curl -IL --max-time 30 https://brass-tune.vercel.app/settings` | Passed: `HTTP/2 200`, `filename="index.html"`. |
 | Render health | `curl -fsS --max-time 70 https://brasstune.onrender.com/api/health` | Passed after cold start: `{"ok":true,"service":"BrassTune Analytics API"}`. |
 | Render CORS | `OPTIONS /api/health` from Vercel origin | Passed after warmup: `access-control-allow-origin: https://brass-tune.vercel.app`. |
-| Hosted WebSocket | `wss://brasstune.onrender.com/ws/pitch` and `/api/ws/pitch` probes | Failed: hosted service returned `404 Not Found`; local backend has `/ws/pitch`, so Render appears out of sync or not routing WebSockets. |
+| Hosted WebSocket handshake | Node `WebSocket('wss://brasstune.onrender.com/ws/pitch')` ping probe | Failed: connection error. Local backend has `/ws/pitch`, so Render deployment/routing remains unverified. |

@@ -32,17 +32,15 @@ Native SwiftUI app created under `swift/BrassTuneApp` with:
 | Check | Result |
 |---|---|
 | `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj` | Passed; schemes `BrassTuneApp`, `BrassTuneCore`. |
-| Clean Debug build on iPhone 17 iOS 26.2 | Passed. |
-| Clean Release build on iPhone 17 iOS 26.2 | Passed. |
-| Clean Debug build on iPad Pro 11-inch (M5) iOS 26.2 | Passed. |
-| `xcodebuild test ... -only-testing:BrassTuneAppTests` | Passed on iPhone 17 simulator: `3 tests`; xcresult `/tmp/brasstune-dd-unittest-final/Logs/Test/Test-BrassTuneApp-2026.06.18_13-46-20--0500.xcresult`. |
-| `xcodebuild test ... -only-testing:BrassTuneAppUITests/...testLaunchPracticeAndSettingsSurfaces` | Passed on fresh temporary iPhone 17 simulator: `1 test`; xcresult `/tmp/brasstune-dd-uitest-final-fresh2/Logs/Test/Test-BrassTuneApp-2026.06.18_13-49-56--0500.xcresult`. |
-| Combined `xcodebuild test` | Not used as a gate; it hit CoreSimulator `Busy` runner preflight when unit/UI runners launched back-to-back. The workflow runs unit and UI separately. |
+| `xcodebuild test ... -only-testing:BrassTuneAppTests -only-testing:BrassTuneAppUITests/...testLaunchPracticeAndSettingsSurfaces` | Passed on dynamically selected iPhone simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`: `3 unit tests`, `1 UI test`; xcresult under Xcode DerivedData. |
+| `xcodebuild ... -configuration Debug ... CODE_SIGNING_ALLOWED=NO clean build` | Passed on dynamically selected iPhone simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`; derived data `/tmp/brasstune-dd-debug-iphone-final`. |
+| `xcodebuild ... -configuration Debug ... CODE_SIGNING_ALLOWED=NO clean build` | Passed on dynamically selected iPad simulator `C86B38C3-D50B-48F3-8E21-1FD7A44FCC81`; derived data `/tmp/brasstune-dd-debug-ipad-final`. |
+| `xcodebuild ... -configuration Release ... CODE_SIGNING_ALLOWED=NO build` | Passed on dynamically selected iPhone simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`. |
+| Signed archive | Not run; blocked by Apple Developer credentials/signing profiles. |
 
 ## Simulator Notes
 
-- XcodeBuildMCP was available but had no project/scheme/simulator defaults configured and no setter tool exposed in this thread; explicit `xcodebuild` commands were used.
-- Temporary simulators were created for stable unit/UI evidence instead of erasing the user's default simulator.
+- Explicit `xcodebuild` commands were used with dynamically discovered simulator IDs.
 - Dynamic simulator discovery is required in CI and is implemented in `.github/workflows/swift.yml`.
 
 ## Blockers

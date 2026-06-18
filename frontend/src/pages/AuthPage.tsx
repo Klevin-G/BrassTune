@@ -81,14 +81,14 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
           </div>
           <h1>{isSignup ? 'Start tracking your tuning patterns.' : 'Welcome back to your practice cockpit.'}</h1>
           <p>
-            Sign in keeps your sessions, audio playback, analytics, and ensemble membership tied to your account. Guest demo mode stays available for local testing.
+            Sign in keeps your sessions, audio playback, analytics, and ensemble membership tied to your account. Guest practice remains available on this device.
           </p>
         </section>
-        <SectionCard title={isSignup ? 'Sign up' : mode === 'reset' ? 'Reset password' : 'Sign in'} eyebrow={auth.configured ? 'Supabase Auth' : 'Guest mode active'}>
+        <SectionCard title={isSignup ? 'Sign up' : mode === 'reset' ? 'Reset password' : 'Sign in'} eyebrow={auth.configured ? 'Account access' : 'Guest mode active'}>
           {!auth.configured && (
             <EmptyActionState
-              title="Supabase env vars are not configured"
-              body="Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to enable real sign up/sign in. You can keep using the local demo now."
+              title="Account sign-in is unavailable"
+              body="Sign-in is temporarily unavailable. Guest practice remains available on this device."
               icon={Mail}
             />
           )}

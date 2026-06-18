@@ -1,13 +1,21 @@
+import { existsSync } from 'node:fs';
 import { defineConfig, devices } from 'playwright/test';
 
-const backendCommand = process.platform === 'win32'
-  ? 'cd ../backend && .venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000'
-  : 'cd ../backend && (.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 || python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000)';
+const startLocalServers = process.env.E2E_START_LOCAL_SERVERS !== '0';
+const baseURL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5173';
+const apiBaseURL = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const wsBaseURL = process.env.E2E_WS_BASE_URL ?? apiBaseURL.replace(/^http/, 'ws');
+const defaultBackendPython = process.platform === 'win32'
+  ? (existsSync('../backend/.venv/Scripts/python.exe') ? '../backend/.venv/Scripts/python.exe' : 'py -3')
+  : (existsSync('../backend/.venv/bin/python') ? '../backend/.venv/bin/python' : 'python3');
+const backendPython = process.env.E2E_BACKEND_PYTHON ?? defaultBackendPython;
+const backendCommand = `cd ../backend && ${backendPython} -m uvicorn app.main:app --host 127.0.0.1 --port 8000`;
 
 export default defineConfig({
   testDir: './e2e',
   timeout: 45_000,
   workers: 1,
+  forbidOnly: !!process.env.CI,
   expect: {
     timeout: 10_000,
   },
@@ -16,33 +24,35 @@ export default defineConfig({
     ['html', { outputFolder: '../docs/release-readiness/playwright-report', open: 'never' }],
   ],
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL,
     trace: 'retain-on-failure',
   },
-  webServer: [
+  webServer: startLocalServers ? [
     {
       command: backendCommand,
-      url: 'http://127.0.0.1:8000/api/health',
-      reuseExistingServer: true,
+      url: `${apiBaseURL}/api/health`,
+      reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },
     {
       command: 'npm run dev -- --host 127.0.0.1 --port 5173',
-      url: 'http://127.0.0.1:5173',
-      reuseExistingServer: true,
+      url: baseURL,
+      reuseExistingServer: !process.env.CI,
       timeout: 30_000,
       env: {
-        VITE_API_BASE_URL: 'http://127.0.0.1:8000',
-        VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
+        VITE_API_BASE_URL: apiBaseURL,
+        VITE_WS_BASE_URL: wsBaseURL,
         VITE_SUPABASE_URL: '',
         VITE_SUPABASE_PUBLISHABLE_KEY: '',
+        VITE_ENABLE_INTERNAL_TOOLS: 'false',
       },
     },
-  ],
+  ] : undefined,
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
+    { name: 'mobile-webkit', use: { ...devices['iPhone 15'] } },
   ],
 });

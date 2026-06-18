@@ -85,9 +85,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               />
             </label>
             <button className={`toggle ${demoMode ? 'on' : ''}`} onClick={() => setDemoMode(!demoMode)} type="button">
-              Demo
+              Guide
             </button>
-            <StatusBadge tone={demoMode ? 'gold' : 'green'}>{demoMode ? 'Seeded audio' : 'Mic ready'}</StatusBadge>
+            <StatusBadge tone={demoMode ? 'gold' : 'green'}>{demoMode ? 'Guided audio' : 'Mic ready'}</StatusBadge>
             {auth.isSignedIn ? (
               <Link to="/settings" className="icon-button labeled" aria-label="Open profile settings">
                 <UserRound size={18} />

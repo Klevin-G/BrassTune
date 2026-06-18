@@ -16,6 +16,7 @@ on:
 jobs:
   package-and-ios:
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: List Xcode and simulator environment

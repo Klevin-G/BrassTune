@@ -1,5 +1,6 @@
 import datetime as dt
 import io
+import json
 import math
 import asyncio
 import zipfile
@@ -9,13 +10,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.api.auth import AuthContext, _sync_supabase_user
 from app.api.routes import _filtered_events, _read_limited_body
 from app.core.analytics.stats import build_instrument_heatmap, calculate_most_improved_notes, calculate_note_stats
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
 from app.core.pitch.detector import yin_pitch
 from app.db.database import Base
-from app.db.maintenance import repair_demo_data
+from app.db.maintenance import clear_practice_data, repair_demo_data
 from app.db.seed import seed_demo_data
 from app.main import app
 from app.models.db import Group, GroupMember, NoteEvent, PitchSample, PracticeSession, User
@@ -389,6 +391,95 @@ def test_signed_in_student_cannot_use_full_json_export_bypass():
     with TestClient(app) as client:
         response = client.get("/api/export/all.json", headers={"Authorization": "Bearer dev-user-1"})
     assert response.status_code == 403
+
+
+def test_email_linked_supabase_user_does_not_inherit_privileged_local_role():
+    db = _test_db()
+    try:
+        db.add(
+            User(
+                email="teacher@example.com",
+                username="teacher",
+                name="Teacher",
+                role="director",
+                primary_instrument_id="trumpet",
+            )
+        )
+        db.commit()
+        user = _sync_supabase_user(
+            db,
+            {
+                "id": "supabase-user-1",
+                "email": "teacher@example.com",
+                "user_metadata": {},
+                "app_metadata": {},
+            },
+        )
+        assert user.supabase_user_id == "supabase-user-1"
+        assert user.role == "student"
+    finally:
+        db.close()
+
+
+def test_ensemble_aggregate_reports_are_manager_only():
+    with TestClient(app) as client:
+        group_response = client.get("/api/ensemble/groups/1", headers={"Authorization": "Bearer dev-user-1"})
+        assert group_response.status_code == 200
+        student_report = client.get("/api/ensemble/groups/1/report", headers={"Authorization": "Bearer dev-user-1"})
+        assert student_report.status_code == 403
+        director_report = client.get("/api/ensemble/groups/1/report", headers={"Authorization": "Bearer dev-user-2"})
+        assert director_report.status_code == 200
+
+
+def test_account_export_contains_profile_and_lifecycle_data():
+    with TestClient(app) as client:
+        response = client.get("/api/users/me/export.zip", headers={"Authorization": "Bearer dev-user-1"})
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = set(archive.namelist())
+        assert {"account.json", "sessions.json", "memberships.json", "owned_groups.json", "invitations.json", "recommendations.json"}.issubset(names)
+        account = json.loads(archive.read("account.json"))
+    assert account["id"] == 1
+    assert account["role"] == "student"
+
+
+def test_clear_practice_data_deletes_audio_before_bulk_rows(monkeypatch):
+    db = _test_db()
+    calls = []
+    try:
+        session = _session(db, 51, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "51/%s/recording.webm" % session.id
+
+        def fake_delete_audio(row):
+            calls.append(row.audio_object_key)
+
+        monkeypatch.setattr("app.db.maintenance.delete_audio_for_session", fake_delete_audio)
+        counts = clear_practice_data(db)
+        assert counts["practice_sessions"] == 1
+        assert calls == ["51/%s/recording.webm" % session.id]
+        assert db.query(PracticeSession).count() == 0
+    finally:
+        db.close()
+
+
+def test_websocket_accepts_first_message_auth_without_token_query(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+
+    def fake_auth_context(db, token):
+        assert token == "dev-ws-token"
+        user = db.query(User).filter(User.id == 1).first()
+        return AuthContext(user=user, is_guest=False, access_token=token)
+
+    monkeypatch.setattr("app.api.websocket.auth_context_from_token", fake_auth_context)
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_json({"type": "ping"})
+            assert websocket.receive_json()["message"].lower().startswith("authenticate")
+            websocket.send_json({"type": "authenticate", "token": "dev-ws-token"})
+            assert websocket.receive_json()["type"] == "authenticated"
+            websocket.send_json({"type": "ping"})
+            assert websocket.receive_json()["type"] == "pong"
 
 
 def test_supabase_audio_delete_is_called_before_metadata_is_cleared(monkeypatch):

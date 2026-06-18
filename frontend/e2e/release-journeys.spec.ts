@@ -1,9 +1,18 @@
 import { expect, test } from 'playwright/test';
 
+const apiBaseURL = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const localAdminEnabled = process.env.E2E_START_LOCAL_SERVERS !== '0';
+
 test.beforeEach(async ({ page, request }) => {
-  await request.post('http://127.0.0.1:8000/api/admin/demo-data/repair').catch(() => undefined);
+  if (localAdminEnabled) {
+    await request.post(`${apiBaseURL}/api/admin/demo-data/repair`).catch(() => undefined);
+  }
   await page.addInitScript(() => {
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith('brasstune.'))
+      .forEach((key) => localStorage.removeItem(key));
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.demoMode', 'true');
   });
 });
 
@@ -38,6 +47,7 @@ test('auth reset and Apple surfaces are wired', async ({ page }) => {
   await page.goto('/auth/reset-password');
   await expect(page.getByRole('button', { name: /send reset link/i })).toBeDisabled();
   await expect(page.getByLabel(/email/i)).toBeVisible();
+  await expect(page.getByText(/account sign-in is unavailable/i)).toBeVisible();
 
   await page.goto('/auth/sign-in');
   await expect(page.getByRole('button', { name: /continue with apple/i })).toBeDisabled();
@@ -57,13 +67,22 @@ test('onboarding traps keyboard focus and closes with Escape', async ({ page }) 
 
 test('demo recording creates a reviewable session with playback surface', async ({ page }) => {
   await page.goto('/practice');
-  await page.getByRole('button', { name: /start recording/i }).click();
-  await expect(page.getByRole('button', { name: /stop recording/i })).toBeVisible();
-  await page.waitForTimeout(2200);
-  await page.getByRole('button', { name: /stop recording/i }).click();
-  await expect(page.getByRole('link', { name: /review session/i })).toBeVisible();
-  await page.getByRole('link', { name: /review session/i }).click();
-  await expect(page).toHaveURL(/\/sessions\/\d+/);
+  const startButton = page.getByRole('button', { name: /start recording/i });
+  await expect(startButton).toBeVisible();
+  await expect(startButton).toBeEnabled();
+  await startButton.click();
+  const stopButton = page.getByRole('button', { name: /stop recording/i });
+  await expect(stopButton).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator('.note-history .history-row').count(), { timeout: 15_000 }).toBeGreaterThan(0);
+  await stopButton.click();
+  const reviewLink = page.getByRole('link', { name: /review session/i });
+  await expect(reviewLink).toBeVisible();
+  await expect(reviewLink).toHaveAttribute('href', /\/sessions\/\d+/);
+  await reviewLink.scrollIntoViewIfNeeded();
+  await Promise.all([
+    page.waitForURL(/\/sessions\/\d+/, { timeout: 15_000 }),
+    reviewLink.click({ force: true }),
+  ]);
   await expect(page.getByRole('heading', { name: /Relisten/i })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Note performance/i })).toBeVisible();
 });
@@ -72,18 +91,20 @@ test('settings exposes export before account deletion and legal links', async ({
   await page.goto('/settings');
   await expect(page.getByRole('link', { name: /privacy/i })).toBeVisible();
   await expect(page.getByRole('link', { name: /terms/i })).toBeVisible();
+  await expect(page.getByRole('link', { name: /support/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /export account data/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /delete account/i })).toBeDisabled();
+  await expect(page.locator('body')).not.toContainText(/MVP|Developer testing|seeded ensemble|FastAPI|Supabase env vars/i);
 });
 
 test('server-side ensemble authorization rejects forbidden writes', async ({ request }) => {
-  const denied = await request.post('http://127.0.0.1:8000/api/ensemble/groups/1/members/by-username', {
+  const denied = await request.post(`${apiBaseURL}/api/ensemble/groups/1/members/by-username`, {
     headers: { Authorization: 'Bearer dev-user-1' },
     data: { username: 'maya', instrument_id: 'horn' },
   });
   expect(denied.status()).toBe(403);
 
-  const allowed = await request.post('http://127.0.0.1:8000/api/ensemble/groups/1/members/by-username', {
+  const allowed = await request.post(`${apiBaseURL}/api/ensemble/groups/1/members/by-username`, {
     headers: { Authorization: 'Bearer dev-user-2' },
     data: { username: 'maya', instrument_id: 'horn' },
   });

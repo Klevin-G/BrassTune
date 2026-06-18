@@ -35,7 +35,7 @@ export function DashboardPage() {
         setRecommendations(recommendationData.slice(0, 3));
         setError(null);
       })
-      .catch(() => setError('Backend unavailable. Start the FastAPI server or keep using the tuner in demo mode.'));
+      .catch(() => setError('Practice mode is still available. Analytics will refresh when the service reconnects.'));
   }, [instrumentId]);
 
   const latestPoint = progress?.timeseries[progress.timeseries.length - 1];

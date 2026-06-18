@@ -32,7 +32,6 @@ export default function App() {
         <Route path="/privacy" element={<LegalPage kind="privacy" />} />
         <Route path="/terms" element={<LegalPage kind="terms" />} />
         <Route path="/support" element={<LegalPage kind="support" />} />
-        <Route path="/dev/calibration" element={<AudioLabPage />} />
         <Route path="/auth/sign-in" element={<AuthPage mode="sign-in" />} />
         <Route path="/auth/sign-up" element={<AuthPage mode="sign-up" />} />
         <Route path="/auth/reset-password" element={<AuthPage mode="reset" />} />

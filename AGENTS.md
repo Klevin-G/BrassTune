@@ -17,7 +17,8 @@ BrassTune is a brass-practice analytics product with a React/Vite web app, FastA
 - Frontend unit tests: `cd frontend && npm test`.
 - Frontend build/typecheck: `cd frontend && npm run build`.
 - Frontend dependency audit: `cd frontend && npm audit --omit=dev`.
-- Browser journeys: `cd frontend && npm run e2e`.
+- Local browser journeys: `cd frontend && npm run e2e:local`.
+- Hosted read-only smoke: `cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted`.
 - Device simulation: `cd frontend && npm run simulate:devices`.
 - Swift package tests: `cd swift/BrassTuneCore && swift test`.
 - Native app schemes: `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj`.

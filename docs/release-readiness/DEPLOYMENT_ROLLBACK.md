@@ -12,7 +12,7 @@
 - Frontend unit/build/audit plus Playwright browser release journeys.
 - Security workflow with npm audit, pip-audit with exact ignored advisories, Bandit, and Gitleaks.
 - Swift workflow for Swift package tests, native simulator build, native unit tests, and native UI smoke with dynamic simulator discovery.
-- Deploy workflow is now guarded to run only from `main`.
+- Deploy workflow is guarded to run only from `main`, uses the `production` GitHub environment, has bounded timeouts, minimal read permissions, deploy concurrency, and a Render hook timeout.
 
 ## Deployment Procedure
 
@@ -26,6 +26,7 @@
    - `curl -IL https://brass-tune.vercel.app/settings`
    - `curl -fsS --max-time 70 https://brasstune.onrender.com/api/health`
    - CORS OPTIONS from Vercel origin.
+   - `E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted`
    - Authenticated WebSocket handshake after Render route is fixed.
 
 ## Rollback Procedure
@@ -39,4 +40,5 @@
 
 ## Current Deployment Blocker
 
-- Hosted WebSocket route returned `404`; do not claim production tuner WebSocket readiness until Render serves the current `/ws/pitch` route and an authenticated smoke passes.
+- Hosted WebSocket handshake currently fails at connection level; do not claim production tuner WebSocket readiness until Render serves the current `/ws/pitch` route and an authenticated smoke passes.
+- `render.yaml` no longer provides a broad `https://.*\.vercel\.app` CORS regex by default. Configure exact production and preview origins before deployment.
