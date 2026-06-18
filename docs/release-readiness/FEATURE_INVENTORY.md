@@ -15,4 +15,4 @@ Date: 2026-06-18
 | Shared domain parity | Backend/frontend/Swift fixture smoke passes | `swift test`, Vitest, pytest | Full cross-runtime fixture matrix still limited |
 | Native SwiftUI app | Native app target, tests, UI smoke, unsigned Debug/Release simulator builds pass | `swift/BrassTuneApp`, xcodebuild results | Production config, signing, Apple capability, live auth, native mic pipeline remain incomplete |
 | CI/security | Backend/frontend/security/Swift/device workflows exist with bounded timeouts and artifacts | `.github/workflows/*` | GitHub environment protection/reviewers require repo settings |
-| Hosted deployment | Vercel root/deep link and Render health/CORS pass | curl and hosted Playwright smoke | Hosted WebSocket handshake fails; current production lacks this branch content |
+| Hosted deployment | Render health/CORS/WebSocket pass and Vercel preview deploy exists for the PR branch | `npm run smoke:hosted`, Render deploy `dep-d8q7296gvqtc73a0djm0`, Vercel deploy `dpl_37XVAT1hCjibznU5G4hCB8MUiT2t` | Protected Vercel preview page automation still needs an automation bypass; production frontend was not deployed |

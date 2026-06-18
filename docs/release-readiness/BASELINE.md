@@ -10,7 +10,7 @@ Date: 2026-06-18
 - Current HEAD at continuation baseline: `a77a669460aece83f395f7acda879a67e54f0c12`
 - Merge base with `main`: `652a787c2e643542dfac5911820a2fed01885622`
 - `swift-migration` fact: local branch exists at `2d44e24...` and is behind `main`; current work stayed on a new release branch from `main`.
-- Dirty state at start of continuation: clean. Current dirty state contains intentional source, workflow, browser evidence, and release-readiness doc changes.
+- Dirty state at start of hosted-beta continuation: clean at `e56cacd61114cd453b21d3d6d597b702e30e67a9`. Current working tree contains intentional post-deploy docs/evidence updates until the final commit is created.
 
 ## Toolchain
 
@@ -70,4 +70,4 @@ No secret values were printed or committed. Local/example config names observed:
 | Vercel deep link | `curl -IL --max-time 30 https://brass-tune.vercel.app/settings` | Passed: `HTTP/2 200`, `filename="index.html"`. |
 | Render health | `curl -fsS --max-time 70 https://brasstune.onrender.com/api/health` | Passed after cold start: `{"ok":true,"service":"BrassTune Analytics API"}`. |
 | Render CORS | `OPTIONS /api/health` from Vercel origin | Passed after warmup: `access-control-allow-origin: https://brass-tune.vercel.app`. |
-| Hosted WebSocket handshake | Node `WebSocket('wss://brasstune.onrender.com/ws/pitch')` ping probe | Failed: connection error. Local backend has `/ws/pitch`, so Render deployment/routing remains unverified. |
+| Hosted WebSocket handshake | Node `WebSocket('wss://brasstune.onrender.com/ws/pitch')` ping probe | Initially failed with Uvicorn missing WebSocket protocol support; fixed by `uvicorn[standard]` and verified after Render deploy `dep-d8q7296gvqtc73a0djm0`. |

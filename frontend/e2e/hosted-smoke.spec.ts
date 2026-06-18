@@ -38,13 +38,16 @@ function assertNoHostedURLRegression(url: string, appOrigin: string) {
   }
 }
 
-test.describe('hosted read-only smoke', () => {
-  test.beforeEach(async ({ page }) => {
-    if (hostedMode && vercelShareURL) {
-      await page.goto(vercelShareURL);
-    }
-  });
+function routeURL(route: string) {
+  if (!hostedMode || !vercelShareURL) return route;
+  const shared = new URL(vercelShareURL);
+  const destination = new URL(route, shared.origin);
+  const shareToken = shared.searchParams.get('_vercel_share');
+  if (shareToken) destination.searchParams.set('_vercel_share', shareToken);
+  return destination.toString();
+}
 
+test.describe('hosted read-only smoke', () => {
   test('deployed app loads root and deep links without mixed content', async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on('console', (message) => {
@@ -53,7 +56,7 @@ test.describe('hosted read-only smoke', () => {
     page.on('pageerror', (error) => consoleErrors.push(error.message));
 
     for (const route of routes) {
-      const response = await page.goto(route);
+      const response = await page.goto(routeURL(route));
       expect(response?.status(), `${route} should not be behind auth or missing`).toBeLessThan(400);
       await expect(page.getByRole('main')).toBeVisible();
       await expect(page.locator('body')).not.toContainText(/mixed content/i);
@@ -83,7 +86,7 @@ test.describe('hosted read-only smoke', () => {
         badURLs.push(socket.url());
       }
     });
-    await page.goto('/settings/audio-lab');
+    await page.goto(routeURL('/settings/audio-lab'));
     await expect(page.getByText(/WebSocket URL/i)).toBeVisible();
     await expect(page.locator('body')).toContainText(wsBaseURL ?? 'wss://');
     expect(badURLs).toEqual([]);
@@ -116,7 +119,7 @@ test.describe('hosted read-only smoke', () => {
 
   test('configured WebSocket URL uses secure transport for https app', async ({ page }) => {
     test.skip(!wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket URL checks.');
-    await page.goto('/settings/audio-lab');
+    await page.goto(routeURL('/settings/audio-lab'));
     const appUrl = new URL(process.env.E2E_BASE_URL ?? page.url());
     if (appUrl.protocol === 'https:') {
       expect(wsBaseURL?.startsWith('wss://')).toBe(true);
@@ -125,7 +128,7 @@ test.describe('hosted read-only smoke', () => {
 
   test('configured WebSocket upgrades and returns an app-level auth response', async ({ page }) => {
     test.skip(!wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket handshake checks.');
-    await page.goto('/settings/audio-lab');
+    await page.goto(routeURL('/settings/audio-lab'));
     const outcome = await page.evaluate(async (baseURL) => {
       const url = new URL('/ws/pitch', baseURL).toString();
       return await new Promise<{ type: string; data?: string; code?: number; reason?: string; opened?: boolean }>((resolve) => {
@@ -164,9 +167,9 @@ test.describe('hosted read-only smoke', () => {
 
   test('strict hosted branch content is current when enabled', async ({ page }) => {
     test.skip(!strictHostedContent, 'Strict content validation runs only after deploying this branch.');
-    await page.goto('/more');
+    await page.goto(routeURL('/more'));
     await expect(page.locator('body')).not.toContainText(/\/dev\/calibration|MVP|Developer testing|FastAPI|Supabase env vars/i);
-    await page.goto('/privacy');
+    await page.goto(routeURL('/privacy'));
     await expect(page.getByText(/Privacy Policy/i)).toBeVisible();
   });
 });

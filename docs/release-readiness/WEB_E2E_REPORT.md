@@ -17,18 +17,19 @@
 - Settings legal links, account export button, disabled account deletion until confirmation/auth.
 - Server-side ensemble authorization: student forbidden write returns `403`; director write returns `200`.
 - Browser matrix: Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit.
-- Hosted read-only smoke checks root/deep links, backend health/CORS, and secure WebSocket URL configuration.
+- Hosted read-only smoke checks root/deep links, backend health/CORS, secure WebSocket URL configuration, and the raw `/ws/pitch` upgrade/app-level auth response when hosted variables are supplied.
 
 ## Results
 
-- `cd frontend && npm run e2e:local`
-- Final local result: `35 passed`, `10 skipped` for hosted-only optional API/WS checks.
-- `cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted`
-- Final hosted read-only result: `15 passed`.
-- A strict hosted legal/content run is intentionally opt-in with `E2E_STRICT_HOSTED_CONTENT=1` because current Vercel production has not deployed this branch yet.
+- `cd frontend && CI=true npm run e2e:local`
+- Final local result: `35 passed`, `30 skipped` for hosted-only checks.
+- `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted`
+- Final hosted root/API/CORS/WebSocket result: passed.
+- `cd frontend && E2E_BASE_URL=https://brass-tune-9f0sicpxl-aryaswebsites.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted -- --project=chromium`
+- Protected preview Playwright result: backend health, CORS, secure WS URL, and raw WS upgrade tests passed; preview page route tests received `401` from Vercel Authentication. Vercel connector fetch verified the fresh preview deployment is accessible to the connected account.
 
 ## Not Covered
 
 - Live Supabase email confirmation, reset email delivery, Apple OAuth provider exchange, and identity deletion are not covered without a disposable live Supabase project and Apple provider configuration.
 - Hosted production browser mutation tests were not run to avoid mutating ordinary users.
-- Raw hosted WebSocket handshake is still not passing; the hosted smoke only verifies secure URL configuration until Render routing/deployment is fixed.
+- Protected Vercel preview page automation needs an automation bypass or temporarily public preview access.

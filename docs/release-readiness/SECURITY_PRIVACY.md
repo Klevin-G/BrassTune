@@ -33,7 +33,8 @@
 ## Known Risks
 
 - Account deletion is not yet a durable deletion saga; add a tombstone/outbox/retry worker for stronger operational guarantees.
-- Hosted Render WebSocket route currently fails at connection level; production tuner WebSocket cannot be verified until deployment/routing is fixed and this branch is deployed.
+- Hosted Render WebSocket now upgrades and returns an app-level auth-required response after deploying commit `395a9d29870b25a7aadf161dc1d69c988bdaa841`.
 - Live Supabase deletion/export was not tested because disposable live credentials were not provided.
-- Supabase advisor reports live-project drift: `public.rls_auto_enable()` is executable by `anon`/`authenticated`; this needs owner-approved remote remediation.
-- The current Supabase migration is not a complete clean-database baseline because it assumes app tables already exist.
+- Supabase live-project drift was remediated for `public.rls_auto_enable()` by revoking execute from `public`, `anon`, and `authenticated`; verification showed `anon_execute=false` and `authenticated_execute=false`.
+- A clean Supabase baseline migration now exists and was applied to the connected project; direct Data API policies remain intentionally closed while FastAPI mediates app access.
+- Native app production flows remain fixture-backed in several areas despite passing simulator builds/tests.

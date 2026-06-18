@@ -1,66 +1,50 @@
 # BrassTune Final Release Report
 
-Status: local release-hardening continuation complete for exercised automated gates. BrassTune is not release ready until the failed/blocked hosted WebSocket, live provider, App Store, Supabase project-drift, migration, and physical-device gates below are resolved.
+Status: hosted web/backend beta hardening is code-complete for repository-actionable, Render-actionable, and Supabase migration-drift items exercised on 2026-06-18. BrassTune is not full release ready because live provider auth, Apple/App Store, physical-device audio, protected-preview browser automation, and native app production-depth gates remain.
 
 ## Summary
 
-This continuation fixed the PR #2 Security and Frontend failure causes, hardened backend authorization/data lifecycle paths, removed WebSocket tokens from URLs, stabilized recording/import/playback behavior, cleaned production-facing web copy/internal controls, expanded browser journeys to mobile WebKit and hosted smoke, added CI artifacts/timeouts, and refreshed release blockers.
+This pass fixed the remaining hosted Render WebSocket blocker, added repeatable hosted smoke coverage, corrected Vercel-hosted API/WebSocket fallbacks, removed user-facing env-var copy, added a clean Supabase baseline migration, and remediated the live public `SECURITY DEFINER` helper RPC grant drift. No PR merge, release tag, main push, or production frontend deploy was performed.
 
-## Passed Local Gates
+## Hosted Results
 
-- Backend pytest: `47 passed`.
-- Frontend Vitest: `15 tests passed`.
-- Frontend build/typecheck: passed.
-- Frontend dependency audit: `0 vulnerabilities`.
-- Playwright local browser journeys: `35 passed`, `10 skipped` hosted-only checks.
-- Hosted read-only Playwright smoke: `15 passed`.
-- Device simulation: passed.
-- Swift package tests: passed.
-- Native app unit/UI test command: passed on dynamically selected iPhone simulator (`3 unit`, `1 UI`).
-- Native Debug simulator builds: passed unsigned on dynamically selected iPhone and iPad simulators.
-- Native Release simulator build: passed unsigned on dynamically selected iPhone simulator with `CODE_SIGNING_ALLOWED=NO`.
-- Backend dependency/security scans: passed with five documented ignored advisories.
-- Backend Bandit scan: passed.
-- Gitleaks secret scan: passed locally, `25 commits` scanned with no leaks.
-- Vercel root/deep-link smoke: passed.
-- Render health/CORS smoke: passed after cold start.
+- Render service `BrassTune` (`srv-d8pgo3ok1i2s73f3k740`) is a Python web service in Oregon, root directory `backend`, public URL `https://brasstune.onrender.com`, health path `/api/health`.
+- Render remains configured on branch `main`, but the backend was safely deployed through the Render API by exact commit.
+- Render live deploy `dep-d8q7296gvqtc73a0djm0` is `live` for commit `395a9d29870b25a7aadf161dc1d69c988bdaa841`, trigger `api`, finished `2026-06-18T22:30:13Z`.
+- Root cause: hosted Render installed `uvicorn` without a WebSocket protocol implementation, producing Uvicorn warnings and `404` on WebSocket upgrades. `backend/requirements.txt` now installs `uvicorn[standard]`.
+- Direct hosted checks passed: `/api/health` `200`, CORS preflight for the Vercel preview origin `200`, and `wss://brasstune.onrender.com/ws/pitch` opens and returns `{"type":"error","message":"Authenticate before sending pitch frames."}` for unauthenticated ping.
+- `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` passed.
+- Vercel created preview deployment `dpl_37XVAT1hCjibznU5G4hCB8MUiT2t` for commit `395a9d2`; protected preview routes are fetchable through the Vercel connector, but local Playwright still receives `401` due Vercel Authentication.
 
-## Failed Or Blocked Gates
+## Supabase Results
 
-- Hosted Render WebSocket handshake failed at connection level for `wss://brasstune.onrender.com/ws/pitch`.
-- Supabase advisor reports live-project drift: public `SECURITY DEFINER` RPC executable by `anon`/`authenticated`.
-- Existing Supabase migration is not a standalone clean-database baseline.
-- Live Supabase email/password, reset, Apple OAuth, token refresh, and account deletion tests are blocked by missing disposable live credentials/provider setup.
-- Apple signed archive, TestFlight/App Store upload, and App Store Connect metadata are blocked by missing Apple credentials and owner/legal metadata.
-- Physical microphone/brass quality validation is blocked by hardware and performers.
+- Before remediation, public schema had no app tables and `public.rls_auto_enable()` was `SECURITY DEFINER` executable by `anon` and `authenticated`.
+- Applied migrations through Supabase MCP:
+  - `20260616_brasstune_baseline`
+  - `20260617_brasstune_production_readiness`
+  - `20260618_lock_down_rls_auto_enable`
+- Verification showed nine public app tables with RLS enabled and zero rows: `users`, `instrument_profiles`, `practice_sessions`, `pitch_samples`, `note_events`, `groups`, `group_members`, `invitations`, `recommendations`.
+- Verification showed `rls_auto_enable()` still exists but `anon_execute=false` and `authenticated_execute=false`.
 
-## Deployment Impact
+## Local Validation
 
-- No production deployment was performed.
-- Deploy workflow still refuses to deploy from branches other than `main`, now with `environment: production`, concurrency, minimal permissions, and Render hook timeout.
-- Frontend CI now runs local browser release journeys with bounded runtime and uploads Playwright artifacts.
-- Security CI now grants Gitleaks the PR read permission it needs.
-- Swift CI builds/tests the native app using dynamic simulator selection.
+- Backend: `cd backend && .venv/bin/python -m pytest` passed, `48 passed`.
+- Frontend unit: `cd frontend && npm test` passed, `16 passed`.
+- Frontend build: `cd frontend && npm run build` passed with existing chunk-size warning.
+- Frontend audit: `cd frontend && npm audit --omit=dev` passed, `0 vulnerabilities`.
+- Browser E2E local: `cd frontend && CI=true npm run e2e:local` passed, `35 passed`, `30 skipped` hosted-only checks.
+- Device simulation: `cd frontend && npm run simulate:devices` passed and refreshed `docs/device-simulation-report.md`.
+- Swift package: `cd swift/BrassTuneCore && swift test` passed, `3` Swift Testing tests.
+- Xcode/native read-only scout passed iPhone Debug, iPhone Release, iPad Debug, app unit tests, and UI smoke on dynamically discovered simulators with unsigned simulator builds.
 
-## Migration Impact
+## Not Verified
 
-- No full baseline Supabase schema migration was added.
-- Account deletion changes operate through existing models and explicit cleanup; Supabase cleanup is preflighted before local deletion, but no durable outbox exists.
-- Production deploy should be paired with a clean-database startup/migration smoke and current-schema smoke.
+- Protected Vercel preview Playwright page journeys remain blocked by Vercel Authentication returning `401` outside the connector.
+- Live Supabase email/password, reset email delivery, Apple OAuth, token refresh, account deletion, storage cleanup, and identity cleanup were not run without disposable live test credentials/provider setup.
+- Native SwiftUI app remains fixture-backed for practice/audio/analytics/ensemble depth. Simulator builds/tests passed, but this is not a production native feature-complete claim.
+- Signed archive, App Store Connect upload, App Store metadata, Apple legal identity, and signing profiles are not available.
+- Physical iPhone/iPad microphone quality with real brass input was not tested.
 
-## Rollback
+## Current Status
 
-- Use Vercel previous deployment promotion or redeploy previous commit for frontend rollback.
-- Use Render previous deploy or redeploy previous commit for backend rollback.
-- Avoid destructive DB rollback unless a reviewed reversible migration exists.
-
-## Changed Areas
-
-- Backend auth, routes, WebSocket, schemas, storage, CORS, hardening tests.
-- Frontend auth, settings/account deletion, legal pages, ensemble selection, accessibility/layout, Playwright.
-- Native SwiftUI app/project/tests.
-- GitHub Actions, AGENTS, release-readiness docs.
-
-## Required Before Calling Release Ready
-
-Complete `HUMAN_ACTIONS.md`, fix hosted WebSocket routing, remediate Supabase advisor/migration blockers, run live Supabase/provider tests, run physical-device protocol, and complete Apple signing/archive/App Store Connect validation.
+Hosted web/backend can be treated as a closed-beta candidate for owner-controlled testing, with external provider/App Store/device gates remaining. Do not call the full product release ready.

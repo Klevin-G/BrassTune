@@ -26,17 +26,19 @@
 | Medium | Frontend CI lacked bounded runtime and failure artifacts. | `.github/workflows/frontend.yml`. | Added timeouts and Playwright artifact upload. |
 | Medium | Native SwiftUI app did not exist. | `swift/BrassTuneApp`. | Added native SwiftUI app, project, unit target, UI target, Keychain session storage, Supabase Auth REST wiring, deterministic audio fixture, legal/settings/account surfaces. |
 | Low | Mobile/auth accessibility and layout had missing focus/live semantics. | Frontend component updates. | Added focus trap, safe-area padding, aria labels/live regions, meter/timer semantics. |
+| High | Hosted Render WebSocket failed with `404`. | Render logs showed Uvicorn warning `No supported WebSocket library detected`; direct WebSocket failed pre-upgrade. | Added `uvicorn[standard]`, deployed exact commit `395a9d2`, and verified `/ws/pitch` opens with app-level auth-required response. |
+| High | Supabase clean baseline was missing and live project had public helper RPC drift. | Supabase MCP showed no public app tables and `rls_auto_enable()` executable by `anon`/`authenticated`. | Added/applied baseline and readiness migrations; added/applied RPC lockdown migration; verified RLS tables and revoked execute grants. |
+| Medium | Vercel-hosted app shell could fall back to same-origin API/WS if Vite envs were absent. | Protected preview Audio Lab showed same-origin backend/WS before the new deployment. | Client now defaults Vercel-hosted builds to Render API/WS when explicit Vite env vars are absent. |
 
 ## Remaining Failed Or Blocked Gates
 
 | Severity | Finding | Current Status | Required Owner/External Action |
 |---|---|---|---|
-| High | Hosted Render WebSocket route returns `404`. | Local backend has `/ws/pitch`; hosted smoke failed for `/ws/pitch` and `/api/ws/pitch`. | Authorized Render deployment/routing check and production WebSocket smoke with credentials. |
-| High | Live Supabase project advisor reports public `SECURITY DEFINER` RPC drift. | Supabase advisor found `public.rls_auto_enable()` executable by `anon`/`authenticated`. | Owner-approved Supabase migration/config change to revoke execute or move/change function. |
-| High | Supabase migration is not clean-database safe by itself. | Existing migration references `public.groups`/`public.users` before a full baseline schema migration. | Add full baseline schema migration or enforce backend schema creation before migration. |
 | High | Live Supabase email/password, Apple OAuth, reset callback, and identity deletion are not live-tested. | Local deterministic tests and UI surfaces exist; no disposable live credentials were provided. | Supabase test project credentials, redirect allowlist, Apple provider configuration, disposable test personas. |
 | High | Apple signing/archive/App Store Connect validation not performed. | Simulator builds/tests pass; no signing credentials or App Store Connect access. | Apple Developer team, bundle IDs, profiles/certificates, App Store Connect app record. |
 | High | Physical microphone quality cannot be proven in simulator. | Native audio fixture tests exist; simulator cannot validate brass microphone capture. | Physical iPhone/iPad protocol in `PHYSICAL_DEVICE_PROTOCOL.md`. |
+| High | Protected Vercel preview page automation receives `401`. | Playwright route checks against the fresh preview failed even with generated share URL; connector fetch succeeded. | Provide Vercel automation bypass or temporarily public preview access for browser smoke. |
+| High | Native app is still fixture-backed in core product areas. | `swift/BrassTuneApp` uses deterministic fixture recording/playback/analytics/ensemble states. | Replace fixture-backed native flows with production API/audio implementations before claiming native closed beta. |
 | Medium | Combined `xcodebuild test` can fail with CoreSimulator `Busy` when unit/UI runners launch back-to-back. | Unit target and UI target pass separately on fresh temporary simulators; combined action failed with runner preflight Busy. | CI should run native unit and UI steps separately as in `.github/workflows/swift.yml`. |
 | Medium | Legal metadata cannot be invented. | In-app privacy/terms/support surfaces exist without owner-specific legal identity. | Owner/legal counsel must provide legal controller, support URL/email, policy URL, and metadata. |
 
