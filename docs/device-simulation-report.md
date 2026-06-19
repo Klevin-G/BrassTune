@@ -1,6 +1,6 @@
 # Device Simulation Report
 
-Generated: 2026-06-19T01:26:47.325Z
+Generated: 2026-06-19T02:24:12.909Z
 
 The committed Playwright harness was used for repeatable multi-viewport browser automation.
 
@@ -45,6 +45,6 @@ The committed Playwright harness was used for repeatable multi-viewport browser 
 ## Remaining Risks
 
 - Playwright Chromium covers layout and interaction behavior, but not Safari/WebKit rendering differences on physical iPad hardware.
-- Demo recording creates local sample sessions during simulation; this is expected for the current local MVP database.
+- Demo recording creates local sample sessions during simulation; this is expected for the current local demo database.
 - CI cannot exercise native iOS camera pickers or choose a physical local video from Photos; those checks remain in the manual phone test plan.
 - Tables are intentionally allowed to scroll horizontally only inside `.table-wrap` when the advanced mobile table is opened.

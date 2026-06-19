@@ -8,48 +8,70 @@ final class BrassTuneAppUITests: XCTestCase {
     @MainActor
     func testLaunchPracticeAndSettingsSurfaces() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["UITEST_DEMO"]
+        app.launchArguments = ["UITEST_DEMO", "UITEST_RESET_STATE"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Practice"].waitForExistence(timeout: 5), "Practice tab should be visible after UITEST_DEMO launch")
-        app.tabBars.buttons["Practice"].tap()
-        XCTAssertTrue(app.buttons["practice.recordButton"].waitForExistence(timeout: 5), "Practice recording control should be visible")
-        app.buttons["practice.recordButton"].tap()
-        app.buttons["practice.recordButton"].tap()
-        app.tabBars.buttons["Sessions"].tap()
+
+        openTab("Practice", in: app)
+        let recordButton = app.buttons["practice.recordButton"]
+        XCTAssertTrue(recordButton.waitForExistence(timeout: 10), "Practice recording control should be visible")
+        let recordingState = app.staticTexts["practice.recordingState"]
+        XCTAssertTrue(recordingState.waitForExistence(timeout: 5), "Recording state should be visible")
+        recordButton.tap()
+        waitForElementLabel(recordingState, containing: "Recording")
+        recordButton.tap()
+        waitForElementLabel(recordingState, containing: "Ready")
+
+        openTab("Sessions", in: app)
         XCTAssertTrue(app.staticTexts["Demo take"].waitForExistence(timeout: 5), "Stopping a fixture recording should create a saved session")
-        openSettings(in: app)
+
+        openTab("Settings", in: app)
         let deleteButton = app.descendants(matching: .any)["settings.deleteAccount"]
-        let deleteLabel = app.buttons["Delete account"]
-        var attempts = 0
-        while !deleteButton.exists && !deleteLabel.exists && attempts < 5 {
-            app.swipeUp()
-            attempts += 1
-        }
-        XCTAssertTrue(
-            deleteButton.waitForExistence(timeout: 5) || deleteLabel.waitForExistence(timeout: 1),
-            "Account deletion control should be available in Settings"
-        )
+        XCTAssertTrue(waitForElementOrScroll(deleteButton, in: app), "Account deletion control should be available in Settings")
     }
 
-    private func openSettings(in app: XCUIApplication) {
-        let settingsTab = app.tabBars.buttons["Settings"]
-        if settingsTab.exists {
-            settingsTab.tap()
+    @MainActor
+    private func openTab(_ title: String, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let directTab = app.tabBars.buttons[title]
+        if directTab.waitForExistence(timeout: 5), directTab.isHittable {
+            directTab.tap()
             return
         }
 
         let moreTab = app.tabBars.buttons["More"]
-        XCTAssertTrue(moreTab.waitForExistence(timeout: 5), "Settings should be reachable directly or from More")
+        XCTAssertTrue(moreTab.waitForExistence(timeout: 5), "\(title) should be reachable directly or from More", file: file, line: line)
         moreTab.tap()
 
-        let settingsCell = app.cells.containing(.staticText, identifier: "Settings").element
-        if settingsCell.waitForExistence(timeout: 5) {
-            settingsCell.tap()
-            return
+        let candidates = [
+            app.cells.containing(.staticText, identifier: title).element,
+            app.buttons[title],
+            app.staticTexts[title],
+        ]
+        for candidate in candidates {
+            if candidate.waitForExistence(timeout: 3), candidate.isHittable {
+                candidate.tap()
+                return
+            }
         }
 
-        let settingsButton = app.buttons["Settings"]
-        XCTAssertTrue(settingsButton.waitForExistence(timeout: 5), "Settings should be listed under More on compact tab bars")
-        settingsButton.tap()
+        XCTFail("\(title) should be listed under More on compact tab bars", file: file, line: line)
+    }
+
+    @MainActor
+    private func waitForElementLabel(_ element: XCUIElement, containing text: String, file: StaticString = #filePath, line: UInt = #line) {
+        let predicate = NSPredicate(format: "label CONTAINS[c] %@", text)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed, "Element label should contain \(text)", file: file, line: line)
+    }
+
+    @MainActor
+    private func waitForElementOrScroll(_ element: XCUIElement, in app: XCUIApplication, timeout: TimeInterval = 8) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.exists {
+                return true
+            }
+            app.swipeUp()
+        }
+        return element.exists
     }
 }

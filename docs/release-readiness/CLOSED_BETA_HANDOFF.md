@@ -1,6 +1,6 @@
 # Closed Beta Handoff
 
-Status: closed-beta candidate, external provider/App Store/device gates remaining.
+Status: web/backend closed-beta candidate for owner-controlled testing after the post-fix PR head has green required GitHub Actions; external provider/App Store/device gates remain.
 
 ## Tester URLs
 

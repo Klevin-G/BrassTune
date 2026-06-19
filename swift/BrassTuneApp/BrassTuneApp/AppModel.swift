@@ -16,6 +16,18 @@ final class AppModel: ObservableObject {
     let apiClient = APIClient()
     let authService = AuthService()
 
+    func resetForUITesting() {
+        authService.deleteStoredAuth()
+        authState = .guest
+        selectedInstrumentId = "trumpet"
+        referencePitchHz = 440.0
+        sessions.removeAll()
+        ensembles = [
+            EnsembleSummary(id: UUID(), name: "Central Wind Ensemble Brass", role: "student", activeMembers: 4, focus: "Center D5 before range expansion.")
+        ]
+        lastError = nil
+    }
+
     func enterGuestDemo() {
         authState = .guest
     }

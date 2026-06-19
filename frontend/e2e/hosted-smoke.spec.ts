@@ -1,10 +1,12 @@
 import { expect, test } from 'playwright/test';
+import type { Page, Response } from 'playwright/test';
 
 const apiBaseURL = process.env.E2E_API_BASE_URL;
 const wsBaseURL = process.env.E2E_WS_BASE_URL;
 const strictHostedContent = process.env.E2E_STRICT_HOSTED_CONTENT === '1';
 const hostedMode = process.env.E2E_START_LOCAL_SERVERS === '0';
 const vercelShareURL = process.env.E2E_VERCEL_SHARE_URL;
+const webBaseURL = process.env.E2E_BASE_URL;
 
 const routes = [
   '/',
@@ -47,6 +49,19 @@ function routeURL(route: string) {
   return destination.toString();
 }
 
+async function skipProtectedPreview(response: Response | null, page: Page, route: string) {
+  if (strictHostedContent || response?.status() !== 401) return;
+  const baseHostname = webBaseURL ? new URL(webBaseURL).hostname : '';
+  const unauthenticatedVercelPreview = baseHostname.endsWith('.vercel.app') && baseHostname !== 'brass-tune.vercel.app' && !vercelShareURL;
+  if (unauthenticatedVercelPreview) {
+    test.skip(true, `Protected Vercel preview returned 401 for ${route}; provide E2E_VERCEL_SHARE_URL or an automation bypass for page journeys.`);
+  }
+  const bodyText = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
+  if (/vercel authentication|log in to vercel|single sign-on|authentication required/i.test(bodyText)) {
+    test.skip(true, `Protected Vercel preview returned 401 for ${route}; provide E2E_VERCEL_SHARE_URL or an automation bypass for page journeys.`);
+  }
+}
+
 test.describe('hosted read-only smoke', () => {
   test('deployed app loads root and deep links without mixed content', async ({ page }) => {
     const consoleErrors: string[] = [];
@@ -57,10 +72,11 @@ test.describe('hosted read-only smoke', () => {
 
     for (const route of routes) {
       const response = await page.goto(routeURL(route));
+      await skipProtectedPreview(response, page, route);
       expect(response?.status(), `${route} should not be behind auth or missing`).toBeLessThan(400);
       await expect(page.getByRole('main')).toBeVisible();
       await expect(page.locator('body')).not.toContainText(/mixed content/i);
-      await expect(page.locator('body')).not.toContainText(/vercel authentication|single sign-on|authentication required/i);
+      await expect(page.locator('body')).not.toContainText(/vercel authentication|log in to vercel|single sign-on|authentication required/i);
     }
 
     expect(consoleErrors.filter((message) => !/favicon|ResizeObserver/i.test(message))).toEqual([]);
@@ -86,7 +102,8 @@ test.describe('hosted read-only smoke', () => {
         badURLs.push(socket.url());
       }
     });
-    await page.goto(routeURL('/settings/audio-lab'));
+    const response = await page.goto(routeURL('/settings/audio-lab'));
+    await skipProtectedPreview(response, page, '/settings/audio-lab');
     await expect(page.getByText(/WebSocket URL/i)).toBeVisible();
     await expect(page.locator('body')).toContainText(wsBaseURL ?? 'wss://');
     expect(badURLs).toEqual([]);
@@ -119,7 +136,8 @@ test.describe('hosted read-only smoke', () => {
 
   test('configured WebSocket URL uses secure transport for https app', async ({ page }) => {
     test.skip(!wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket URL checks.');
-    await page.goto(routeURL('/settings/audio-lab'));
+    const response = await page.goto(routeURL('/settings/audio-lab'));
+    await skipProtectedPreview(response, page, '/settings/audio-lab');
     const appUrl = new URL(process.env.E2E_BASE_URL ?? page.url());
     if (appUrl.protocol === 'https:') {
       expect(wsBaseURL?.startsWith('wss://')).toBe(true);

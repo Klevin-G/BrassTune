@@ -15,12 +15,15 @@ struct AppRootView: View {
     @EnvironmentObject private var model: AppModel
     @State private var selectedTab: AppTab = .home
     @State private var onboardingPresented: Bool
+    private let resetUITestState: Bool
     private let settingsOnlyLaunch: Bool
+    private let uiTestMode: Bool
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         settingsOnlyLaunch = arguments.contains("UITEST_SETTINGS")
-        let uiTestMode = arguments.contains("UITEST_DEMO") || arguments.contains("UITEST_SETTINGS")
+        resetUITestState = arguments.contains("UITEST_RESET_STATE")
+        uiTestMode = arguments.contains("UITEST_DEMO") || arguments.contains("UITEST_SETTINGS")
         _onboardingPresented = State(initialValue: !uiTestMode)
     }
 
@@ -55,6 +58,12 @@ struct AppRootView: View {
             }
         }
         .task {
+            if resetUITestState {
+                model.resetForUITesting()
+            }
+            if uiTestMode {
+                return
+            }
             await model.restoreSession()
         }
     }
@@ -128,34 +137,55 @@ struct PracticeView: View {
 
     var body: some View {
         List {
-            Section("Practice tuner") {
-                let frame = model.audioEngine.currentFrame
-                let noteLabel = frame?.writtenNoteName.map { "\($0)\(frame?.writtenOctave ?? 0)" } ?? "No lock"
-                let centsLabel = frame?.centsDeviation.map { String(format: "%+.1f cents", $0) } ?? "Silence or no lock"
-                Text(noteLabel)
-                    .font(.system(size: 56, weight: .bold, design: .rounded))
-                    .accessibilityIdentifier("practice.note")
-                Text(centsLabel)
-                Text(frame?.tuningStatus.rawValue.replacingOccurrences(of: "_", with: " ") ?? "ready")
-                Button(model.audioEngine.recording ? "Stop sample take" : "Start sample take") {
-                    if model.audioEngine.recording {
-                        model.stopDemoRecording()
-                    } else {
-                        model.startDemoRecording()
-                    }
-                }
-                .accessibilityIdentifier("practice.recordButton")
-            }
-            Section("Microphone") {
-                Button("Request microphone permission") {
-                    Task { _ = await model.audioEngine.requestMicrophonePermission() }
-                }
-                if model.audioEngine.permissionDenied {
-                    Text("Microphone denied. Open Settings to allow access.")
-                }
-            }
+            PracticeTunerSection(model: model, audioEngine: model.audioEngine)
+            MicrophoneSection(audioEngine: model.audioEngine)
         }
         .navigationTitle("Practice")
+    }
+}
+
+private struct PracticeTunerSection: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var audioEngine: NativeAudioEngine
+
+    var body: some View {
+        Section("Practice tuner") {
+            let frame = audioEngine.currentFrame
+            let noteLabel = frame?.writtenNoteName.map { "\($0)\(frame?.writtenOctave ?? 0)" } ?? "No lock"
+            let centsLabel = frame?.centsDeviation.map { String(format: "%+.1f cents", $0) } ?? "Silence or no lock"
+            Text(noteLabel)
+                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .accessibilityIdentifier("practice.note")
+            Text(centsLabel)
+            Text(frame?.tuningStatus.rawValue.replacingOccurrences(of: "_", with: " ") ?? "ready")
+            Button(audioEngine.recording ? "Stop sample take" : "Start sample take") {
+                if audioEngine.recording {
+                    model.stopDemoRecording()
+                } else {
+                    model.startDemoRecording()
+                }
+            }
+            .accessibilityIdentifier("practice.recordButton")
+            Text(audioEngine.recording ? "Recording" : "Ready")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("practice.recordingState")
+        }
+    }
+}
+
+private struct MicrophoneSection: View {
+    @ObservedObject var audioEngine: NativeAudioEngine
+
+    var body: some View {
+        Section("Microphone") {
+            Button("Request microphone permission") {
+                Task { _ = await audioEngine.requestMicrophonePermission() }
+            }
+            if audioEngine.permissionDenied {
+                Text("Microphone denied. Open Settings to allow access.")
+            }
+        }
     }
 }
 

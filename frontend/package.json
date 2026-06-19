@@ -10,7 +10,7 @@
     "test": "vitest run",
     "e2e": "npm run e2e:local",
     "e2e:local": "playwright test e2e/release-journeys.spec.ts",
-    "e2e:hosted": "node scripts/require-hosted-smoke-env.mjs && E2E_START_LOCAL_SERVERS=0 playwright test e2e/hosted-smoke.spec.ts",
+    "e2e:hosted": "node scripts/run-hosted-smoke.mjs",
     "e2e:hosted:strict": "E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted",
     "smoke:hosted": "npm run e2e:hosted",
     "simulate:devices": "node scripts/device-simulation.mjs"
