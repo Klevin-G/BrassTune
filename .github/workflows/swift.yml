@@ -32,9 +32,13 @@ jobs:
         run: |
           SIM_ID="$(xcrun simctl list -j devices available | ruby -rjson -e 'devices = JSON.parse(STDIN.read).fetch("devices").values.flatten; match = devices.find { |d| d["isAvailable"] && d["name"].start_with?("iPhone") }; abort("No available iPhone simulator") unless match; puts match.fetch("udid")')"
           echo "id=${SIM_ID}" >> "$GITHUB_OUTPUT"
+      - name: Boot selected simulator
+        run: |
+          xcrun simctl boot "${{ steps.simulator.outputs.id }}" || true
+          xcrun simctl bootstatus "${{ steps.simulator.outputs.id }}" -b
       - name: Native app Debug build
         run: xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Debug -destination "id=${{ steps.simulator.outputs.id }}" CODE_SIGNING_ALLOWED=NO build
       - name: Native app unit tests
         run: xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination "id=${{ steps.simulator.outputs.id }}" CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppTests
       - name: Native app UI smoke test
-        run: xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination "id=${{ steps.simulator.outputs.id }}" CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces
+        run: xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneAppUISmoke -destination "id=${{ steps.simulator.outputs.id }}" CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces

@@ -54,7 +54,14 @@ jobs:
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Browser release journeys
         timeout-minutes: 15
+        env:
+          DATABASE_URL: sqlite:///${{ runner.temp }}/brasstune-e2e-${{ github.run_id }}-${{ github.run_attempt }}.db
+          E2E_START_LOCAL_SERVERS: "1"
+          PLAYWRIGHT_HTML_OPEN: never
         run: npm run e2e:local
+      - name: Clean browser journey temp database
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/brasstune-e2e-*.db*
       - name: Upload Playwright artifacts
         uses: actions/upload-artifact@v4
         if: always()

@@ -9,10 +9,12 @@ Date: 2026-06-18
 - Starting deployed branch verified: `main`
 - Original PR continuation baseline: `a77a669460aece83f395f7acda879a67e54f0c12`
 - Hosted-beta handoff recheck HEAD: `81285b653bc5e357f79fe41f04b51e93418f541d`
+- CI repair baseline HEAD: `fc7ee5db54d7dc7a29fce37eeb67acf83fc70011`; Backend and Security Actions passed, Swift failed at Native app unit tests, and Frontend was stuck at Browser release journeys.
 - Merge base with `main`: `652a787c2e643542dfac5911820a2fed01885622`
 - `swift-migration` fact: local branch exists at `2d44e24...` and is behind `main`; current work stayed on a new release branch from `main`.
 - Dirty state at start of hosted-beta continuation: clean at `e56cacd61114cd453b21d3d6d597b702e30e67a9`.
 - Dirty state before closed-beta handoff edits: clean at `81285b653bc5e357f79fe41f04b51e93418f541d`.
+- Dirty state before CI repair edits: clean at `fc7ee5db54d7dc7a29fce37eeb67acf83fc70011`.
 
 ## Toolchain
 
@@ -53,12 +55,12 @@ No secret values were printed or committed. Local/example config names observed:
 | Frontend | `cd frontend && npm test` | Passed: `16 tests`. |
 | Frontend | `cd frontend && npm run build` | Passed; Vite emitted the pre-existing large chunk warning. |
 | Frontend | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities`. |
-| Browser | `cd frontend && npm run e2e:local` | Passed: `35 passed`, `30 skipped` across Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. |
+| Browser | `cd frontend && npm run e2e:local` | Current CI-repair command passed: `30 passed` across Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. Hosted smoke is now an explicit command. |
 | Device simulation | `cd frontend && npm run simulate:devices` | Passed and updated `docs/device-simulation-report.md` plus screenshots. |
 | Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3 tests`. |
 | Hosted production smoke | `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Passed for root, health, CORS, and WebSocket upgrade/app response. |
 | Hosted preview smoke | `BRASSTUNE_WEB_BASE_URL=https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app ... npm run smoke:hosted` | Partial: health, CORS, and WebSocket passed; preview root returned `401` from Vercel Authentication. |
-| Native project list | `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj` | Passed; schemes `BrassTuneApp`, `BrassTuneCore`. |
+| Native project list | `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj` | Passed; schemes `BrassTuneApp`, `BrassTuneAppUISmoke`, `BrassTuneCore`. |
 | Native unit | `xcodebuild test ... -only-testing:BrassTuneAppTests` | Passed on iPhone Air simulator: `3` tests. |
 | Native UI smoke | `xcodebuild test ... -only-testing:BrassTuneAppUITests/...` | Passed on iPhone Air simulator: `1` XCUITest. |
 | Native Debug builds | `xcodebuild clean build ... -configuration Debug ... CODE_SIGNING_ALLOWED=NO` | Passed on iPhone 17 Pro and iPad Pro 13-inch simulators. |

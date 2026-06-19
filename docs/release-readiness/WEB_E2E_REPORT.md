@@ -22,14 +22,14 @@
 ## Results
 
 - `cd frontend && CI=true npm run e2e:local`
-- Final local result: `35 passed`, `30 skipped` for hosted-only checks.
+- Current local CI entrypoint result: `30 passed` across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. `npm run e2e:local` is scoped to `release-journeys.spec.ts`; hosted smoke remains an explicit command.
 - `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted`
 - Final hosted root/API/CORS/WebSocket result: passed.
 - `BRASSTUNE_WEB_BASE_URL=https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted`
 - Branch-preview hosted smoke result: Render health, CORS, and WebSocket passed; preview web root returned `401` from Vercel Authentication.
 - `cd frontend && E2E_BASE_URL=https://brass-tune-9f0sicpxl-aryaswebsites.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted -- --project=chromium`
 - Protected preview Playwright result: backend health, CORS, secure WS URL, and raw WS upgrade tests passed; preview page route tests received `401` from Vercel Authentication. Vercel connector fetch verified the fresh preview deployment is accessible to the connected account.
-- GitHub Frontend workflow passed on final head `81285b653bc5e357f79fe41f04b51e93418f541d`.
+- GitHub Frontend workflow passed earlier on `81285b653bc5e357f79fe41f04b51e93418f541d`, but PR head `fc7ee5db54d7dc7a29fce37eeb67acf83fc70011` was stuck at `Browser release journeys`. The latest CI-fix head must be verified green before merge.
 
 ## Not Covered
 

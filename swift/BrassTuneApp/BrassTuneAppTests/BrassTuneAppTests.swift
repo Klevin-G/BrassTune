@@ -2,8 +2,8 @@ import XCTest
 @testable import BrassTuneApp
 import BrassTuneCore
 
-@MainActor
 final class BrassTuneAppTests: XCTestCase {
+    @MainActor
     func testFixtureRecordingCreatesDeterministicSession() {
         let model = AppModel()
         model.startDemoRecording()
@@ -13,6 +13,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertGreaterThan(model.sessions[0].inTunePercentage, 0)
     }
 
+    @MainActor
     func testAccountDeletionRequiresConfirmation() async {
         let model = AppModel()
         model.sessions = [
