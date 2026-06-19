@@ -104,7 +104,7 @@ struct OnboardingView: View {
                 }
                 Stepper("A4 \(model.referencePitchHz, specifier: "%.1f") Hz", value: $model.referencePitchHz, in: 430...450, step: 0.5)
                 Section("Input") {
-                    Text("Demo mode uses deterministic pitch fixtures. Microphone mode requires permission and physical-device validation.")
+                    Text("Try a guided sample take, or enable the microphone for live tuning. Microphone mode requires permission.")
                     Text("No lock means confidence is too low to save. Unstable pitch means lock exists but cents vary too much.")
                 }
             }
@@ -137,7 +137,7 @@ struct PracticeView: View {
                     .accessibilityIdentifier("practice.note")
                 Text(centsLabel)
                 Text(frame?.tuningStatus.rawValue.replacingOccurrences(of: "_", with: " ") ?? "ready")
-                Button(model.audioEngine.recording ? "Stop recording" : "Record fixture") {
+                Button(model.audioEngine.recording ? "Stop sample take" : "Start sample take") {
                     if model.audioEngine.recording {
                         model.stopDemoRecording()
                     } else {
@@ -187,7 +187,7 @@ struct SessionDetailView: View {
                 Text("\(session.inTunePercentage, specifier: "%.0f")% in tune")
             }
             Section("Relisten") {
-                Text(session.retainedRecordingURL == nil ? "Playback fixture unavailable" : "Playback ready")
+                Text(session.retainedRecordingURL == nil ? "No playback saved for this take" : "Playback ready")
             }
             Section("Export") {
                 ShareLink(item: session.name)
@@ -207,7 +207,7 @@ struct AnalyticsView: View {
         List {
             Section("Progress") {
                 Text("\(model.sessions.count) sessions")
-                Text("Heat map fixture ready")
+                Text("Heat map will appear after more saved takes.")
             }
             Section("Recommendations") {
                 Text("Practice plan: long tones, drone match, then repertoire excerpt.")

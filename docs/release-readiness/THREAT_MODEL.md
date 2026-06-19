@@ -20,7 +20,7 @@ Date: 2026-06-18
 | Storage orphaning | Audio objects remain after bulk row deletion | Demo/admin clear paths call audio delete before deleting session rows | Add periodic storage reconciliation for Supabase buckets |
 | Overbroad CORS preview regex | Unowned Vercel origins can make credentialed requests if they obtain a token | Render config no longer sets broad `https://.*\\.vercel\\.app` by default | Owner must set exact production/preview origins |
 | Oversized media/audio payloads | Browser/backend memory and storage pressure | PCM schema cap, upload limit, local media preflight, batch cap, audit tests | Add ASGI raw JSON request-size middleware and quotas |
-| Live Supabase project drift | Public `SECURITY DEFINER` function may be callable by `anon`/`authenticated` | Documented in Human Actions | Owner-approved remote migration/config change required |
+| Live Supabase project drift | Public `SECURITY DEFINER` function may be callable by `anon`/`authenticated` | Applied `20260618_lock_down_rls_auto_enable`; verified `anon_execute=false` and `authenticated_execute=false` | Periodically rerun Supabase advisors and migration-drift checks |
 
 ## Trust Boundaries
 

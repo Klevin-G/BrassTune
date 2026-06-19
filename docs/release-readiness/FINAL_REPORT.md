@@ -1,10 +1,10 @@
 # BrassTune Final Release Report
 
-Status: hosted web/backend beta hardening is code-complete for repository-actionable, Render-actionable, and Supabase migration-drift items exercised on 2026-06-18. BrassTune is not full release ready because live provider auth, Apple/App Store, physical-device audio, protected-preview browser automation, and native app production-depth gates remain.
+Status: closed-beta candidate, external provider/App Store/device gates remaining.
 
 ## Summary
 
-This pass fixed the remaining hosted Render WebSocket blocker, added repeatable hosted smoke coverage, corrected Vercel-hosted API/WebSocket fallbacks, removed user-facing env-var copy, added a clean Supabase baseline migration, and remediated the live public `SECURITY DEFINER` helper RPC grant drift. No PR merge, release tag, main push, or production frontend deploy was performed.
+This pass fixed the remaining hosted Render WebSocket blocker, added repeatable hosted smoke coverage, corrected Vercel-hosted API/WebSocket fallbacks, removed user-facing env-var copy, added a clean Supabase baseline migration, and remediated the live public `SECURITY DEFINER` helper RPC grant drift. PR #2 is open and marked ready for review. No PR merge, release tag, main push, or production frontend deploy was performed.
 
 ## Hosted Results
 
@@ -13,8 +13,9 @@ This pass fixed the remaining hosted Render WebSocket blocker, added repeatable 
 - Render live deploy `dep-d8q7296gvqtc73a0djm0` is `live` for commit `395a9d29870b25a7aadf161dc1d69c988bdaa841`, trigger `api`, finished `2026-06-18T22:30:13Z`.
 - Root cause: hosted Render installed `uvicorn` without a WebSocket protocol implementation, producing Uvicorn warnings and `404` on WebSocket upgrades. `backend/requirements.txt` now installs `uvicorn[standard]`.
 - Direct hosted checks passed: `/api/health` `200`, CORS preflight for the Vercel preview origin `200`, and `wss://brasstune.onrender.com/ws/pitch` opens and returns `{"type":"error","message":"Authenticate before sending pitch frames."}` for unauthenticated ping.
-- `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` passed.
-- Vercel created preview deployment `dpl_37XVAT1hCjibznU5G4hCB8MUiT2t` for commit `395a9d2`; protected preview routes are fetchable through the Vercel connector, but local Playwright still receives `401` due Vercel Authentication.
+- `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` passed for production root, API health, CORS, and WebSocket.
+- The same hosted smoke against the PR branch preview passed Render health, CORS, and WebSocket, but the preview web root returned `401` because Vercel Authentication protects the preview.
+- Vercel created final preview deployment `dpl_Gspk8kPcVCDcBX5G9WDUByxLrEpr` for commit `81285b653bc5e357f79fe41f04b51e93418f541d`; protected preview routes are fetchable through the Vercel connector, but local Playwright still receives `401` due Vercel Authentication.
 
 ## Supabase Results
 
@@ -35,7 +36,8 @@ This pass fixed the remaining hosted Render WebSocket blocker, added repeatable 
 - Browser E2E local: `cd frontend && CI=true npm run e2e:local` passed, `35 passed`, `30 skipped` hosted-only checks.
 - Device simulation: `cd frontend && npm run simulate:devices` passed and refreshed `docs/device-simulation-report.md`.
 - Swift package: `cd swift/BrassTuneCore && swift test` passed, `3` Swift Testing tests.
-- Xcode/native read-only scout passed iPhone Debug, iPhone Release, iPad Debug, app unit tests, and UI smoke on dynamically discovered simulators with unsigned simulator builds.
+- Xcode/native passed clean iPhone Debug (`/tmp/brasstune-dd-debug-iphone-handoff-final`), clean iPhone Release (`/tmp/brasstune-dd-release-iphone-handoff-final`), clean iPad Debug (`/tmp/brasstune-dd-debug-ipad-handoff-final`), app unit tests (`3` tests), and UI smoke (`1` XCUITest) on dynamically discovered simulators with unsigned simulator builds.
+- Native Settings now surfaces Data/export/delete controls first, and the iPhone UI smoke follows the compact `More` tab path to Settings.
 
 ## Not Verified
 
@@ -47,4 +49,4 @@ This pass fixed the remaining hosted Render WebSocket blocker, added repeatable 
 
 ## Current Status
 
-Hosted web/backend can be treated as a closed-beta candidate for owner-controlled testing, with external provider/App Store/device gates remaining. Do not call the full product release ready.
+Hosted web/backend can be treated as a closed-beta candidate for owner-controlled testing, with external provider/App Store/device gates remaining. Do not describe the full product as complete until the live-provider, App Store, physical-device, and native production-depth gates have real evidence.

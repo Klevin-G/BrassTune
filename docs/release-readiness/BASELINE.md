@@ -7,10 +7,12 @@ Date: 2026-06-18
 - Working directory: `/Users/aryasalem/Downloads/BrassTune`
 - Current branch: `arya/release-readiness-hardening`
 - Starting deployed branch verified: `main`
-- Current HEAD at continuation baseline: `a77a669460aece83f395f7acda879a67e54f0c12`
+- Original PR continuation baseline: `a77a669460aece83f395f7acda879a67e54f0c12`
+- Hosted-beta handoff recheck HEAD: `81285b653bc5e357f79fe41f04b51e93418f541d`
 - Merge base with `main`: `652a787c2e643542dfac5911820a2fed01885622`
 - `swift-migration` fact: local branch exists at `2d44e24...` and is behind `main`; current work stayed on a new release branch from `main`.
-- Dirty state at start of hosted-beta continuation: clean at `e56cacd61114cd453b21d3d6d597b702e30e67a9`. Current working tree contains intentional post-deploy docs/evidence updates until the final commit is created.
+- Dirty state at start of hosted-beta continuation: clean at `e56cacd61114cd453b21d3d6d597b702e30e67a9`.
+- Dirty state before closed-beta handoff edits: clean at `81285b653bc5e357f79fe41f04b51e93418f541d`.
 
 ## Toolchain
 
@@ -22,7 +24,7 @@ Date: 2026-06-18
 - Swift: `Apple Swift version 6.2.3`
 - Xcode: `Xcode 26.2`, build `17C52`
 - iOS runtime: `iOS 26.2 (23C54)`
-- Available simulators verified: `iPhone 17`, `iPhone 17 Pro`, `iPhone 17 Pro Max`, `iPad Pro 11-inch (M5)`
+- Available simulators verified: `iPhone 17`, `iPhone 17 Pro`, `iPhone 17 Pro Max`, `iPhone Air`, `iPad Pro 13-inch (M5)`, `iPad Pro 11-inch (M5)`
 
 ## Existing CI Workflows
 
@@ -47,17 +49,20 @@ No secret values were printed or committed. Local/example config names observed:
 | Area | Command | Result |
 |---|---|---|
 | Backend | `cd backend && python -m pytest` | Failed: `python` command not found. |
-| Backend | `cd backend && .venv/bin/python -m pytest` | Passed after fixes: `47 passed, 5 warnings`. |
-| Frontend | `cd frontend && npm test` | Passed: `15 tests` across `5` files. |
+| Backend | `cd backend && .venv/bin/python -m pytest` | Passed after fixes: `48 passed`. |
+| Frontend | `cd frontend && npm test` | Passed: `16 tests`. |
 | Frontend | `cd frontend && npm run build` | Passed; Vite emitted the pre-existing large chunk warning. |
 | Frontend | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities`. |
-| Browser | `cd frontend && npm run e2e:local` | Passed: `35 passed`, `10 skipped` across Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. |
+| Browser | `cd frontend && npm run e2e:local` | Passed: `35 passed`, `30 skipped` across Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. |
 | Device simulation | `cd frontend && npm run simulate:devices` | Passed and updated `docs/device-simulation-report.md` plus screenshots. |
 | Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3 tests`. |
-| Hosted browser smoke | `cd frontend && E2E_BASE_URL=... E2E_API_BASE_URL=... E2E_WS_BASE_URL=... npm run e2e:hosted` | Passed: `15 passed`. Strict branch-content checks remain post-deploy. |
+| Hosted production smoke | `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Passed for root, health, CORS, and WebSocket upgrade/app response. |
+| Hosted preview smoke | `BRASSTUNE_WEB_BASE_URL=https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app ... npm run smoke:hosted` | Partial: health, CORS, and WebSocket passed; preview root returned `401` from Vercel Authentication. |
 | Native project list | `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj` | Passed; schemes `BrassTuneApp`, `BrassTuneCore`. |
-| Native Debug/unit/UI | `xcodebuild test ... -only-testing:BrassTuneAppTests -only-testing:BrassTuneAppUITests/...` | Passed on dynamically selected iPhone simulator: `3 unit`, `1 UI`. |
-| Native Release build | `xcodebuild ... -configuration Release ... CODE_SIGNING_ALLOWED=NO build` | Passed on dynamically selected iPhone simulator. |
+| Native unit | `xcodebuild test ... -only-testing:BrassTuneAppTests` | Passed on iPhone Air simulator: `3` tests. |
+| Native UI smoke | `xcodebuild test ... -only-testing:BrassTuneAppUITests/...` | Passed on iPhone Air simulator: `1` XCUITest. |
+| Native Debug builds | `xcodebuild clean build ... -configuration Debug ... CODE_SIGNING_ALLOWED=NO` | Passed on iPhone 17 Pro and iPad Pro 13-inch simulators. |
+| Native Release build | `xcodebuild clean build ... -configuration Release ... CODE_SIGNING_ALLOWED=NO` | Passed on iPhone 17 Pro simulator. |
 | Security | `gitleaks git --redact=100 --verbose .` | Passed: 25 commits scanned, no leaks found. |
 | Security | `pip-audit ...` | Passed: no known vulnerabilities found, five documented ignores. |
 | Security | `bandit -r app -x app/tests` | Passed: no issues identified. |

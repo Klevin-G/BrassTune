@@ -11,6 +11,20 @@ struct SettingsView: View {
 
     var body: some View {
         List {
+            Section("Data") {
+                ShareLink("Export data", item: "BrassTune export")
+                TextField("Type delete my account", text: $deletionConfirmation)
+                Text("Deletion requires the confirmation phrase.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button("Delete account", role: .destructive) {
+                    Task { await model.deleteAccount(confirmation: deletionConfirmation) }
+                }
+                .accessibilityIdentifier("settings.deleteAccount")
+                NavigationLink("Privacy Policy") { LegalDetailView(kind: .privacy) }
+                NavigationLink("Terms of Service") { LegalDetailView(kind: .terms) }
+                NavigationLink("Support") { LegalDetailView(kind: .support) }
+            }
             Section("Tuner") {
                 Picker("Instrument", selection: $model.selectedInstrumentId) {
                     Text("Trumpet in Bb").tag("trumpet")
@@ -63,18 +77,6 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings.appleSignIn")
                 Button("Continue as guest") { model.enterGuestDemo() }
                 Button("Sign out") { model.signOut() }
-            }
-            Section("Data") {
-                NavigationLink("Privacy Policy") { LegalDetailView(kind: .privacy) }
-                NavigationLink("Terms of Service") { LegalDetailView(kind: .terms) }
-                NavigationLink("Support") { LegalDetailView(kind: .support) }
-                ShareLink("Export data", item: "BrassTune export")
-                TextField("Type delete my account", text: $deletionConfirmation)
-                Button("Delete account", role: .destructive) {
-                    Task { await model.deleteAccount(confirmation: deletionConfirmation) }
-                }
-                .disabled(deletionConfirmation.lowercased() != "delete my account")
-                .accessibilityIdentifier("settings.deleteAccount")
             }
             if let error = model.lastError {
                 Section("Status") {

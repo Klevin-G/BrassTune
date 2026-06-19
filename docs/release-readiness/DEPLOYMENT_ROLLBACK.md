@@ -42,5 +42,6 @@
 ## Current Deployment Notes
 
 - Hosted WebSocket handshake passed after Render deployed exact commit `395a9d29870b25a7aadf161dc1d69c988bdaa841`.
+- After PR merge, run `POST_MERGE_PRODUCTION_CHECKLIST.md` before inviting production closed-beta testers.
 - Protected Vercel preview page journeys still need an automation bypass; direct connector fetch and hosted API/WS smoke passed.
 - `render.yaml` no longer provides a broad `https://.*\.vercel\.app` CORS regex by default. Configure exact production and preview origins before deployment.

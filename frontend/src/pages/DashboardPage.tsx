@@ -88,7 +88,7 @@ export function DashboardPage() {
         <MetricTile label="Avg error" value={`${(latestPoint?.avg_abs_cents ?? 0).toFixed(1)}c`} detail="recent sessions" icon={Gauge} tone="gold" />
         <MetricTile label="In tune" value={`${Math.round(latestPoint?.in_tune_percentage ?? 0)}%`} detail="within +/-5 cents" icon={Percent} tone="green" />
         <MetricTile label="Practice" value={`${minutes(progress?.total_practice_time_seconds)} min`} detail={progress?.consistency.practice_days_label} icon={CalendarClock} />
-        <MetricTile label="Sessions" value={`${progress?.session_count ?? 0}`} detail="stored locally" icon={Music2} />
+        <MetricTile label="Sessions" value={`${progress?.session_count ?? 0}`} detail="saved reviews" icon={Music2} />
       </div>
       <div className="two-column-grid">
         <SectionCard title="Full-range heat map" eyebrow="Written notes" action={<Link to="/analytics">Open analytics</Link>}>

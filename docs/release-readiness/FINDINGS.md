@@ -29,6 +29,7 @@
 | High | Hosted Render WebSocket failed with `404`. | Render logs showed Uvicorn warning `No supported WebSocket library detected`; direct WebSocket failed pre-upgrade. | Added `uvicorn[standard]`, deployed exact commit `395a9d2`, and verified `/ws/pitch` opens with app-level auth-required response. |
 | High | Supabase clean baseline was missing and live project had public helper RPC drift. | Supabase MCP showed no public app tables and `rls_auto_enable()` executable by `anon`/`authenticated`. | Added/applied baseline and readiness migrations; added/applied RPC lockdown migration; verified RLS tables and revoked execute grants. |
 | Medium | Vercel-hosted app shell could fall back to same-origin API/WS if Vite envs were absent. | Protected preview Audio Lab showed same-origin backend/WS before the new deployment. | Client now defaults Vercel-hosted builds to Render API/WS when explicit Vite env vars are absent. |
+| Medium | Native Settings account deletion was brittle to discover on compact iPhone tabs. | Focused XCUITest initially could not reach `settings.deleteAccount`; iPhone compact tab bars place Settings under `More`. | Settings Data/export/delete controls now appear first, and XCUITest follows the `More` route before asserting the deletion control. |
 
 ## Remaining Failed Or Blocked Gates
 
