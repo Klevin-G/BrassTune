@@ -54,31 +54,31 @@ export function useAudioRecorder() {
     startedAtRef.current = Date.now();
     chunksRef.current = [];
     const promise = (async () => {
-    if (demoMode) {
-      setStatus('recording');
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setStatus('unavailable');
-      setError('Audio playback capture is unavailable in this browser.');
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-      streamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorderRef.current = recorder;
-      recorder.start();
-      setStatus('recording');
-    } catch {
-      setStatus('unavailable');
-      setError('Microphone permission was denied, so this session may not include playback audio.');
-    } finally {
-      startPromiseRef.current = null;
-    }
+      try {
+        if (demoMode) {
+          setStatus('recording');
+          return;
+        }
+        if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+          setStatus('unavailable');
+          setError('Audio playback capture is unavailable in this browser.');
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+        streamRef.current = stream;
+        const recorder = new MediaRecorder(stream);
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunksRef.current.push(event.data);
+        };
+        recorderRef.current = recorder;
+        recorder.start();
+        setStatus('recording');
+      } catch {
+        setStatus('unavailable');
+        setError('Microphone permission was denied, so this session may not include playback audio.');
+      } finally {
+        startPromiseRef.current = null;
+      }
     })();
     startPromiseRef.current = promise;
     return promise;

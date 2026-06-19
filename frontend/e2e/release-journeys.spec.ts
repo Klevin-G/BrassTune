@@ -70,14 +70,24 @@ test('demo recording creates a reviewable session with playback surface', async 
   const startButton = page.getByRole('button', { name: /start recording/i });
   await expect(startButton).toBeVisible();
   await expect(startButton).toBeEnabled();
+  const sessionStarted = page.waitForResponse((response) => {
+    const request = response.request();
+    return request.method() === 'POST' && /\/api\/sessions\/start$/.test(new URL(response.url()).pathname) && response.ok();
+  });
   await startButton.click();
+  const startedSession = await (await sessionStarted).json() as { id: number };
   const stopButton = page.getByRole('button', { name: /stop recording/i });
   await expect(stopButton).toBeVisible({ timeout: 15_000 });
   await expect.poll(async () => page.locator('.note-history .history-row').count(), { timeout: 15_000 }).toBeGreaterThan(0);
+  const sessionStopped = page.waitForResponse((response) => {
+    const request = response.request();
+    return request.method() === 'POST' && response.url().includes(`/api/sessions/${startedSession.id}/stop`) && response.ok();
+  });
   await stopButton.click();
+  await sessionStopped;
   const reviewLink = page.getByRole('link', { name: /review session/i });
-  await expect(reviewLink).toBeVisible();
-  await expect(reviewLink).toHaveAttribute('href', /\/sessions\/\d+/);
+  await expect(reviewLink).toBeVisible({ timeout: 20_000 });
+  await expect(reviewLink).toHaveAttribute('href', new RegExp(`/sessions/${startedSession.id}$`));
   await reviewLink.scrollIntoViewIfNeeded();
   await Promise.all([
     page.waitForURL(/\/sessions\/\d+/, { timeout: 15_000 }),

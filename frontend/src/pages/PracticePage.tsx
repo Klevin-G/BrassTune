@@ -45,6 +45,12 @@ export function PracticePage() {
     setTransitionBusy(true);
     try {
       const sessionId = recorder.activeSession?.id;
+      if (sessionId && demoMode) {
+        const uploadPromise = audioRecorder.stopAndUpload(sessionId, true);
+        const summary = await recorder.stop();
+        void uploadPromise.catch(() => undefined);
+        return summary;
+      }
       if (sessionId) {
         await audioRecorder.stopAndUpload(sessionId, demoMode);
       }

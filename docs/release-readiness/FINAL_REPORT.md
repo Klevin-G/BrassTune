@@ -6,7 +6,7 @@ Status: closed-beta candidate, external provider/App Store/device gates remainin
 
 The hosted beta pass fixed the Render WebSocket blocker, added repeatable hosted smoke coverage, corrected Vercel-hosted API/WebSocket fallbacks, removed user-facing env-var copy, added a clean Supabase baseline migration, and remediated the live public `SECURITY DEFINER` helper RPC grant drift.
 
-PR #2 head `d05fe773499393ad50af15c59322f66adeb98c11` was not merge-ready because Swift failed at `Native app UI smoke test`. The follow-up fix made `PracticeView` observe nested audio-engine state, reset UI-test app state, use stable accessibility identifiers, and isolate the UI smoke simulator install. GitHub Actions were then verified green on PR head `91ca605b64a58e582b2e8f6b2d06c9f80ba3b6c7`: Backend, Frontend, Security, Swift, and Vercel all passed. If this report changes after that commit, re-check the latest PR head before merging.
+PR #2 head `d05fe773499393ad50af15c59322f66adeb98c11` was not merge-ready because Swift failed at `Native app UI smoke test`. The follow-up fix made `PracticeView` observe nested audio-engine state, reset UI-test app state, use stable accessibility identifiers, and isolate the UI smoke simulator install. GitHub Actions were then verified green on PR head `91ca605b64a58e582b2e8f6b2d06c9f80ba3b6c7`: Backend, Frontend, Security, Swift, and Vercel all passed. A later docs-only head `0f2e46a457ec2a47b0110cba31e3f455e8df587c` exposed a mobile WebKit timing issue in the demo recording journey; the current frontend fix stops demo sessions before waiting on synthetic audio upload and binds the journey to start/stop API responses. Re-check the latest PR head before merging.
 
 ## Hosted Results
 
@@ -35,7 +35,7 @@ PR #2 head `d05fe773499393ad50af15c59322f66adeb98c11` was not merge-ready becaus
 - Frontend unit: `cd frontend && npm test` passed, `16 passed`.
 - Frontend build: `cd frontend && npm run build` passed with existing chunk-size warning.
 - Frontend audit: `cd frontend && npm audit --omit=dev` passed, `0 vulnerabilities`.
-- Browser E2E local: `cd frontend && CI=true npm run e2e:local` now runs only local release journeys and passed, `30 passed`; hosted smoke remains explicit through `npm run e2e:hosted` / `npm run smoke:hosted`.
+- Browser E2E local: `cd frontend && CI=true npm run e2e:local` now runs only local release journeys and passed, `30 passed`; hosted smoke remains explicit through `npm run e2e:hosted` / `npm run smoke:hosted`. The final local rerun after the mobile WebKit timing fix also passed `30 passed`.
 - Hosted preview smoke: `BRASSTUNE_WEB_BASE_URL=https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` passed with `15 passed`, `20 skipped` for protected preview page journeys.
 - Device simulation: `cd frontend && npm run simulate:devices` passed and refreshed `docs/device-simulation-report.md`.
 - Swift package: `cd swift/BrassTuneCore && swift test` passed, `3` Swift Testing tests.

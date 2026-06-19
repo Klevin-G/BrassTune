@@ -6,7 +6,7 @@
 | Web unit tests | Web user | Local | Vitest | `cd frontend && npm test` | Passed: `16 tests` | Terminal output | None |
 | Web build/typecheck | Web app | Local | npm/Vite | `cd frontend && npm run build` | Passed | Terminal output | Large chunk warning only |
 | Frontend dependency audit | Web app | Local | npm audit | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities` | Terminal output | None |
-| Browser critical routes | Guest | Local Chromium/Firefox/WebKit/mobile | Playwright | `cd frontend && CI=true npm run e2e:local` | Passed: `30 passed` | `frontend/e2e/release-journeys.spec.ts` | Hosted-only API/WS checks run through `npm run e2e:hosted` / `npm run smoke:hosted` |
+| Browser critical routes | Guest | Local Chromium/Firefox/WebKit/mobile | Playwright | `cd frontend && CI=true npm run e2e:local` | Passed: `30 passed` after mobile WebKit demo recording timing fix | `frontend/e2e/release-journeys.spec.ts` | Hosted-only API/WS checks run through `npm run e2e:hosted` / `npm run smoke:hosted`; verify latest Frontend Action before merge |
 | Auth reset/Apple surfaces | Guest/auth user | Local mocked Supabase config | Playwright | `npm run e2e:local` | Passed for disabled/mocked surfaces | `WEB_E2E_REPORT.md` | Live Supabase/Apple provider not configured |
 | Demo tuner recording/session review | Guest | Local browser | Playwright | `npm run e2e:local` | Passed across desktop/mobile browser projects | `WEB_E2E_REPORT.md` | Real microphone quality not covered |
 | Settings export before delete | Signed-in surface | Local browser | Playwright | `npm run e2e:local` | Passed | `WEB_E2E_REPORT.md` | Live deletion requires credentials |
