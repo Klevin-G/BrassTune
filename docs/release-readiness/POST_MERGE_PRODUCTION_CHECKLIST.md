@@ -2,7 +2,7 @@
 
 Use this only after PR #2 is merged into `main`. Do not merge, tag, or promote production from this checklist without owner approval.
 
-Precondition: the latest PR #2 head must have green Backend, Frontend, Security, and Swift GitHub Actions. Head `d05fe773499393ad50af15c59322f66adeb98c11` is not eligible because Swift failed at Native app UI smoke; verify the post-fix head before merging.
+Precondition: the latest PR #2 head must have green Backend, Frontend, Security, Swift, and Vercel checks. PR head `91ca605b64a58e582b2e8f6b2d06c9f80ba3b6c7` was verified green before the final docs consistency pass; re-check the latest head if any later commit is pushed before merging.
 
 ## Confirm Deployed State
 

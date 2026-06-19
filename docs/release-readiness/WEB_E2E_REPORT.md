@@ -29,7 +29,7 @@
 - Branch-preview hosted smoke result: passed with `15 passed`, `20 skipped`; Render health, CORS, and raw WebSocket upgrade passed, while preview page journeys and page-derived WebSocket URL checks were skipped because Vercel Authentication returns the Vercel login page without a share URL or automation bypass.
 - `cd frontend && E2E_BASE_URL=https://brass-tune-9f0sicpxl-aryaswebsites.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted -- --project=chromium`
 - Protected preview Playwright result: backend health, CORS, secure WS URL, and raw WS upgrade tests passed; preview page route tests received `401` from Vercel Authentication. Vercel connector fetch verified the fresh preview deployment is accessible to the connected account.
-- GitHub Frontend workflow is green on PR head `d05fe773499393ad50af15c59322f66adeb98c11`. The overall PR still requires Swift to pass on the post-fix head before merge.
+- GitHub Frontend workflow is green on PR head `91ca605b64a58e582b2e8f6b2d06c9f80ba3b6c7`. The overall PR still requires the latest head to stay green before merge.
 
 ## Not Covered
 
