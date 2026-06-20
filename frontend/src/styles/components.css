@@ -107,7 +107,8 @@
 }
 
 select,
-input {
+input,
+output {
   min-width: 0;
   min-height: var(--tap);
   padding: 0 12px;
@@ -1010,6 +1011,11 @@ meter {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: rgba(2, 4, 7, 0.48);
+}
+
+.score-preview-stack-focused .score-preview-frame {
+  min-height: min(78vh, 820px);
+  background: rgba(2, 4, 7, 0.76);
 }
 
 .score-preview-frame iframe,

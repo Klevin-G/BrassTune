@@ -104,7 +104,7 @@ test.describe('hosted read-only smoke', () => {
     });
     const response = await page.goto(routeURL('/settings/audio-lab'));
     await skipProtectedPreview(response, page, '/settings/audio-lab');
-    await expect(page.getByText(/Pitch stream/i)).toBeVisible();
+    await expect(page.getByText(/Cloud sync stream/i)).toBeVisible();
     await expect(page.getByText(/Connection diagnostics/i)).toBeVisible();
     expect(badURLs).toEqual([]);
   });

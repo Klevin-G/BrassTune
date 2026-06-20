@@ -2,8 +2,8 @@
 
 Date: 2026-06-20
 Branch: `arya/release-readiness-hardening`
-Baseline SHA: `9b3766bc4241843c52b2a703c7ec923b4105f540`
-Current state: local uncommitted worktree.
+Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
+Current state: local uncommitted worktree on top of `36b29c8cff85f3364648763fd36d6472fb1ef8a3`; exact-SHA CI/preview pending after commit and push.
 
 ## Agent Wave
 
@@ -26,6 +26,9 @@ Current state: local uncommitted worktree.
 | Recorder stream reuse | `frontend/src/hooks/useAudioRecorder.ts`, `frontend/src/pages/PracticePage.tsx` | Allows `MediaRecorder` to reuse the live pitch stream and negotiates supported MIME types. |
 | Auth safety/providers | `backend/app/api/auth.py`, `backend/app/tests/test_hardening.py`, `frontend/src/state/AuthContext.tsx`, `frontend/src/pages/AuthPage.tsx`, `frontend/src/styles/components.css` | Blocks same-email provider takeover and adds Google OAuth path/UI. |
 | Hosted smoke | `scripts/hosted-smoke.mjs` | Adds WS query-token and bad-Origin negative probes. |
+| Ensemble aggregate privacy | `backend/app/api/routes.py`, `backend/app/tests/test_hardening.py` | Limits ensemble summary/report sessions to active members' post-membership practice history. |
+| Score Practice and settings affordances | `frontend/src/pages/ScorePracticePage.tsx`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/styles/components.css` | Makes focus preview functional and removes editable styling from fixed threshold copy. |
+| Hosted smoke copy alignment | `frontend/e2e/hosted-smoke.spec.ts`, `frontend/src/pages/AudioLabPage.tsx` | Keeps hosted route assertions aligned with current Audio Lab user-facing copy. |
 | Evidence/docs | `docs/release-readiness/*`, `docs/deployment.md`, `docs/device-simulation-report.md`, `docs/assets/device-simulation/*` | Updates canonical evidence, current local matrix, and generated device screenshots. |
 
 ## Review Rules

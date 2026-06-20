@@ -702,6 +702,24 @@ def _group_member_ids(db: Session, group_id: int):
     return [member.user_id for member in db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()]
 
 
+def _group_scoped_sessions(db: Session, group_id: int) -> List[PracticeSession]:
+    members = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()
+    sessions_by_id = {}
+    for member in members:
+        rows = (
+            db.query(PracticeSession)
+            .options(joinedload(PracticeSession.note_events))
+            .filter(
+                PracticeSession.user_id == member.user_id,
+                PracticeSession.started_at >= member.created_at,
+            )
+            .all()
+        )
+        for session in rows:
+            sessions_by_id[session.id] = session
+    return list(sessions_by_id.values())
+
+
 def _can_view_group(user: User, group: Group, db: Session) -> bool:
     if _can_manage_group(user, group):
         return True
@@ -808,16 +826,14 @@ def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(
 @router.get("/ensemble/groups/{group_id}/summary")
 def ensemble_group_summary(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_group_manager(db, group_id, auth)
-    member_ids = _group_member_ids(db, group_id)
-    sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
+    sessions = _group_scoped_sessions(db, group_id)
     return calculate_ensemble_summary(group_id, sessions)
 
 
 @router.get("/ensemble/groups/{group_id}/report")
 def ensemble_group_report(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_group_manager(db, group_id, auth)
-    member_ids = _group_member_ids(db, group_id)
-    sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
+    sessions = _group_scoped_sessions(db, group_id)
     return generate_rehearsal_report(group_id, sessions)
 
 

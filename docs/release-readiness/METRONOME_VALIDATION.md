@@ -20,7 +20,7 @@ Updated: 2026-06-20 UTC.
 ## Automated Evidence
 
 - `frontend/src/domain/metronome.test.ts` covers BPM bounds, signature normalization, tick scheduling, subdivision timing, tap tempo, ramp behavior, and timing-stat calculation.
-- `cd frontend && npm test` passed: `8` test files, `27` tests.
+- `cd frontend && npm test` passed: `9` test files, `34` tests.
 - `cd frontend && npm run build` passed.
 - Full local E2E and device simulation passed after mobile overlap fixes.
 - Rendered browser spot check verified Tap tempo updates BPM/status with no console errors or framework overlay.

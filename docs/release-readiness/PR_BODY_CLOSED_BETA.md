@@ -14,14 +14,14 @@ Not full release ready until live provider, Apple/App Store/legal, native produc
 - Frontend tests/build/audit/E2E and GitHub Action
 - Security GitHub Action
 - Swift package/native simulator checks locally after final fix
-- GitHub Backend, Frontend, Security, Swift, and Vercel checks were green on PR head `9b3766bc4241843c52b2a703c7ec923b4105f540` before the current local microphone/auth/smoke changes.
+- GitHub Backend, Frontend, Security, and Swift checks were green on PR head `36b29c8cff85f3364648763fd36d6472fb1ef8a3` before the current local ensemble privacy, Score Practice focus, hosted-smoke copy, Settings affordance, and evidence-doc changes.
 - Vercel status was green on that baseline PR head.
 - Production root, Render health, CORS, and basic WebSocket connectivity passed as baseline checks.
 - Enhanced production WebSocket hardening smoke currently fails because production Render is stale relative to the local backend hardening.
 
 ## Current CI gate
 
-PR head `9b3766bc4241843c52b2a703c7ec923b4105f540` was verified green before this local pass. The current local worktree adds browser-local guest microphone pitch detection, safer provider identity linking, Google OAuth wiring, and stricter hosted WebSocket smoke checks. Re-check the latest pushed SHA and hosted smoke before updating the live PR body, merging, or deploying.
+PR head `36b29c8cff85f3364648763fd36d6472fb1ef8a3` was verified green before this local pass. The current local worktree adds ensemble pre-membership report scoping, a working Score Practice focus control, hosted-smoke copy alignment, a non-editable Settings threshold affordance, refreshed device-simulation artifacts, and updated release evidence. Re-check the latest pushed SHA, exact-SHA preview, and hosted smoke before updating the live PR body, merging, or deploying.
 
 ## Remaining external gates
 

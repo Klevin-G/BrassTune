@@ -87,7 +87,7 @@ export function SettingsPage() {
             </label>
             <label className="field">
               <span>In-tune threshold</span>
-              <input type="text" value="+/-5 cents" readOnly />
+              <output>+/-5 cents</output>
             </label>
           </div>
         </SectionCard>

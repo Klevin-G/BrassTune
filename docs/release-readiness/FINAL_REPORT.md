@@ -1,19 +1,23 @@
 # BrassTune Final Report
 
-Updated: 2026-06-20T16:12:23Z
+Updated: 2026-06-20T18:29:25Z
 Branch: `arya/release-readiness-hardening`
-Starting SHA: `9b3766bc4241843c52b2a703c7ec923b4105f540`
-Current state: local commit-ready worktree on top of the starting SHA; push and exact-SHA CI are the next repository gate.
+Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
+Current state: local fixes on top of the remote head; commit, push, exact-SHA CI, and exact-SHA Vercel preview are the next repository gates.
 
 ## Summary
 
-This pass fixed two repository-actionable release blockers and added stronger hosted smoke coverage:
+This pass preserved the prior release hardening and fixed additional bounded P1 issues found by the scout wave:
 
 - Guest live microphone pitch detection no longer depends on Supabase, login, backend availability, or `/ws/pitch`; the browser now derives pitch frames locally from microphone PCM and guest recordings stay device-local.
 - Live pitch and recording can share the active microphone stream, reducing duplicate permission/device contention.
 - Backend Supabase identity sync no longer links a provider identity to a local account by email alone.
 - Web Google OAuth is wired through Supabase with minimal `openid email profile` scopes and a visible provider action.
 - Hosted smoke now fails stale Render deployments that still accept query-token WebSocket auth or unexpected origins.
+- Ensemble aggregate summary/report endpoints now exclude sessions from before a student's active membership date.
+- Score Practice focus mode is no longer a dead control; it toggles a focused preview state with accessible pressed state.
+- Hosted-smoke page assertions now match the current Audio Lab copy.
+- The fixed in-tune threshold in Settings no longer looks like an editable text field.
 
 No production deploy, merge, or tag was performed in this pass.
 
@@ -25,18 +29,18 @@ See `TEST_MATRIX.md` and `release-evidence.json` for the full command matrix. Cu
 - Frontend build/typecheck: passed.
 - Local Playwright journeys/accessibility: `75 passed`.
 - Device simulation: passed and refreshed tracked screenshots/report.
-- Backend full suite: `59 passed`.
-- Backend hardening target: `43 passed`.
+- Backend full suite: `60 passed`.
+- Backend hardening target: `44 passed`.
 - `npm audit --omit=dev`: `0 vulnerabilities`.
 - `.venv-audit` `pip_audit --local`: no known vulnerabilities.
 - Requirements-file audit: the exact `.venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` command is blocked because `.venv` is Python 3.9.6 and the backend dependency floor is Python 3.10+; equivalent Python 3.12 evidence passed by resolving `requirements-dev.txt` with `uv pip compile --python ...` and auditing the resolved file with `pip-audit --no-deps --disable-pip`.
 - Bandit: passed.
 - Swift package: `3 passed`.
-- XcodeBuildMCP iPhone 17 simulator Debug build: passed.
-- XcodeBuildMCP app unit tests: `7 passed`.
-- XcodeBuildMCP UI smoke: `1 passed`.
+- XcodeBuildMCP app unit tests on booted iPhone 16e simulator: `7 passed`.
+- XcodeBuildMCP UI smoke on booted iPhone 16e simulator: `1 passed`.
+- Hosted-smoke spec local sanity: `1 passed`, `6` hosted-only checks skipped as expected.
 
-The GitHub connector verified PR #2 was open, mergeable, non-draft, and green on Backend, Frontend, Security, Swift, and Vercel for the starting SHA `9b3766bc4241843c52b2a703c7ec923b4105f540`. That remote evidence does not cover the local changes from this pass until they are committed, pushed, and CI completes on the exact new SHA.
+Authenticated GitHub API checks verified PR #2 was open, mergeable clean, non-draft, and green on Backend, Frontend, Security, and Swift for `36b29c8cff85f3364648763fd36d6472fb1ef8a3`. Vercel deployment listing showed the latest branch preview still points to `9b3766bc4241843c52b2a703c7ec923b4105f540`, not `36b29c8`. Remote CI and preview evidence do not cover the local changes from this pass until they are committed, pushed, and CI/deployment complete on the exact new SHA.
 
 ## Hosted Status
 
@@ -71,6 +75,6 @@ External or owner-gated:
 
 ## Release Decision
 
-Current status: `web closed-beta candidate pending owner-approved Render deployment and final production smoke; native engineering parity in progress; external provider/App Store/device gates remaining`.
+Current status: `local web closed-beta candidate worktree pending commit/push, exact-SHA CI, exact-SHA preview, owner-approved Render deployment, and final hosted smoke; native engineering parity in progress; external provider/App Store/device gates remaining`.
 
-Do not call this release-ready and do not merge/deploy until the changes are committed, pushed, CI is green on the exact new SHA, and hosted smoke passes after owner-approved production backend/frontend deployment.
+Do not call this release-ready and do not merge/deploy until the changes are committed, pushed, CI is green on the exact new SHA, an exact-SHA preview is verified, and hosted smoke passes after owner-approved production backend/frontend deployment.

@@ -151,7 +151,7 @@ export function AudioLabPage() {
                   <Waves size={18} />
                 </span>
                 <div>
-                  <h3>Backend stream</h3>
+                  <h3>Cloud sync stream</h3>
                   <span>{wsUrl ? 'Ready to check' : 'Checking'}</span>
                 </div>
               </div>

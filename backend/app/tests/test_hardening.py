@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.auth import AuthContext, _sync_supabase_user
-from app.api.routes import _filtered_events, _read_limited_body
+from app.api.routes import _filtered_events, _group_scoped_sessions, _read_limited_body
 from app.core.analytics.stats import build_instrument_heatmap, calculate_most_improved_notes, calculate_note_stats
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
@@ -569,6 +569,35 @@ def test_ensemble_aggregate_reports_are_manager_only():
         assert student_report.status_code == 403
         director_report = client.get("/api/ensemble/groups/1/report", headers={"Authorization": "Bearer dev-user-2"})
         assert director_report.status_code == 200
+
+
+def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():
+    db = _test_db()
+    try:
+        director = User(id=80, username="director80", name="Director", role="director", primary_instrument_id="trumpet")
+        student = User(id=81, username="student81", name="Student", role="student", primary_instrument_id="trumpet")
+        group = Group(id=82, name="Wind Ensemble", director_user_id=director.id, created_at=dt.datetime(2026, 6, 1))
+        db.add_all([director, student, group])
+        db.commit()
+        before = _session(db, student.id, "trumpet", dt.datetime(2026, 6, 5))
+        after = _session(db, student.id, "trumpet", dt.datetime(2026, 6, 12))
+        member = GroupMember(
+            group_id=group.id,
+            user_id=student.id,
+            instrument_id="trumpet",
+            role_in_group="student",
+            status="active",
+            created_at=dt.datetime(2026, 6, 10),
+        )
+        db.add(member)
+        db.commit()
+
+        rows = _group_scoped_sessions(db, group.id)
+
+        assert [row.id for row in rows] == [after.id]
+        assert before.id not in {row.id for row in rows}
+    finally:
+        db.close()
 
 
 def test_account_export_contains_profile_and_lifecycle_data():

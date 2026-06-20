@@ -4,7 +4,7 @@
 
 - [P0] Commit, push, and verify the current local worktree on PR #2
   - Owner type: repo
-  - Acceptance criteria: the local microphone/auth/hosted-smoke/docs changes are committed and pushed; latest PR head has Backend, Frontend, Security, Swift, and Vercel checks all green on the exact new SHA.
+  - Acceptance criteria: the local ensemble privacy, Score Practice focus, hosted-smoke copy, Settings affordance, device-simulation, and evidence-doc changes are committed and pushed; latest PR head has Backend, Frontend, Security, Swift, and Vercel checks all green on the exact new SHA.
   - Verification command or evidence: GitHub Actions and Vercel status for PR #2 on the latest pushed commit.
 
 - [P0] Owner-approved Render deployment before production beta smoke
@@ -14,7 +14,7 @@
 
 - [P1] Keep release docs non-contradictory
   - Owner type: repo
-  - Acceptance criteria: canonical reports do not say the local worktree is merge-ready before latest Actions and hosted smoke pass, and do not call the product release ready.
+  - Acceptance criteria: canonical reports do not say the local worktree is merge-ready before latest Actions, exact-SHA preview, and hosted smoke pass, and do not call the product release ready.
   - Verification command or evidence: `MASTER_FINDINGS.md`, `TEST_MATRIX.md`, `FINAL_REPORT.md`, and `release-evidence.json` reference the same SHA/evidence state.
 
 ## Should Finish During Closed Beta

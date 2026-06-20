@@ -2,7 +2,7 @@
 
 Use this only after PR #2 is merged into `main`. Do not merge, tag, or promote production from this checklist without owner approval.
 
-Precondition: the latest PR #2 head must have green Backend, Frontend, Security, Swift, and Vercel checks. PR head `9b3766bc4241843c52b2a703c7ec923b4105f540` was verified green before the current local microphone/auth/smoke changes; re-check the exact latest pushed SHA after those changes are committed and pushed before merging. Production Render must then be owner-deployed to that backend commit before final hosted smoke can pass.
+Precondition: the latest PR #2 head must have green Backend, Frontend, Security, Swift, and exact-SHA preview checks. PR head `36b29c8cff85f3364648763fd36d6472fb1ef8a3` was verified green before the current local ensemble privacy, Score Practice focus, hosted-smoke copy, Settings affordance, device-simulation, and evidence-doc changes; commit/push this worktree and re-check the exact latest pushed SHA before merging. Production Render must then be owner-deployed to that backend commit before final hosted smoke can pass.
 
 ## Confirm Deployed State
 

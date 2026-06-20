@@ -146,6 +146,7 @@ export function ScorePracticePage() {
   const [cameraActive, setCameraActive] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
+  const [focusMode, setFocusMode] = useState(false);
   const canUseCamera = typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
   const selected = pages.find((page) => page.id === selectedId) ?? pages[0];
 
@@ -357,12 +358,12 @@ export function ScorePracticePage() {
         </SectionCard>
         <SectionCard title="Preview and confirm" eyebrow={selected?.source ?? 'Waiting'}>
           {selected ? (
-            <div className="score-preview-stack">
+            <div className={`score-preview-stack ${focusMode ? 'score-preview-stack-focused' : ''}`}>
               <div className="score-toolbar">
                 <button className="icon-button" type="button" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} aria-label="Zoom in score preview" title="Zoom in"><ZoomIn size={18} /></button>
                 <button className="icon-button" type="button" onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))} aria-label="Zoom out score preview" title="Zoom out"><ZoomOut size={18} /></button>
                 <button className="icon-button" type="button" onClick={() => setRotation((value) => (value + 90) % 360)} aria-label="Rotate score preview" title="Rotate"><RotateCw size={18} /></button>
-                <button className="icon-button" type="button" aria-label="Focus score preview" title="Focus mode"><Maximize2 size={18} /></button>
+                <button className="icon-button" type="button" onClick={() => setFocusMode((value) => !value)} aria-label={focusMode ? 'Exit focused score preview' : 'Focus score preview'} aria-pressed={focusMode} title={focusMode ? 'Exit focus mode' : 'Focus mode'}><Maximize2 size={18} /></button>
                 <button className="icon-button danger-action" type="button" onClick={() => void removeSelected()} aria-label="Remove selected score page" title="Remove"><Trash2 size={18} /></button>
               </div>
               <div className="score-preview-frame">
