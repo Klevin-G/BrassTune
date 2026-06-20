@@ -13,10 +13,13 @@ import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { usePitchStream } from '../hooks/usePitchStream';
 import { useSessionRecorder } from '../hooks/useSessionRecorder';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 
 export function PracticePage() {
   const { instrumentId, referencePitch, demoMode } = useAppSettings();
-  const recorder = useSessionRecorder(instrumentId, referencePitch);
+  const auth = useAuth();
+  const cloudSessionEnabled = auth.isSignedIn;
+  const recorder = useSessionRecorder(instrumentId, referencePitch, { cloudEnabled: cloudSessionEnabled });
   const audioRecorder = useAudioRecorder();
   const [transitionBusy, setTransitionBusy] = useState(false);
   const stream = usePitchStream({
@@ -26,6 +29,8 @@ export function PracticePage() {
     referencePitch,
     recording: recorder.recording,
     sessionId: recorder.activeSession?.id,
+    persistDemoFramesToBackend: cloudSessionEnabled,
+    onFrame: recorder.captureFrame,
   });
 
   const start = async () => {
@@ -45,6 +50,10 @@ export function PracticePage() {
     setTransitionBusy(true);
     try {
       const sessionId = recorder.activeSession?.id;
+      if (!cloudSessionEnabled) {
+        const guestAudio = await audioRecorder.stopLocal(demoMode);
+        return await recorder.stop(guestAudio);
+      }
       if (sessionId && demoMode) {
         const uploadPromise = audioRecorder.stopAndUpload(sessionId, true);
         const summary = await recorder.stop();
@@ -65,6 +74,7 @@ export function PracticePage() {
   };
   const latestValid = stream.history.find((frame) => frame.is_valid_for_recording);
   const eligibility = describeSaveEligibility(stream.currentFrame);
+  const microphoneLabel = stream.micActive ? 'Listening' : stream.statusMessage.startsWith('Requesting') || stream.statusMessage.startsWith('Connecting') ? 'Connecting' : 'Mic';
 
   return (
     <ScreenContainer>
@@ -75,8 +85,9 @@ export function PracticePage() {
               <p className="eyebrow">Live tuner cockpit</p>
               <h1>{latestValid?.written_note_name ? `${latestValid.written_note_name}${latestValid.written_octave}` : 'Ready'}</h1>
               <p>{stream.statusMessage}</p>
+              {!cloudSessionEnabled && <p className="muted-copy">Guest sessions stay on this device. Sign in to sync practice history and ensemble features.</p>}
             </div>
-            <span className={`record-dot ${recorder.recording ? 'on' : ''}`}>{recorder.recording ? 'Recording' : demoMode ? 'Demo ready' : 'Mic ready'}</span>
+            <span className={`record-dot ${recorder.recording ? 'on' : ''}`}>{recorder.recording ? 'Recording' : demoMode ? 'Guest demo ready' : 'Microphone optional'}</span>
           </div>
           <NoteDisplay frame={stream.currentFrame} />
           <TunerNeedle frame={stream.currentFrame} />
@@ -85,6 +96,7 @@ export function PracticePage() {
             elapsedSeconds={recorder.elapsedSeconds}
             demoMode={demoMode}
             micActive={stream.micActive}
+            microphoneLabel={microphoneLabel}
             busy={transitionBusy || recorder.busy || audioRecorder.status === 'uploading'}
             onStart={start}
             onStop={stop}
@@ -112,7 +124,7 @@ export function PracticePage() {
                   <span>{referencePitch} Hz</span>
                 </div>
               </div>
-              <p>{demoMode ? 'Demo mode generates stable brass-like samples for repeatable review.' : 'Microphone mode streams audio to the backend detector.'}</p>
+              <p>{demoMode ? 'Guest demo mode generates stable brass-like samples for repeatable review.' : 'Microphone mode listens for pitch and saves cloud sessions only after sign-in.'}</p>
             </article>
             <article className="insight-card">
               <div className="insight-heading">
@@ -148,7 +160,7 @@ export function PracticePage() {
                   <span>{audioRecorder.status}</span>
                 </div>
               </div>
-              <p>{audioRecorder.error ?? 'Audio is captured for playback when a recording stops.'}</p>
+              <p>{audioRecorder.error ?? (cloudSessionEnabled ? 'Audio is captured for playback when a recording stops.' : 'Guest playback stays in this browser and is not uploaded.')}</p>
             </article>
           </div>
           <div className="inline-panel">

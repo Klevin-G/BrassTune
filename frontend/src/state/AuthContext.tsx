@@ -39,6 +39,7 @@ interface AuthState {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
+const accountsDisabledMessage = 'Accounts are not enabled in this beta build yet. You can still use guest practice.';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -90,14 +91,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!supabase) throw new Error('Supabase Auth is not configured for this environment.');
+    if (!supabase) throw new Error(accountsDisabledMessage);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     await refreshProfile();
   }, [refreshProfile]);
 
   const signUp = useCallback(async (payload: SignUpPayload) => {
-    if (!supabase) throw new Error('Supabase Auth is not configured for this environment.');
+    if (!supabase) throw new Error(accountsDisabledMessage);
     const { error } = await supabase.auth.signUp({
       email: payload.email,
       password: payload.password,
@@ -114,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshProfile]);
 
   const signInWithApple = useCallback(async () => {
-    if (!supabase) throw new Error('Supabase Auth is not configured for this environment.');
+    if (!supabase) throw new Error(accountsDisabledMessage);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'apple',
       options: {
@@ -125,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestPasswordReset = useCallback(async (email: string) => {
-    if (!supabase) throw new Error('Supabase Auth is not configured for this environment.');
+    if (!supabase) throw new Error(accountsDisabledMessage);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth/reset-password`,
     });
@@ -133,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updatePassword = useCallback(async (password: string) => {
-    if (!supabase) throw new Error('Supabase Auth is not configured for this environment.');
+    if (!supabase) throw new Error(accountsDisabledMessage);
     const { error } = await supabase.auth.updateUser({ password });
     if (error) throw error;
   }, []);

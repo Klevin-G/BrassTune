@@ -4,8 +4,21 @@ import { Link } from 'react-router-dom';
 import { clearLocalSessions, downloadExport, repairDemoData, resetDemoData } from '../api/client';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { guestSessionsExport } from '../domain/guestSessions';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
+
+function downloadTextFile(content: string, filename: string, type = 'application/json') {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function SettingsPage() {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
@@ -20,8 +33,8 @@ export function SettingsPage() {
     setBusyAction(label);
     setMaintenanceStatus(`${label}...`);
     try {
-      const result = await action();
-      setMaintenanceStatus(`${label} complete: ${JSON.stringify(result)}`);
+      await action();
+      setMaintenanceStatus(`${label} complete.`);
     } catch (error) {
       setMaintenanceStatus(`${label} failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -32,6 +45,15 @@ export function SettingsPage() {
   const deleteAccount = async () => {
     await runMaintenance('Delete account', () => auth.deleteAccount(deleteConfirmation), 'This permanently deletes your BrassTune account data and owned ensembles according to the documented policy. Continue?');
     setDeleteConfirmation('');
+  };
+
+  const exportAllData = () => {
+    if (auth.isSignedIn) {
+      downloadExport('/api/export/all.zip', 'brasstune-export.zip').catch(() => setMaintenanceStatus('Cloud export is unavailable right now. Try again later.'));
+      return;
+    }
+    downloadTextFile(guestSessionsExport(), 'brasstune-guest-practice-export.json');
+    setMaintenanceStatus('Guest practice export downloaded from this device.');
   };
 
   const clearPreferences = () => {
@@ -115,14 +137,14 @@ export function SettingsPage() {
             <InsightCard
               title="Export all local data"
               detail="JSON"
-              body="Download the practice data available to this browser or account scope."
+              body="Download guest practice saved in this browser, or account data after sign-in."
               icon={Download}
               tone="gold"
             />
             <InsightCard
               title="Clear preferences"
               detail="Browser storage"
-              body="Resets local UI preferences without touching saved backend sessions."
+              body="Resets local UI preferences without touching saved cloud sessions."
               icon={Trash2}
               tone="red"
             />
@@ -136,7 +158,7 @@ export function SettingsPage() {
               <SlidersHorizontal size={18} />
               Reopen onboarding
             </button>
-            <button className="ghost-button" type="button" onClick={() => downloadExport('/api/export/all.zip', 'brasstune-export.zip')}>
+            <button className="ghost-button" type="button" onClick={exportAllData}>
               <Download size={18} />
               Export all data
             </button>
@@ -184,11 +206,11 @@ export function SettingsPage() {
           Delete account
         </button>
       </SectionCard>
-      <SectionCard title="Portability note" eyebrow="Swift-ready core">
+      <SectionCard title="Beta limitations" eyebrow="What sync requires">
         <InsightCard
-          title="Pure domain logic stays portable"
-          detail="Pitch math, profiles, segmentation, analytics"
-          body="The frontend controls assume the backend owns microphone persistence and note math, so the same core models can still move toward Swift cleanly."
+          title="Guest practice stays on this device"
+          detail="Sign in to sync"
+          body="Account sync, ensemble membership, and cloud exports require beta account access. Guest practice remains available in this browser."
           icon={SlidersHorizontal}
         />
       </SectionCard>

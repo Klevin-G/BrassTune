@@ -1,9 +1,11 @@
-import { Camera, CheckCircle2, FileVideo, Square, Upload } from 'lucide-react';
+import { CheckCircle2, File as FileIcon, Square, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { recordPitchFrames, startSession, stopSession } from '../api/client';
+import { createGuestSession, saveGuestSessionFromFrames } from '../domain/guestSessions';
 import { analyzeLocalMediaFile } from '../domain/localMediaAnalysis';
 import type { PracticeSession } from '../domain/types';
+import { useAuth } from '../state/AuthContext';
 
 export function LocalMediaImportPanel({
   instrumentId,
@@ -14,10 +16,10 @@ export function LocalMediaImportPanel({
   referencePitch: number;
   onImported?: (session: PracticeSession) => void;
 }) {
+  const auth = useAuth();
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const [status, setStatus] = useState('Ready for local video or audio analysis.');
+  const [status, setStatus] = useState('Ready to analyze a saved recording.');
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<PracticeSession | null>(null);
@@ -39,14 +41,23 @@ export function LocalMediaImportPanel({
         setStatus('No recording-quality pitch frames were found in this local media file.');
         return;
       }
-      const session = await startSession(instrumentId, referencePitch, `Imported ${file.name}`);
-      startedSession = session;
-      setStatus(`Saving ${validFrames.length} analyzed pitch frames. Source media remains local.`);
-      await recordPitchFrames(session.id, validFrames);
-      const stopped = await stopSession(session.id);
+      let stopped: PracticeSession;
+      if (auth.isSignedIn) {
+        const session = await startSession(instrumentId, referencePitch, `Imported ${file.name}`);
+        startedSession = session;
+        setStatus(`Saving ${validFrames.length} analyzed pitch frames. Source recording remains on this device.`);
+        await recordPitchFrames(session.id, validFrames);
+        stopped = await stopSession(session.id);
+      } else {
+        const draft = createGuestSession(instrumentId, referencePitch, `Imported ${file.name}`);
+        stopped = saveGuestSessionFromFrames(draft, validFrames);
+        setStatus(`Saved ${Math.round(analysis.analyzedSeconds)}s from ${file.name} as a guest review. Source recording remains on this device.`);
+      }
       setSummary(stopped);
       onImported?.(stopped);
-      setStatus(`Analyzed ${Math.round(analysis.analyzedSeconds)}s from ${file.name}. Video/audio was not stored by BrassTune.`);
+      if (auth.isSignedIn) {
+        setStatus(`Analyzed ${Math.round(analysis.analyzedSeconds)}s from ${file.name}. The source recording was not stored by BrassTune.`);
+      }
     } catch (error) {
       if (startedSession) {
         stopSession(startedSession.id).catch(() => undefined);
@@ -56,7 +67,6 @@ export function LocalMediaImportPanel({
       if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
       if (libraryInputRef.current) libraryInputRef.current.value = '';
-      if (cameraInputRef.current) cameraInputRef.current.value = '';
     }
   };
 
@@ -70,26 +80,21 @@ export function LocalMediaImportPanel({
     <div className="local-media-import">
       <div className="insight-heading">
         <span className="insight-icon">
-          <FileVideo size={18} />
+          <FileIcon size={18} />
         </span>
         <div>
-          <h3>Analyze local video/audio</h3>
-          <span>No video storage, pitch analytics only</span>
+          <h3>Import recording</h3>
+          <span>Audio analysis only</span>
         </div>
       </div>
       <p>
-        Upload a video from Photos/Files or use the phone camera picker. BrassTune decodes audio in the browser, saves derived pitch frames, and leaves the source media on your device.
+        Choose an audio or video file from Photos or Files. BrassTune analyzes the audio track, saves derived pitch frames, and leaves the source file on your device.
       </p>
       <div className="settings-actions">
         <label className={`ghost-button file-action ${busy ? 'disabled' : ''}`}>
           <Upload size={17} />
-          Choose file
+          Choose audio or video file
           <input ref={libraryInputRef} className="visually-hidden" type="file" accept="audio/*,video/mp4,video/webm,video/quicktime" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label="Choose local audio or video file" />
-        </label>
-        <label className={`ghost-button file-action ${busy ? 'disabled' : ''}`}>
-          <Camera size={17} />
-          Camera
-          <input ref={cameraInputRef} className="visually-hidden" type="file" accept="video/*" capture="environment" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label="Record or choose a camera video" />
         </label>
         {busy && (
           <button className="ghost-button" type="button" onClick={cancel}>

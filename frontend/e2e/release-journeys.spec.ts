@@ -40,19 +40,24 @@ test('critical routes render identifiable content', async ({ page }) => {
     await expect(page).toHaveURL(new RegExp(`${route === '/' ? '/?$' : route.replace('/', '\\/')}`));
     await expect(page.getByRole('main').getByText(text).first()).toBeVisible();
     await expect(page.locator('.content')).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(/Supabase env vars|FastAPI|Start the FastAPI server|Authentication required|Developer testing|MVP|seeded ensemble|phone camera picker/i);
   }
 });
 
-test('auth reset and Apple surfaces are wired', async ({ page }) => {
+test('auth unavailable surfaces route testers into guest practice', async ({ page }) => {
   await page.goto('/auth/reset-password');
-  await expect(page.getByRole('button', { name: /send reset link/i })).toBeDisabled();
-  await expect(page.getByLabel(/email/i)).toBeVisible();
-  await expect(page.getByText(/account sign-in is unavailable/i)).toBeVisible();
+  await expect(page.getByText(/accounts are not enabled in this beta build yet/i)).toBeVisible();
+  await expect(page.getByRole('link', { name: /continue as guest/i })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/Supabase|VITE_SUPABASE|env vars/i);
 
   await page.goto('/auth/sign-in');
-  await expect(page.getByRole('button', { name: /continue with apple/i })).toBeDisabled();
-  await page.goto('/auth/callback#error=access_denied&error_description=The%20user%20cancelled');
-  await expect(page.getByText(/not completed/i)).toBeVisible();
+  await page.getByRole('link', { name: /continue as guest/i }).click();
+  await expect(page).toHaveURL(/\/practice$/);
+
+  await page.goto('/auth/callback#error=access_denied&error_description=SUPABASE_SECRET_KEY%20missing');
+  await expect(page.getByText(/accounts are not enabled in this beta build yet/i)).toBeVisible();
+  await expect(page.getByRole('link', { name: /continue as guest/i })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/SUPABASE|SECRET_KEY|Supabase/i);
 });
 
 test('onboarding traps keyboard focus and closes with Escape', async ({ page }) => {
@@ -70,31 +75,35 @@ test('demo recording creates a reviewable session with playback surface', async 
   const startButton = page.getByRole('button', { name: /start recording/i });
   await expect(startButton).toBeVisible();
   await expect(startButton).toBeEnabled();
-  const sessionStarted = page.waitForResponse((response) => {
-    const request = response.request();
-    return request.method() === 'POST' && /\/api\/sessions\/start$/.test(new URL(response.url()).pathname) && response.ok();
+  const backendSessionCalls: string[] = [];
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && /\/api\/sessions\/.+(samples|stop|audio)|\/api\/sessions\/start$/.test(path)) {
+      backendSessionCalls.push(`${request.method()} ${path}`);
+    }
   });
   await startButton.click();
-  const startedSession = await (await sessionStarted).json() as { id: number };
   const stopButton = page.getByRole('button', { name: /stop recording/i });
   await expect(stopButton).toBeVisible({ timeout: 15_000 });
   await expect.poll(async () => page.locator('.note-history .history-row').count(), { timeout: 15_000 }).toBeGreaterThan(0);
-  const sessionStopped = page.waitForResponse((response) => {
-    const request = response.request();
-    return request.method() === 'POST' && response.url().includes(`/api/sessions/${startedSession.id}/stop`) && response.ok();
-  });
   await stopButton.click();
-  await sessionStopped;
   const reviewLink = page.getByRole('link', { name: /review session/i });
   await expect(reviewLink).toBeVisible({ timeout: 20_000 });
-  await expect(reviewLink).toHaveAttribute('href', new RegExp(`/sessions/${startedSession.id}$`));
+  await expect(reviewLink).toHaveAttribute('href', /\/sessions\/-/);
+  expect(backendSessionCalls).toEqual([]);
   await reviewLink.scrollIntoViewIfNeeded();
-  await Promise.all([
-    page.waitForURL(/\/sessions\/\d+/, { timeout: 15_000 }),
-    reviewLink.click({ force: true }),
-  ]);
+  const reviewHref = await reviewLink.getAttribute('href');
+  expect(reviewHref).toMatch(/\/sessions\/-/);
+  await reviewLink.click();
+  await expect(page).toHaveURL(/\/sessions\/-/);
   await expect(page.getByRole('heading', { name: /Relisten/i })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Note performance/i })).toBeVisible();
+  await expect(page.getByText(/guest session saved on this device/i)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/Authentication required/i);
+  await page.goto('/practice');
+  await expect(page.getByText(/Import recording/i)).toBeVisible();
+  await expect(page.getByText(/Choose audio or video file/i)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/Camera|phone camera picker|Record or choose a camera video/i);
 });
 
 test('settings exposes export before account deletion and legal links', async ({ page }) => {

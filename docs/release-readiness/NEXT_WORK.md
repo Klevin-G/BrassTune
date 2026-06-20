@@ -22,17 +22,17 @@
 - [P0] Run post-merge production smoke before inviting testers
   - Owner type: provider
   - Acceptance criteria: production Vercel and Render are on the merged commit; root, deep links, health, CORS, WebSocket, legal routes, export surfaces, and no-localhost checks pass.
-  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted`.
+  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` or a green `.github/workflows/production-smoke.yml` run.
 
 - [P0] Validate live Supabase auth and account lifecycle with disposable users
   - Owner type: provider
   - Acceptance criteria: sign-up, sign-in, duplicate/weak password handling, reset email, Apple OAuth, token refresh, export, account deletion, storage deletion, and Supabase identity cleanup are verified with disposable live accounts.
-  - Verification command or evidence: env-gated integration test run or recorded manual evidence tied to `HUMAN_ACTIONS.md`; Supabase logs/admin evidence with no secrets exposed.
+  - Verification command or evidence: completed `LIVE_AUTH_TEST_PLAN.md`; env-gated integration test run or recorded manual evidence tied to `HUMAN_ACTIONS.md`; Supabase logs/admin evidence with no secrets exposed.
 
 - [P1] Close beta operations and data-policy setup
   - Owner type: product
-  - Acceptance criteria: support contact, incident contacts, alert ownership, log access, backup/restore expectations, tester data policy, and bug-report process are documented before external testers use the app.
-  - Verification command or evidence: completed `HUMAN_ACTIONS.md` items 2 and 6 plus owner signoff on `CLOSED_BETA_HANDOFF.md`.
+  - Acceptance criteria: support contact, incident contacts, alert ownership, log access, backup/restore expectations, tester data policy, bug-report process, and triage labels are documented before external testers use the app.
+  - Verification command or evidence: completed `HUMAN_ACTIONS.md` items 2 and 6 plus owner signoff on `CLOSED_BETA_HANDOFF.md` and `BETA_QA_GUIDE.md`.
 
 - [P2] Unblock protected Vercel preview browser automation
   - Owner type: provider
@@ -118,7 +118,7 @@
 - [P2] Build closed-beta feedback loop
   - Owner type: product
   - Acceptance criteria: tester personas, bug-report template, severity triage, and weekly beta issue review are in place.
-  - Verification command or evidence: beta tracker/report examples and linked resolved issues.
+  - Verification command or evidence: completed `BETA_QA_GUIDE.md` run notes, beta tracker/report examples, and linked resolved issues.
 
 - [P2] Define native parity roadmap
   - Owner type: product
@@ -128,4 +128,4 @@
 - [P2] Run accessibility pass with real assistive tech
   - Owner type: product
   - Acceptance criteria: keyboard, screen-reader, Dynamic Type, VoiceOver, and mobile Safari behavior are checked by a human tester.
-  - Verification command or evidence: completed accessibility checklist and filed follow-up issues.
+  - Verification command or evidence: completed `BETA_QA_GUIDE.md` accessibility checklist and filed follow-up issues.

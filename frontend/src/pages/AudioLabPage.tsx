@@ -1,6 +1,7 @@
 import { Activity, Bug, Clipboard, Gauge, Mic, Radio, Save, Settings2, Waves } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getInstruments, pitchWebSocketUrl } from '../api/client';
+import { apiBase as runtimeApiBase } from '../api/runtimeConfig';
 import { SessionControls } from '../components/SessionControls';
 import { SignalMeter } from '../components/SignalMeter';
 import { MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
@@ -10,6 +11,7 @@ import type { InstrumentProfile } from '../domain/types';
 import { usePitchStream } from '../hooks/usePitchStream';
 import { useSessionRecorder } from '../hooks/useSessionRecorder';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 
 function noteLabel(note?: string | null, octave?: number | null) {
   return note ? `${note}${octave}` : '--';
@@ -22,11 +24,12 @@ function centsLabel(value?: number | null) {
 
 export function AudioLabPage() {
   const { instrumentId, referencePitch, demoMode } = useAppSettings();
+  const auth = useAuth();
   const [profiles, setProfiles] = useState<InstrumentProfile[]>([]);
   const [permissionState, setPermissionState] = useState('unknown');
   const [wsUrl, setWsUrl] = useState('');
-  const apiBase = import.meta.env.VITE_API_BASE_URL || `${window.location.origin}`;
-  const recorder = useSessionRecorder(instrumentId, referencePitch);
+  const apiBase = runtimeApiBase() || `${window.location.origin}`;
+  const recorder = useSessionRecorder(instrumentId, referencePitch, { cloudEnabled: auth.isSignedIn });
   const stream = usePitchStream({
     enabled: true,
     demoMode,
@@ -34,6 +37,8 @@ export function AudioLabPage() {
     referencePitch,
     recording: recorder.recording,
     sessionId: recorder.activeSession?.id,
+    persistDemoFramesToBackend: auth.isSignedIn,
+    onFrame: recorder.captureFrame,
   });
 
   useEffect(() => {
@@ -88,7 +93,7 @@ export function AudioLabPage() {
           <div className="stats-grid">
             <MetricTile label="Frequency" value={frame?.frequency_hz ? `${frame.frequency_hz.toFixed(1)} Hz` : '--'} detail="current estimate" icon={Waves} tone="gold" />
             <MetricTile label="Written note" value={noteLabel(frame?.written_note_name, frame?.written_octave)} detail={instrumentId} icon={Gauge} tone="green" />
-            <MetricTile label="Concert note" value={noteLabel(frame?.concert_note_name, frame?.concert_octave)} detail="backend pitch math" icon={Radio} />
+            <MetricTile label="Concert note" value={noteLabel(frame?.concert_note_name, frame?.concert_octave)} detail="pitch model" icon={Radio} />
             <MetricTile label="Cents" value={centsLabel(frame?.cents_deviation)} detail={frame?.tuning_status?.replace('_', ' ') ?? 'waiting'} icon={Activity} tone="amber" />
           </div>
 
@@ -115,7 +120,7 @@ export function AudioLabPage() {
           <p className="calibration-reason">{eligibility.detail}</p>
         </SectionCard>
 
-        <SectionCard title="Audio pipeline" eyebrow="Browser and backend">
+        <SectionCard title="Audio connection" eyebrow="Microphone readiness">
           <div className="insight-grid">
             <article className="insight-card">
               <div className="insight-heading">
@@ -123,11 +128,11 @@ export function AudioLabPage() {
                   <Radio size={18} />
                 </span>
                 <div>
-                  <h3>Backend URL</h3>
-                  <span>{apiBase}</span>
+                  <h3>Cloud service</h3>
+                  <span>{apiBase ? 'Configured' : 'Using app origin'}</span>
                 </div>
               </div>
-              <p>REST API target for phone-hosted testing.</p>
+              <p>Practice still works in guest mode if cloud sync is unavailable.</p>
             </article>
             <article className="insight-card">
               <div className="insight-heading">
@@ -135,8 +140,8 @@ export function AudioLabPage() {
                   <Waves size={18} />
                 </span>
                 <div>
-                  <h3>WebSocket URL</h3>
-                  <span>{wsUrl || 'checking'}</span>
+                  <h3>Pitch stream</h3>
+                  <span>{wsUrl ? 'Ready to check' : 'Checking'}</span>
                 </div>
               </div>
               <p>Live microphone sessions connect to the secure tuning stream for this environment.</p>
@@ -151,7 +156,7 @@ export function AudioLabPage() {
                   <span>{stream.streamInfo.frameSize} samples</span>
                 </div>
               </div>
-              <p>{stream.streamInfo.sampleRate ? `${stream.streamInfo.sampleRate} Hz browser sample rate.` : 'Demo mode uses generated pitch frames without browser PCM.'}</p>
+              <p>{stream.streamInfo.sampleRate ? `${stream.streamInfo.sampleRate} Hz input sample rate.` : 'Guest demo mode uses generated pitch frames without microphone input.'}</p>
             </article>
             <article className="insight-card">
               <div className="insight-heading">
@@ -159,7 +164,7 @@ export function AudioLabPage() {
                   <Bug size={18} />
                 </span>
                 <div>
-                  <h3>Detector source</h3>
+                  <h3>Pitch source</h3>
                   <span>{stream.streamInfo.detectorSource}</span>
                 </div>
               </div>
@@ -185,6 +190,16 @@ export function AudioLabPage() {
               Start microphone monitor
             </button>
           )}
+          <details className="developer-diagnostics">
+            <summary>Connection diagnostics</summary>
+            <dl>
+              <dt>Cloud service URL</dt>
+              <dd>{apiBase}</dd>
+              <dt>Streaming URL</dt>
+              <dd>{wsUrl || 'checking'}</dd>
+            </dl>
+          </details>
+
           <button className="ghost-button" type="button" onClick={copyDiagnostics}>
             <Clipboard size={18} />
             Copy frame diagnostics
@@ -204,6 +219,7 @@ export function AudioLabPage() {
               elapsedSeconds={recorder.elapsedSeconds}
               demoMode={demoMode}
               micActive={stream.micActive}
+              microphoneLabel={stream.micActive ? 'Listening' : 'Mic'}
               busy={recorder.busy}
               onStart={start}
               onStop={stop}

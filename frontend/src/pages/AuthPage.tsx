@@ -23,7 +23,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     if (mode !== 'callback') return;
     const params = new URLSearchParams(window.location.search || window.location.hash.replace(/^#/, '?'));
     const error = params.get('error_description') || params.get('error');
-    setMessage(error ? `Sign-in was not completed: ${error}` : 'Supabase is restoring your session. Continue when the session is ready.');
+    setMessage(error ? 'Sign-in was not completed. You can keep using guest practice and try account access again later.' : 'Finishing sign-in. Continue when your account session is ready.');
   }, [mode]);
 
   async function onSubmit(event: FormEvent) {
@@ -55,10 +55,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   if (mode === 'callback') {
     return (
       <ScreenContainer>
-        <SectionCard title="Finishing sign in" eyebrow="Auth callback">
-          <p className="muted-copy" role="status">{message ?? 'Supabase will restore the browser session automatically.'}</p>
-          <Link className="primary-button" to="/">
-            Continue
+        <SectionCard title="Finishing sign in" eyebrow="Account access">
+          <p className="muted-copy" role="status">{auth.configured ? message ?? 'Finishing sign-in. Continue when your account session is ready.' : 'Accounts are not enabled in this beta build yet. You can still use guest practice.'}</p>
+          <Link className="primary-button" to={auth.configured ? '/' : '/practice'}>
+            {auth.configured ? 'Continue' : 'Continue as guest'}
             <ArrowRight size={18} />
           </Link>
         </SectionCard>
@@ -81,54 +81,62 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
           </div>
           <h1>{isSignup ? 'Start tracking your tuning patterns.' : 'Welcome back to your practice cockpit.'}</h1>
           <p>
-            Sign in keeps your sessions, audio playback, analytics, and ensemble membership tied to your account. Guest practice remains available on this device.
+            Account access keeps your sessions, audio playback, analytics, and ensemble membership synced. Guest practice remains available on this device.
           </p>
         </section>
         <SectionCard title={isSignup ? 'Sign up' : mode === 'reset' ? 'Reset password' : 'Sign in'} eyebrow={auth.configured ? 'Account access' : 'Guest mode active'}>
           {!auth.configured && (
-            <EmptyActionState
-              title="Account sign-in is unavailable"
-              body="Sign-in is temporarily unavailable. Guest practice remains available on this device."
-              icon={Mail}
-            />
+            <>
+              <EmptyActionState
+                title="Accounts are not enabled in this beta build yet"
+                body="You can still use guest practice. Sign-in, syncing, and ensemble membership will be available when beta account access is enabled."
+                icon={Mail}
+              />
+              <Link className="primary-button full-width-action" to="/practice">
+                Continue as guest
+                <ArrowRight size={18} />
+              </Link>
+            </>
           )}
-          <form className="auth-form" onSubmit={onSubmit}>
-            <label>
-              Email
-              <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={!auth.isSignedIn || mode !== 'reset'} placeholder="you@example.com" />
-            </label>
-            {mode !== 'reset' && (
+          {auth.configured && (
+            <form className="auth-form" onSubmit={onSubmit}>
               <label>
-                Password
-                <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder="Minimum 6 characters" />
+                Email
+                <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={!auth.isSignedIn || mode !== 'reset'} placeholder="you@example.com" />
               </label>
-            )}
-            {isSignup && (
-              <>
+              {mode !== 'reset' && (
                 <label>
-                  Username
-                  <input value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} required minLength={3} placeholder="avery" />
+                  Password
+                  <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder="Minimum 6 characters" />
                 </label>
+              )}
+              {isSignup && (
+                <>
+                  <label>
+                    Username
+                    <input value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} required minLength={3} placeholder="avery" />
+                  </label>
+                  <label>
+                    Display name
+                    <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required placeholder="Avery Brass" />
+                  </label>
+                  <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
+                </>
+              )}
+              {mode === 'reset' && auth.isSignedIn && (
                 <label>
-                  Display name
-                  <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required placeholder="Avery Brass" />
+                  New password
+                  <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" minLength={8} placeholder="Minimum 8 characters" />
                 </label>
-                <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
-              </>
-            )}
-            {mode === 'reset' && auth.isSignedIn && (
-              <label>
-                New password
-                <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" minLength={8} placeholder="Minimum 8 characters" />
-              </label>
-            )}
-            <button className="primary-button" disabled={busy || !auth.configured} type="submit">
-              {isSignup ? <UserPlus size={18} /> : mode === 'reset' ? <KeyRound size={18} /> : <LogIn size={18} />}
-              {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' && auth.isSignedIn && newPassword ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
-            </button>
-          </form>
-          {mode !== 'reset' && (
-            <button className="ghost-button full-width-action" disabled={busy || !auth.configured} type="button" onClick={() => auth.signInWithApple().catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in failed.'))}>
+              )}
+              <button className="primary-button" disabled={busy} type="submit">
+                {isSignup ? <UserPlus size={18} /> : mode === 'reset' ? <KeyRound size={18} /> : <LogIn size={18} />}
+                {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' && auth.isSignedIn && newPassword ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
+              </button>
+            </form>
+          )}
+          {mode !== 'reset' && auth.configured && (
+            <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple().catch(() => setMessage('Apple sign-in could not start. Try again later.'))}>
               <ShieldCheck size={18} />
               Continue with Apple
             </button>

@@ -275,7 +275,7 @@ async function runViewport(browser, viewport) {
     const reviewHref = await reviewLink.getAttribute('href');
     if (!reviewHref) issues.push(`${viewport.name} Practice: saved session review link missing href`);
     await reviewLink.click();
-    await page.waitForURL(/\/sessions\/\d+/);
+    await page.waitForURL(/\/sessions\/-?\d+/);
     await page.waitForLoadState('networkidle');
     await page.waitForSelector('.two-column-grid', { state: 'visible', timeout: 15000 });
     await page.waitForSelector('.audio-player-card', { state: 'visible', timeout: 15000 }).catch(() => {

@@ -11,6 +11,9 @@ frontend/test-results/
 frontend/playwright-report/
 docs/release-readiness/playwright-report/
 swift/**/.build/
+swift/**/.swiftpm/
+swift/**/*.xcodeproj/project.xcworkspace/
+swift/**/*.xcodeproj/xcuserdata/
 .DS_Store
 .pytest_cache/
 .env

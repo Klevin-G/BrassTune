@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
 import { uploadSessionAudio } from '../api/client';
+import type { GuestAudio } from '../domain/guestSessions';
 
-type UploadStatus = 'idle' | 'recording' | 'uploading' | 'uploaded' | 'failed' | 'unavailable';
+type UploadStatus = 'idle' | 'recording' | 'uploading' | 'uploaded' | 'saved' | 'failed' | 'unavailable';
 
 function wavFromSine(durationSeconds = 4, frequency = 440, sampleRate = 16000) {
   const sampleCount = Math.floor(durationSeconds * sampleRate);
@@ -33,6 +34,15 @@ function wavFromSine(durationSeconds = 4, frequency = 440, sampleRate = 16000) {
     view.setInt16(44 + index * bytesPerSample, Math.max(-1, Math.min(1, sample)) * 0x7fff, true);
   }
   return new Blob([buffer], { type: 'audio/wav' });
+}
+
+function dataUrlForBlob(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 export function useAudioRecorder() {
@@ -84,27 +94,36 @@ export function useAudioRecorder() {
     return promise;
   }, [status]);
 
+  const recordedBlob = useCallback(async (demoMode: boolean, durationSeconds: number) => {
+    if (demoMode) {
+      return wavFromSine(Math.min(8, Math.max(3, durationSeconds)));
+    }
+    const recorder = recorderRef.current;
+    if (!recorder) return null;
+    return await new Promise<Blob>((resolve) => {
+      recorder.onstop = () => resolve(new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' }));
+      recorder.stop();
+    });
+  }, []);
+
+  const cleanup = useCallback(() => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    recorderRef.current = null;
+    streamRef.current = null;
+    chunksRef.current = [];
+  }, []);
+
   const stopAndUpload = useCallback(async (sessionId: number, demoMode: boolean) => {
     if (stopPromiseRef.current) return stopPromiseRef.current;
     const durationSeconds = Math.max(1, (Date.now() - startedAtRef.current) / 1000);
     setStatus('uploading');
     const promise = (async () => {
     try {
-      let blob: Blob;
-      if (demoMode) {
-        blob = wavFromSine(Math.min(8, Math.max(3, durationSeconds)));
-      } else {
-        const recorder = recorderRef.current;
-        if (!recorder) {
-          setStatus('unavailable');
-          return null;
-        }
-        blob = await new Promise<Blob>((resolve) => {
-          recorder.onstop = () => resolve(new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' }));
-          recorder.stop();
-        });
+      const blob = await recordedBlob(demoMode, durationSeconds);
+      if (!blob) {
+        setStatus('unavailable');
+        return null;
       }
-      streamRef.current?.getTracks().forEach((track) => track.stop());
       const result = await uploadSessionAudio(sessionId, blob, durationSeconds);
       setStatus('uploaded');
       return result.audio;
@@ -113,15 +132,45 @@ export function useAudioRecorder() {
       setError(uploadError instanceof Error ? uploadError.message : 'Audio upload failed.');
       return null;
     } finally {
-      recorderRef.current = null;
-      streamRef.current = null;
-      chunksRef.current = [];
+      cleanup();
       stopPromiseRef.current = null;
     }
     })();
     stopPromiseRef.current = promise;
     return promise;
-  }, []);
+  }, [cleanup, recordedBlob]);
 
-  return { status, error, lastSessionId, start, stopAndUpload };
+  const stopLocal = useCallback(async (demoMode: boolean): Promise<GuestAudio | null> => {
+    if (stopPromiseRef.current) return stopPromiseRef.current as Promise<GuestAudio | null>;
+    const durationSeconds = Math.max(1, (Date.now() - startedAtRef.current) / 1000);
+    setStatus('uploading');
+    const promise = (async () => {
+      try {
+        const blob = await recordedBlob(demoMode, durationSeconds);
+        if (!blob) {
+          setStatus('unavailable');
+          return null;
+        }
+        const dataUrl = await dataUrlForBlob(blob);
+        setStatus('saved');
+        return {
+          dataUrl,
+          mimeType: blob.type || (demoMode ? 'audio/wav' : 'audio/webm'),
+          durationSeconds,
+          sizeBytes: blob.size,
+        };
+      } catch (localError) {
+        setStatus('failed');
+        setError(localError instanceof Error ? localError.message : 'Audio could not be saved on this device.');
+        return null;
+      } finally {
+        cleanup();
+        stopPromiseRef.current = null;
+      }
+    })();
+    stopPromiseRef.current = promise;
+    return promise;
+  }, [cleanup, recordedBlob]);
+
+  return { status, error, lastSessionId, start, stopAndUpload, stopLocal };
 }

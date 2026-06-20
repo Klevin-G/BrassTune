@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { startSession, stopSession } from '../api/client';
-import type { PracticeSession } from '../domain/types';
+import { createGuestSession, saveGuestSessionFromFrames, type GuestAudio, type GuestSessionDraft } from '../domain/guestSessions';
+import type { PitchFrame, PracticeSession } from '../domain/types';
 
 export type SessionRecorderState = 'idle' | 'starting' | 'recording' | 'stopping' | 'failed';
 
-export function useSessionRecorder(instrumentId: string, referencePitch: number) {
+export function useSessionRecorder(instrumentId: string, referencePitch: number, options: { cloudEnabled?: boolean } = {}) {
+  const cloudEnabled = options.cloudEnabled ?? true;
   const [state, setState] = useState<SessionRecorderState>('idle');
   const [activeSession, setActiveSession] = useState<PracticeSession | null>(null);
   const [lastSummary, setLastSummary] = useState<PracticeSession | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const activeSessionRef = useRef<PracticeSession | null>(null);
+  const capturedFramesRef = useRef<PitchFrame[]>([]);
   const startPromiseRef = useRef<Promise<PracticeSession> | null>(null);
   const stopPromiseRef = useRef<Promise<PracticeSession | null> | null>(null);
   const recording = state === 'recording' || state === 'stopping';
@@ -29,7 +32,8 @@ export function useSessionRecorder(instrumentId: string, referencePitch: number)
     if (activeSessionRef.current) return activeSessionRef.current;
     setError(null);
     setState('starting');
-    const promise = startSession(instrumentId, referencePitch, name)
+    capturedFramesRef.current = [];
+    const promise = (cloudEnabled ? startSession(instrumentId, referencePitch, name) : Promise.resolve(createGuestSession(instrumentId, referencePitch, name)))
       .then((session) => {
         activeSessionRef.current = session;
         setActiveSession(session);
@@ -50,17 +54,23 @@ export function useSessionRecorder(instrumentId: string, referencePitch: number)
     return promise;
   };
 
-  const stop = async () => {
+  const captureFrame = (frame: PitchFrame) => {
+    if (!activeSessionRef.current || !frame.is_valid_for_recording) return;
+    capturedFramesRef.current = [...capturedFramesRef.current, frame].slice(-9000);
+  };
+
+  const stop = async (guestAudio?: GuestAudio | null) => {
     if (stopPromiseRef.current) return stopPromiseRef.current;
     const session = activeSessionRef.current;
     if (!session) return null;
     setError(null);
     setState('stopping');
-    const promise = stopSession(session.id)
+    const promise = (cloudEnabled ? stopSession(session.id) : Promise.resolve(saveGuestSessionFromFrames(session as GuestSessionDraft, capturedFramesRef.current, guestAudio)))
       .then((summary) => {
         setLastSummary(summary);
         activeSessionRef.current = null;
         setActiveSession(null);
+        capturedFramesRef.current = [];
         setElapsedSeconds(0);
         setState('idle');
         return summary;
@@ -77,5 +87,18 @@ export function useSessionRecorder(instrumentId: string, referencePitch: number)
     return promise;
   };
 
-  return { state, recording, busy: state === 'starting' || state === 'stopping', activeSession, lastSummary, elapsedSeconds, error, setError, start, stop };
+  return {
+    state,
+    recording,
+    busy: state === 'starting' || state === 'stopping',
+    cloudEnabled,
+    activeSession,
+    lastSummary,
+    elapsedSeconds,
+    error,
+    setError,
+    captureFrame,
+    start,
+    stop,
+  };
 }

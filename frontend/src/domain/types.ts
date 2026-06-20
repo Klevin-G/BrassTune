@@ -53,6 +53,8 @@ export interface PracticeSession {
   audio_size_bytes?: number | null;
   audio_uploaded_at?: string | null;
   audio_available?: boolean;
+  guest_session?: boolean;
+  guest_audio_data_url?: string | null;
   created_at: string;
 }
 

@@ -19,6 +19,7 @@ Precondition: the latest PR #2 head must have green Backend, Frontend, Security,
 5. Confirm production deploy uses the repo-root GitHub workflow path. The root `vercel.json` builds `frontend`; do not assume the GitHub production deploy should run from `frontend`.
 6. Confirm required secret names exist without printing values: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_API_BASE_URL`, `VITE_WS_BASE_URL`, Supabase frontend vars, and the Render deploy hook.
 7. Confirm Supabase migration state includes the baseline/readiness/RPC lockdown migrations, nine RLS-enabled app tables, and `rls_auto_enable()` with `anon_execute=false` and `authenticated_execute=false`.
+8. Confirm `.github/workflows/render-keepalive.yml` is enabled only after owner approval for scheduled Actions usage. Keepalive is a cold-start mitigation, not an uptime guarantee.
 
 ## Hosted Smoke
 
@@ -79,6 +80,12 @@ E2E_API_BASE_URL=https://brasstune.onrender.com \
 E2E_WS_BASE_URL=wss://brasstune.onrender.com \
 npm run e2e:hosted:strict
 ```
+
+GitHub workflow check:
+
+1. Run `.github/workflows/production-smoke.yml` with default production URLs.
+2. Confirm the run passes root, Render health, CORS, and WebSocket app-level response.
+3. If production is behind deployment protection or a different URL, set `BRASSTUNE_WEB_ACCESS_URL` as a GitHub variable and rerun without exposing tokens in logs.
 
 ## Rollback Confirmation
 

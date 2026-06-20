@@ -38,11 +38,24 @@ describe('API client runtime URLs', () => {
     vi.stubGlobal('window', {
       location: {
         protocol: 'https:',
-        host: 'brass-tune-git-branch-owner.vercel.app',
-        hostname: 'brass-tune-git-branch-owner.vercel.app',
+        host: 'brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app',
+        hostname: 'brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app',
       },
     });
     expect(exportUrl('/api/health')).toBe('https://brasstune.onrender.com/api/health');
     expect(await pitchWebSocketUrl()).toBe('wss://brasstune.onrender.com/ws/pitch');
+  });
+
+  it('does not silently use production Render from unknown hosted origins', async () => {
+    const { exportUrl, pitchWebSocketUrl } = await loadClient();
+    vi.stubGlobal('window', {
+      location: {
+        protocol: 'https:',
+        host: 'unrelated-preview.vercel.app',
+        hostname: 'unrelated-preview.vercel.app',
+      },
+    });
+    expect(exportUrl('/api/health')).toBe('/api/health');
+    expect(await pitchWebSocketUrl()).toBe('wss://unrelated-preview.vercel.app/ws/pitch');
   });
 });

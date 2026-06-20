@@ -7,14 +7,34 @@ final class AppModel: ObservableObject {
     @Published var selectedInstrumentId = "trumpet"
     @Published var referencePitchHz = 440.0
     @Published var sessions: [PracticeSession] = []
-    @Published var ensembles: [EnsembleSummary] = [
-        EnsembleSummary(id: UUID(), name: "Central Wind Ensemble Brass", role: "student", activeMembers: 4, focus: "Center D5 before range expansion.")
-    ]
+    @Published var ensembles: [EnsembleSummary] = AppModel.demoEnsembles
     @Published var lastError: UserVisibleError?
 
     let audioEngine = NativeAudioEngine()
     let apiClient = APIClient()
     let authService = AuthService()
+
+    static let demoEnsembles = [
+        EnsembleSummary(
+            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            name: "Demo brass studio",
+            role: "Demo student",
+            activeMembers: 4,
+            focus: "Center D5 before range expansion."
+        )
+    ]
+
+    var analyticsSnapshot: AnalyticsSnapshot {
+        AnalyticsSnapshot(sessions: sessions)
+    }
+
+    var accountFeaturesEnabled: Bool {
+        config.supabaseURL != nil && !(config.supabasePublishableKey ?? "").isEmpty
+    }
+
+    var accountUnavailableMessage: String? {
+        accountFeaturesEnabled ? nil : "Accounts are not enabled in this beta build yet. Guest practice still works on this device."
+    }
 
     func resetForUITesting() {
         authService.deleteStoredAuth()
@@ -22,19 +42,23 @@ final class AppModel: ObservableObject {
         selectedInstrumentId = "trumpet"
         referencePitchHz = 440.0
         sessions.removeAll()
-        ensembles = [
-            EnsembleSummary(id: UUID(), name: "Central Wind Ensemble Brass", role: "student", activeMembers: 4, focus: "Center D5 before range expansion.")
-        ]
+        ensembles = Self.demoEnsembles
         lastError = nil
     }
 
     func enterGuestDemo() {
         authState = .guest
+        if ensembles.isEmpty {
+            ensembles = Self.demoEnsembles
+        }
+        lastError = nil
     }
 
     func signOut() {
         authService.signOut()
         authState = .signedOut
+        ensembles.removeAll()
+        lastError = nil
     }
 
     func restoreSession() async {
@@ -86,6 +110,33 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func deleteSession(id: PracticeSession.ID) {
+        sessions.removeAll { $0.id == id }
+    }
+
+    func exportDataText() -> String {
+        var lines = [
+            "BrassTune local data export",
+            "Account state: \(authState.displayTitle)",
+            "Environment: \(config.environment.rawValue)",
+            "Instrument: \(selectedInstrumentId)",
+            "Reference pitch: \(String(format: "%.1f", referencePitchHz)) Hz",
+            "Sessions: \(sessions.count)",
+            "Account features: \(accountFeaturesEnabled ? "configured" : "disabled")",
+        ]
+        let analytics = analyticsSnapshot
+        if analytics.hasSessions {
+            lines.append("Average absolute cents: \(String(format: "%.1f", analytics.averageAbsCents))")
+            lines.append("Average in-tune percentage: \(String(format: "%.0f", analytics.averageInTunePercentage))%")
+            lines.append("")
+            lines.append("Sessions")
+            lines.append(contentsOf: sessions.map(\.exportText))
+        } else {
+            lines.append("No local practice sessions have been recorded.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     func deleteAccount(confirmation: String) async {
         guard confirmation.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "delete my account" else {
             lastError = .accountDeletionRequiresConfirmation
@@ -111,6 +162,7 @@ final class AppModel: ObservableObject {
         ensembles.removeAll()
         authService.deleteStoredAuth()
         authState = .signedOut
+        lastError = nil
     }
 
     func startDemoRecording() {
@@ -119,12 +171,15 @@ final class AppModel: ObservableObject {
 
     func stopDemoRecording() {
         let frames = audioEngine.stopFixtureRecording()
+        let endedAt = Date()
+        let startedAt = endedAt.addingTimeInterval(-Double(frames.count) * 0.11)
+        let demoIndex = sessions.count + 1
         let session = PracticeSession(
             id: UUID(),
-            name: "Demo take",
+            name: demoIndex == 1 ? "Guided take" : "Guided take \(demoIndex)",
             instrumentId: selectedInstrumentId,
-            startedAt: Date(),
-            endedAt: Date(),
+            startedAt: startedAt,
+            endedAt: endedAt,
             frames: frames,
             retainedRecordingURL: nil
         )

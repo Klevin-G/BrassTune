@@ -93,6 +93,8 @@ Report bugs with:
 
 Do not include passwords, provider tokens, private environment values, real user data, or sensitive recordings in reports.
 
+Use `BETA_QA_GUIDE.md` for the friend-tester script, common tester fixes, accessibility checklist, and triage labels. Use `LIVE_AUTH_TEST_PLAN.md` for disposable live-account auth evidence, and `LOAD_ABUSE_SMOKE.md` for conservative load/abuse smoke checks.
+
 ## Rollback And Contact Process
 
 - Stop beta testing if health, CORS, WebSocket, auth, account deletion, or data export fails.

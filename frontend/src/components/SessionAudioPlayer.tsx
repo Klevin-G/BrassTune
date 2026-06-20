@@ -16,7 +16,7 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
 
   useEffect(() => {
     return () => {
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      if (audioUrl?.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
     };
   }, [audioUrl]);
 
@@ -25,7 +25,7 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
     setAudioError(null);
     setLoading(true);
     try {
-      setAudioUrl(await objectUrlFor(`/api/sessions/${session.id}/audio`));
+      setAudioUrl(session.guest_audio_data_url ?? await objectUrlFor(`/api/sessions/${session.id}/audio`));
     } catch {
       setAudioError('Audio could not be loaded.');
     } finally {

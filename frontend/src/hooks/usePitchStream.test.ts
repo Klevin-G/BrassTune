@@ -16,4 +16,8 @@ describe('shouldPersistFrameFromFrontend', () => {
   it('does not persist invalid frames', () => {
     expect(shouldPersistFrameFromFrontend(true, true, 42, { is_valid_for_recording: false } as PitchFrame)).toBe(false);
   });
+
+  it('does not persist local guest demo frames to backend', () => {
+    expect(shouldPersistFrameFromFrontend(true, true, -42, validFrame, false)).toBe(false);
+  });
 });

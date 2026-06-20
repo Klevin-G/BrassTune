@@ -7,6 +7,6 @@ Only items requiring owner/legal/account/hardware access are listed here.
 3. Configure Sign in with Apple capability, Apple Services ID/native callbacks, Supabase Apple provider, and Supabase redirect allowlist.
 4. Provide disposable live Supabase test credentials/project for email sign-up, duplicate handling, weak password, confirmation, reset, Apple OAuth, token refresh, account export, account deletion, storage deletion, and identity cleanup tests.
 5. Provide a Vercel automation bypass or temporarily allow unauthenticated preview access so Playwright can exercise protected preview page journeys; connector fetch and direct hosted API/WS smoke passed, but browser page automation still receives `401`.
-6. Confirm Vercel/Render/Supabase alert ownership, log access, backup/restore expectations, and incident contacts.
+6. Confirm Vercel/Render/Supabase alert ownership, log access, backup/restore expectations, incident contacts, scheduled production smoke ownership, and whether the Render keepalive workflow should stay enabled.
 7. Run the physical-device protocol on supported iPhone/iPad hardware with real brass instruments.
 8. Create App Store review demo account or approve demo mode and review notes.

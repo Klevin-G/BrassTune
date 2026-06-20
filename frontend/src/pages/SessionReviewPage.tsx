@@ -8,6 +8,7 @@ import { NoteStatsTable } from '../components/NoteStatsTable';
 import { RecommendationCard } from '../components/RecommendationCard';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { LoadingSkeleton, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { getGuestSession, isGuestSessionId, type GuestSessionDetail } from '../domain/guestSessions';
 import type { NoteEvent, NoteStats, PracticeSession, Recommendation } from '../domain/types';
 
 type SessionDetail = PracticeSession & { samples_count: number; note_events: NoteEvent[] };
@@ -21,12 +22,31 @@ export function SessionReviewPage() {
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([getSession(id), getSessionAnalytics(id)]).then(([sessionData, analytics]) => {
-      setSession(sessionData);
-      setStats(analytics.note_stats);
-      setHeatmap(analytics.heatmap);
-      setRecommendations(analytics.recommendations);
-    });
+    if (isGuestSessionId(id)) {
+      const guestSession = getGuestSession(id);
+      if (guestSession) {
+        setSession(guestSession);
+        setStats(guestSession.note_stats);
+        setHeatmap(guestSession.heatmap);
+        setRecommendations(guestSession.recommendations);
+      }
+      return;
+    }
+    Promise.all([getSession(id), getSessionAnalytics(id)])
+      .then(([sessionData, analytics]) => {
+        setSession(sessionData);
+        setStats(analytics.note_stats);
+        setHeatmap(analytics.heatmap);
+        setRecommendations(analytics.recommendations);
+      })
+      .catch(() => {
+        const guestSession = getGuestSession(id);
+        if (!guestSession) return;
+        setSession(guestSession);
+        setStats(guestSession.note_stats);
+        setHeatmap(guestSession.heatmap);
+        setRecommendations(guestSession.recommendations);
+      });
   }, [id]);
 
   if (!session) {
@@ -44,9 +64,13 @@ export function SessionReviewPage() {
       <PageHeader
         eyebrow="Session review"
         title={session.name}
-        description={`Recorded ${new Date(session.started_at).toLocaleString()} with ${session.notes_count} detected note events.`}
-        action={<ExportButtons sessionId={session.id} />}
-        meta={<StatusBadge tone="gold">{session.instrument_id}</StatusBadge>}
+        description={
+          session.guest_session
+            ? `Guest session saved on this device ${new Date(session.started_at).toLocaleString()} with ${session.notes_count} detected note events.`
+            : `Recorded ${new Date(session.started_at).toLocaleString()} with ${session.notes_count} detected note events.`
+        }
+        action={<ExportButtons sessionId={session.id} guestSession={session.guest_session ? session as GuestSessionDetail : null} />}
+        meta={<StatusBadge tone="gold">{session.guest_session ? 'guest practice' : session.instrument_id}</StatusBadge>}
       />
       <div className="stats-grid">
         <MetricTile label="Avg abs" value={`${session.average_abs_cents.toFixed(1)}c`} icon={Gauge} tone="gold" />

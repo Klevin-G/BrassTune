@@ -5,6 +5,7 @@ import { listSessions } from '../api/client';
 import { ExportButtons } from '../components/ExportButtons';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { EmptyActionState, PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
+import { listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
 import type { PracticeSession } from '../domain/types';
 
 type SessionFilter = 'all' | 'week' | 'audio' | 'best' | 'work';
@@ -22,7 +23,10 @@ export function SessionsPage() {
   const [filter, setFilter] = useState<SessionFilter>('all');
 
   useEffect(() => {
-    listSessions().then(setSessions).catch(() => setSessions([]));
+    const guestSessions = listGuestSessions();
+    listSessions()
+      .then((cloudSessions) => setSessions([...guestSessions, ...cloudSessions].sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())))
+      .catch(() => setSessions(guestSessions));
   }, []);
 
   const filtered = useMemo(() => {
@@ -38,7 +42,7 @@ export function SessionsPage() {
       <PageHeader
         eyebrow="Sessions"
         title="Practice timeline"
-        description="Review saved takes as evidence cards: date, instrument, note count, average error, and in-tune percentage."
+        description="Review saved takes as evidence cards. Guest sessions stay on this device; sign in to sync sessions across devices and ensembles."
         action={
           <Link to="/practice" className="primary-button">
             <Plus size={18} />
@@ -72,7 +76,7 @@ export function SessionsPage() {
               <div className="mini-stat-list">
                 <div className="mini-stat-row">
                   <span>Instrument</span>
-                  <strong>{session.instrument_id}</strong>
+                  <strong>{session.guest_session ? 'guest' : session.instrument_id}</strong>
                 </div>
                 <div className="mini-stat-row">
                   <span>Notes</span>
@@ -108,7 +112,7 @@ export function SessionsPage() {
                     <Download size={16} />
                     Export
                   </summary>
-                  <ExportButtons sessionId={session.id} />
+                  <ExportButtons sessionId={session.id} guestSession={session.guest_session ? session as GuestSessionDetail : null} />
                 </details>
               </div>
             </article>

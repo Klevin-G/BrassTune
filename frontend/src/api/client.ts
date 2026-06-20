@@ -1,8 +1,5 @@
 import type { InstrumentProfile, NoteEvent, NoteStats, PitchFrame, PracticePlan, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
-
-const HOSTED_RENDER_API_BASE = 'https://brasstune.onrender.com';
-const CONFIGURED_API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
-const CONFIGURED_WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? '';
+import { apiBase, wsBase } from './runtimeConfig';
 let authTokenProvider: (() => Promise<string | null>) | null = null;
 
 export interface DateRangeParams {
@@ -34,30 +31,26 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `Request failed: ${response.status}`);
+    throw new Error(friendlyRequestError(message, response.status));
   }
   return response.json() as Promise<T>;
 }
 
-function cleanBase(base: string) {
-  return base.replace(/\/+$/, '');
-}
-
-function isVercelHostedApp() {
-  if (typeof window === 'undefined') return false;
-  const hostname = window.location.hostname || window.location.host.split(':')[0];
-  return hostname.endsWith('.vercel.app');
-}
-
-function apiBase() {
-  if (CONFIGURED_API_BASE) return cleanBase(CONFIGURED_API_BASE);
-  return isVercelHostedApp() ? HOSTED_RENDER_API_BASE : '';
-}
-
-function wsBase() {
-  if (CONFIGURED_WS_BASE) return cleanBase(CONFIGURED_WS_BASE);
-  const base = apiBase();
-  return base ? base.replace(/^http/, 'ws') : '';
+function friendlyRequestError(message: string, status: number) {
+  let raw = message;
+  try {
+    const parsed = JSON.parse(message);
+    raw = parsed.detail ?? parsed.message ?? message;
+  } catch {
+    raw = message;
+  }
+  if (status === 401 || /authentication required|auth|token|supabase/i.test(raw)) {
+    return 'Sign in to sync sessions and account features. Guest practice still works on this device.';
+  }
+  if (/fastapi|backend|env var|SUPABASE_|VITE_/i.test(raw)) {
+    return 'Cloud practice is unavailable right now. Guest practice still works on this device.';
+  }
+  return raw || `Request failed: ${status}`;
 }
 
 export const exportUrl = (path: string) => `${apiBase()}${path}`;
