@@ -10,7 +10,7 @@ Evidence state: pushed branch follow-up plus local guest-fetch fix; exact-SHA CI
 | Gate | Command | Result | Notes |
 |---|---|---|---|
 | Frontend unit tests | `cd frontend && npm test` | Passed: `9` files, `35` tests | Includes browser-local pitch detector coverage. |
-| Frontend build/typecheck | `cd frontend && npm run build` | Passed | Main JS `382.73 kB`; large Recharts chunk remains split. |
+| Frontend build/typecheck | `cd frontend && npm run build` | Passed | Main JS `382.76 kB`; large Recharts chunk remains split. |
 | Frontend dependency audit | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities` | Dev dependencies excluded. |
 | Local browser journeys/accessibility | `cd frontend && CI=true npm run e2e:local` | Passed: `75 passed` | Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. |
 | Device simulation | `cd frontend && npm run simulate:devices` | Passed | Refreshed `docs/device-simulation-report.md` and tracked screenshots. |

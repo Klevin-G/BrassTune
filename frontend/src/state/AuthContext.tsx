@@ -1,6 +1,7 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/client';
+import { apiBase } from '../api/runtimeConfig';
 import { supabase, supabaseConfigured } from '../lib/supabase';
 
 interface BackendProfile {
@@ -50,6 +51,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = useCallback(async (activeSession: Session | null) => {
     if (supabase && !activeSession) {
+      setProfile(null);
+      return;
+    }
+    if (!supabase && apiBase()) {
       setProfile(null);
       return;
     }
