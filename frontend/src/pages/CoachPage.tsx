@@ -12,12 +12,20 @@ export function CoachPage() {
   const { instrumentId } = useAppSettings();
   const [plan, setPlan] = useState<PracticePlan | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getPracticePlan(instrumentId), getRecommendations(instrumentId)]).then(([planData, recommendationData]) => {
-      setPlan(planData);
-      setRecommendations(recommendationData);
-    });
+    Promise.all([getPracticePlan(instrumentId), getRecommendations(instrumentId)])
+      .then(([planData, recommendationData]) => {
+        setPlan(planData);
+        setRecommendations(recommendationData);
+        setError(null);
+      })
+      .catch(() => {
+        setPlan(null);
+        setRecommendations([]);
+        setError('Coach recommendations are unavailable right now. Practice and local review still work.');
+      });
   }, [instrumentId]);
 
   return (
@@ -33,6 +41,7 @@ export function CoachPage() {
           </Link>
         }
       />
+      {error && <div className="alert">{error}</div>}
       {plan && <PracticePlanCard plan={plan} />}
       <div className="insight-grid">
         <InsightCard

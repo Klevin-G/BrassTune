@@ -1,5 +1,6 @@
 import { Gauge, Music2, Percent, Timer } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useParams } from 'react-router-dom';
 import { getSession, getSessionAnalytics } from '../api/client';
 import { ExportButtons } from '../components/ExportButtons';
@@ -19,9 +20,13 @@ export function SessionReviewPage() {
   const [stats, setStats] = useState<NoteStats[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (!id) return;
+    setLoading(true);
+    setNotFound(false);
     if (isGuestSessionId(id)) {
       const guestSession = getGuestSession(id);
       if (guestSession) {
@@ -29,6 +34,10 @@ export function SessionReviewPage() {
         setStats(guestSession.note_stats);
         setHeatmap(guestSession.heatmap);
         setRecommendations(guestSession.recommendations);
+        setLoading(false);
+      } else {
+        setNotFound(true);
+        setLoading(false);
       }
       return;
     }
@@ -38,22 +47,42 @@ export function SessionReviewPage() {
         setStats(analytics.note_stats);
         setHeatmap(analytics.heatmap);
         setRecommendations(analytics.recommendations);
+        setLoading(false);
       })
       .catch(() => {
         const guestSession = getGuestSession(id);
-        if (!guestSession) return;
+        if (!guestSession) {
+          setNotFound(true);
+          setLoading(false);
+          return;
+        }
         setSession(guestSession);
         setStats(guestSession.note_stats);
         setHeatmap(guestSession.heatmap);
         setRecommendations(guestSession.recommendations);
+        setLoading(false);
       });
   }, [id]);
 
-  if (!session) {
+  if (!session && loading) {
     return (
       <ScreenContainer>
         <SectionCard title="Loading session">
           <LoadingSkeleton rows={4} />
+        </SectionCard>
+      </ScreenContainer>
+    );
+  }
+
+  if (!session || notFound) {
+    return (
+      <ScreenContainer>
+        <SectionCard title="Session not found" eyebrow="Review">
+          <p className="muted-copy">This session is not available on this device or account.</p>
+          <div className="settings-actions">
+            <Link className="primary-button" to="/practice">Record a take</Link>
+            <Link className="ghost-button" to="/sessions">Open sessions</Link>
+          </div>
         </SectionCard>
       </ScreenContainer>
     );

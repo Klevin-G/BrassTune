@@ -1,9 +1,11 @@
-import { Activity, Bug, FileText, LogIn, LogOut, Music2, Settings, UserRound, Users } from 'lucide-react';
+import { Activity, Bug, FileText, LogIn, LogOut, Music2, Settings, Timer, UserRound, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
 
 const moreItems = [
+  { to: '/metronome', title: 'Metronome', detail: 'Tempo, count-in, subdivisions, and ramp practice.', icon: Timer },
+  { to: '/practice/score', title: 'Score practice', detail: 'PDF, image, and camera score practice on this device.', icon: FileText },
   { to: '/sessions', title: 'Sessions', detail: 'Review practice history and open saved takes.', icon: Music2 },
   { to: '/progress', title: 'Progress', detail: 'See weekly pulse, improvement, and consistency.', icon: Activity },
   { to: '/ensemble', title: 'Ensemble', detail: 'Director briefing cards and rehearsal focus.', icon: Users },
@@ -17,7 +19,7 @@ const moreItems = [
 export function MorePage() {
   const auth = useAuth();
   return (
-    <ScreenContainer>
+    <ScreenContainer className="more-screen">
       <PageHeader
         eyebrow="Secondary hub"
         title="More"
@@ -53,9 +55,9 @@ export function MorePage() {
               Sign out
             </button>
           ) : (
-            <Link className="primary-button" to="/auth/sign-in">
+            <Link className="primary-button" to={auth.configured ? '/auth/sign-in' : '/practice'}>
               <LogIn size={17} />
-              Sign in
+              {auth.configured ? 'Sign in' : 'Continue as guest'}
             </Link>
           )}
         </div>

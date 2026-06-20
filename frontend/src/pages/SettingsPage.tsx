@@ -60,12 +60,13 @@ export function SettingsPage() {
     if (!window.confirm('Clear BrassTune preferences on this device?')) return;
     Object.keys(localStorage)
       .filter((key) => key.startsWith('brasstune.'))
+      .filter((key) => key !== 'brasstune.guestSessions.v1')
       .forEach((key) => localStorage.removeItem(key));
-    setMaintenanceStatus('Preferences cleared on this device.');
+    setMaintenanceStatus('Preferences cleared on this device. Guest sessions were preserved.');
   };
 
   return (
-    <ScreenContainer>
+    <ScreenContainer className="settings-screen">
       <PageHeader
         eyebrow="Settings"
         title="Practice preferences"
@@ -73,7 +74,7 @@ export function SettingsPage() {
         meta={<StatusBadge tone="gold">{instrumentId}</StatusBadge>}
       />
       <div className="two-column-grid">
-        <SectionCard title="Tuner setup" eyebrow="Core controls">
+        <SectionCard className="settings-tuner-card" title="Tuner setup" eyebrow="Core controls">
           <div className="settings-grid">
             <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
             <label className="field">
@@ -90,7 +91,7 @@ export function SettingsPage() {
             </label>
           </div>
         </SectionCard>
-        <SectionCard title="Profile" eyebrow={auth.isSignedIn ? 'Account' : 'Guest practice'}>
+        <SectionCard className="settings-profile-card" title="Profile" eyebrow={auth.isSignedIn ? 'Account' : 'Guest practice'}>
           <div className="account-card vertical">
             <span className="insight-icon">
               <UserRound size={18} />
@@ -107,9 +108,9 @@ export function SettingsPage() {
                 Sign out
               </button>
             ) : (
-              <Link className="primary-button" to="/auth/sign-in">
+              <Link className="primary-button" to={auth.configured ? '/auth/sign-in' : '/practice'}>
                 <LogIn size={18} />
-                Sign in
+                {auth.configured ? 'Sign in' : 'Continue as guest'}
               </Link>
             )}
           </div>
@@ -192,7 +193,7 @@ export function SettingsPage() {
       <SectionCard title="Delete account" eyebrow="Account lifecycle">
         <p className="muted-copy">Export your data first. Deletion removes your profile, sessions, pitch samples, note events, recommendations, group memberships, and owned ensembles. Teacher-owned groups are deleted with their memberships and invitations.</p>
         <div className="settings-actions">
-          <button className="ghost-button" type="button" onClick={() => downloadExport('/api/users/me/export.zip', 'brasstune-account-export.zip')}>
+          <button className="ghost-button" type="button" onClick={auth.isSignedIn ? () => downloadExport('/api/users/me/export.zip', 'brasstune-account-export.zip') : exportAllData}>
             <Download size={18} />
             Export account data
           </button>

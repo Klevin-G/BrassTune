@@ -9,9 +9,18 @@ import { useAppSettings } from '../state/AppSettingsContext';
 export function ProgressPage() {
   const { instrumentId } = useAppSettings();
   const [progress, setProgress] = useState<ProgressMetrics | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getProgress(instrumentId).then(setProgress);
+    getProgress(instrumentId)
+      .then((next) => {
+        setProgress(next);
+        setError(null);
+      })
+      .catch(() => {
+        setProgress(null);
+        setError('Progress sync is unavailable right now. Record or review guest sessions locally.');
+      });
   }, [instrumentId]);
 
   const latestPoint = progress?.timeseries[progress.timeseries.length - 1];
@@ -26,6 +35,7 @@ export function ProgressPage() {
         description="Track whether the tuning work is getting steadier, not just whether one note looked good for a moment."
         meta={<StatusBadge tone="gold">{progress?.period?.current ?? 'Current period'}</StatusBadge>}
       />
+      {error && <div className="alert">{error}</div>}
       <div className="stats-grid">
         <MetricTile label="Current error" value={`${latestPoint?.avg_abs_cents.toFixed(1) ?? '0.0'}c`} detail="average deviation" icon={TrendingDown} tone="gold" />
         <MetricTile label="In tune" value={`${Math.round(latestPoint?.in_tune_percentage ?? 0)}%`} detail="recent period" icon={Award} tone="green" />

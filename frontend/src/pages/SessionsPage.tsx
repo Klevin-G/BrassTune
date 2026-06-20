@@ -76,7 +76,7 @@ export function SessionsPage() {
               <div className="mini-stat-list">
                 <div className="mini-stat-row">
                   <span>Instrument</span>
-                  <strong>{session.guest_session ? 'guest' : session.instrument_id}</strong>
+                  <strong>{session.guest_session ? `${session.instrument_id} · guest` : session.instrument_id}</strong>
                 </div>
                 <div className="mini-stat-row">
                   <span>Notes</span>

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Activity, BarChart3, Gauge, GraduationCap, Home, LogIn, MoreHorizontal, Music2, Settings, SlidersHorizontal, UserRound, Users } from 'lucide-react';
+import { Activity, BarChart3, FileText, Gauge, GraduationCap, Home, LogIn, MoreHorizontal, Music2, Settings, SlidersHorizontal, Timer, UserRound, Users } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
@@ -16,6 +16,8 @@ const primaryNav = [
 ];
 
 const secondaryNav = [
+  { to: '/metronome', label: 'Metronome', icon: Timer },
+  { to: '/practice/score', label: 'Score', icon: FileText },
   { to: '/sessions', label: 'Sessions', icon: Music2 },
   { to: '/progress', label: 'Progress', icon: Activity },
   { to: '/ensemble', label: 'Ensemble', icon: Users },
@@ -87,11 +89,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button className={`toggle ${demoMode ? 'on' : ''}`} onClick={() => setDemoMode(!demoMode)} type="button">
               Guide
             </button>
-            <StatusBadge tone={demoMode ? 'gold' : 'green'}>{demoMode ? 'Guided audio' : 'Mic ready'}</StatusBadge>
+            <StatusBadge tone={demoMode ? 'gold' : 'green'}>{demoMode ? 'Guided audio' : 'Mic mode'}</StatusBadge>
             {auth.isSignedIn ? (
               <Link to="/settings" className="icon-button labeled" aria-label="Open profile settings">
                 <UserRound size={18} />
                 <span>{auth.profile?.username ?? 'Profile'}</span>
+              </Link>
+            ) : !auth.configured ? (
+              <Link to="/practice" className="icon-button labeled" aria-label="Continue as guest">
+                <UserRound size={18} />
+                <span>Guest</span>
               </Link>
             ) : (
               <Link to="/auth/sign-in" className="icon-button labeled" aria-label="Sign in">

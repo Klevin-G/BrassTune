@@ -20,6 +20,8 @@ test('critical routes render identifiable content', async ({ page }) => {
   const routes = [
     ['/', /Today's intonation focus/i],
     ['/practice', /Live tuner cockpit/i],
+    ['/metronome', /Metronome/i],
+    ['/practice/score', /Score practice/i],
     ['/sessions', /Practice timeline/i],
     ['/analytics', /Analytics/i],
     ['/progress', /Progress/i],

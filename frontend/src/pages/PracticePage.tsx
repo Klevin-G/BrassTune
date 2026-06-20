@@ -1,4 +1,4 @@
-import { ArrowRight, Gauge, History, Mic, Play, Timer, UploadCloud } from 'lucide-react';
+import { ArrowRight, FileText, Gauge, History, Mic, Play, Timer, UploadCloud } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LocalMediaImportPanel } from '../components/LocalMediaImportPanel';
@@ -162,6 +162,25 @@ export function PracticePage() {
               </div>
               <p>{audioRecorder.error ?? (cloudSessionEnabled ? 'Audio is captured for playback when a recording stops.' : 'Guest playback stays in this browser and is not uploaded.')}</p>
             </article>
+          </div>
+          <div className="inline-panel">
+            <div className="section-card-heading">
+              <div>
+                <p className="eyebrow">Practice tools</p>
+                <h2>Tempo and score</h2>
+              </div>
+            </div>
+            <div className="settings-actions">
+              <Link className="ghost-button" to="/metronome">
+                <Timer size={18} />
+                Open metronome
+              </Link>
+              <Link className="ghost-button" to="/practice/score">
+                <FileText size={18} />
+                Open score practice
+              </Link>
+            </div>
+            <p className="muted-copy">Use count-ins, tempo ramps, and local score pages alongside the tuner. Automatic score following remains a separate validation item.</p>
           </div>
           <div className="inline-panel">
             <div className="section-card-heading">

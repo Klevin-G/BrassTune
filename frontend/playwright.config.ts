@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineConfig, devices } from 'playwright/test';
 
 const startLocalServers = process.env.E2E_START_LOCAL_SERVERS !== '0';
@@ -11,6 +13,7 @@ const defaultBackendPython = process.platform === 'win32'
   : (existsSync('../backend/.venv/bin/python') ? '../backend/.venv/bin/python' : 'python3');
 const backendPython = process.env.E2E_BACKEND_PYTHON ?? defaultBackendPython;
 const backendCommand = `cd ../backend && ${backendPython} -m uvicorn app.main:app --host 127.0.0.1 --port 8000`;
+const backendDatabaseURL = process.env.E2E_BACKEND_DATABASE_URL ?? `sqlite:///${join(tmpdir(), `brasstune-e2e-${process.pid}.db`)}`;
 
 export default defineConfig({
   testDir: './e2e',
@@ -38,6 +41,13 @@ export default defineConfig({
       url: `${apiBaseURL}/api/health`,
       reuseExistingServer: !ci,
       timeout: 30_000,
+      env: {
+        APP_ENV: 'local',
+        BRASSTUNE_AUTH_MODE: 'disabled',
+        BRASSTUNE_DATABASE_URL: backendDatabaseURL,
+        FRONTEND_ORIGIN: baseURL,
+        CORS_ALLOWED_ORIGINS: `${baseURL},http://localhost:5173,http://127.0.0.1:5173`,
+      },
     },
     {
       command: 'npm run dev -- --host 127.0.0.1 --port 5173',

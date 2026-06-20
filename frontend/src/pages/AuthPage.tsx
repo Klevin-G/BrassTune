@@ -142,10 +142,12 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
             </button>
           )}
           {message && <div className="alert" role="status">{message}</div>}
-          <div className="auth-switcher">
-            {isSignup ? <Link to="/auth/sign-in">Already have an account?</Link> : <Link to="/auth/sign-up">Create an account</Link>}
-            <Link to="/auth/reset-password">Reset password</Link>
-          </div>
+          {auth.configured && (
+            <div className="auth-switcher">
+              {isSignup ? <Link to="/auth/sign-in">Already have an account?</Link> : <Link to="/auth/sign-up">Create an account</Link>}
+              <Link to="/auth/reset-password">Reset password</Link>
+            </div>
+          )}
         </SectionCard>
       </div>
     </ScreenContainer>

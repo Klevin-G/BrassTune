@@ -33,12 +33,20 @@ export function AnalyticsPage() {
   const [period, setPeriod] = useState<Period>('30d');
   const [range, setRange] = useState(rangeForPeriod('30d'));
   const [selectedNote, setSelectedNote] = useState<string | undefined>();
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getNoteStats(instrumentId, range), getHeatmap(instrumentId, range)]).then(([noteData, heatmapData]) => {
-      setStats(noteData);
-      setHeatmap(heatmapData);
-    });
+    Promise.all([getNoteStats(instrumentId, range), getHeatmap(instrumentId, range)])
+      .then(([noteData, heatmapData]) => {
+        setStats(noteData);
+        setHeatmap(heatmapData);
+        setError(null);
+      })
+      .catch(() => {
+        setStats([]);
+        setHeatmap([]);
+        setError('Analytics are unavailable right now. Guest practice and local review still work on this device.');
+      });
   }, [instrumentId, range]);
 
   useEffect(() => {
@@ -83,6 +91,7 @@ export function AnalyticsPage() {
           </div>
         }
       />
+      {error && <div className="alert">{error}</div>}
       <SectionCard
         className="analytics-controls"
         title="Period and instrument"

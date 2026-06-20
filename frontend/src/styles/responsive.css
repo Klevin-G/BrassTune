@@ -84,7 +84,8 @@
 
   .topbar {
     align-items: start;
-    padding: 14px 16px;
+    min-height: 62px;
+    padding: 10px 16px;
   }
 
   .topbar-controls {
@@ -94,6 +95,14 @@
   .topbar .select-wrap.compact span,
   .control-inline {
     display: none;
+  }
+
+  .topbar-label {
+    display: none;
+  }
+
+  .topbar h1 {
+    margin-top: 0;
   }
 
   .content {
@@ -113,7 +122,14 @@
   .page-header {
     align-items: start;
     min-height: 0;
-    padding: 22px;
+    padding: 18px;
+  }
+
+  .settings-screen .page-header > div > p:not(.eyebrow),
+  .score-practice-screen .page-header > div > p:not(.eyebrow),
+  .metronome-screen .page-header > div > p:not(.eyebrow),
+  .more-screen .page-header > div > p:not(.eyebrow) {
+    display: none;
   }
 
   .page-header-action {
@@ -122,12 +138,18 @@
 
   .practice-layout,
   .two-column-grid,
+  .metronome-grid,
+  .score-reader-grid,
   .auth-layout,
   .analytics-main-grid,
   .analytics-chart-grid,
   .analytics-control-row,
   .ensemble-admin-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-profile-card {
+    order: -1;
   }
 
   .analytics-inspector-card {
@@ -172,7 +194,7 @@
     display: grid;
     grid-template-columns: repeat(5, 1fr);
     gap: 4px;
-    padding: 7px;
+    padding: 6px;
     border: 1px solid rgba(240, 201, 112, 0.22);
     border-radius: 24px;
     background: rgba(6, 10, 15, 0.86);
@@ -180,13 +202,17 @@
     backdrop-filter: blur(18px);
   }
 
+  .floating-tabbar a {
+    min-height: 48px;
+  }
+
   .bottom-action-bar {
-    bottom: calc(92px + env(safe-area-inset-bottom));
+    bottom: calc(84px + env(safe-area-inset-bottom));
   }
 
   .tuner-surface .session-controls {
     position: sticky;
-    bottom: calc(94px + env(safe-area-inset-bottom));
+    bottom: calc(86px + env(safe-area-inset-bottom));
     z-index: 21;
     padding: 8px;
     border: 1px solid rgba(240, 201, 112, 0.22);
@@ -233,6 +259,11 @@
     grid-template-columns: minmax(0, 1.3fr) minmax(285px, 0.8fr);
   }
 
+  .metronome-grid,
+  .score-reader-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .analytics-diagnosis-grid,
   .insight-grid,
   .recommendation-grid,
@@ -253,6 +284,8 @@
 
   .practice-layout,
   .two-column-grid,
+  .metronome-grid,
+  .score-reader-grid,
   .auth-layout,
   .analytics-main-grid,
   .analytics-chart-grid,
@@ -309,7 +342,8 @@
 
 @media (max-width: 640px) {
   .topbar {
-    min-height: 70px;
+    min-height: 58px;
+    padding: 9px 12px;
   }
 
   .topbar h1 {
@@ -435,6 +469,11 @@
     flex-direction: column;
   }
 
+  .settings-profile-card .account-card {
+    align-items: center;
+    flex-direction: row;
+  }
+
   .export-menu,
   .export-menu summary,
   .export-menu .export-buttons {
@@ -554,7 +593,8 @@
 
 @media (max-width: 360px) {
   .topbar {
-    padding: 12px 10px;
+    min-height: 54px;
+    padding: 8px 10px;
   }
 
   .topbar h1 {
@@ -584,7 +624,7 @@
   .practice-plan,
   .tuner-surface,
   .today-focus-card {
-    padding: 14px;
+    padding: 12px;
     border-radius: 18px;
   }
 
@@ -601,7 +641,31 @@
   }
 
   .page-header {
-    padding: 18px;
+    padding: 14px;
+  }
+
+  .settings-screen .page-header {
+    padding: 10px 12px;
+  }
+
+  .settings-screen .page-header h1 {
+    font-size: 1.45rem;
+  }
+
+  .settings-screen .page-header .status-badge {
+    display: none;
+  }
+
+  .settings-screen .section-card-heading {
+    margin-bottom: 10px;
+  }
+
+  .settings-screen .two-column-grid {
+    gap: 12px;
+  }
+
+  .settings-profile-card .account-card {
+    padding: 10px;
   }
 
   h1 {
@@ -662,7 +726,7 @@
 
   .floating-tabbar a {
     gap: 2px;
-    min-height: 46px;
+    min-height: 42px;
     font-size: 0.56rem;
   }
 
@@ -697,6 +761,40 @@
 
   .tuner-header {
     order: 1;
+  }
+
+  .beat-ring {
+    grid-template-columns: repeat(auto-fit, minmax(42px, 1fr));
+    gap: 6px;
+    margin: 6px 0 10px;
+  }
+
+  .beat-ring span {
+    font-size: 1rem;
+    border-radius: 14px;
+  }
+
+  .subdivision-dots {
+    min-height: 14px;
+    margin-bottom: 10px;
+  }
+
+  .score-page-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .score-page-row .status-badge {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .score-preview-frame {
+    min-height: 280px;
+  }
+
+  .score-preview-frame iframe,
+  .score-preview-frame img {
+    min-height: 280px;
   }
 
   .note-display {
