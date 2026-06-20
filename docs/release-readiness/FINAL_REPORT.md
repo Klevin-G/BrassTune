@@ -2,6 +2,19 @@
 
 Status: closed-beta candidate, external provider/App Store/device gates remaining.
 
+## Current Run Update - 2026-06-20 UTC
+
+This run continued from local branch `arya/release-readiness-hardening` at `1013177ba7056fd8f3fa91b99b233d1adf51ff4c`. No production deploy, merge, tag, or push was performed.
+
+Current local evidence added:
+
+- Backend hardening: production startup now requires Supabase configuration, local auth is not allowed in production, WebSocket query-token auth is disabled, WebSocket origins are checked, and audio/pitch payloads have tighter schema constraints.
+- Web features: added `/metronome` and `/practice/score`, primary navigation entries, guest-safe auth fallbacks, route coverage, and unit tests.
+- Validation completed: backend pytest `53 passed`; frontend Vitest `27 passed`; frontend build passed with a large chunk warning; frontend dependency audit `0 vulnerabilities`; full local browser E2E `75 passed`; device simulation passed; Swift package tests `3 passed`; Bandit passed; rendered browser spot checks passed for metronome tap-tempo and score-practice import controls.
+- Security caveat: `pip-audit` fails on Starlette, pytest, and python-dotenv advisories; see `TEST_MATRIX.md` and `NEXT_WORK.md` for dependency follow-up.
+
+This update does not supersede the external gates below: live provider lifecycle tests, Apple signing/TestFlight/App Store Connect, physical-device microphone testing, strict post-deploy production content smoke, and native production parity remain blocked.
+
 ## Summary
 
 The hosted beta pass fixed the Render WebSocket blocker, added repeatable hosted smoke coverage, corrected Vercel-hosted API/WebSocket fallbacks, removed user-facing env-var copy, added a clean Supabase baseline migration, and remediated the live public `SECURITY DEFINER` helper RPC grant drift.

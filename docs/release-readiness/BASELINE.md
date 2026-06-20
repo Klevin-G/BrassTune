@@ -2,6 +2,25 @@
 
 Date: 2026-06-18
 
+## Current Run Update - 2026-06-20 UTC
+
+- Branch: `arya/release-readiness-hardening`
+- HEAD before uncommitted edits: `1013177ba7056fd8f3fa91b99b233d1adf51ff4c`
+- Merge base with `origin/main`: `652a787c2e643542dfac5911820a2fed01885622`
+- Linked Vercel project metadata: `.vercel/repo.json` project `brass-tune`, directory `frontend`.
+- Current validation added after backend/frontend edits:
+  - `cd backend && .venv/bin/python -m pytest`: `53 passed`, `5 warnings`.
+  - `cd frontend && npm test`: `8` files and `27` tests passed.
+  - `cd frontend && npm run build`: passed with Vite large chunk warning.
+  - `cd frontend && npm audit --omit=dev`: `0 vulnerabilities`.
+  - `cd frontend && npm run e2e:local`: `75 passed`.
+  - `cd frontend && npm run simulate:devices`: passed and refreshed screenshots/report.
+  - `cd swift/BrassTuneCore && swift test`: `3` tests passed.
+- Security checks in this current run:
+  - `cd backend && .venv/bin/python -m bandit -r app -x app/tests`: passed with no issues.
+  - `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt`: failed on Starlette, pytest, and python-dotenv advisories.
+- Current dirty state includes intentional backend/frontend/docs edits plus regenerated device-simulation artifacts. Do not broad-stage; stage only reviewed paths if a commit is requested.
+
 ## Repository State
 
 - Working directory: `/Users/aryasalem/Downloads/BrassTune`

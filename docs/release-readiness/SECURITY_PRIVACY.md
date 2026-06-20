@@ -20,10 +20,12 @@
 ## Implemented Controls
 
 - JWT/Supabase auth context maps users through `supabase_user_id` or local dev tokens.
-- Production local-auth defaults are disabled unless explicitly allowed.
+- Production local-auth defaults are disabled, and production startup now requires Supabase configuration. `BRASSTUNE_ALLOW_LOCAL_AUTH` is rejected in production.
 - Backend server-side checks enforce session, audio, analytics, recommendation, export, and ensemble scoping.
-- WebSocket URLs no longer carry bearer tokens; signed-in clients send an initial auth message and `stop_session` requires session ownership/admin.
-- Audio upload and PCM payload sizes are capped.
+- WebSocket URLs no longer carry bearer tokens; signed-in clients send an initial auth message, `stop_session` requires session ownership/admin, query-token auth is rejected, and production WebSocket origins must be explicitly allowed.
+- Audio upload, raw WebSocket message, pitch-frame, and PCM payload sizes are capped.
+- Score-practice source PDFs/images stay local by default; raw SVG is rejected instead of rendered.
+- Guest export uses local guest data instead of cloud export endpoints.
 - Supabase storage delete/read helpers avoid exposing upstream error bodies.
 - Account export includes account profile, sessions, memberships, owned groups, invitations, recommendations, and session files for the authenticated user.
 - Account deletion requires confirmation, preflights Supabase identity/session cleanup when configured, and removes sessions, audio, memberships, invitations, recommendations, teacher-owned groups, and user row.
@@ -33,8 +35,12 @@
 ## Known Risks
 
 - Account deletion is not yet a durable deletion saga; add a tombstone/outbox/retry worker for stronger operational guarantees.
+- WebSocket origin checks require explicit `CORS_ALLOWED_ORIGINS`; `CORS_ALLOWED_ORIGIN_REGEX` only applies to HTTP CORS middleware.
+- Score image/PDF validation still needs magic-byte validation, EXIF stripping, decoded-pixel caps, and stronger quality checks.
+- Metronome click bleed, long-run drift, and physical-device audio behavior are not verified.
 - Hosted Render WebSocket now upgrades and returns an app-level auth-required response after deploying commit `395a9d29870b25a7aadf161dc1d69c988bdaa841`.
 - Live Supabase deletion/export was not tested because disposable live credentials were not provided.
 - Supabase live-project drift was remediated for `public.rls_auto_enable()` by revoking execute from `public`, `anon`, and `authenticated`; verification showed `anon_execute=false` and `authenticated_execute=false`.
 - A clean Supabase baseline migration now exists and was applied to the connected project; direct Data API policies remain intentionally closed while FastAPI mediates app access.
 - Native app production flows remain fixture-backed in several areas despite passing simulator builds/tests.
+- Dependency audit follow-up is required: local `pip-audit` reports Starlette, pytest, and python-dotenv advisories. Do not treat the backend dependency set as security-clean until the FastAPI/Starlette and test-tool dependency path is upgraded or formally risk-accepted.

@@ -1,5 +1,22 @@
 # Release Test Matrix
 
+## Current Run Update - 2026-06-20 UTC
+
+| Journey/Gate | Command | Result | Notes |
+|---|---|---|---|
+| Backend regression suite | `cd backend && .venv/bin/python -m pytest` | Passed: `53 passed`, `5 warnings` | Warnings are Pydantic/FastAPI deprecations. |
+| Web unit tests | `cd frontend && npm test` | Passed: `8` files, `27` tests | Includes new metronome and score-practice domain tests. |
+| Web build/typecheck | `cd frontend && npm run build` | Passed | Vite large chunk warning remains, JS about `904 kB` minified. |
+| Frontend dependency audit | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities` | Dev dependencies excluded. |
+| Swift package parity smoke | `cd swift/BrassTuneCore && swift test` | Passed: `3` Swift tests | Native app UI/build tests not rerun yet in this current run. |
+| Browser E2E local | `cd frontend && npm run e2e:local` | Passed: `75 passed` | Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. |
+| Device simulation | `cd frontend && npm run simulate:devices` | Passed | Refreshed `docs/device-simulation-report.md` and screenshots. |
+| Rendered browser spot check | Browser plugin against `http://127.0.0.1:5173` | Passed | Metronome Tap tempo changed BPM/status; score-practice import controls rendered with no console errors/overlap. |
+| Backend Bandit | `cd backend && .venv/bin/python -m bandit -r app -x app/tests` | Passed: no issues | Bandit emitted comment-token warnings only. |
+| Backend pip-audit | `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` | Failed: `7` advisories | Starlette, pytest, python-dotenv dependency remediation required. |
+| Live provider lifecycle | Env-gated/manual | Blocked | Requires disposable Supabase/Apple/Google provider setup. |
+| Physical microphone/device | Manual protocol | Blocked | Requires supported iPhone/iPad hardware and real brass. |
+
 | Journey/Gate | Persona | Environment | Automation | Command | Result | Evidence | Blocker |
 |---|---|---|---|---|---|---|---|
 | Backend regression suite | API users | Local venv | Pytest | `cd backend && .venv/bin/python -m pytest` | Passed: `48 passed` | Terminal output | None |

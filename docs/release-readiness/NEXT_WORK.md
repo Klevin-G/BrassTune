@@ -88,6 +88,11 @@
   - Acceptance criteria: non-production Supabase project can run auth/export/delete/storage lifecycle tests without real user data.
   - Verification command or evidence: CI/manual env-gated test command documented; disposable project evidence redacted.
 
+- [P1] Remediate backend dependency advisories
+  - Owner type: repo
+  - Acceptance criteria: Starlette, pytest, and python-dotenv advisories reported by `pip-audit` are fixed through compatible FastAPI/Starlette/test-tool upgrades or formally risk-accepted with exact advisory notes.
+  - Verification command or evidence: `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` passes or records approved ignores.
+
 - [P2] Revisit WebSocket auth hardening after live auth stabilizes
   - Owner type: repo
   - Acceptance criteria: decide whether first-message auth is enough or short-lived WebSocket tickets are needed.

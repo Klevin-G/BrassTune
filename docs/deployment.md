@@ -14,8 +14,10 @@ Backend:
 ```bash
 cd backend
 python -m pip install -r requirements.txt
-uvicorn app.main:app --reload
+APP_ENV=local uvicorn app.main:app --reload
 ```
+
+Production is the safe default when `APP_ENV` is absent. Local development and local browser automation must set `APP_ENV=local` or use the checked-in `.env.example` values in a local `.env` file.
 
 Frontend:
 
@@ -60,7 +62,7 @@ Required Render env vars:
 - `APP_ENV=production`
 - `FRONTEND_ORIGIN`
 - `CORS_ALLOWED_ORIGINS`
-- `CORS_ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app`
+- `CORS_ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app` for HTTP CORS only
 - `BRASSTUNE_DATABASE_URL` or `DATABASE_URL`
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY`
@@ -80,6 +82,8 @@ WebSocket:
 ```text
 wss://brasstune.onrender.com/ws/pitch
 ```
+
+WebSocket Origin checks use explicit `CORS_ALLOWED_ORIGINS`/`FRONTEND_ORIGIN` entries, not `CORS_ALLOWED_ORIGIN_REGEX`. Include `https://brass-tune.vercel.app` and any owner-approved preview/share origins explicitly when WebSocket smoke must pass from those hosts.
 
 ### Render Keepalive
 

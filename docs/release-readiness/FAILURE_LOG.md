@@ -2,6 +2,15 @@
 
 Date: 2026-06-18
 
+## 2026-06-20 Current Run
+
+| Failure | Reproduction | Root Cause | Resolution | Current Status |
+|---|---|---|---|---|
+| Metronome accessibility smoke failed with `aria-prohibited-attr` | `cd frontend && npm run e2e:local`, axe serious smoke on `/metronome` | `aria-label` was applied to a generic `div` without a valid ARIA role on the subdivision visual group | Added `role="group"` to beat/subdivision visual groups | Fixed; full E2E passed `75 passed` |
+| Settings release journey could not find `Export account data` | `cd frontend && npm run e2e:local`, settings legal/export/delete journey | Guest copy changed the existing export button accessible name to `Export guest data` while the route contract expected account-export wording | Restored stable button name while still routing guest users through local guest export | Fixed; full E2E passed |
+| Device simulation reported mobile bottom-nav overlap on metronome, score practice, More, and settings | `cd frontend && npm run simulate:devices` | New dense routes placed primary actions under the fixed mobile tab bar at small viewport heights | Added compact screen-scoped headers, mobile settings profile ordering, and smaller tiny-phone chrome | Fixed; device simulation passed |
+| Mobile demo recording journey reached review page but guest-save proof text was hidden | `cd frontend && npm run e2e:local`, mobile Chromium/WebKit demo recording journey | A broad mobile CSS rule hid all page-header descriptions, including the session review guest-save evidence | Scoped description suppression only to dense metronome, score, settings, and More screens | Fixed; targeted mobile rerun and full E2E passed |
+
 | Failure | Reproduction | Root Cause | Resolution | Current Status |
 |---|---|---|---|---|
 | GitHub Security / Gitleaks failed on PR #2 commit `a77a669...` | GitHub Actions Security run `27784019566`, Gitleaks step | `gitleaks/gitleaks-action@v2` could not read PR commits because workflow token lacked `pull-requests: read`; logs showed `Resource not accessible by integration`, not a leak finding | Added `permissions: contents: read, pull-requests: read` | Fixed historically; Security passed on PR head `91ca605...` |

@@ -1,6 +1,6 @@
 # Apple App Store Checklist
 
-Official Apple sources checked on 2026-06-18:
+Official Apple sources checked on 2026-06-18 and refreshed for this run on 2026-06-20:
 
 - [SDK minimum requirements](https://developer.apple.com/news/upcoming-requirements/?id=02032026a): apps uploaded to App Store Connect must be built with Xcode 26 or later using iOS/iPadOS 26 SDKs since April 28, 2026.
 - [Submitting apps](https://developer.apple.com/app-store/submitting/): build and test with current Xcode/latest SDKs.
@@ -8,6 +8,9 @@ Official Apple sources checked on 2026-06-18:
 - [Required reason APIs](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api): required-reason API usage must be declared in privacy manifests.
 - [Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files): app/SDK privacy practices and required-reason APIs belong in the privacy manifest.
 - [App Review](https://developer.apple.com/distribute/app-review/): gated features need demo access/instructions.
+- [App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/): release claims, privacy disclosures, and demo access must be accurate.
+- [VisionKit document camera](https://developer.apple.com/documentation/visionkit/vndocumentcameraviewcontroller): native document scanning should use platform document-camera APIs where available.
+- [TestFlight overview](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/): TestFlight requires App Store Connect setup and an uploaded signed build.
 
 ## Implemented Technical Artifacts
 
@@ -19,6 +22,7 @@ Official Apple sources checked on 2026-06-18:
 - In-app privacy, terms, support, data export, and account deletion surfaces exist.
 - Account deletion can be initiated in app.
 - Simulator Debug/Release builds pass with Xcode 26.2 / iOS 26.2 SDK.
+- Web score practice and metronome were added, but native equivalents are not complete.
 
 ## Owner Decisions Required
 
@@ -52,4 +56,6 @@ Official Apple sources checked on 2026-06-18:
 - Third-party SDK privacy signature/manifest audit after final dependencies are pinned.
 - Required-reason API final audit after adding production Supabase Swift client.
 - Physical-device microphone validation.
+- Native score scanner/VisionKit flow.
+- Native metronome parity and timing validation.
 - Owner/legal metadata.
