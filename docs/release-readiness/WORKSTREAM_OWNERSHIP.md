@@ -3,7 +3,7 @@
 Date: 2026-06-20
 Branch: `arya/release-readiness-hardening`
 Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
-Current state: local uncommitted worktree on top of `36b29c8cff85f3364648763fd36d6472fb1ef8a3`; exact-SHA CI/preview pending after commit and push.
+Current state: pushed branch follow-up; exact-SHA CI/preview pending on the latest PR head.
 
 ## Agent Wave
 
@@ -36,4 +36,4 @@ Current state: local uncommitted worktree on top of `36b29c8cff85f3364648763fd36
 - Do not stage ignored env files, `.vercel/`, `backend/data/`, Playwright traces, Xcode result bundles, or local databases.
 - Do not claim production is current until an owner-approved Render/Vercel deploy passes the enhanced hosted smoke.
 - Do not claim native parity complete; current evidence is simulator shell/readiness plus fixture-backed app tests.
-- Do not claim final PR readiness until the current local changes are committed, pushed, and green on exact-SHA CI.
+- Do not claim final PR readiness until the latest pushed SHA is green on exact-SHA CI and preview checks.

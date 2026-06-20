@@ -21,7 +21,7 @@ Not full release ready until live provider, Apple/App Store/legal, native produc
 
 ## Current CI gate
 
-PR head `36b29c8cff85f3364648763fd36d6472fb1ef8a3` was verified green before this local pass. The current local worktree adds ensemble pre-membership report scoping, a working Score Practice focus control, hosted-smoke copy alignment, a non-editable Settings threshold affordance, refreshed device-simulation artifacts, and updated release evidence. Re-check the latest pushed SHA, exact-SHA preview, and hosted smoke before updating the live PR body, merging, or deploying.
+PR head `36b29c8cff85f3364648763fd36d6472fb1ef8a3` was verified green before this follow-up. The latest branch work adds ensemble pre-membership report scoping, a working Score Practice focus control, hosted-smoke copy alignment, a non-editable Settings threshold affordance, refreshed device-simulation artifacts, and updated release evidence. Re-check the latest pushed SHA, exact-SHA preview, and hosted smoke before updating the live PR body, merging, or deploying.
 
 ## Remaining external gates
 

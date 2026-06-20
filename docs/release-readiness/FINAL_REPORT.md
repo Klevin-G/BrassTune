@@ -3,7 +3,7 @@
 Updated: 2026-06-20T18:29:25Z
 Branch: `arya/release-readiness-hardening`
 Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
-Current state: local fixes on top of the remote head; commit, push, exact-SHA CI, and exact-SHA Vercel preview are the next repository gates.
+Current state: pushed branch follow-up; exact-SHA CI and exact-SHA Vercel preview are the next repository gates.
 
 ## Summary
 
@@ -64,7 +64,7 @@ Repository-actionable before broad public/App Store release:
 - Full Score Practice reader workflow with PDF.js/page model, timeline, flags, review/export, crop/reorder, and native parity.
 - Measured metronome timing, click-bleed rejection, and native metronome parity.
 - Native real audio capture, native Score Practice, native provider parity, and broader Swift domain parity.
-- Exact-SHA CI and Vercel/Render preview/deploy evidence after these local changes are committed and pushed.
+- Exact-SHA CI and Vercel/Render preview/deploy evidence for the latest pushed PR head.
 
 External or owner-gated:
 
@@ -75,6 +75,6 @@ External or owner-gated:
 
 ## Release Decision
 
-Current status: `local web closed-beta candidate worktree pending commit/push, exact-SHA CI, exact-SHA preview, owner-approved Render deployment, and final hosted smoke; native engineering parity in progress; external provider/App Store/device gates remaining`.
+Current status: `local web closed-beta candidate branch pending exact-SHA CI, exact-SHA preview, owner-approved Render deployment, and final hosted smoke; native engineering parity in progress; external provider/App Store/device gates remaining`.
 
 Do not call this release-ready and do not merge/deploy until the changes are committed, pushed, CI is green on the exact new SHA, an exact-SHA preview is verified, and hosted smoke passes after owner-approved production backend/frontend deployment.

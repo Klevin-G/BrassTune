@@ -8,7 +8,7 @@
   "current_sha": null,
   "main_sha": "0e5eea2d80471af637b80906508564ba32bd9148",
   "pr_number": 2,
-  "evidence_state": "local edits after green remote PR head; commit, push, CI, and exact-SHA preview are still required",
+  "evidence_state": "pushed branch follow-up after green 36b29c8; exact-SHA CI and preview are still required on the latest PR head",
   "ci_status": {
     "remote_head_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
     "verified_at": "2026-06-20T18:15:00Z",
@@ -23,7 +23,7 @@
       {"name": "Security / dependency-and-secrets", "status": "completed", "conclusion": "success"},
       {"name": "Swift / package-and-ios", "status": "completed", "conclusion": "success"}
     ],
-    "blocker": "CI covers the remote head only; local worktree fixes in this pass are not covered until committed and pushed."
+    "blocker": "CI covered 36b29c8 only at generation time; the latest pushed PR head must pass before merge."
   },
   "deployment_status": {
     "vercel_latest_branch_preview_sha": "9b3766bc4241843c52b2a703c7ec923b4105f540",
@@ -31,7 +31,7 @@
     "vercel_production_sha": "0e5eea2d80471af637b80906508564ba32bd9148",
     "vercel_production_id": "dpl_4grTP7xCDV5rMZq6a4DTkGimpc3y",
     "render_status": "production health and basic WS respond, but production is stale for current WebSocket hardening",
-    "blocker": "No exact-SHA Vercel preview exists for the current local worktree or remote 36b29c8; Render deployment access was not available in this shell."
+    "blocker": "No exact-SHA Vercel preview was available at generation time for the current follow-up; Render deployment access was not available in this shell."
   },
   "items": [
     {
@@ -45,7 +45,7 @@
       "status": "passed",
       "result": "PR #2 is open, non-draft, mergeable clean; Backend, Frontend, Security, and Swift check runs completed success on 36b29c8.",
       "artifact_location": "GitHub API response in Codex terminal output",
-      "blocker": "Does not cover local uncommitted fixes made after 36b29c8."
+      "blocker": "Does not cover follow-up commits after 36b29c8."
     },
     {
       "id": "backend-tests",

@@ -3,7 +3,7 @@
 Updated: 2026-06-20T18:29:25Z
 Branch: `arya/release-readiness-hardening`
 Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
-Evidence state: local edits on top of `36b29c8cff85f3364648763fd36d6472fb1ef8a3`; exact-SHA CI and preview must rerun after commit/push.
+Evidence state: pushed branch follow-up; exact-SHA CI and preview must pass on the latest PR head.
 
 ## Current Local Gates
 
@@ -27,7 +27,7 @@ Evidence state: local edits on top of `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
 
 ## Remote Baseline
 
-Authenticated GitHub API checks verified PR #2 at `36b29c8cff85f3364648763fd36d6472fb1ef8a3` before local edits:
+Authenticated GitHub API checks verified PR #2 at `36b29c8cff85f3364648763fd36d6472fb1ef8a3` before this follow-up commit:
 
 | Remote gate | Result |
 |---|---|
@@ -38,7 +38,7 @@ Authenticated GitHub API checks verified PR #2 at `36b29c8cff85f3364648763fd36d6
 | Swift workflow | Completed success. |
 | Vercel status | No exact-SHA branch preview for `36b29c8`; latest branch preview remains `9b3766bc4241843c52b2a703c7ec923b4105f540`. |
 
-Remote CI and preview must be rerun after these local changes are committed and pushed. Do not use `36b29c8` as proof for this local worktree.
+Remote CI and preview must pass on the latest pushed PR head. Do not use `36b29c8` as proof for later commits.
 
 ## Blocked Or Scoped
 

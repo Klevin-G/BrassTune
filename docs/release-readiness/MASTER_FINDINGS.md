@@ -3,7 +3,7 @@
 Updated: 2026-06-20T18:29:25Z
 Branch: `arya/release-readiness-hardening`
 Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
-Current evidence state: local edits on top of `36b29c8cff85f3364648763fd36d6472fb1ef8a3`; commit, push, exact-SHA CI, and exact-SHA Vercel preview are still required.
+Current evidence state: pushed branch follow-up after `36b29c8cff85f3364648763fd36d6472fb1ef8a3`; exact-SHA CI and exact-SHA Vercel preview are still required on the latest PR head.
 
 ## Source Of Truth
 
@@ -13,7 +13,7 @@ Use this file plus `release-evidence.json` for the current pass. Older status ta
 
 | ID | Area | Severity | Status | Evidence | Release impact |
 |---|---|---:|---|---|---|
-| MF-001 | PR/CI baseline | P0 | PR #2 is open, mergeable clean, non-draft, with Backend, Frontend, Security, and Swift green on `36b29c8cff85f3364648763fd36d6472fb1ef8a3`. | Authenticated GitHub REST API using the local Git credential helper. | CI is green only for the remote head. Local fixes in this pass still need commit, push, and exact-SHA CI. |
+| MF-001 | PR/CI baseline | P0 | PR #2 is open, mergeable clean, non-draft, with Backend, Frontend, Security, and Swift green on `36b29c8cff85f3364648763fd36d6472fb1ef8a3`. | Authenticated GitHub REST API using the local Git credential helper. | CI was green for `36b29c8`; follow-up commits still need exact-SHA CI. |
 | MF-002 | Guest live microphone | P0 | Improved locally. Guest microphone pitch detection now runs in the browser using local PCM autocorrelation instead of requiring `/ws/pitch`, Supabase, or backend availability. | `frontend/src/domain/localPitchDetection.ts`; `npm test` passed `34`; `CI=true npm run e2e:local` passed `75`. | Physical microphone quality and WebKit fake-media coverage still need device/browser-specific validation. |
 | MF-003 | Duplicate microphone streams | P1 | Improved locally. The recorder can reuse the active pitch stream for `MediaRecorder` when live mic is already running. | `frontend/src/hooks/useAudioRecorder.ts`, `frontend/src/pages/PracticePage.tsx`; frontend tests/build passed. | Safari/iOS MIME behavior still needs real-device validation. |
 | MF-004 | Supabase identity linking | P1 | Improved locally. Backend no longer links a Supabase identity to an existing local account solely by matching email. | `backend/app/api/auth.py`; `backend/app/tests/test_hardening.py`; targeted hardening `44 passed`, full backend `60 passed`. | Explicit account-linking ceremony and provider edge-case tests remain future work. |
@@ -25,7 +25,7 @@ Use this file plus `release-evidence.json` for the current pass. Older status ta
 | MF-010 | Native parity | P1 | Simulator gates pass, but native remains fixture-backed for practice/audio and lacks native metronome/score/provider parity. | XcodeBuildMCP Debug build succeeded; unit tests `7 passed`; UI smoke `1 passed`; Swift package `3 passed`. | Status remains `native engineering parity in progress`, not TestFlight/App Store ready. |
 | MF-011 | Artifact/secret hygiene | P1 | No tracked secret or large-file issue found. Ignored local env files and local recordings exist and must not be staged. | Artifact scout, `git status`, ignored-file review. | Stage explicit files only; never stage `.env*`, `.vercel/`, `backend/data/`, traces, or Xcode results. |
 | MF-012 | Chrome connector | P2 | Blocked by tool runtime failure before browser control. | `node_repl/js` failed with missing `sandboxPolicy` metadata even for a trivial command. | Chrome-specific smoke was not possible in this environment; Playwright and Simulator evidence were used instead. |
-| MF-013 | Ensemble aggregate privacy | P1 | Fixed locally. Director/admin summary and report endpoints now include only active-member sessions on or after membership creation, preventing pre-membership practice history from leaking into ensemble aggregates. | `backend/app/api/routes.py`; `backend/app/tests/test_hardening.py`; targeted hardening `44 passed`, full backend `60 passed`. | Needs exact-SHA CI after commit/push before merge. |
+| MF-013 | Ensemble aggregate privacy | P1 | Fixed locally. Director/admin summary and report endpoints now include only active-member sessions on or after membership creation, preventing pre-membership practice history from leaking into ensemble aggregates. | `backend/app/api/routes.py`; `backend/app/tests/test_hardening.py`; targeted hardening `44 passed`, full backend `60 passed`. | Needs exact-SHA CI on the latest pushed head before merge. |
 | MF-014 | Score Practice focus control | P1 | Fixed locally. The focus button now toggles a focused preview state with `aria-pressed` and explicit exit text instead of being a dead control. | `frontend/src/pages/ScorePracticePage.tsx`; frontend tests/build and local E2E passed. | Full Score Practice scope remains incomplete. |
 
 ## Current Validation
@@ -48,6 +48,6 @@ Use this file plus `release-evidence.json` for the current pass. Older status ta
 
 ## Release Decision
 
-Current status: `local web closed-beta candidate worktree pending commit/push, exact-SHA CI, exact-SHA preview, owner-approved Render deployment, and final hosted smoke; native engineering parity in progress; external provider/App Store/device gates remaining`.
+Current status: `local web closed-beta candidate branch pending exact-SHA CI, exact-SHA preview, owner-approved Render deployment, and final hosted smoke; native engineering parity in progress; external provider/App Store/device gates remaining`.
 
 Do not merge, tag, deploy, or invite beta testers until the changes are committed, pushed, CI is green on the exact new SHA, Vercel preview/deploy evidence is current, and hosted smoke passes after an owner-approved Render/Vercel deployment.
