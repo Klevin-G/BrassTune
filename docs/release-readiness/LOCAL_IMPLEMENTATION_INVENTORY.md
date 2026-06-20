@@ -7,8 +7,9 @@ Initial safety backup: `/tmp/brasstune-local-work-20260620-031847`
 Current safety backup: `/tmp/brasstune-local-work-20260620-032819`
 Current safety branch: `backup/local-before-integration-20260620-032819`
 Local implementation commits: backend/security `33b9e8b`; web/metronome/score `080eb4f`
+Local reconciliation commit: `bf3282a` merged `origin/main` and combined upstream Codex setup with BrassTune project agents
 
-This inventory records local modified and untracked files that existed after the Markdown-only push. Backend and frontend source rows have since been committed locally, but this is not proof of release readiness until the branch is reconciled with `origin/main`, pushed, and verified on the exact pushed SHA. Each row marks whether the file is complete enough to commit, which claim it supports, and the remaining action before final release evidence.
+This inventory records local modified and untracked files that existed after the Markdown-only push. Backend and frontend source rows have since been committed locally and the branch has been reconciled with `origin/main`, but this is not proof of release readiness until the branch is pushed and verified on the exact pushed SHA. Each row marks whether the file is complete enough to commit, which claim it supports, and the remaining action before final release evidence.
 
 ## Source And Test Files
 
