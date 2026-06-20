@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import app.main as main_module
 from app.api.auth import AuthContext, _sync_supabase_user
 from app.api.routes import _filtered_events, _group_scoped_sessions, _read_limited_body
 from app.core.analytics.stats import build_instrument_heatmap, calculate_most_improved_notes, calculate_note_stats
@@ -295,6 +296,44 @@ def test_repair_demo_data_rebuilds_broken_seed_sessions():
         db.close()
 
 
+def test_production_startup_does_not_seed_demo_data_by_default(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.delenv("BRASSTUNE_SEED_DEMO_DATA", raising=False)
+    calls = []
+
+    class EmptyDB:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main_module, "init_db", lambda: None)
+    monkeypatch.setattr(main_module, "SessionLocal", lambda: EmptyDB())
+    monkeypatch.setattr(main_module, "seed_demo_data", lambda db: calls.append(db))
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+    assert calls == []
+
+
+def test_explicit_demo_seed_override_still_works_in_non_release_envs(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "preview")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("BRASSTUNE_SEED_DEMO_DATA", "1")
+    calls = []
+
+    class EmptyDB:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main_module, "init_db", lambda: None)
+    monkeypatch.setattr(main_module, "SessionLocal", lambda: EmptyDB())
+    monkeypatch.setattr(main_module, "seed_demo_data", lambda db: calls.append(db))
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+    assert len(calls) == 1
+
+
 def test_production_startup_requires_explicit_auth_mode(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.delenv("BRASSTUNE_AUTH_MODE", raising=False)
@@ -569,6 +608,37 @@ def test_ensemble_aggregate_reports_are_manager_only():
         assert student_report.status_code == 403
         director_report = client.get("/api/ensemble/groups/1/report", headers={"Authorization": "Bearer dev-user-2"})
         assert director_report.status_code == 200
+
+
+def test_director_roster_view_includes_member_identity():
+    with TestClient(app) as client:
+        response = client.get("/api/ensemble/groups/1", headers={"Authorization": "Bearer dev-user-2"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["roster_scope"] == "full"
+    assert payload["director_user_id"] == 2
+    usernames = {member.get("username") for member in payload["members"]}
+    assert {"avery", "maya", "luis", "sam"}.issubset(usernames)
+    assert all("user_id" in member for member in payload["members"])
+
+
+def test_student_roster_view_is_self_only_and_redacted():
+    with TestClient(app) as client:
+        response = client.get("/api/ensemble/groups/1", headers={"Authorization": "Bearer dev-user-1"})
+        members_response = client.get("/api/ensemble/groups/1/members", headers={"Authorization": "Bearer dev-user-1"})
+    assert response.status_code == 200
+    assert members_response.status_code == 200
+    payload = response.json()
+    assert payload["roster_scope"] == "self"
+    assert "director_user_id" not in payload
+    assert payload["members"] == members_response.json()
+    assert len(payload["members"]) == 1
+    member = payload["members"][0]
+    assert member["instrument_id"] == "trumpet"
+    assert member["display_name"] == "You"
+    assert member["is_current_user"] is True
+    assert "user_id" not in member
+    assert "username" not in member
 
 
 def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():

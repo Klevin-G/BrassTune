@@ -48,32 +48,42 @@ def user_to_dict(user) -> Dict[str, Any]:
     }
 
 
-def group_to_dict(group, members=None) -> Dict[str, Any]:
+def group_to_dict(group, members=None, include_director_identity: bool = True) -> Dict[str, Any]:
     payload = {
         "id": group.id,
         "name": group.name,
-        "director_user_id": group.director_user_id,
         "created_at": iso(group.created_at),
         "updated_at": iso(group.updated_at),
     }
+    if include_director_identity:
+        payload["director_user_id"] = group.director_user_id
     if members is not None:
         payload["members"] = members
     return payload
 
 
-def group_member_to_dict(member) -> Dict[str, Any]:
+def group_member_to_dict(member, include_identity: bool = True) -> Dict[str, Any]:
     user = getattr(member, "user", None)
-    return {
+    payload = {
         "id": member.id,
         "group_id": member.group_id,
-        "user_id": member.user_id,
         "instrument_id": member.instrument_id,
         "role_in_group": getattr(member, "role_in_group", "student"),
         "status": getattr(member, "status", "active"),
         "created_at": iso(member.created_at),
-        "username": getattr(user, "username", None),
-        "display_name": getattr(user, "display_name", None) or getattr(user, "name", None),
     }
+    if include_identity:
+        payload.update({
+            "user_id": member.user_id,
+            "username": getattr(user, "username", None),
+            "display_name": getattr(user, "display_name", None) or getattr(user, "name", None),
+        })
+    else:
+        payload.update({
+            "display_name": "You",
+            "is_current_user": True,
+        })
+    return payload
 
 
 def sample_to_dict(sample) -> Dict[str, Any]:

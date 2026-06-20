@@ -57,7 +57,14 @@ export function PracticePage() {
       const sessionId = recorder.activeSession?.id;
       if (!cloudSessionEnabled) {
         const guestAudio = await audioRecorder.stopLocal(demoMode);
-        return await recorder.stop(guestAudio);
+        try {
+          const summary = await recorder.stop(guestAudio);
+          if (guestAudio) audioRecorder.markLocalSaved();
+          return summary;
+        } catch (saveError) {
+          audioRecorder.markLocalSaveFailed('Guest audio was captured, but the local session could not be saved on this device.');
+          throw saveError;
+        }
       }
       if (sessionId && demoMode) {
         const uploadPromise = audioRecorder.stopAndUpload(sessionId, true);

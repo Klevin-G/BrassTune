@@ -19,6 +19,12 @@ export function EnsemblePage() {
   const auth = useAuth();
   const canManage = auth.profile?.role === 'director' || auth.profile?.role === 'admin';
 
+  const memberLabel = (member: any) => {
+    if (member.is_current_user) return 'You';
+    if (member.username) return `@${member.username}`;
+    return member.display_name ?? 'Member';
+  };
+
   const selectGroup = async (groupId: number) => {
     setLoading(true);
     try {
@@ -118,7 +124,7 @@ export function EnsemblePage() {
             <div className="roster-list">
               {selectedGroup?.members?.map((member: any) => (
                 <div className="history-row" key={member.id}>
-                  <span>@{member.username ?? member.user_id}</span>
+                  <span>{memberLabel(member)}</span>
                   <strong>{member.instrument_id}</strong>
                   <em>{member.status}</em>
                 </div>

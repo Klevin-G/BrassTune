@@ -1,9 +1,9 @@
 # BrassTune Final Report
 
-Updated: 2026-06-20T18:29:25Z
+Updated: 2026-06-20T19:39:44Z
 Branch: `arya/release-readiness-hardening`
-Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
-Current state: pushed branch follow-up; exact-SHA CI and exact-SHA Vercel preview are the next repository gates.
+Remote PR head at start of this pass: `26de9a223b64b7bbde3c3b4aacd963c17dad0dbd`
+Current state: local follow-up fixes on top of green PR head `26de9a223b64b7bbde3c3b4aacd963c17dad0dbd`; commit/push, exact-SHA CI, exact-SHA Vercel preview, Render deployment, and hosted smoke are still required.
 
 ## Summary
 
@@ -15,6 +15,10 @@ This pass preserved the prior release hardening and fixed additional bounded P1 
 - Web Google OAuth is wired through Supabase with minimal `openid email profile` scopes and a visible provider action.
 - Hosted smoke now fails stale Render deployments that still accept query-token WebSocket auth or unexpected origins.
 - Ensemble aggregate summary/report endpoints now exclude sessions from before a student's active membership date.
+- Deployed backend startup no longer seeds demo users/sessions by default; `BRASSTUNE_SEED_DEMO_DATA=1` is required for an intentional disposable demo environment.
+- Ordinary student ensemble views now return only the caller's redacted membership instead of other students' identifiers.
+- Guest audio is not marked saved until the guest session persistence path succeeds.
+- Mission-style hosted smoke now maps `BRASSTUNE_WEB_ACCESS_URL` to the Playwright share URL variable.
 - Score Practice focus mode is no longer a dead control; it toggles a focused preview state with accessible pressed state.
 - Hosted-smoke page assertions now match the current Audio Lab copy.
 - The fixed in-tune threshold in Settings no longer looks like an editable text field.
@@ -25,14 +29,14 @@ No production deploy, merge, or tag was performed in this pass.
 
 See `TEST_MATRIX.md` and `release-evidence.json` for the full command matrix. Current highlights:
 
-- Frontend unit tests: `34 passed`.
+- Frontend unit tests: `36 passed`.
 - Frontend build/typecheck: passed.
 - Local Playwright journeys/accessibility: `75 passed`.
 - Device simulation: passed and refreshed tracked screenshots/report.
-- Backend full suite: `60 passed`.
-- Backend hardening target: `44 passed`.
+- Backend full suite: `64 passed`.
+- Backend targeted seeding/roster privacy regression: `6 passed`.
 - `npm audit --omit=dev`: `0 vulnerabilities`.
-- `.venv-audit` `pip_audit --local`: no known vulnerabilities.
+- Python 3.12 resolved `pip_audit --no-deps --disable-pip`: no known vulnerabilities.
 - Requirements-file audit: the exact `.venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` command is blocked because `.venv` is Python 3.9.6 and the backend dependency floor is Python 3.10+; equivalent Python 3.12 evidence passed by resolving `requirements-dev.txt` with `uv pip compile --python ...` and auditing the resolved file with `pip-audit --no-deps --disable-pip`.
 - Bandit: passed.
 - Swift package: `3 passed`.
@@ -40,7 +44,7 @@ See `TEST_MATRIX.md` and `release-evidence.json` for the full command matrix. Cu
 - XcodeBuildMCP UI smoke on booted iPhone 16e simulator: `1 passed`.
 - Hosted-smoke spec local sanity: `1 passed`, `6` hosted-only checks skipped as expected.
 
-Authenticated GitHub API checks verified PR #2 was open, mergeable clean, non-draft, and green on Backend, Frontend, Security, and Swift for `36b29c8cff85f3364648763fd36d6472fb1ef8a3`. Vercel deployment listing showed the latest branch preview still points to `9b3766bc4241843c52b2a703c7ec923b4105f540`, not `36b29c8`. Remote CI and preview evidence do not cover the local changes from this pass until they are committed, pushed, and CI/deployment complete on the exact new SHA.
+Authenticated GitHub API checks verified PR #2 was open, mergeable clean, non-draft, and green on Backend, Frontend, Security, and Swift for `26de9a223b64b7bbde3c3b4aacd963c17dad0dbd`. Vercel deployment listing showed the exact branch preview `dpl_2pTQ98czTPCTaB2PeDnz2iEVMBEh` is READY for `26de9a223b64b7bbde3c3b4aacd963c17dad0dbd`. Remote CI and preview evidence do not cover the local changes from this pass until they are committed, pushed, and CI/deployment complete on the exact new SHA.
 
 ## Hosted Status
 
@@ -65,6 +69,7 @@ Repository-actionable before broad public/App Store release:
 - Measured metronome timing, click-bleed rejection, and native metronome parity.
 - Native real audio capture, native Score Practice, native provider parity, and broader Swift domain parity.
 - Exact-SHA CI and Vercel/Render preview/deploy evidence for the latest pushed PR head.
+- Reliable protected-preview browser access for exact-SHA Playwright smoke, or an approved Vercel bypass path that works in local/CI browser automation.
 
 External or owner-gated:
 

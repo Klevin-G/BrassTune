@@ -35,4 +35,30 @@ describe('guest session storage', () => {
     expect(saved.audio_storage_provider).toBe('browser_guest');
     expect(saved.guest_audio_data_url).toContain('data:audio/wav');
   });
+
+  it('does not return a saved session when browser storage rejects the write', () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: () => null,
+        setItem: () => {
+          throw new DOMException('Guest storage quota exceeded.', 'QuotaExceededError');
+        },
+        removeItem: () => undefined,
+      },
+    });
+
+    try {
+      const draft = createGuestSession('trumpet', 440, 'Quota take');
+      expect(() => saveGuestSessionFromFrames(draft, [nextDemoPitchFrame(0, 'trumpet', 440)])).toThrow(/quota/i);
+      expect(listGuestSessions()).toHaveLength(0);
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, 'localStorage', originalDescriptor);
+      } else {
+        delete (globalThis as { localStorage?: Storage }).localStorage;
+      }
+    }
+  });
 });

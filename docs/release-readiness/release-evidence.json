@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-06-20T18:29:25Z",
+  "generated_at": "2026-06-20T19:39:44Z",
   "repo": "aryasalem09/BrassTune",
   "branch": "arya/release-readiness-hardening",
-  "remote_head_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-  "local_worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
+  "remote_head_sha": "26de9a223b64b7bbde3c3b4aacd963c17dad0dbd",
+  "local_worktree_base_sha": "26de9a223b64b7bbde3c3b4aacd963c17dad0dbd",
   "current_sha": null,
   "main_sha": "0e5eea2d80471af637b80906508564ba32bd9148",
   "pr_number": 2,
-  "evidence_state": "pushed branch follow-up after green 36b29c8; exact-SHA CI and preview are still required on the latest PR head",
+  "evidence_state": "local follow-up fixes on top of green PR head 26de9a2; exact-SHA CI and preview are required again after commit/push",
   "ci_status": {
-    "remote_head_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-    "verified_at": "2026-06-20T18:15:00Z",
+    "remote_head_sha": "26de9a223b64b7bbde3c3b4aacd963c17dad0dbd",
+    "verified_at": "2026-06-20T19:29:00Z",
     "source": "GitHub API using local Git credential helper",
     "pr_state": "open",
     "draft": false,
@@ -23,15 +23,15 @@
       {"name": "Security / dependency-and-secrets", "status": "completed", "conclusion": "success"},
       {"name": "Swift / package-and-ios", "status": "completed", "conclusion": "success"}
     ],
-    "blocker": "CI covered 36b29c8 only at generation time; the latest pushed PR head must pass before merge."
+    "blocker": "CI covered 26de9a2 only at generation time; the local follow-up fixes must be committed, pushed, and validated before merge."
   },
   "deployment_status": {
-    "vercel_latest_branch_preview_sha": "9b3766bc4241843c52b2a703c7ec923b4105f540",
-    "vercel_latest_branch_preview_id": "dpl_BsxkD2k2dRMNE6y3Tz5SYLgEUC9s",
+    "vercel_latest_branch_preview_sha": "26de9a223b64b7bbde3c3b4aacd963c17dad0dbd",
+    "vercel_latest_branch_preview_id": "dpl_2pTQ98czTPCTaB2PeDnz2iEVMBEh",
     "vercel_production_sha": "0e5eea2d80471af637b80906508564ba32bd9148",
     "vercel_production_id": "dpl_4grTP7xCDV5rMZq6a4DTkGimpc3y",
     "render_status": "production health and basic WS respond, but production is stale for current WebSocket hardening",
-    "blocker": "No exact-SHA Vercel preview was available at generation time for the current follow-up; Render deployment access was not available in this shell."
+    "blocker": "Exact-SHA Vercel deployment is READY but protected browser smoke still needs working preview access; Render deployment access was not available in this shell."
   },
   "items": [
     {

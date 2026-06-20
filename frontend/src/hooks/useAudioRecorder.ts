@@ -172,7 +172,6 @@ export function useAudioRecorder() {
           return null;
         }
         const dataUrl = await dataUrlForBlob(blob);
-        setStatus('saved');
         return {
           dataUrl,
           mimeType: blob.type || (demoMode ? 'audio/wav' : 'audio/webm'),
@@ -192,5 +191,15 @@ export function useAudioRecorder() {
     return promise;
   }, [cleanup, recordedBlob]);
 
-  return { status, error, lastSessionId, start, stopAndUpload, stopLocal };
+  const markLocalSaved = useCallback(() => {
+    setStatus('saved');
+    setError(null);
+  }, []);
+
+  const markLocalSaveFailed = useCallback((message: string) => {
+    setStatus('failed');
+    setError(message);
+  }, []);
+
+  return { status, error, lastSessionId, start, stopAndUpload, stopLocal, markLocalSaved, markLocalSaveFailed };
 }

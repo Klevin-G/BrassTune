@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 const aliases = new Map([
   ['E2E_BASE_URL', 'BRASSTUNE_WEB_BASE_URL'],
+  ['E2E_VERCEL_SHARE_URL', 'BRASSTUNE_WEB_ACCESS_URL'],
   ['E2E_API_BASE_URL', 'BRASSTUNE_API_BASE_URL'],
   ['E2E_WS_BASE_URL', 'BRASSTUNE_WS_BASE_URL'],
 ]);

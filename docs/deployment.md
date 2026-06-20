@@ -60,6 +60,7 @@ Do not add `SUPABASE_SECRET_KEY`, Render deploy hooks, GitHub tokens, Apple keys
 Required Render env vars:
 
 - `APP_ENV=production`
+- `BRASSTUNE_SEED_DEMO_DATA` should be unset or `0` in production. Set `1` only for a deliberate disposable demo environment.
 - `FRONTEND_ORIGIN`
 - `CORS_ALLOWED_ORIGINS`
 - `CORS_ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app` for HTTP CORS only

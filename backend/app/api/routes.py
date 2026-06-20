@@ -89,6 +89,21 @@ def _can_manage_group(user: User, group: Group) -> bool:
     return user.role == "admin" or group.director_user_id == user.id
 
 
+def _viewer_membership(db: Session, group_id: int, user_id: int) -> Optional[GroupMember]:
+    return (
+        db.query(GroupMember)
+        .filter(GroupMember.group_id == group_id, GroupMember.user_id == user_id, GroupMember.status == "active")
+        .first()
+    )
+
+
+def _can_view_full_roster(db: Session, group: Group, user: User) -> bool:
+    if _can_manage_group(user, group):
+        return True
+    membership = _viewer_membership(db, group.id, user.id)
+    return membership is not None and getattr(membership, "role_in_group", "student") in {"assistant", "director"}
+
+
 def _require_group_manager(db: Session, group_id: int, auth: AuthContext) -> Group:
     group = _group_or_404(db, group_id)
     if not _can_manage_group(auth.user, group):
@@ -723,7 +738,20 @@ def _group_scoped_sessions(db: Session, group_id: int) -> List[PracticeSession]:
 def _can_view_group(user: User, group: Group, db: Session) -> bool:
     if _can_manage_group(user, group):
         return True
-    return db.query(GroupMember).filter(GroupMember.group_id == group.id, GroupMember.user_id == user.id, GroupMember.status == "active").first() is not None
+    return _viewer_membership(db, group.id, user.id) is not None
+
+
+def _visible_group_members(db: Session, group: Group, user: User):
+    if _can_view_full_roster(db, group, user):
+        members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group.id).order_by(GroupMember.created_at.asc()).all()
+        return [group_member_to_dict(member) for member in members], True
+    membership = (
+        db.query(GroupMember)
+        .options(joinedload(GroupMember.user))
+        .filter(GroupMember.group_id == group.id, GroupMember.user_id == user.id, GroupMember.status == "active")
+        .first()
+    )
+    return ([group_member_to_dict(membership, include_identity=False)] if membership else []), False
 
 
 @router.post("/ensemble/groups")
@@ -752,8 +780,10 @@ def get_ensemble_group(group_id: int, db: Session = Depends(get_db), auth: AuthC
     group = _group_or_404(db, group_id)
     if not _can_view_group(auth.user, group, db):
         raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
-    members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group_id).order_by(GroupMember.created_at.asc()).all()
-    return group_to_dict(group, [group_member_to_dict(member) for member in members])
+    members, full_roster = _visible_group_members(db, group, auth.user)
+    payload = group_to_dict(group, members, include_director_identity=full_roster)
+    payload["roster_scope"] = "full" if full_roster else "self"
+    return payload
 
 
 @router.get("/ensemble/groups/{group_id}/members")
@@ -761,8 +791,8 @@ def get_ensemble_members(group_id: int, db: Session = Depends(get_db), auth: Aut
     group = _group_or_404(db, group_id)
     if not _can_view_group(auth.user, group, db):
         raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
-    members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group_id).all()
-    return [group_member_to_dict(member) for member in members]
+    members, _ = _visible_group_members(db, group, auth.user)
+    return members
 
 
 @router.post("/ensemble/groups/{group_id}/members/by-username")

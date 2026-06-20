@@ -1,9 +1,9 @@
 # Master Findings
 
-Updated: 2026-06-20T18:29:25Z
+Updated: 2026-06-20T19:39:44Z
 Branch: `arya/release-readiness-hardening`
-Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`
-Current evidence state: pushed branch follow-up after `36b29c8cff85f3364648763fd36d6472fb1ef8a3`; exact-SHA CI and exact-SHA Vercel preview are still required on the latest PR head.
+Remote PR head at start of this pass: `26de9a223b64b7bbde3c3b4aacd963c17dad0dbd`
+Current evidence state: local follow-up fixes on top of green PR head `26de9a223b64b7bbde3c3b4aacd963c17dad0dbd`; exact-SHA CI and Vercel preview are required again after commit/push.
 
 ## Source Of Truth
 
@@ -13,7 +13,7 @@ Use this file plus `release-evidence.json` for the current pass. Older status ta
 
 | ID | Area | Severity | Status | Evidence | Release impact |
 |---|---|---:|---|---|---|
-| MF-001 | PR/CI baseline | P0 | PR #2 is open, mergeable clean, non-draft, with Backend, Frontend, Security, and Swift green on `36b29c8cff85f3364648763fd36d6472fb1ef8a3`. | Authenticated GitHub REST API using the local Git credential helper. | CI was green for `36b29c8`; follow-up commits still need exact-SHA CI. |
+| MF-001 | PR/CI baseline | P0 | PR #2 is open, mergeable clean, non-draft, with Backend, Frontend, Security, and Swift green on `26de9a223b64b7bbde3c3b4aacd963c17dad0dbd`. | Authenticated GitHub REST API using the local Git credential helper. | CI was green for `26de9a2`; local follow-up fixes still need commit/push and exact-SHA CI. |
 | MF-002 | Guest live microphone | P0 | Improved locally. Guest microphone pitch detection now runs in the browser using local PCM autocorrelation instead of requiring `/ws/pitch`, Supabase, or backend availability. | `frontend/src/domain/localPitchDetection.ts`; `npm test` passed `34`; `CI=true npm run e2e:local` passed `75`. | Physical microphone quality and WebKit fake-media coverage still need device/browser-specific validation. |
 | MF-003 | Duplicate microphone streams | P1 | Improved locally. The recorder can reuse the active pitch stream for `MediaRecorder` when live mic is already running. | `frontend/src/hooks/useAudioRecorder.ts`, `frontend/src/pages/PracticePage.tsx`; frontend tests/build passed. | Safari/iOS MIME behavior still needs real-device validation. |
 | MF-004 | Supabase identity linking | P1 | Improved locally. Backend no longer links a Supabase identity to an existing local account solely by matching email. | `backend/app/api/auth.py`; `backend/app/tests/test_hardening.py`; targeted hardening `44 passed`, full backend `60 passed`. | Explicit account-linking ceremony and provider edge-case tests remain future work. |
@@ -27,16 +27,20 @@ Use this file plus `release-evidence.json` for the current pass. Older status ta
 | MF-012 | Chrome connector | P2 | Blocked by tool runtime failure before browser control. | `node_repl/js` failed with missing `sandboxPolicy` metadata even for a trivial command. | Chrome-specific smoke was not possible in this environment; Playwright and Simulator evidence were used instead. |
 | MF-013 | Ensemble aggregate privacy | P1 | Fixed locally. Director/admin summary and report endpoints now include only active-member sessions on or after membership creation, preventing pre-membership practice history from leaking into ensemble aggregates. | `backend/app/api/routes.py`; `backend/app/tests/test_hardening.py`; targeted hardening `44 passed`, full backend `60 passed`. | Needs exact-SHA CI on the latest pushed head before merge. |
 | MF-014 | Score Practice focus control | P1 | Fixed locally. The focus button now toggles a focused preview state with `aria-pressed` and explicit exit text instead of being a dead control. | `frontend/src/pages/ScorePracticePage.tsx`; frontend tests/build and local E2E passed. | Full Score Practice scope remains incomplete. |
+| MF-015 | Production demo data seeding | P1 | Fixed locally. Deployed startup no longer seeds demo users/sessions by default; `BRASSTUNE_SEED_DEMO_DATA=1` is required for an intentional disposable demo environment. | `backend/app/main.py`; `backend/app/tests/test_hardening.py`; backend full suite `64 passed`. | Needs exact-SHA CI before deploy. |
+| MF-016 | Student roster identity minimization | P0 | Fixed locally. Ordinary student ensemble views now return only the caller's redacted active membership; directors/admins and assistant/director group roles retain full roster visibility. | `backend/app/api/routes.py`, `backend/app/services/serializers.py`, `frontend/src/pages/EnsemblePage.tsx`; backend full suite `64 passed`; frontend build passed. | Needs exact-SHA CI before merge. |
+| MF-017 | Guest audio save truthfulness | P0 | Fixed locally. Guest audio is no longer marked saved until guest session persistence succeeds; quota rejection remains visible instead of producing a false saved state. | `frontend/src/hooks/useAudioRecorder.ts`, `frontend/src/pages/PracticePage.tsx`, `frontend/src/domain/guestSessions.test.ts`; frontend unit tests `36 passed`. | Full IndexedDB migration remains incomplete. |
+| MF-018 | Protected preview smoke access | P1 | Partially fixed locally. The mission-style `BRASSTUNE_WEB_ACCESS_URL` env var now maps to Playwright's `E2E_VERCEL_SHARE_URL`; regenerated Vercel share URL still returned an initial `401` in local browser smoke. | `frontend/scripts/run-hosted-smoke.mjs`; hosted preview smoke failure logged in `FAILURE_LOG.md`. | Browser smoke remains blocked by Vercel Authentication automation until a reusable access cookie/bypass works. |
 
 ## Current Validation
 
-- `cd frontend && npm test`: passed, `35` tests.
-- `cd frontend && npm run build`: passed, main JS `382.62 kB` minified, large Recharts chunk remains route-split.
+- `cd frontend && npm test`: passed, `36` tests.
+- `cd frontend && npm run build`: passed, main JS `382.76 kB` minified, large Recharts chunk remains route-split.
 - `cd frontend && CI=true npm run e2e:local`: passed, `75` tests across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit.
 - `cd frontend && npm run simulate:devices`: passed; refreshed `docs/device-simulation-report.md` and tracked screenshots.
 - `cd frontend && npm audit --omit=dev`: passed, `0 vulnerabilities`.
-- `cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py -q`: passed, `44` tests, including query-token WebSocket auth rejection, unapproved-origin rejection, same-email Supabase no-link regression, and ensemble pre-membership report scoping.
-- `cd backend && .venv/bin/python -m pytest -q`: passed, `60` tests.
+- `cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py -k 'seed_demo or production_startup_does_not_seed or explicit_demo_seed or roster_view or ensemble_aggregate_reports'`: passed, `6` selected tests.
+- `cd backend && .venv/bin/python -m pytest`: passed, `64` tests.
 - `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt`: blocked by local Python 3.9.6 dependency-floor mismatch; backend requirements now require Python 3.10+.
 - `cd backend && uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/... && .venv-audit/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/...`: passed, no known vulnerabilities.
 - `cd backend && .venv/bin/python -m bandit -r app -x app/tests`: passed.
