@@ -10,6 +10,8 @@ services:
     envVars:
       - key: APP_ENV
         value: production
+      - key: BRASSTUNE_AUTH_MODE
+        value: disabled
       - key: FRONTEND_ORIGIN
         sync: false
       - key: CORS_ALLOWED_ORIGINS

@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.security import DEPLOYED_ENVIRONMENTS, LOCAL_ENVIRONMENTS, app_environment, auth_mode
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.db.database import get_db
 from app.models.db import User
@@ -28,7 +29,25 @@ class AuthContext:
 
 
 def local_auth_enabled() -> bool:
-    return os.getenv("APP_ENV", "local").lower() != "production" or os.getenv("BRASSTUNE_ALLOW_LOCAL_AUTH") == "1"
+    environment = app_environment()
+    if environment in DEPLOYED_ENVIRONMENTS:
+        return False
+    return auth_mode() == "disabled" and (environment in LOCAL_ENVIRONMENTS or os.getenv("BRASSTUNE_ALLOW_LOCAL_AUTH") == "1")
+
+
+def assert_auth_configured() -> None:
+    environment = app_environment()
+    if environment in DEPLOYED_ENVIRONMENTS and os.getenv("BRASSTUNE_ALLOW_LOCAL_AUTH") == "1":
+        raise RuntimeError("BRASSTUNE_ALLOW_LOCAL_AUTH cannot be enabled in deployed environments.")
+    mode = auth_mode()
+    if mode == "disabled":
+        return
+    if not os.getenv("SUPABASE_URL"):
+        raise RuntimeError("SUPABASE_URL is required when BRASSTUNE_AUTH_MODE=supabase.")
+    if not os.getenv("SUPABASE_PUBLISHABLE_KEY"):
+        raise RuntimeError("SUPABASE_PUBLISHABLE_KEY is required when BRASSTUNE_AUTH_MODE=supabase.")
+    if not os.getenv("SUPABASE_SECRET_KEY"):
+        raise RuntimeError("SUPABASE_SECRET_KEY is required when BRASSTUNE_AUTH_MODE=supabase.")
 
 
 def _bearer_token(authorization: Optional[str]) -> Optional[str]:
@@ -129,7 +148,7 @@ def _fetch_supabase_user(token: str) -> dict:
         headers={"apikey": api_key, "Authorization": "Bearer %s" % token},
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310 - URL is validated as Supabase HTTPS/local dev HTTP.
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired Supabase token.") from exc
@@ -155,7 +174,7 @@ def supabase_global_sign_out(token: Optional[str]) -> bool:
         headers={"apikey": service_key, "Authorization": "Bearer %s" % token, "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=10):  # nosec B310 - URL is validated as Supabase HTTPS/local dev HTTP.
+        with urllib.request.urlopen(request, timeout=10):  # nosec B310
             return True
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Supabase session revocation failed.") from exc
@@ -174,7 +193,7 @@ def delete_supabase_identity(supabase_user_id: Optional[str]) -> bool:
         headers={"apikey": service_key, "Authorization": "Bearer %s" % service_key},
     )
     try:
-        with urllib.request.urlopen(request, timeout=10):  # nosec B310 - URL is validated as Supabase HTTPS/local dev HTTP.
+        with urllib.request.urlopen(request, timeout=10):  # nosec B310
             return True
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Supabase identity deletion failed.") from exc
@@ -202,6 +221,8 @@ def auth_context_from_token(db: Session, token: Optional[str]) -> AuthContext:
         dev_user = _dev_token_user(db, token)
         if dev_user is not None:
             return AuthContext(user=dev_user, is_guest=False, access_token=token)
+        if auth_mode() == "disabled":
+            raise HTTPException(status_code=401, detail="Accounts are unavailable in this environment.")
         payload = _fetch_supabase_user(token)
         return AuthContext(user=_sync_supabase_user(db, payload), is_guest=False, access_token=token)
     if local_auth_enabled():

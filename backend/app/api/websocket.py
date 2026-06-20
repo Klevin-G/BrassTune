@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.api.auth import AuthContext, auth_context_from_token, local_auth_enabled
+from app.core.security import allowed_origins, app_environment
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.core.pitch.detector import PitchDetector
 from app.db.database import SessionLocal
@@ -14,17 +15,40 @@ from app.services.session_service import save_pitch_frames, start_session, stop_
 
 router = APIRouter()
 
+MAX_WS_MESSAGE_BYTES = 256 * 1024
+
+
+async def _reject(websocket: WebSocket, message: str) -> None:
+    await websocket.accept()
+    await websocket.send_json({"type": "error", "message": message})
+    await websocket.close(code=1008)
+
+
+def _origin_allowed(websocket: WebSocket) -> bool:
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return app_environment() != "production"
+    return origin in allowed_origins()
+
 
 @router.websocket("/ws/pitch")
 async def pitch_socket(websocket: WebSocket):
+    if not _origin_allowed(websocket):
+        await _reject(websocket, "WebSocket origin is not allowed.")
+        return
     await websocket.accept()
     detector = PitchDetector()
     db = SessionLocal()
     auth: Optional[AuthContext] = None
     try:
         query_token = websocket.query_params.get("token")
-        if query_token or local_auth_enabled():
-            auth = auth_context_from_token(db, query_token)
+        if query_token:
+            await websocket.send_json({"type": "error", "message": "WebSocket query-token auth is disabled."})
+            await websocket.close(code=1008)
+            db.close()
+            return
+        if local_auth_enabled():
+            auth = auth_context_from_token(db, None)
     except HTTPException as exc:
         await websocket.send_json({"type": "error", "message": exc.detail})
         await websocket.close()
@@ -55,6 +79,10 @@ async def pitch_socket(websocket: WebSocket):
     try:
         while True:
             raw = await websocket.receive_text()
+            if len(raw.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
+                await websocket.send_json({"type": "error", "message": "WebSocket message is too large."})
+                await websocket.close(code=1009)
+                return
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:

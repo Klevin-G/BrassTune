@@ -89,7 +89,7 @@ def _upload_to_supabase(object_key: str, data: bytes, mime_type: str) -> None:
         headers={**_supabase_headers(mime_type), "x-upsert": "true"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=20):  # nosec B310 - URL is built from a validated Supabase HTTPS/local dev endpoint.
+        with urllib.request.urlopen(request, timeout=20):  # nosec B310
             return
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Supabase audio upload failed.") from exc
@@ -103,7 +103,7 @@ def _read_supabase_object(object_key: str) -> bytes:
         headers=_supabase_headers(),
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310 - URL is built from a validated Supabase HTTPS/local dev endpoint.
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310
             return response.read()
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Supabase audio download failed.") from exc
@@ -118,7 +118,7 @@ def _delete_supabase_object(object_key: str) -> None:
         headers=_supabase_headers(),
     )
     try:
-        with urllib.request.urlopen(request, timeout=20):  # nosec B310 - URL is built from a validated Supabase HTTPS/local dev endpoint.
+        with urllib.request.urlopen(request, timeout=20):  # nosec B310
             return
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -136,7 +136,7 @@ def create_supabase_signed_url(object_key: str, expires_in: int = 900) -> str:
         headers={**_supabase_headers("application/json")},
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310 - URL is built from a validated Supabase HTTPS/local dev endpoint.
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Supabase signed URL failed.") from exc

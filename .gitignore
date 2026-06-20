@@ -3,6 +3,7 @@ backend/data/*.db-shm
 backend/data/*.db-wal
 backend/data/audio/
 backend/.venv/
+backend/.venv-audit/
 backend/__pycache__/
 backend/app/**/__pycache__/
 frontend/node_modules/

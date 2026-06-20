@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -66,6 +67,15 @@ def _session(db, user_id: int, instrument_id: str, started_at: dt.datetime):
     db.commit()
     db.refresh(row)
     return row
+
+
+def _set_production_auth_env(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "supabase")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_test")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
 
 
 def _event(db, session, note: str, octave: int, avg_abs: float, avg_signed: float = None):
@@ -285,11 +295,92 @@ def test_repair_demo_data_rebuilds_broken_seed_sessions():
         db.close()
 
 
-def test_production_mode_requires_auth(monkeypatch):
+def test_production_startup_requires_explicit_auth_mode(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("BRASSTUNE_AUTH_MODE", raising=False)
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_PUBLISHABLE_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="BRASSTUNE_AUTH_MODE"):
+        with TestClient(app):
+            pass
+
+
+def test_invalid_app_env_is_rejected(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
+    with pytest.raises(RuntimeError, match="APP_ENV"):
+        with TestClient(app):
+            pass
+
+
+def test_deployed_staging_requires_explicit_auth_mode(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.delenv("BRASSTUNE_AUTH_MODE", raising=False)
+    with pytest.raises(RuntimeError, match="BRASSTUNE_AUTH_MODE"):
+        with TestClient(app):
+            pass
+
+
+def test_production_disabled_auth_mode_starts_and_fails_private_routes_closed(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_PUBLISHABLE_KEY", raising=False)
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/instruments").status_code == 200
+        assert client.get("/api/sessions").status_code == 401
+        token_response = client.get("/api/users/current", headers={"Authorization": "Bearer any-token"})
+    assert token_response.status_code == 401
+    assert "unavailable" in token_response.json()["detail"].lower()
+
+
+def test_production_supabase_mode_requires_supabase_config(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "supabase")
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_PUBLISHABLE_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="SUPABASE_URL"):
+        with TestClient(app):
+            pass
+
+
+def test_production_supabase_mode_requires_service_key(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "supabase")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="SUPABASE_SECRET_KEY"):
+        with TestClient(app):
+            pass
+
+
+def test_production_rejects_local_auth_override(monkeypatch):
+    _set_production_auth_env(monkeypatch)
+    monkeypatch.setenv("BRASSTUNE_ALLOW_LOCAL_AUTH", "1")
+    with pytest.raises(RuntimeError, match="BRASSTUNE_ALLOW_LOCAL_AUTH"):
+        with TestClient(app):
+            pass
+
+
+def test_production_mode_requires_auth(monkeypatch):
+    _set_production_auth_env(monkeypatch)
     with TestClient(app) as client:
         response = client.get("/api/sessions")
     assert response.status_code == 401
+
+
+def test_local_disabled_mode_allows_guest_demo_auth(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
+    with TestClient(app) as client:
+        response = client.get("/api/sessions")
+    assert response.status_code == 200
 
 
 def test_user_cannot_access_another_users_session():
@@ -365,7 +456,9 @@ def test_websocket_stop_session_requires_owner_or_admin():
             headers={"Authorization": "Bearer dev-user-3"},
             json={"instrument_id": "horn", "reference_pitch_hz": 440},
         ).json()
-        with client.websocket_connect("/ws/pitch?token=dev-user-1") as websocket:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_json({"type": "authenticate", "token": "dev-user-1"})
+            assert websocket.receive_json()["type"] == "authenticated"
             websocket.send_json({"type": "stop_session", "session_id": created["id"]})
             message = websocket.receive_json()
         assert message["type"] == "error"
@@ -379,6 +472,31 @@ def test_websocket_pcm_frame_size_is_limited():
     with TestClient(app) as client:
         with client.websocket_connect("/ws/pitch") as websocket:
             websocket.send_json({"type": "audio_frame", "instrument_id": "trumpet", "sample_rate": 48000, "pcm": oversized_pcm})
+            message = websocket.receive_json()
+    assert message["type"] == "error"
+    assert "too large" in message["message"].lower()
+
+
+def test_websocket_rejects_query_token_auth():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch?token=dev-user-1") as websocket:
+            message = websocket.receive_json()
+    assert message["type"] == "error"
+    assert "query-token" in message["message"]
+
+
+def test_websocket_rejects_unapproved_origin():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch", headers={"Origin": "https://evil.example"}) as websocket:
+            message = websocket.receive_json()
+    assert message["type"] == "error"
+    assert "origin" in message["message"].lower()
+
+
+def test_websocket_raw_message_size_is_limited():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_text('{"type":"ping","padding":"%s"}' % ("x" * (270 * 1024)))
             message = websocket.receive_json()
     assert message["type"] == "error"
     assert "too large" in message["message"].lower()
@@ -482,7 +600,7 @@ def test_clear_practice_data_deletes_audio_before_bulk_rows(monkeypatch):
 
 
 def test_websocket_accepts_first_message_auth_without_token_query(monkeypatch):
-    monkeypatch.setenv("APP_ENV", "production")
+    _set_production_auth_env(monkeypatch)
 
     def fake_auth_context(db, token):
         assert token == "dev-ws-token"
@@ -491,7 +609,7 @@ def test_websocket_accepts_first_message_auth_without_token_query(monkeypatch):
 
     monkeypatch.setattr("app.api.websocket.auth_context_from_token", fake_auth_context)
     with TestClient(app) as client:
-        with client.websocket_connect("/ws/pitch") as websocket:
+        with client.websocket_connect("/ws/pitch", headers={"Origin": "https://brass-tune.vercel.app"}) as websocket:
             websocket.send_json({"type": "ping"})
             assert websocket.receive_json()["message"].lower().startswith("authenticate")
             websocket.send_json({"type": "authenticate", "token": "dev-ws-token"})

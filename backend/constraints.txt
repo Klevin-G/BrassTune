@@ -1,0 +1,7 @@
+# Security floor constraints for Python 3.11+ installs.
+# This is not a full lockfile; it prevents resolver backtracking below patched
+# versions while keeping CI on current compatible releases.
+fastapi>=0.138
+starlette>=1.3.1
+python-dotenv>=1.2.2
+pytest>=9.0.3
