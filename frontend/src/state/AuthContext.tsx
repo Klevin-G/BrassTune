@@ -48,7 +48,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<BackendProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshProfile = useCallback(async () => {
+  const loadProfile = useCallback(async (activeSession: Session | null) => {
+    if (supabase && !activeSession) {
+      setProfile(null);
+      return;
+    }
     try {
       const current = await getCurrentUser();
       setProfile(current);
@@ -57,6 +61,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshProfile = useCallback(async () => {
+    await loadProfile(session);
+  }, [loadProfile, session]);
+
   useEffect(() => {
     setAuthTokenProvider(async () => {
       if (!supabase) return null;
@@ -64,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return data.session?.access_token ?? null;
     });
     if (!supabase) {
-      refreshProfile().finally(() => setLoading(false));
+      loadProfile(null).finally(() => setLoading(false));
       return () => setAuthTokenProvider(null);
     }
     supabase.auth
@@ -72,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(({ data }) => {
         setSession(data.session ?? null);
         setUser(data.session?.user ?? null);
-        refreshProfile().finally(() => setLoading(false));
+        loadProfile(data.session ?? null).finally(() => setLoading(false));
       })
       .catch(() => {
         setSession(null);
@@ -83,13 +91,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
-      refreshProfile();
+      loadProfile(nextSession);
     });
     return () => {
       subscription.subscription.unsubscribe();
       setAuthTokenProvider(null);
     };
-  }, [refreshProfile]);
+  }, [loadProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
@@ -161,8 +169,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setSession(null);
     setUser(null);
-    await refreshProfile();
-  }, [refreshProfile]);
+    if (supabase) {
+      setProfile(null);
+    } else {
+      await loadProfile(null);
+    }
+  }, [loadProfile]);
 
   const deleteAccount = useCallback(async (confirmation: string) => {
     await deleteMyAccount(confirmation);

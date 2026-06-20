@@ -7,6 +7,7 @@ import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { EmptyActionState, PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
 import { listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
 import type { PracticeSession } from '../domain/types';
+import { useAuth } from '../state/AuthContext';
 
 type SessionFilter = 'all' | 'week' | 'audio' | 'best' | 'work';
 
@@ -19,15 +20,20 @@ function isThisWeek(dateText: string) {
 }
 
 export function SessionsPage() {
+  const auth = useAuth();
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   const [filter, setFilter] = useState<SessionFilter>('all');
 
   useEffect(() => {
     const guestSessions = listGuestSessions();
+    if (!auth.isSignedIn) {
+      setSessions(guestSessions);
+      return;
+    }
     listSessions()
       .then((cloudSessions) => setSessions([...guestSessions, ...cloudSessions].sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())))
       .catch(() => setSessions(guestSessions));
-  }, []);
+  }, [auth.isSignedIn]);
 
   const filtered = useMemo(() => {
     if (filter === 'week') return sessions.filter((session) => isThisWeek(session.started_at));

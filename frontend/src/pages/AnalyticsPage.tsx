@@ -10,6 +10,7 @@ import { NoteStatsTable } from '../components/NoteStatsTable';
 import { InsightCard, MetricTile, PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge } from '../components/ui/AppPrimitives';
 import type { NoteStats } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 import { measuredRows, selectDefaultNoteLabel } from './analyticsSelection';
 
 type Period = '7d' | '30d' | 'all' | 'custom';
@@ -28,6 +29,7 @@ function rangeForPeriod(period: Period) {
 
 export function AnalyticsPage() {
   const { instrumentId, setInstrumentId } = useAppSettings();
+  const auth = useAuth();
   const [stats, setStats] = useState<NoteStats[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
   const [period, setPeriod] = useState<Period>('30d');
@@ -36,6 +38,12 @@ export function AnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!auth.isSignedIn) {
+      setStats([]);
+      setHeatmap([]);
+      setError('Analytics are available after sign-in. Guest practice and local review still work on this device.');
+      return;
+    }
     Promise.all([getNoteStats(instrumentId, range), getHeatmap(instrumentId, range)])
       .then(([noteData, heatmapData]) => {
         setStats(noteData);
@@ -47,7 +55,7 @@ export function AnalyticsPage() {
         setHeatmap([]);
         setError('Analytics are unavailable right now. Guest practice and local review still work on this device.');
       });
-  }, [instrumentId, range]);
+  }, [auth.isSignedIn, instrumentId, range]);
 
   useEffect(() => {
     const nextSelection = selectDefaultNoteLabel(heatmap, selectedNote);

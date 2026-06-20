@@ -5,13 +5,20 @@ import { AccuracyLineChart, PracticeBarChart } from '../components/ProgressChart
 import { InsightCard, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import type { ProgressMetrics } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 
 export function ProgressPage() {
   const { instrumentId } = useAppSettings();
+  const auth = useAuth();
   const [progress, setProgress] = useState<ProgressMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!auth.isSignedIn) {
+      setProgress(null);
+      setError('Progress sync is available after sign-in. Record or review guest sessions locally.');
+      return;
+    }
     getProgress(instrumentId)
       .then((next) => {
         setProgress(next);
@@ -21,7 +28,7 @@ export function ProgressPage() {
         setProgress(null);
         setError('Progress sync is unavailable right now. Record or review guest sessions locally.');
       });
-  }, [instrumentId]);
+  }, [auth.isSignedIn, instrumentId]);
 
   const latestPoint = progress?.timeseries[progress.timeseries.length - 1];
   const improved = progress?.most_improved_notes?.[0];

@@ -14,14 +14,14 @@ Not full release ready until live provider, Apple/App Store/legal, native produc
 - Frontend tests/build/audit/E2E and GitHub Action
 - Security GitHub Action
 - Swift package/native simulator checks locally after final fix
-- GitHub Backend, Frontend, Security, and Swift checks were green on PR head `36b29c8cff85f3364648763fd36d6472fb1ef8a3` before the current local ensemble privacy, Score Practice focus, hosted-smoke copy, Settings affordance, and evidence-doc changes.
+- GitHub Backend and Security were green on PR head `72bb5a4681b0e4710dedaaeeb3449e6ddd124f38`; Frontend and Swift were still running at the last poll before the local guest-fetch follow-up.
 - Vercel status was green on that baseline PR head.
 - Production root, Render health, CORS, and basic WebSocket connectivity passed as baseline checks.
 - Enhanced production WebSocket hardening smoke currently fails because production Render is stale relative to the local backend hardening.
 
 ## Current CI gate
 
-PR head `36b29c8cff85f3364648763fd36d6472fb1ef8a3` was verified green before this follow-up. The latest branch work adds ensemble pre-membership report scoping, a working Score Practice focus control, hosted-smoke copy alignment, a non-editable Settings threshold affordance, refreshed device-simulation artifacts, and updated release evidence. Re-check the latest pushed SHA, exact-SHA preview, and hosted smoke before updating the live PR body, merging, or deploying.
+PR head `72bb5a4681b0e4710dedaaeeb3449e6ddd124f38` added ensemble pre-membership report scoping, a working Score Practice focus control, hosted-smoke copy alignment, a non-editable Settings threshold affordance, refreshed device-simulation artifacts, and updated release evidence. A protected Vercel preview for that SHA was READY and passed backend/API/WS hosted checks, but route smoke exposed guest-mode protected API `401` console noise. The current local follow-up gates protected cloud fetches for guests. Re-check the latest pushed SHA, exact-SHA preview, and hosted smoke before updating the live PR body, merging, or deploying.
 
 ## Remaining external gates
 

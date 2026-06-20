@@ -5,8 +5,10 @@ import { getHeatmap, getProgress, getRecommendations, listSessions } from '../ap
 import { HeatMapGrid } from '../components/HeatMapGrid';
 import { RecommendationCard } from '../components/RecommendationCard';
 import { EmptyActionState, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { listGuestSessions } from '../domain/guestSessions';
 import type { NoteStats, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 
 function minutes(seconds: number | undefined) {
   return Math.round((seconds ?? 0) / 60);
@@ -20,6 +22,7 @@ function topMeasuredNote(rows: NoteStats[]) {
 
 export function DashboardPage() {
   const { instrumentId } = useAppSettings();
+  const auth = useAuth();
   const [progress, setProgress] = useState<ProgressMetrics | null>(null);
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
@@ -27,6 +30,14 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!auth.isSignedIn) {
+      setProgress(null);
+      setSessions(listGuestSessions().slice(0, 3));
+      setHeatmap([]);
+      setRecommendations([]);
+      setError(null);
+      return;
+    }
     Promise.all([getProgress(instrumentId), listSessions(), getHeatmap(instrumentId), getRecommendations(instrumentId)])
       .then(([progressData, sessionData, heatmapData, recommendationData]) => {
         setProgress(progressData);
@@ -36,7 +47,7 @@ export function DashboardPage() {
         setError(null);
       })
       .catch(() => setError('Practice mode is still available. Analytics will refresh when the service reconnects.'));
-  }, [instrumentId]);
+  }, [auth.isSignedIn, instrumentId]);
 
   const latestPoint = progress?.timeseries[progress.timeseries.length - 1];
   const focusNote = useMemo(() => topMeasuredNote(heatmap), [heatmap]);

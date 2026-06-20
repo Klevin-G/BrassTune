@@ -41,6 +41,15 @@ export function EnsemblePage() {
   };
 
   useEffect(() => {
+    if (!auth.isSignedIn) {
+      setGroups([]);
+      setSelectedGroup(null);
+      setSummary(null);
+      setReport(null);
+      setEnsembleStatus('Sign in with an ensemble account to view roster and director reports.');
+      setLoading(false);
+      return;
+    }
     getEnsembleGroups()
       .then((groupsData) => {
         setGroups(groupsData);
@@ -53,7 +62,7 @@ export function EnsemblePage() {
       })
       .catch((error) => setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensembles.'))
       .finally(() => setLoading(false));
-  }, [canManage]);
+  }, [auth.isSignedIn, canManage]);
 
   const createGroup = async () => {
     if (!newGroupName.trim()) return;

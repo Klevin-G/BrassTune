@@ -7,14 +7,22 @@ import { RecommendationCard } from '../components/RecommendationCard';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import type { PracticePlan, Recommendation } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 
 export function CoachPage() {
   const { instrumentId } = useAppSettings();
+  const auth = useAuth();
   const [plan, setPlan] = useState<PracticePlan | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!auth.isSignedIn) {
+      setPlan(null);
+      setRecommendations([]);
+      setError('Coach recommendations are available after sign-in. Practice and local review still work.');
+      return;
+    }
     Promise.all([getPracticePlan(instrumentId), getRecommendations(instrumentId)])
       .then(([planData, recommendationData]) => {
         setPlan(planData);
@@ -26,7 +34,7 @@ export function CoachPage() {
         setRecommendations([]);
         setError('Coach recommendations are unavailable right now. Practice and local review still work.');
       });
-  }, [instrumentId]);
+  }, [auth.isSignedIn, instrumentId]);
 
   return (
     <ScreenContainer>
