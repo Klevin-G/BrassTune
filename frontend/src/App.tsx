@@ -1,10 +1,10 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
+import { AuthPage } from './pages/AuthPage';
 
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })));
 const AudioLabPage = lazy(() => import('./pages/AudioLabPage').then((module) => ({ default: module.AudioLabPage })));
-const AuthPage = lazy(() => import('./pages/AuthPage').then((module) => ({ default: module.AuthPage })));
 const CoachPage = lazy(() => import('./pages/CoachPage').then((module) => ({ default: module.CoachPage })));
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })));
 const EnsemblePage = lazy(() => import('./pages/EnsemblePage').then((module) => ({ default: module.EnsemblePage })));

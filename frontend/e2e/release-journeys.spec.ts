@@ -48,7 +48,7 @@ test('critical routes render identifiable content', async ({ page }) => {
 
 test('auth unavailable surfaces route testers into guest practice', async ({ page }) => {
   await page.goto('/auth/reset-password');
-  await expect(page.getByText(/accounts are not enabled in this beta build yet/i)).toBeVisible();
+  await expect(page.getByText(/accounts are not enabled in this build yet/i)).toBeVisible();
   await expect(page.getByRole('link', { name: /continue as guest/i })).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/Supabase|VITE_SUPABASE|env vars/i);
 
@@ -57,7 +57,7 @@ test('auth unavailable surfaces route testers into guest practice', async ({ pag
   await expect(page).toHaveURL(/\/practice$/);
 
   await page.goto('/auth/callback#error=access_denied&error_description=SUPABASE_SECRET_KEY%20missing');
-  await expect(page.getByText(/accounts are not enabled in this beta build yet/i)).toBeVisible();
+  await expect(page.getByText(/accounts are not enabled in this build yet/i)).toBeVisible();
   await expect(page.getByRole('link', { name: /continue as guest/i })).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/SUPABASE|SECRET_KEY|Supabase/i);
 });

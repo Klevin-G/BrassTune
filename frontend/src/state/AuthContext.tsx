@@ -41,7 +41,7 @@ interface AuthState {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
-const accountsDisabledMessage = 'Accounts are not enabled in this beta build yet. You can still use guest practice.';
+const accountsDisabledMessage = 'Accounts are not enabled in this build yet. You can still use guest practice.';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);

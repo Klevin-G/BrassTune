@@ -56,7 +56,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     return (
       <ScreenContainer>
         <SectionCard title="Finishing sign in" eyebrow="Account access">
-          <p className="muted-copy" role="status">{auth.configured ? message ?? 'Finishing sign-in. Continue when your account session is ready.' : 'Accounts are not enabled in this beta build yet. You can still use guest practice.'}</p>
+          <p className="muted-copy" role="status">{auth.configured ? message ?? 'Finishing sign-in. Continue when your account session is ready.' : 'Accounts are not enabled in this build yet. You can still use guest practice.'}</p>
           <Link className="primary-button" to={auth.configured ? '/' : '/practice'}>
             {auth.configured ? 'Continue' : 'Continue as guest'}
             <ArrowRight size={18} />
@@ -88,8 +88,8 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
           {!auth.configured && (
             <>
               <EmptyActionState
-                title="Accounts are not enabled in this beta build yet"
-                body="You can still use guest practice. Sign-in, syncing, and ensemble membership will be available when beta account access is enabled."
+                title="Accounts are not enabled in this build yet"
+                body="You can still use guest practice. Sign-in, syncing, and ensemble membership will be available when account access is enabled."
                 icon={Mail}
               />
               <Link className="primary-button full-width-action" to="/practice">
