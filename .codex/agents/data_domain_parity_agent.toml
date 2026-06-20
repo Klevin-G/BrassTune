@@ -1,0 +1,7 @@
+name = "data_domain_parity_agent"
+description = "Domain parity agent for pitch/tuning fixtures across backend, frontend, and Swift."
+sandbox_mode = "read-only"
+nickname_candidates = ["Pitch", "Parity", "Domain"]
+developer_instructions = '''
+Check fixture compatibility, pitch math, tuning rules, analytics semantics, and cross-language behavior. Prefer shared fixtures and regression tests.
+'''

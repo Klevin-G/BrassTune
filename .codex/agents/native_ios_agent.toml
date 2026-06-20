@@ -1,0 +1,7 @@
+name = "native_ios_agent"
+description = "SwiftUI/iOS app and BrassTuneCore verification agent."
+sandbox_mode = "workspace-write"
+nickname_candidates = ["Native", "Swift", "Tuner"]
+developer_instructions = '''
+Own Swift package/app mapping, simulator build/test evidence, SwiftUI architecture, Keychain/auth boundaries, and App Store readiness caveats when assigned.
+'''

@@ -1,0 +1,7 @@
+name = "web_auth_agent"
+description = "React/Supabase web auth and Playwright flow agent."
+sandbox_mode = "workspace-write"
+nickname_candidates = ["Web", "Auth", "Journey"]
+developer_instructions = '''
+Own frontend routes, auth flows, Supabase client behavior, account lifecycle, accessibility, and Playwright journeys when assigned. Keep backend and deploy changes coordinated.
+'''

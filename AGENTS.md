@@ -42,6 +42,8 @@ BrassTune is a brass-practice analytics product with a React/Vite web app, FastA
 - Treat live Supabase, Vercel, Render, Apple Developer, and App Store Connect work as externally blocked unless credentials and explicit authorization are present.
 - Do not claim physical microphone quality, Apple archive signing, or App Store readiness from simulator-only evidence.
 - Keep raw large datasets, recordings, model artifacts, caches, Playwright traces, and Xcode derived data out of Git.
+- Do not hand-edit generated screenshots or large assets unless the task is explicitly visual documentation.
+- Do not introduce paid services, production deploys, or credential use without explicit approval.
 
 ## Agent Fanout For Nontrivial Work
 
@@ -49,6 +51,7 @@ BrassTune is a brass-practice analytics product with a React/Vite web app, FastA
 - Web/auth agent: React flows, accessibility, browser journeys, Supabase client behavior.
 - Backend/security agent: FastAPI auth, authorization, account lifecycle, payload limits, logging, storage privacy.
 - Data/domain agent: pitch fixtures, backend/frontend/Swift parity, analytics rules.
+- Audio pipeline reviewer: pitch, note, recording, metronome, and music-domain behavior.
 - Native iOS agent: SwiftUI architecture, Keychain/auth surfaces, audio fixtures, simulator tests.
 - Deployment agent: Vercel/Render/Supabase config names, CI, smoke tests, rollback notes.
 - Reviewer agent: diff review, secret scan, large-file scan, remaining blockers.
@@ -58,6 +61,7 @@ BrassTune is a brass-practice analytics product with a React/Vite web app, FastA
 - Relevant automated checks pass locally, or failures are documented with exact blocker and evidence.
 - Backend authorization and data-lifecycle changes have regression tests.
 - Browser journeys exercise real local routes and backend authorization, not only route visits.
+- Audio, pitch, transposition, and score behavior changes consider fixture/schema implications.
 - Native claims distinguish Swift package tests, app builds, unit tests, UI tests, signed archives, and physical-device evidence.
 - Release-readiness docs are updated when behavior, deployment, data handling, App Store readiness, or test status changes.
 - `git status` is reviewed; only intentional files are staged.
@@ -109,6 +113,8 @@ Coding and safety conventions:
 - Never commit env files, Supabase service keys, Vercel tokens, Render hooks, Apple credentials, recordings, local DBs, Playwright traces, or Xcode derived data.
 - Keep release-readiness docs honest about simulator versus physical-device evidence and hosted smoke blockers.
 - Use linked Vercel metadata rather than guessing root/frontend deploy directory.
+- Keep audio, pitch, and transposition logic reproducible with fixtures when behavior changes.
+- Preserve the separation between backend app logic, frontend domain logic, native Swift code, fixtures, and docs.
 
 Git rules:
 - Check `git status --short --branch` before edits and handoff.
@@ -127,7 +133,7 @@ Codex should use parallel subagents for nontrivial work, but fanout must be just
 
 Do not spawn agents that edit the same file at the same time. Keep `max_depth = 1` unless the repo-specific config and setup notes explain why `2` is justified. Always use a read-only scout before major edits, and always use independent tester/reviewer agents before claiming completion.
 
-Use CSV fanout for repeated independent tasks like file audits, package reviews, migration target reviews, route/component checks, artifact inventories, or per-module security reviews. Keep `max_concurrency` bounded so local builds, browser tests, Xcode, GPU work, or data pipelines do not overload the machine.
+Use CSV fanout for repeated independent tasks like file audits, package reviews, migration target reviews, route/component checks, artifact inventories, fixture audits, endpoint reviews, or per-module security reviews. Keep `max_concurrency` bounded so local builds, browser tests, Xcode, GPU work, or data pipelines do not overload the machine.
 
 ## Recommended Agent Roles
 
@@ -135,6 +141,7 @@ Use the global `repo_scout`, `architect`, `implementer`, `tester`, `reviewer`, `
 - release integration lead
 - web auth agent
 - backend security agent
+- audio pipeline reviewer
 - data domain parity agent
 - native ios agent
 - deployment smoke agent
