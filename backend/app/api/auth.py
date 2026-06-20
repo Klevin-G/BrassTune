@@ -90,10 +90,6 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
     app_metadata = payload.get("app_metadata") or {}
     requested_role = app_metadata.get("role") if app_metadata.get("role") in {"student", "director", "admin"} else None
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
-    matched_by_email = False
-    if user is None and email:
-        user = db.query(User).filter(User.email == email).first()
-        matched_by_email = user is not None
     if user is None:
         preferred_username = metadata.get("username") or (email.split("@")[0] if email else "player")
         user = User(
@@ -118,8 +114,6 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             user.primary_instrument_id = metadata["primary_instrument_id"]
         if requested_role:
             user.role = requested_role
-        elif matched_by_email and user.role in {"director", "admin"}:
-            user.role = "student"
     user.updated_at = dt.datetime.utcnow()
     db.commit()
     db.refresh(user)

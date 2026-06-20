@@ -24,12 +24,12 @@
 - `cd frontend && CI=true npm run e2e:local`
 - Current local CI entrypoint result: `30 passed` across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. `npm run e2e:local` is scoped to `release-journeys.spec.ts`; hosted smoke remains an explicit command.
 - `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted`
-- Final hosted root/API/CORS/WebSocket result: passed.
+- Current production baseline root/API/CORS/basic WebSocket result: passed; enhanced query-token and bad-Origin WebSocket hardening checks fail until production Render is deployed to the new backend commit.
 - `BRASSTUNE_WEB_BASE_URL=https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted`
 - Branch-preview hosted smoke result: passed with `15 passed`, `20 skipped`; Render health, CORS, and raw WebSocket upgrade passed, while preview page journeys and page-derived WebSocket URL checks were skipped because Vercel Authentication returns the Vercel login page without a share URL or automation bypass.
 - `cd frontend && E2E_BASE_URL=https://brass-tune-9f0sicpxl-aryaswebsites.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted -- --project=chromium`
 - Protected preview Playwright result: backend health, CORS, secure WS URL, and raw WS upgrade tests passed; preview page route tests received `401` from Vercel Authentication. Vercel connector fetch verified the fresh preview deployment is accessible to the connected account.
-- GitHub Frontend workflow was green on PR head `91ca605b64a58e582b2e8f6b2d06c9f80ba3b6c7`. A later docs-only head `0f2e46a...` failed mobile WebKit while waiting for the demo recording review link; the local fix stops demo sessions before synthetic audio upload completes and the full local suite now passes `30 passed`. Re-check the latest Frontend Action before merge.
+- Current local pass on top of `9b3766bc4241843c52b2a703c7ec923b4105f540`: `CI=true npm run e2e:local` passed `75` tests across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. Remote CI must be rerun after committing and pushing the local microphone/auth/smoke changes. Production WebSocket hardening smoke must be rerun only after owner-approved Render deployment.
 
 ## Not Covered
 

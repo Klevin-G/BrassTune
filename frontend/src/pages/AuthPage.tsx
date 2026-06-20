@@ -136,10 +136,15 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
             </form>
           )}
           {mode !== 'reset' && auth.configured && (
-            <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple().catch(() => setMessage('Apple sign-in could not start. Try again later.'))}>
-              <ShieldCheck size={18} />
-              Continue with Apple
-            </button>
+            <div className="provider-button-stack">
+              <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle().catch(() => setMessage('Google sign-in could not start. Try again later.'))}>
+                Continue with Google
+              </button>
+              <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple().catch(() => setMessage('Apple sign-in could not start. Try again later.'))}>
+                <ShieldCheck size={18} />
+                Continue with Apple
+              </button>
+            </div>
           )}
           {message && <div className="alert" role="status">{message}</div>}
           {auth.configured && (

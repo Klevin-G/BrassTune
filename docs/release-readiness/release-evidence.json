@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-06-20T16:12:23Z",
+  "branch": "arya/release-readiness-hardening",
+  "starting_sha": "9b3766bc4241843c52b2a703c7ec923b4105f540",
+  "current_state": "local-commit-ready-worktree",
+  "current_sha": null,
+  "items": [
+    {
+      "id": "github-pr-baseline",
+      "sha": "9b3766bc4241843c52b2a703c7ec923b4105f540",
+      "date": "2026-06-20",
+      "command": "GitHub connector: get_pr_info, fetch_commit_workflow_runs, get_commit_combined_status",
+      "environment": "GitHub connector",
+      "result": "PR #2 open, mergeable, non-draft; Backend, Frontend, Security, Swift workflow runs completed success; Vercel status success.",
+      "evidence_level": "remote exact SHA before local edits",
+      "artifact_location": "connector response in current Codex run",
+      "blocker": "Does not cover uncommitted local changes from this pass."
+    },
+    {
+      "id": "frontend-unit",
+      "sha": "9b3766bc4241843c52b2a703c7ec923b4105f540+local",
+      "date": "2026-06-20",
+      "command": "cd frontend && npm test",
+      "environment": "local macOS",
+      "result": "Passed: 9 files, 34 tests.",
+      "evidence_level": "local worktree",
+      "artifact_location": "terminal output",
+      "blocker": null
+    },
+    {
+      "id": "frontend-build",
+      "sha": "9b3766bc4241843c52b2a703c7ec923b4105f540+local",
+      "date": "2026-06-20",
+      "command": "cd frontend && npm run build",
+      "environment": "local macOS",
+      "result": "Passed; main JS 382.62 kB minified; route chunks generated.",
+      "evidence_level": "local worktree",
+      "artifact_location": "frontend/dist ignored build output",
+      "blocker": null
+    },
+    {
+      "id": "frontend-e2e-local",
+      "sha": "9b3766bc4241843c52b2a703c7ec923b4105f540+local",
+      "date": "2026-06-20",
+      "command": "cd frontend && CI=true npm run e2e:local",
+      "environment": "local Playwright with local backend/web servers",
+      "result": "Passed: 75 tests across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit.",
+      "evidence_level": "local worktree",
+      "artifact_location": "terminal output",
+      "blocker": null
+    },
+    {
+      "id": "device-simulation",
+      "sha": "9b3766bc4241843c52b2a703c7ec923b4105f540+local",
+      "date": "2026-06-20",
+      "command": "cd frontend && npm run simulate:devices",
+      "environment": "local Playwright device simulation",
+      "result": "Passed; refreshed device report and screenshots.",
+      "evidence_level": "local worktree",
+      "artifact_location": "docs/device-simulation-report.md and docs/assets/device-simulation/",
+      "blocker": null
+    },
+    {
+      "id": "backend-tests",
+      "sha": "9b3766bc4241843c52b2a703c7ec923b4105f540+local",
+      "date": "2026-06-20",
+      "command": "cd backend && .venv/bin/python -m pytest -q",
+      "environment": "local backend .venv Python 3.9.6",
+      "result": "Passed: 59 tests. Targeted hardening tests include query-token WebSocket auth rejection, unapproved-origin rejection, and same-email Supabase no-link regression.",
+      "evidence_level": "local worktree",
+      "artifact_location": "terminal output",
+      "blocker": "Local .venv is below the repo Python 3.11+ floor; CI and .venv-audit provide higher-floor security evidence."
+    },
+    {
+      "id": "backend-security",
+      "sha": "9b3766bc4241843c52b2a703c7ec923b4105f540+local",
+      "date": "2026-06-20",
+      "command": "cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt; uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/...; .venv-audit/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/...; .venv/bin/python -m bandit -r app -x app/tests",
+      "environment": "local backend .venv Python 3.9.6 plus Python 3.12.13 audit resolution",
+      "result": "Exact .venv requirements audit blocked by Python 3.9 dependency-floor mismatch; Python 3.12 uv-resolved requirements audit found no known vulnerabilities; Bandit passed.",
+      "evidence_level": "local worktree",
+      "artifact_location": "terminal output",
+      "blocker": "Security workflow must still pass on the exact pushed SHA."
+    },
+    {
+      "id": "native-simulator",
+      "sha": "9b3766bc4241843c52b2a703c7ec923b4105f540+local",
+      "date": "2026-06-20",
+      "command": "XcodeBuildMCP build_sim/test_sim plus cd swift/BrassTuneCore && swift test",
+      "environment": "Xcode 26.2, iPhone 17 simulator iOS 26.2",
+      "result": "Swift package 3 tests passed; simulator Debug build passed; app unit tests 7 passed; UI smoke 1 passed.",
+      "evidence_level": "local simulator",
+      "artifact_location": "XcodeBuildMCP build logs and xcresult bundles",
+      "blocker": "Simulator-only; no signing, TestFlight, App Store Connect, or physical microphone evidence."
+    },
+    {
+      "id": "hosted-production-smoke",
+      "sha": "production-current",
+      "date": "2026-06-20",
+      "command": "env BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted",
+      "environment": "hosted production",
+      "result": "Root, health, CORS, and basic WebSocket response passed; query-token rejection and bad-Origin rejection failed.",
+      "evidence_level": "hosted smoke",
+      "artifact_location": "terminal output",
+      "blocker": "Production Render is stale for current WebSocket hardening; owner-approved deploy required before final hosted smoke. Local backend tests pass, so this is a deployment gate rather than a local code failure."
+    }
+  ],
+  "external_sources_checked": [
+    {
+      "label": "Apple SDK minimum requirements",
+      "url": "https://developer.apple.com/news/upcoming-requirements/",
+      "finding": "Since April 28, 2026, App Store Connect uploads require Xcode 26 or later and current platform SDKs."
+    },
+    {
+      "label": "Apple account deletion",
+      "url": "https://developer.apple.com/support/offering-account-deletion-in-your-app/",
+      "finding": "Apps that support account creation must let users initiate account deletion in app."
+    },
+    {
+      "label": "Apple App Review third-party login guidance",
+      "url": "https://developer.apple.com/app-store/review/guidelines/",
+      "finding": "Apps using third-party/social login for primary accounts must offer an equivalent privacy-preserving login option unless an exception applies."
+    },
+    {
+      "label": "Google Sign-In for iOS",
+      "url": "https://developers.google.com/identity/sign-in/ios/start-integrating",
+      "finding": "Native Google Sign-In requires configured OAuth client IDs and signed-app/keychain-capable project setup."
+    },
+    {
+      "label": "Supabase Google/Apple provider setup",
+      "url": "https://supabase.com/docs/guides/auth/social-login/auth-google",
+      "finding": "Provider credentials and callback/redirect URLs must be configured in Supabase and the identity provider."
+    }
+  ]
+}

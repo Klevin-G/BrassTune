@@ -2,20 +2,20 @@
 
 ## Must Finish Before Closed-Beta Merge
 
-- [P0] Verify post-fix GitHub Actions on PR #2
+- [P0] Commit, push, and verify the current local worktree on PR #2
   - Owner type: repo
-  - Acceptance criteria: latest PR head has Backend, Frontend, Security, and Swift Actions all green; Swift no longer fails at `Native app UI smoke test`.
-  - Verification command or evidence: GitHub Actions for PR #2 on the latest pushed commit.
+  - Acceptance criteria: the local microphone/auth/hosted-smoke/docs changes are committed and pushed; latest PR head has Backend, Frontend, Security, Swift, and Vercel checks all green on the exact new SHA.
+  - Verification command or evidence: GitHub Actions and Vercel status for PR #2 on the latest pushed commit.
 
-- [P0] Keep hosted smoke green after final push
-  - Owner type: repo
-  - Acceptance criteria: Render health, CORS, and hosted WebSocket still pass; Vercel preview protection is documented honestly if root returns `401`.
-  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted`.
+- [P0] Owner-approved Render deployment before production beta smoke
+  - Owner type: owner/provider
+  - Acceptance criteria: Render serves the branch's WebSocket hardening; hosted smoke passes root, health, CORS, basic WS, query-token rejection, and bad-Origin rejection.
+  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` after owner-approved deploy.
 
 - [P1] Keep release docs non-contradictory
   - Owner type: repo
-  - Acceptance criteria: reports do not say the PR is ready to merge before latest Actions pass and do not call the product release ready.
-  - Verification command or evidence: `grep -RIn "draft PR\|a77a669\|release ready\|bug-free\|fully secure" docs/release-readiness || true`.
+  - Acceptance criteria: canonical reports do not say the local worktree is merge-ready before latest Actions and hosted smoke pass, and do not call the product release ready.
+  - Verification command or evidence: `MASTER_FINDINGS.md`, `TEST_MATRIX.md`, `FINAL_REPORT.md`, and `release-evidence.json` reference the same SHA/evidence state.
 
 ## Should Finish During Closed Beta
 
@@ -88,10 +88,10 @@
   - Acceptance criteria: non-production Supabase project can run auth/export/delete/storage lifecycle tests without real user data.
   - Verification command or evidence: CI/manual env-gated test command documented; disposable project evidence redacted.
 
-- [P1] Remediate backend dependency advisories
+- [P1] Confirm Security workflow on the exact pushed SHA
   - Owner type: repo
-  - Acceptance criteria: Starlette, pytest, and python-dotenv advisories reported by `pip-audit` are fixed through compatible FastAPI/Starlette/test-tool upgrades or formally risk-accepted with exact advisory notes.
-  - Verification command or evidence: `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` passes or records approved ignores.
+  - Acceptance criteria: Security workflow reruns after this commit and passes dependency, Bandit, and secret checks on the exact PR head.
+  - Verification command or evidence: GitHub Actions Security result for the latest pushed SHA.
 
 - [P2] Revisit WebSocket auth hardening after live auth stabilizes
   - Owner type: repo

@@ -529,19 +529,19 @@ def test_signed_in_student_cannot_use_full_json_export_bypass():
     assert response.status_code == 403
 
 
-def test_email_linked_supabase_user_does_not_inherit_privileged_local_role():
+def test_supabase_user_does_not_link_to_existing_account_by_email_alone():
     db = _test_db()
     try:
-        db.add(
-            User(
-                email="teacher@example.com",
-                username="teacher",
-                name="Teacher",
-                role="director",
-                primary_instrument_id="trumpet",
-            )
+        local_teacher = User(
+            email="teacher@example.com",
+            username="teacher",
+            name="Teacher",
+            role="director",
+            primary_instrument_id="trumpet",
         )
+        db.add(local_teacher)
         db.commit()
+        db.refresh(local_teacher)
         user = _sync_supabase_user(
             db,
             {
@@ -551,8 +551,12 @@ def test_email_linked_supabase_user_does_not_inherit_privileged_local_role():
                 "app_metadata": {},
             },
         )
+        db.refresh(local_teacher)
         assert user.supabase_user_id == "supabase-user-1"
+        assert user.id != local_teacher.id
         assert user.role == "student"
+        assert local_teacher.supabase_user_id is None
+        assert local_teacher.role == "director"
     finally:
         db.close()
 

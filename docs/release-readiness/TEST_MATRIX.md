@@ -1,55 +1,52 @@
 # Release Test Matrix
 
-## Current Run Update - 2026-06-20 UTC
+Updated: 2026-06-20T16:12:23Z
+Branch: `arya/release-readiness-hardening`
+Baseline SHA: `9b3766bc4241843c52b2a703c7ec923b4105f540`
+Evidence state: local commit-ready worktree on top of the baseline SHA; exact-SHA CI must rerun after push.
 
-| Journey/Gate | Command | Result | Notes |
+## Current Local Gates
+
+| Gate | Command | Result | Notes |
 |---|---|---|---|
-| Backend regression suite | `cd backend && .venv/bin/python -m pytest` | Passed: `53 passed`, `5 warnings` | Warnings are Pydantic/FastAPI deprecations. |
-| Web unit tests | `cd frontend && npm test` | Passed: `8` files, `27` tests | Includes new metronome and score-practice domain tests. |
-| Web build/typecheck | `cd frontend && npm run build` | Passed | Vite large chunk warning remains, JS about `904 kB` minified. |
+| Frontend unit tests | `cd frontend && npm test` | Passed: `9` files, `34` tests | Includes browser-local pitch detector coverage. |
+| Frontend build/typecheck | `cd frontend && npm run build` | Passed | Main JS `382.62 kB`; large Recharts chunk remains split. |
 | Frontend dependency audit | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities` | Dev dependencies excluded. |
-| Swift package parity smoke | `cd swift/BrassTuneCore && swift test` | Passed: `3` Swift tests | Native app UI/build tests not rerun yet in this current run. |
-| Browser E2E local | `cd frontend && npm run e2e:local` | Passed: `75 passed` | Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. |
-| Device simulation | `cd frontend && npm run simulate:devices` | Passed | Refreshed `docs/device-simulation-report.md` and screenshots. |
-| Rendered browser spot check | Browser plugin against `http://127.0.0.1:5173` | Passed | Metronome Tap tempo changed BPM/status; score-practice import controls rendered with no console errors/overlap. |
-| Backend Bandit | `cd backend && .venv/bin/python -m bandit -r app -x app/tests` | Passed: no issues | Bandit emitted comment-token warnings only. |
-| Backend pip-audit | `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` | Failed: `7` advisories | Starlette, pytest, python-dotenv dependency remediation required. |
-| Live provider lifecycle | Env-gated/manual | Blocked | Requires disposable Supabase/Apple/Google provider setup. |
-| Physical microphone/device | Manual protocol | Blocked | Requires supported iPhone/iPad hardware and real brass. |
+| Local browser journeys/accessibility | `cd frontend && CI=true npm run e2e:local` | Passed: `75 passed` | Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. |
+| Device simulation | `cd frontend && npm run simulate:devices` | Passed | Refreshed `docs/device-simulation-report.md` and tracked screenshots. |
+| Backend hardening target | `cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py -q` | Passed: `43 passed` | Covers same-email Supabase identity no-link regression plus local query-token and unapproved-origin WebSocket rejection. |
+| Backend full suite | `cd backend && .venv/bin/python -m pytest -q` | Passed: `59 passed` | Local `.venv` is Python 3.9.6, below the repo floor. |
+| Backend requirements audit | `cd backend && uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/... && .venv-audit/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/...` | Passed: no known vulnerabilities | Exact `.venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` is blocked because `.venv` is Python 3.9.6 and current backend requirements need Python 3.10+. |
+| Backend Bandit | `cd backend && .venv/bin/python -m bandit -r app -x app/tests` | Passed | No issues reported. |
+| Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3` Swift tests | Domain parity smoke only. |
+| iOS simulator build | XcodeBuildMCP `build_sim` with `BrassTuneApp`, iPhone 17, iOS 26.2, `CODE_SIGNING_ALLOWED=NO` | Passed | Xcode 26.2, Debug simulator build. |
+| iOS app unit tests | XcodeBuildMCP `test_sim` with `-only-testing:BrassTuneAppTests` | Passed: `7 passed` | Simulator-only. |
+| iOS UI smoke | XcodeBuildMCP `test_sim` with `BrassTuneAppUISmoke/.../testLaunchPracticeAndSettingsSurfaces` | Passed: `1 passed` | Simulator-only, `UITEST_DEMO=1`, `UITEST_RESET_STATE=1`. |
+| Hosted production smoke | `env BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Failed: 2 WS hardening checks | Root, health, CORS, and basic WS response passed; query-token rejection and bad-Origin rejection failed because production Render is stale. This is an expected deployment gate, not a local code failure. |
+| Smoke script syntax | `node --check scripts/hosted-smoke.mjs` | Passed | Validates the enhanced hosted-smoke script parses. |
 
-| Journey/Gate | Persona | Environment | Automation | Command | Result | Evidence | Blocker |
-|---|---|---|---|---|---|---|---|
-| Backend regression suite | API users | Local venv | Pytest | `cd backend && .venv/bin/python -m pytest` | Passed: `48 passed` | Terminal output | None |
-| Web unit tests | Web user | Local | Vitest | `cd frontend && npm test` | Passed: `16 tests` | Terminal output | None |
-| Web build/typecheck | Web app | Local | npm/Vite | `cd frontend && npm run build` | Passed | Terminal output | Large chunk warning only |
-| Frontend dependency audit | Web app | Local | npm audit | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities` | Terminal output | None |
-| Browser critical routes | Guest | Local Chromium/Firefox/WebKit/mobile | Playwright | `cd frontend && CI=true npm run e2e:local` | Passed: `30 passed` after mobile WebKit demo recording timing fix | `frontend/e2e/release-journeys.spec.ts` | Hosted-only API/WS checks run through `npm run e2e:hosted` / `npm run smoke:hosted`; verify latest Frontend Action before merge |
-| Auth reset/Apple surfaces | Guest/auth user | Local mocked Supabase config | Playwright | `npm run e2e:local` | Passed for disabled/mocked surfaces | `WEB_E2E_REPORT.md` | Live Supabase/Apple provider not configured |
-| Demo tuner recording/session review | Guest | Local browser | Playwright | `npm run e2e:local` | Passed across desktop/mobile browser projects | `WEB_E2E_REPORT.md` | Real microphone quality not covered |
-| Settings export before delete | Signed-in surface | Local browser | Playwright | `npm run e2e:local` | Passed | `WEB_E2E_REPORT.md` | Live deletion requires credentials |
-| Server-side ensemble forbidden write | Student/director | Local backend | Playwright API request | `npm run e2e:local` | Passed: student 403, director 200 | `frontend/e2e/release-journeys.spec.ts` | Broader live personas unavailable |
-| Web device simulation | Guest/demo | Local browser screenshots | Node/Playwright | `cd frontend && npm run simulate:devices` | Passed | `docs/device-simulation-report.md` | Generated screenshot diffs are artifacts |
-| Swift package parity smoke | Domain logic | Local SwiftPM | XCTest | `cd swift/BrassTuneCore && swift test` | Passed: `3 tests` | Terminal output | Parity breadth still limited |
-| Native app unit tests | Native app | iPhone simulator | XCTest | `xcodebuild test ... -scheme BrassTuneApp ... -only-testing:BrassTuneAppTests` | Passed locally and in GitHub Swift on PR head `91ca605...` | Local xcodebuild output and GitHub Actions | None for simulator unit scope |
-| Native app UI smoke | Native app | iPhone simulator | XCUITest | `xcodebuild test ... -scheme BrassTuneAppUISmoke ... -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces` | Passed locally and in GitHub Swift on PR head `91ca605...`; prior head `d05fe773...` failed before nested-observable fix | Local xcodebuild output, `/tmp/BrassTuneAppUISmoke.xcresult`, and GitHub Actions | Physical microphone/signing not covered |
-| Native Debug builds | iPhone/iPad | Dynamically selected iOS simulators | xcodebuild | `xcodebuild clean build ... Debug ... CODE_SIGNING_ALLOWED=NO` | Passed on iPhone 17 Pro and iPad Pro 13-inch simulators | `/tmp/brasstune-dd-debug-iphone-handoff-final`, `/tmp/brasstune-dd-debug-ipad-handoff-final` | No signing/archive |
-| Native Release build | iPhone | Dynamically selected iOS simulator | xcodebuild | `xcodebuild clean build ... Release ... CODE_SIGNING_ALLOWED=NO` | Passed | `/tmp/brasstune-dd-release-iphone-handoff-final` | No signing/archive |
-| Vercel root/deep link | Public web | Hosted | curl | `curl -IL https://brass-tune.vercel.app[/settings]` | Passed: `HTTP/2 200` | Terminal output | None |
-| Render health/CORS | Public API | Hosted | curl | `curl /api/health`, `OPTIONS /api/health` | Passed after cold start | Terminal output | Cold start latency |
-| Hosted production root/API/WS smoke | Public web/API | Hosted | Node script | `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Passed | Terminal output | Strict post-merge content check still required after production deploy |
-| Production smoke workflow | Public web/API | GitHub Actions | Scheduled/manual workflow | `.github/workflows/production-smoke.yml` | Added, not run in this docs pass | Workflow file | Requires GitHub Actions run after merge/deploy for fresh evidence |
-| Render keepalive workflow | Public API | GitHub Actions | Scheduled/manual workflow | `.github/workflows/render-keepalive.yml` | Added, not run in this docs pass | Workflow file | Cold-start mitigation only; not uptime guarantee |
-| Hosted preview API/WS smoke | PR preview/API | Hosted | Node/Playwright script | `BRASSTUNE_WEB_BASE_URL=https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app ... npm run smoke:hosted` | Passed with protected-page skips: `15 passed`, `20 skipped`; health, CORS, and raw WebSocket upgrade passed | Terminal output | Page journeys require Vercel preview auth bypass or public preview access |
-| Hosted WebSocket handshake | Web/API | Hosted | Node WebSocket | `wss://brasstune.onrender.com/ws/pitch` | Passed: opens and returns auth-required app message | Terminal output | Live authenticated WS requires credentials |
-| Protected Vercel preview routes | Guest | Hosted preview | Playwright | `E2E_BASE_URL=... E2E_VERCEL_SHARE_URL=... npm run e2e:hosted -- --project=chromium` | Skipped by default without share URL because preview returns Vercel login `401`; API/CORS/WS tests still pass | Terminal output | Requires Vercel automation bypass or unprotected preview |
-| GitHub Actions | PR #2 | Hosted CI | GitHub Actions | Backend, Frontend, Security, Swift, Vercel | Passed on PR head `91ca605b64a58e582b2e8f6b2d06c9f80ba3b6c7` | GitHub connector check: Backend, Frontend, Security, Swift completed success; Vercel commit status success | Re-check latest head if docs or code change before merge |
-| Supabase clean baseline | Backend data | Live Supabase project | Supabase migrations | `20260616_brasstune_baseline`, `20260617_brasstune_production_readiness` | Passed: nine public app tables, RLS enabled, zero rows | Supabase MCP output | None for baseline |
-| Supabase RPC drift | Backend data | Live Supabase project | Supabase migration/query | `20260618_lock_down_rls_auto_enable` | Passed: `anon_execute=false`, `authenticated_execute=false` | Supabase MCP output | None for that finding |
-| Local secret scan | Repo history | Local | Gitleaks | `gitleaks detect --redact --verbose` | Not run in final local pass: tool unavailable | Terminal output | GitHub Security workflow passed |
-| Backend security scans | Backend | Local | pip-audit/Bandit | `pip-audit ...`, `bandit -r app -x app/tests` | Not run in final local pass: tools unavailable | Terminal output | GitHub Security workflow passed |
-| Live Supabase auth lifecycle | User | Hosted/live Supabase | Environment-gated tests | Not run | Blocked | `HUMAN_ACTIONS.md` | Requires credentials and disposable project/users |
-| Live auth test plan | User | Hosted/live Supabase | Manual/env-gated | `docs/release-readiness/LIVE_AUTH_TEST_PLAN.md` | Added, not executed | Doc | Requires owner/provider setup |
-| Closed-beta QA script | Beta testers | Hosted/native simulator | Manual | `docs/release-readiness/BETA_QA_GUIDE.md` | Added, not executed | Doc | Requires tester run evidence |
-| Load/abuse smoke | Public web/API | Hosted | Manual low-volume smoke | `docs/release-readiness/LOAD_ABUSE_SMOKE.md` | Added, not executed | Doc | Owner-approved time window required |
-| App Store archive/signing | iOS app | Apple Developer/App Store Connect | xcodebuild/archive | Not run | Blocked | `APP_STORE_CHECKLIST.md` | Requires Apple credentials |
-| Physical audio quality | Brass players | Physical devices | Manual protocol | Not run | Blocked | `PHYSICAL_DEVICE_PROTOCOL.md` | Requires hardware and players |
+## Remote Baseline
+
+The GitHub connector verified PR #2 at `9b3766bc4241843c52b2a703c7ec923b4105f540` before local edits:
+
+| Remote gate | Result |
+|---|---|
+| PR #2 metadata | Open, mergeable, non-draft; base `main`, head `arya/release-readiness-hardening`. |
+| Backend workflow | Completed success. |
+| Frontend workflow | Completed success. |
+| Security workflow | Completed success. |
+| Swift workflow | Completed success. |
+| Vercel status | Success for the baseline SHA. |
+
+Remote CI must be rerun after these local changes are committed and pushed. Do not use the baseline SHA as proof for this local worktree.
+
+## Blocked Or Scoped
+
+| Gate | Status | Reason |
+|---|---|---|
+| Chrome plugin smoke | Blocked | Chrome connector runtime failed before browser commands with missing `sandboxPolicy` metadata. |
+| Exact `.venv` requirements audit | Blocked | The repo `.venv` is Python 3.9.6 and cannot resolve the Python 3.10+ FastAPI floor. Use the Python 3.12 uv-resolved audit above plus Security workflow on the exact pushed SHA. |
+| Live Supabase auth/provider lifecycle | Blocked | Requires owner-issued Supabase, Google, and Apple provider configuration plus disposable live users. |
+| Production exact-SHA smoke | Blocked | Requires owner-approved deploy of the new commit to Vercel/Render. |
+| App Store/TestFlight signing | Blocked | Requires Apple Developer team, bundle ID, signing, App Store Connect, and review metadata. |
+| Physical microphone/device validation | Blocked | Requires iPhone/iPad hardware and real brass input. |

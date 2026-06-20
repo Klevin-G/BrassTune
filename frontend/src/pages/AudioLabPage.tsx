@@ -56,7 +56,18 @@ export function AudioLabPage() {
   const frame = stream.currentFrame;
   const eligibility = describeSaveEligibility(frame, profile);
 
-  const start = () => recorder.start(`Calibration lab ${new Date().toLocaleDateString()}`).catch((error) => recorder.setError(String(error)));
+  const start = async () => {
+    try {
+      const inputStream = demoMode ? null : await stream.startMicrophone();
+      if (!demoMode && !inputStream) {
+        recorder.setError('Microphone access is needed for a calibration take. You can switch to guided mode or retry microphone access.');
+        return;
+      }
+      await recorder.start(`Calibration lab ${new Date().toLocaleDateString()}`);
+    } catch (error) {
+      recorder.setError(String(error));
+    }
+  };
   const stop = () => recorder.stop().catch((error) => recorder.setError(String(error)));
   const copyDiagnostics = () => {
     const payload = {
@@ -140,11 +151,11 @@ export function AudioLabPage() {
                   <Waves size={18} />
                 </span>
                 <div>
-                  <h3>Pitch stream</h3>
+                  <h3>Backend stream</h3>
                   <span>{wsUrl ? 'Ready to check' : 'Checking'}</span>
                 </div>
               </div>
-              <p>Live microphone sessions connect to the secure tuning stream for this environment.</p>
+              <p>Guest microphone detection runs in this browser; this backend stream is kept for signed sync and hosted smoke checks.</p>
             </article>
             <article className="insight-card tone-gold">
               <div className="insight-heading">
@@ -180,7 +191,7 @@ export function AudioLabPage() {
                   <span>{permissionState}</span>
                 </div>
               </div>
-              <p>{stream.streamInfo.sentFrames} PCM frames sent; {stream.streamInfo.droppedFrames} dropped.</p>
+              <p>{stream.streamInfo.sentFrames} PCM frames analyzed; {stream.streamInfo.droppedFrames} dropped.</p>
             </article>
           </div>
 

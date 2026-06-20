@@ -30,6 +30,7 @@ interface AuthState {
   isSignedIn: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signInWithApple: () => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
@@ -125,6 +126,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   }, []);
 
+  const signInWithGoogle = useCallback(async () => {
+    if (!supabase) throw new Error(accountsDisabledMessage);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+        scopes: 'openid email profile',
+        queryParams: {
+          prompt: 'select_account',
+        },
+      },
+    });
+    if (error) throw error;
+  }, []);
+
   const requestPasswordReset = useCallback(async (email: string) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -168,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSignedIn: Boolean(session),
       signIn,
       signUp,
+      signInWithGoogle,
       signInWithApple,
       requestPasswordReset,
       updatePassword,
@@ -175,7 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       refreshProfile,
     }),
-    [deleteAccount, loading, profile, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signOut, signUp, updatePassword, user],
+    [deleteAccount, loading, profile, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

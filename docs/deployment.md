@@ -118,7 +118,7 @@ Use secret stores only. Do not commit values.
 The manual deployment workflow lives at `.github/workflows/deploy.yml`.
 Use `workflow_dispatch` with `target=frontend`, `backend`, or `all`.
 
-The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It runs every six hours and on manual dispatch. It wraps:
+The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It currently runs on manual dispatch. It wraps:
 
 ```bash
 BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app \

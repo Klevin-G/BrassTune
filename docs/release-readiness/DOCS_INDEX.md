@@ -8,11 +8,12 @@ Branch: `arya/release-readiness-hardening`
 | Topic | Canonical File | Notes |
 |---|---|---|
 | Current status and release decision | `MASTER_FINDINGS.md` | Source of truth until final pushed SHA is verified. |
+| Machine-readable evidence | `release-evidence.json` | Current command/source evidence for this local pass. |
 | Local recovery inventory | `LOCAL_IMPLEMENTATION_INVENTORY.md` | Lists dirty/untracked implementation files and known gaps. |
 | Workstream ownership | `WORKSTREAM_OWNERSHIP.md` | Maps multi-agent audits, evidence, and remaining blockers. |
 | Test evidence matrix | `TEST_MATRIX.md` | Must be refreshed after final commit and CI. Treat older counts as historical. |
 | Historical failures | `FAILURE_LOG.md` | Use for prior CI/local failures and recovery backup records. |
-| Final closeout | `FINAL_REPORT.md` | Refresh only after implementation is committed, main is merged, and exact-SHA CI is known. |
+| Final closeout | `FINAL_REPORT.md` | Current local closeout; refresh again after commit, push, CI, and hosted smoke. |
 
 ## Supporting Docs
 
@@ -25,11 +26,12 @@ Branch: `arya/release-readiness-hardening`
 | Native and Apple | `IOS_SIMULATOR_REPORT.md`, `NATIVE_DESIGN_PARITY.md`, `WEB_NATIVE_PARITY_CONTRACT.md`, `APP_STORE_CHECKLIST.md`, `APP_REVIEW_NOTES.md`, `APP_PRIVACY_DRAFT.md`, `TESTFLIGHT_HANDOFF.md` | Simulator evidence exists; App Store/TestFlight/native parity remain blocked. |
 | Beta operations | `CLOSED_BETA_HANDOFF.md`, `BETA_QA_GUIDE.md`, `FRIEND_QA_SCRIPT.md`, `BETA_FEEDBACK_TRIAGE.md` | Keep tester language scoped to web closed-beta candidate. |
 | Deployment and incident handling | `POST_MERGE_PRODUCTION_CHECKLIST.md`, `DEPLOYMENT_ROLLBACK.md`, `INCIDENT_RESPONSE.md`, `HUMAN_ACTIONS.md` | Production deploy was not changed in this run. |
-| Historical baseline | `BASELINE.md`, `FINDINGS.md`, `NEXT_WORK.md` | Useful context, but not current release evidence unless refreshed with final SHA. |
+| Historical baseline and follow-up | `BASELINE.md`, `FINDINGS.md`, `LOCAL_IMPLEMENTATION_INVENTORY.md`, `NEXT_WORK.md` | Useful context, but not current release evidence unless refreshed with the current local or pushed SHA. |
 
 ## Duplicate Handling
 
 - `MASTER_FINDINGS.md` owns the current release decision.
+- `release-evidence.json` owns machine-readable current evidence.
 - `FAILURE_LOG.md` owns historical failure narratives.
 - `TEST_MATRIX.md` owns command/result evidence after final validation.
 - `FINAL_REPORT.md` should summarize, not duplicate, the full evidence matrix.

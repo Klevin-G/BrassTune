@@ -38,9 +38,9 @@
 - WebSocket origin checks require explicit `CORS_ALLOWED_ORIGINS`; `CORS_ALLOWED_ORIGIN_REGEX` only applies to HTTP CORS middleware.
 - Score image/PDF validation still needs magic-byte validation, EXIF stripping, decoded-pixel caps, and stronger quality checks.
 - Metronome click bleed, long-run drift, and physical-device audio behavior are not verified.
-- Hosted Render WebSocket now upgrades and returns an app-level auth-required response after deploying commit `395a9d29870b25a7aadf161dc1d69c988bdaa841`.
+- Hosted Render currently upgrades and returns an app-level auth-required response, but production is stale for the latest WebSocket hardening: query-token auth and bad-Origin rejection fail the enhanced hosted smoke until an owner-approved backend deploy is completed.
 - Live Supabase deletion/export was not tested because disposable live credentials were not provided.
 - Supabase live-project drift was remediated for `public.rls_auto_enable()` by revoking execute from `public`, `anon`, and `authenticated`; verification showed `anon_execute=false` and `authenticated_execute=false`.
 - A clean Supabase baseline migration now exists and was applied to the connected project; direct Data API policies remain intentionally closed while FastAPI mediates app access.
 - Native app production flows remain fixture-backed in several areas despite passing simulator builds/tests.
-- Dependency audit follow-up is required: local `pip-audit` reports Starlette, pytest, and python-dotenv advisories. Do not treat the backend dependency set as security-clean until the FastAPI/Starlette and test-tool dependency path is upgraded or formally risk-accepted.
+- Dependency audit evidence must stay tied to the exact environment and pushed SHA. The exact `.venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` command is blocked locally because `.venv` is Python 3.9.6 and the backend dependency floor is Python 3.10+; equivalent Python 3.12 evidence passed by resolving `requirements-dev.txt` with `uv pip compile --python ...` and auditing the resolved file with `pip-audit --no-deps --disable-pip`. Treat the Security workflow on the exact pushed SHA as the remote merge gate.

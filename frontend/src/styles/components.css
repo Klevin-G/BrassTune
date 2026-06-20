@@ -703,6 +703,12 @@ meter {
   font-weight: 800;
 }
 
+.provider-button-stack {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .auth-switcher {
   display: flex;
   flex-wrap: wrap;

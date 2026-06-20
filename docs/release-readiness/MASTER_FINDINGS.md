@@ -1,52 +1,51 @@
 # Master Findings
 
-Updated: 2026-06-20 UTC
+Updated: 2026-06-20T16:12:23Z
 Branch: `arya/release-readiness-hardening`
-Pushed head at recovery start: `cd37fee3ef927001e755cb4976cf5d52eb00af72`
-Current implementation state: backend/frontend implementation is committed locally, `origin/main` has been merged, Codex setup is reconciled, and the post-merge local validation matrix has passed. Push, GitHub Actions, preview deployment, and hosted exact-SHA verification remain pending.
+Starting SHA for this pass: `9b3766bc4241843c52b2a703c7ec923b4105f540`
+Current evidence state: local commit-ready worktree on top of `9b3766bc4241843c52b2a703c7ec923b4105f540`; exact-SHA CI must rerun after push.
 
-## Current Source Of Truth
+## Source Of Truth
 
-Use this file with `LOCAL_IMPLEMENTATION_INVENTORY.md` until the implementation is pushed and verified. Older evidence tables in `FINAL_REPORT.md`, `TEST_MATRIX.md`, `BASELINE.md`, `WEB_E2E_REPORT.md`, and `IOS_SIMULATOR_REPORT.md` may describe earlier heads such as `91ca605...` or the Markdown-only `cd37fee...` state.
+Use this file plus `release-evidence.json` for the current pass. Older status tables in `BASELINE.md`, `FINAL_REPORT.md`, `WEB_E2E_REPORT.md`, `IOS_SIMULATOR_REPORT.md`, and earlier handoff docs are historical unless they name this current local evidence state.
 
-| ID | Area | Severity | Claim | Implementation State | Evidence | Release Status | Next Action |
-|---|---|---:|---|---|---|---|---|
-| MF-001 | Worktree recovery | P0 | Local implementation is preserved. | Preserved twice: `/tmp/brasstune-local-work-20260620-031847` and current `/tmp/brasstune-local-work-20260620-032819`; backup branch pointers created. | Checksums and reverse patch check passed for the current bundle. | Recoverable and committed locally. | Keep backup until branch is pushed and CI has run. |
-| MF-002 | Git integration | P0 | Branch is merge-ready. | Partially true locally: backend, frontend, docs/evidence, and Codex setup are committed; `origin/main` is merged via `bf3282a`; final refreshed device evidence still needs commit and push. | Local commits: `33b9e8b`, `080eb4f`, `dfef67a`, `bf3282a`. | Local reconciliation complete; remote PR/CI mergeability pending. | Commit final evidence refresh, push branch, verify PR mergeability and CI. |
-| MF-003 | Backend auth mode | P0 | Production auth behavior is explicit. | Implemented in local commit `33b9e8b` with `BRASSTUNE_AUTH_MODE=disabled|supabase`, deployed-env validation, disabled-mode fail-closed private routes, and Supabase service-key startup requirement. | Post-merge `cd backend && .venv-audit/bin/python -m pytest -q`: `59 passed`. | Local committed evidence only. | Verify CI on pushed SHA. |
-| MF-004 | WebSocket hardening | P1 | WebSocket query-token auth is disabled and origins/messages are bounded. | Implemented locally. | Backend hardening tests cover query-token rejection, bad origin, first-message auth, and oversized raw frames. | Local committed evidence only. | Add WS control-message schema tests later. |
-| MF-005 | Dependency advisories | P0 | pip-audit is green without broad ignores. | Runtime/dev requirements upgraded to Python 3.11+ security floor: FastAPI `>=0.138`, Starlette `>=1.3.1`, python-dotenv `>=1.2.2`, pytest `>=9.0.3`; Starlette ignores removed from CI. | `.venv-audit/bin/python -m pip_audit --local`: no known vulnerabilities; JSON saved to `/tmp/brasstune-pip-audit.json`. | Local committed evidence only. | CI must audit exact pushed SHA. |
-| MF-006 | Backend deprecations | P2 | Repository-actionable FastAPI/Pydantic warnings are addressed. | Pydantic validators migrated to `field_validator`; startup moved to FastAPI lifespan. | Python 3.12 backend tests pass post-merge. | Local committed evidence only. | Track remaining Python 3.12 `datetime.utcnow` warnings separately. |
-| MF-007 | Score Practice | P1 | Web score practice is a real reader/practice workflow. | Partially true. Import, camera capture, preview, sanitized image save, local restore/delete, route/device smoke, and basic validation exist in local commit `080eb4f`. Full PDF.js rendering, page extraction, crop/reorder/timeline/review/export, and native parity are not complete. | `cd frontend && npm test`: `29 passed`; `npm run build`: passed; `CI=true npm run e2e:local`: `75 passed`; `npm run simulate:devices`: passed. | Web foundation only. | Do not claim full Score Practice complete; add PDF.js/page/timeline work later. |
-| MF-008 | Metronome | P1 | Web metronome exists and is validated. | Web Audio foundation exists in local commit `080eb4f` with helper tests, route, nav, and lazy chunk. Long-run measured timing, click-bleed, recording/page alignment, and native parity are not complete. | Frontend tests/build/E2E/device simulation pass; metronome audit found timing evidence is scheduled-target only. | Web foundation only. | Keep release language scoped; add timing harness later. |
-| MF-009 | Bundle performance | P2 | Heavy routes are split from initial load. | Implemented route-level lazy loading in local commit `080eb4f`. | `npm run build`: main JS dropped from about `907 kB` to `382.33 kB`; score/metronome chunks split. | Local committed evidence only. | Add formal budget to CI later. |
-| MF-010 | Guest mic | P0 | Unsigned guest live mic works without cloud auth. | False. Guided demo and guest local sessions work, but live mic still depends on WebSocket/auth. | Web mic audit found unsigned production mic receives auth-required behavior. | Blocker for guest live mic claim. | Implement local pitch detection or disable live mic until signed in. |
-| MF-011 | Native parity | P0 | Native metronome/score/live mic/provider parity is complete. | False. Native simulator tests pass, but live mic, metronome, score practice, provider-ready auth, signed archive, and physical-device evidence are incomplete. | Post-merge Xcode 26.2: Swift package `3 tests`, app unit `7 tests`, Debug build, Release build, and UI smoke `1 test` passed on simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`. | Native engineering parity in progress. | Keep final status scoped; do not claim native complete. |
-| MF-012 | Account deletion durability | P1 | Account deletion is durable and retryable. | False. Existing deletion is not an outbox/retry saga and can split across external/local failures. | Backend/security audits. | Blocker remains. | Implement tombstone/outbox/retry before durable deletion claim. |
-| MF-013 | Hosted/CI evidence | P0 | Latest pushed SHA is green and hosted. | False. Current implementation is validated locally but not yet pushed in this run. | No CI/hosted exact-SHA evidence yet. | Pending. | Push branch, verify GitHub Actions and current preview. |
+## Current Findings
 
-## Current Local Validation
+| ID | Area | Severity | Status | Evidence | Release impact |
+|---|---|---:|---|---|---|
+| MF-001 | PR/CI baseline | P0 | PR #2 was verified open, mergeable, non-draft, with Backend, Frontend, Security, Swift, and Vercel green on `9b3766bc4241843c52b2a703c7ec923b4105f540` via the GitHub connector. | `_get_pr_info`, `_fetch_commit_workflow_runs`, `_get_commit_combined_status`. | CI is green only for the pre-edit SHA. Local changes in this pass still need commit, push, and exact-SHA CI. |
+| MF-002 | Guest live microphone | P0 | Improved locally. Guest microphone pitch detection now runs in the browser using local PCM autocorrelation instead of requiring `/ws/pitch`, Supabase, or backend availability. | `frontend/src/domain/localPitchDetection.ts`; `npm test` passed `34`; `CI=true npm run e2e:local` passed `75`. | Physical microphone quality and WebKit fake-media coverage still need device/browser-specific validation. |
+| MF-003 | Duplicate microphone streams | P1 | Improved locally. The recorder can reuse the active pitch stream for `MediaRecorder` when live mic is already running. | `frontend/src/hooks/useAudioRecorder.ts`, `frontend/src/pages/PracticePage.tsx`; frontend tests/build passed. | Safari/iOS MIME behavior still needs real-device validation. |
+| MF-004 | Supabase identity linking | P1 | Improved locally. Backend no longer links a Supabase identity to an existing local account solely by matching email. | `backend/app/api/auth.py`; `backend/app/tests/test_hardening.py`; targeted hardening `43 passed`, full backend `59 passed`. | Explicit account-linking ceremony and provider edge-case tests remain future work. |
+| MF-005 | Google web sign-in path | P1 | Improved locally. Web Supabase OAuth now exposes `signInWithGoogle` with minimal `openid email profile` scopes and a visible Google provider action. | `frontend/src/state/AuthContext.tsx`, `frontend/src/pages/AuthPage.tsx`; frontend tests/build passed. | Live Google provider credentials, redirect allowlist, and cancellation/error tests remain externally blocked. |
+| MF-006 | Hosted WebSocket hardening | P0 | Local code is hardened, but production Render is stale. Enhanced hosted smoke passed root/health/CORS/basic WS but failed query-token rejection and bad-Origin rejection against production. | `backend/app/tests/test_hardening.py` covers query-token and unapproved-origin rejection locally; production `npm run smoke:hosted` failed two WS-hardening checks. | Commit/push and let CI validate the branch; do not claim production current or hardened until owner-approved deploy and hosted smoke pass. |
+| MF-007 | Account deletion durability | P1 | Still incomplete. Deletion remains inline rather than a tombstone/outbox/retry workflow. | Backend/security scout and `DELETE /api/users/me` review. | Repository-actionable before broad public/App Store release; live provider cleanup proof remains externally blocked. |
+| MF-008 | Score Practice | P1 | Still a web foundation, not the full mission scope. | Static review plus existing docs. | PDF.js page model, timeline, flags, review/export, crop/reorder, and native parity remain incomplete. |
+| MF-009 | Metronome | P1 | Web scheduler exists; measured timing/bleed/native parity remain incomplete. | Existing tests and docs. | Do not claim professional timing or mic-bleed validation. |
+| MF-010 | Native parity | P1 | Simulator gates pass, but native remains fixture-backed for practice/audio and lacks native metronome/score/provider parity. | XcodeBuildMCP Debug build succeeded; unit tests `7 passed`; UI smoke `1 passed`; Swift package `3 passed`. | Status remains `native engineering parity in progress`, not TestFlight/App Store ready. |
+| MF-011 | Artifact/secret hygiene | P1 | No tracked secret or large-file issue found. Ignored local env files and local recordings exist and must not be staged. | Artifact scout, `git status`, ignored-file review. | Stage explicit files only; never stage `.env*`, `.vercel/`, `backend/data/`, traces, or Xcode results. |
+| MF-012 | Chrome connector | P2 | Blocked by tool runtime failure before browser control. | `node_repl/js` failed with missing `sandboxPolicy` metadata even for a trivial command. | Chrome-specific smoke was not possible in this environment; Playwright and Simulator evidence were used instead. |
 
-- `cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py -q`: `43 passed`
-- `cd backend && .venv/bin/python -m pytest -q`: `59 passed`
-- `cd backend && .venv-audit/bin/python -m pytest -q`: `59 passed`
-- `cd backend && .venv-audit/bin/python -m pip_audit --local`: no known vulnerabilities
-- `cd backend && .venv-audit/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt`: blocked locally by bundled Python 3.12 `ensurepip` crash while pip-audit creates a temporary venv; CI uses the requirements audit path
-- `cd backend && .venv-audit/bin/python -m bandit -q -r app -x app/tests`: passed
-- `cd frontend && npm test`: `29 passed`
-- `cd frontend && npm run build`: passed; initial JS split to `382.33 kB`
-- `cd frontend && npm audit --omit=dev`: `0 vulnerabilities`
-- `cd frontend && CI=true npm run e2e:local`: `75 passed`
-- `cd frontend && npm run simulate:devices`: passed; report updated at `docs/device-simulation-report.md`
-- `cd swift/BrassTuneCore && swift test`: `3 tests` passed
-- `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj`: schemes listed
-- `xcodebuild build ... -scheme BrassTuneApp ... -configuration Debug`: passed on simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`
-- `xcodebuild test ... -scheme BrassTuneApp -only-testing:BrassTuneAppTests`: `7 tests` passed
-- `xcodebuild build ... -scheme BrassTuneApp ... -configuration Release`: passed
-- `xcodebuild test ... -scheme BrassTuneAppUISmoke -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces`: `1 test` passed
+## Current Validation
+
+- `cd frontend && npm test`: passed, `34` tests.
+- `cd frontend && npm run build`: passed, main JS `382.62 kB` minified, large Recharts chunk remains route-split.
+- `cd frontend && CI=true npm run e2e:local`: passed, `75` tests across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit.
+- `cd frontend && npm run simulate:devices`: passed; refreshed `docs/device-simulation-report.md` and tracked screenshots.
+- `cd frontend && npm audit --omit=dev`: passed, `0 vulnerabilities`.
+- `cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py -q`: passed, `43` tests, including query-token WebSocket auth rejection, unapproved-origin rejection, and same-email Supabase no-link regression.
+- `cd backend && .venv/bin/python -m pytest -q`: passed, `59` tests.
+- `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt`: blocked by local Python 3.9.6 dependency-floor mismatch; backend requirements now require Python 3.10+.
+- `cd backend && uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/... && .venv-audit/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/...`: passed, no known vulnerabilities.
+- `cd backend && .venv/bin/python -m bandit -r app -x app/tests`: passed.
+- `cd swift/BrassTuneCore && swift test`: passed, `3` Swift tests.
+- XcodeBuildMCP `build_sim` on iPhone 17 / iOS 26.2 / Xcode 26.2: passed.
+- XcodeBuildMCP `test_sim` for `BrassTuneAppTests`: passed, `7` tests.
+- XcodeBuildMCP `test_sim` for `BrassTuneAppUISmoke`: passed, `1` UI test.
+- Hosted production smoke with enhanced WS hardening: failed as expected because production Render is stale for query-token and bad-Origin rejection; this is a deployment gate, not a blocker to committing the PR branch.
 
 ## Release Decision
 
-Current status: `web closed-beta candidate; native engineering parity in progress; external provider/App Store/device gates remaining`.
+Current status: `web closed-beta candidate pending owner-approved Render deployment and final production smoke; native engineering parity in progress; external provider/App Store/device gates remaining`.
 
-Do not use `release ready`, `native complete`, `CI green`, or `hosted verified` until the branch is pushed and verified on the exact pushed SHA.
+Do not merge, tag, deploy, or invite beta testers until the changes are committed, pushed, CI is green on the exact new SHA, Vercel preview/deploy evidence is current, and hosted smoke passes after an owner-approved Render/Vercel deployment.

@@ -4,6 +4,21 @@ import type { GuestAudio } from '../domain/guestSessions';
 
 type UploadStatus = 'idle' | 'recording' | 'uploading' | 'uploaded' | 'saved' | 'failed' | 'unavailable';
 
+const RECORDER_MIME_TYPES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+];
+
+function mediaRecorderOptions() {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return undefined;
+  }
+  const mimeType = RECORDER_MIME_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate));
+  return mimeType ? { mimeType } : undefined;
+}
+
 function wavFromSine(durationSeconds = 4, frequency = 440, sampleRate = 16000) {
   const sampleCount = Math.floor(durationSeconds * sampleRate);
   const bytesPerSample = 2;
@@ -52,11 +67,12 @@ export function useAudioRecorder() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const ownsStreamRef = useRef(false);
   const startedAtRef = useRef<number>(0);
   const startPromiseRef = useRef<Promise<void> | null>(null);
   const stopPromiseRef = useRef<Promise<unknown> | null>(null);
 
-  const start = useCallback(async (sessionId: number, demoMode: boolean) => {
+  const start = useCallback(async (sessionId: number, demoMode: boolean, inputStream?: MediaStream | null) => {
     if (startPromiseRef.current) return startPromiseRef.current;
     if (status === 'recording') return undefined;
     setError(null);
@@ -74,9 +90,10 @@ export function useAudioRecorder() {
           setError('Audio playback capture is unavailable in this browser.');
           return;
         }
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+        const stream = inputStream ?? await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+        ownsStreamRef.current = !inputStream;
         streamRef.current = stream;
-        const recorder = new MediaRecorder(stream);
+        const recorder = new MediaRecorder(stream, mediaRecorderOptions());
         recorder.ondataavailable = (event) => {
           if (event.data.size > 0) chunksRef.current.push(event.data);
         };
@@ -107,9 +124,12 @@ export function useAudioRecorder() {
   }, []);
 
   const cleanup = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    if (ownsStreamRef.current) {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    }
     recorderRef.current = null;
     streamRef.current = null;
+    ownsStreamRef.current = false;
     chunksRef.current = [];
   }, []);
 

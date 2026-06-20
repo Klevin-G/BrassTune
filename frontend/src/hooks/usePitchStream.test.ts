@@ -9,6 +9,10 @@ describe('shouldPersistFrameFromFrontend', () => {
     expect(shouldPersistFrameFromFrontend(true, true, 42, validFrame)).toBe(true);
   });
 
+  it('persists browser-generated microphone frames', () => {
+    expect(shouldPersistFrameFromFrontend(false, true, 42, { ...validFrame, detector_source: 'browser_local_pitch' })).toBe(true);
+  });
+
   it('does not persist returned microphone WebSocket frames', () => {
     expect(shouldPersistFrameFromFrontend(false, true, 42, validFrame)).toBe(false);
   });
