@@ -12,7 +12,11 @@ function currentHostname() {
 }
 
 export function isKnownBrassTuneHostedOrigin(hostname = currentHostname()) {
-  return hostname === 'brass-tune.vercel.app' || /^brass-tune-git-[a-z0-9-]+-aryaswebsites\.vercel\.app$/i.test(hostname);
+  return (
+    hostname === 'brass-tune.vercel.app' ||
+    /^brass-tune-git-[a-z0-9-]+-aryaswebsites\.vercel\.app$/i.test(hostname) ||
+    /^brass-tune-[a-z0-9]+-aryaswebsites\.vercel\.app$/i.test(hostname)
+  );
 }
 
 export function apiBase() {

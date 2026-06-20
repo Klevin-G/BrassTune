@@ -9,7 +9,7 @@ Evidence state: pushed branch follow-up; exact-SHA CI and preview must pass on t
 
 | Gate | Command | Result | Notes |
 |---|---|---|---|
-| Frontend unit tests | `cd frontend && npm test` | Passed: `9` files, `34` tests | Includes browser-local pitch detector coverage. |
+| Frontend unit tests | `cd frontend && npm test` | Passed: `9` files, `35` tests | Includes browser-local pitch detector coverage. |
 | Frontend build/typecheck | `cd frontend && npm run build` | Passed | Main JS `382.62 kB`; large Recharts chunk remains split. |
 | Frontend dependency audit | `cd frontend && npm audit --omit=dev` | Passed: `0 vulnerabilities` | Dev dependencies excluded. |
 | Local browser journeys/accessibility | `cd frontend && CI=true npm run e2e:local` | Passed: `75 passed` | Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. |

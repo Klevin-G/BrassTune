@@ -21,7 +21,7 @@ Updated: 2026-06-20 UTC.
 ## Automated Evidence
 
 - `frontend/src/domain/scorePractice.test.ts` covers accepted PDF/image formats, SVG rejection, and low-resolution/non-music review status.
-- `cd frontend && npm test` passed: `34` tests.
+- `cd frontend && npm test` passed: `35` tests.
 - `cd frontend && npm run build` passed.
 - Full local E2E and device simulation passed.
 - Rendered browser spot check verified Scan with Camera, Choose from Photos, Choose Files, local-default copy, and raw-SVG rejection copy with no console errors.

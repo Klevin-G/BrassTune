@@ -30,7 +30,7 @@ Use this file plus `release-evidence.json` for the current pass. Older status ta
 
 ## Current Validation
 
-- `cd frontend && npm test`: passed, `34` tests.
+- `cd frontend && npm test`: passed, `35` tests.
 - `cd frontend && npm run build`: passed, main JS `382.62 kB` minified, large Recharts chunk remains route-split.
 - `cd frontend && CI=true npm run e2e:local`: passed, `75` tests across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit.
 - `cd frontend && npm run simulate:devices`: passed; refreshed `docs/device-simulation-report.md` and tracked screenshots.

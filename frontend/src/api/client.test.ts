@@ -46,6 +46,19 @@ describe('API client runtime URLs', () => {
     expect(await pitchWebSocketUrl()).toBe('wss://brasstune.onrender.com/ws/pitch');
   });
 
+  it('uses Render defaults on exact Vercel preview deployment hostnames', async () => {
+    const { exportUrl, pitchWebSocketUrl } = await loadClient();
+    vi.stubGlobal('window', {
+      location: {
+        protocol: 'https:',
+        host: 'brass-tune-d99807eh3-aryaswebsites.vercel.app',
+        hostname: 'brass-tune-d99807eh3-aryaswebsites.vercel.app',
+      },
+    });
+    expect(exportUrl('/api/instruments')).toBe('https://brasstune.onrender.com/api/instruments');
+    expect(await pitchWebSocketUrl()).toBe('wss://brasstune.onrender.com/ws/pitch');
+  });
+
   it('does not silently use production Render from unknown hosted origins', async () => {
     const { exportUrl, pitchWebSocketUrl } = await loadClient();
     vi.stubGlobal('window', {
