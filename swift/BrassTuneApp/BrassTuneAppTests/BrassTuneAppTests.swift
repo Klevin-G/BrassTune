@@ -4,13 +4,14 @@ import BrassTuneCore
 
 final class BrassTuneAppTests: XCTestCase {
     @MainActor
-    func testFixtureRecordingCreatesDeterministicSession() {
+    func testDeterministicTestRecordingCreatesLocalSession() async {
         let model = AppModel()
-        model.startDemoRecording()
-        model.stopDemoRecording()
+        await model.startPracticeRecording(testInjection: true)
+        model.stopPracticeRecording()
         XCTAssertEqual(model.sessions.count, 1)
         XCTAssertEqual(model.sessions[0].frames.count, 32)
         XCTAssertGreaterThan(model.sessions[0].inTunePercentage, 0)
+        XCTAssertNotNil(model.sessions[0].retainedRecordingURL)
     }
 
     @MainActor
@@ -76,6 +77,31 @@ final class BrassTuneAppTests: XCTestCase {
 
         XCTAssertFalse(model.accountFeaturesEnabled)
         XCTAssertNotNil(model.accountUnavailableMessage)
+    }
+
+    @MainActor
+    func testGuestEntryMovesThroughAuthGateway() {
+        let model = AppModel()
+
+        XCTAssertEqual(model.launchState, .restoring)
+        model.continueAsGuest()
+
+        XCTAssertEqual(model.launchState, .app)
+        XCTAssertEqual(model.authState, .guest)
+    }
+
+    @MainActor
+    func testScoreDocumentAndMetronomeSettingsPersistInModel() {
+        let model = AppModel()
+        model.addScoreDocument(kind: .pdf)
+        XCTAssertEqual(model.scoreDocuments.count, 1)
+        XCTAssertEqual(model.scoreDocuments[0].sourceKind, .pdf)
+
+        var settings = model.metronomeSettings
+        settings.bpm = 312
+        model.updateMetronomeSettings(settings)
+
+        XCTAssertEqual(model.metronomeSettings.bpm, 300)
     }
 
     func testCoreTuningStatusIsAvailableToApp() {

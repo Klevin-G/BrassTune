@@ -1,6 +1,6 @@
 # Current Branch Notice
 
-Updated: 2026-06-21T05:24:54Z for `arya/final-web-completion` at base SHA `a8ce933a8ccfdac75b4244fe1c1bb2630655d14b`.
+Updated: 2026-06-21T06:30:28Z for `arya/final-swift-completion` at base SHA `1c998d5480f52b5fcf0e2c143f5078893caead66`.
 
 Current evidence is maintained in `FINAL_REPORT.md`, `TEST_MATRIX.md`, `release-evidence.json`, `FINAL_WEB_SCOPE.md`, `WEB_CONTROL_MANIFEST.md`, and `WEB_PRODUCTION_COMPLETION_GATE.md`.
 
@@ -30,7 +30,7 @@ Use this file, `LOCKED_RELEASE_SCOPE.md`, `release-evidence.json`, and `FAILURE_
 | MF-007 | Microphone lifecycle | P1 | Fixed locally | Failed signed-in recording start stops an opened mic stream. | Physical microphone quality not claimed. |
 | MF-008 | Score Practice PDF reader | P1 | Fixed locally | Iframe-only PDF preview replaced with lazy PDF.js canvas rendering, page navigation, zoom, and rotation. | Manual score practice only; printed-note comparison remains disabled until OMR/alignment is proven. |
 | MF-009 | Metronome wording/live settings | P1 | Fixed locally | Running accent/ramp settings use refs; UI now labels queue stats instead of acoustic measurements. | Acoustic timing/bleed validation remains unproven. |
-| MF-010 | Native parity | P1 | Red gate | Native audit found fixture-backed mic/practice and missing native metronome/score/auth parity. Swift package tests passed only for existing core fixtures. | Do not claim native production parity or App Store readiness. |
+| MF-010 | Native repository parity | P1 | Fixed locally | Native auth gateway, five-tab compact shell, iPad split, token themes, Liquid Glass fallback, real normal-path audio, local playback/delete/export, metronome, Score Practice import metadata, and persistence implemented. Native unit/UI/build checks passed. | Do not claim App Store/TestFlight, physical microphone quality, or live provider readiness. |
 | MF-011 | Hosted production | P0 | Passed | `npm run smoke:hosted` against production passed root, health, CORS, browser-origin WS app response, query-token rejection, and bad-Origin rejection after Vercel/Render deployment. | Web/backend closed-beta production gate is green. |
 | MF-012 | Exact-SHA CI/deploy | P0 | Passed for merge commit | GitHub connector verified Backend, Frontend, Security, Swift, and Vercel green for `ede7960`; PR #2 merged to `main` as `4bda5691`; Vercel and Render deployed the merge commit. | Re-check exact-SHA gates for future hotfix commits. |
 | MF-013 | Artifact/secret hygiene | P1 | Clean tracked scope | `git diff --check` passed; tracked secret-pattern scan returned no matches; only expected ignored local env/data/test artifacts are present. | Stage explicit files only. |
@@ -39,7 +39,8 @@ Use this file, `LOCKED_RELEASE_SCOPE.md`, `release-evidence.json`, and `FAILURE_
 | MF-016 | Ensemble list privacy | P1 | Fixed/deployed | Student group list responses now redact `director_user_id`; regression coverage added. | Covered by exact-SHA CI and deployed backend. |
 | MF-017 | Backend abuse limits | P2 | Fixed locally | Backend now rejects oversized JSON requests before parsing and has configurable per-client path rate limiting; regression coverage added. | Tune env values in production as needed. |
 | MF-018 | Vercel automation bypass support | P2 | Fixed locally | Hosted Playwright and root smoke scripts accept an approved automation bypass secret and send `x-vercel-protection-bypass` without printing it. | Requires owner-created secret in an approved secret store. |
-| MF-019 | Swift RMS parity | P2 | Fixed locally | Swift Core silence threshold now matches the backend/frontend `rms < 0.01` rule; boundary tests added. | Native mic remains fixture-backed. |
+| MF-019 | Swift RMS parity | P2 | Fixed locally | Swift Core silence threshold now matches the backend/frontend `rms < 0.01` rule; boundary tests passed. | Native physical microphone quality remains hardware-gated. |
+| MF-020 | Native completion gate | P0 | Passed locally | `NATIVE_REPOSITORY_COMPLETION_GATE.md` records the native branch evidence and required pass line. | External Apple/provider/device gates stay separate. |
 
 ## Current Validation
 
@@ -60,7 +61,12 @@ Use this file, `LOCKED_RELEASE_SCOPE.md`, `release-evidence.json`, and `FAILURE_
 - `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted`: passed, `7` checks after Vercel production deploy `dpl_5jR3Qnv71v58YfWN77VxrLihYPk9`, Render deploy `dep-d8rmafreo5us73di4as0`, and the origin-aware smoke script fix.
 - `git diff --check`: passed.
 - Tracked high-confidence secret-pattern scan: no matches.
+- `cd swift/BrassTuneCore && swift test`: passed, `3` Swift tests on 2026-06-21.
+- XcodeBuildMCP Debug simulator build, scheme `BrassTuneApp`: passed, no warnings on iPhone 17 iOS 26.2.
+- XcodeBuildMCP app unit tests, `BrassTuneAppTests`: passed, `9` XCTest cases.
+- XcodeBuildMCP UI smoke, scheme `BrassTuneAppUISmoke`: passed, `1` XCUITest.
+- XcodeBuildMCP Release simulator build, scheme `BrassTuneApp`: passed, no warnings.
 
 ## Release Decision
 
-Current status: web/backend closed-beta production path is deployed and smoke-passed in guest/auth-disabled mode. Do not claim native production parity, TestFlight/App Store readiness, live Supabase provider readiness, or physical-device microphone quality until those separate gates are completed.
+Current status: web/backend closed-beta production path is deployed and smoke-passed in guest/auth-disabled mode. Native repository engineering completion is locally verified on simulator. Do not claim TestFlight/App Store readiness, live Supabase/provider readiness, or physical-device microphone quality until those separate gates are completed.

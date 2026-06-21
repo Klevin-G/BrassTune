@@ -11,6 +11,7 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launchArguments = ["UITEST_DEMO", "UITEST_RESET_STATE"]
         app.launch()
 
+        XCTAssertTrue(app.descendants(matching: .any)["shell.iphoneTabs"].waitForExistence(timeout: 5), "UI test launch should enter guest app shell")
         let startPracticeButton = app.descendants(matching: .any)["home.startPractice"]
         XCTAssertTrue(waitForElementOrScroll(startPracticeButton, in: app), "Home should expose a practice entry point")
         startPracticeButton.tap()
@@ -22,7 +23,7 @@ final class BrassTuneAppUITests: XCTestCase {
         guard let startRecordButton = firstAvailableElement(
             [
                 app.descendants(matching: .any)["practice.recordButton"],
-                app.buttons["Start sample take"]
+                app.buttons["Start recording"]
             ],
             in: app,
             timeout: 10
@@ -43,7 +44,7 @@ final class BrassTuneAppUITests: XCTestCase {
         guard let stopRecordButton = firstAvailableElement(
             [
                 app.descendants(matching: .any)["practice.recordButton"],
-                app.buttons["Stop sample take"]
+                app.buttons["Stop recording"]
             ],
             in: app,
             timeout: 5
@@ -69,15 +70,15 @@ final class BrassTuneAppUITests: XCTestCase {
             return
         }
         viewAnalyticsButton.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["analytics.metrics"].waitForExistence(timeout: 5), "Analytics should derive from the local sample take")
+        XCTAssertTrue(app.descendants(matching: .any)["analytics.metrics"].waitForExistence(timeout: 5), "Analytics should derive from the local practice take")
 
         app.descendants(matching: .any)["analytics.reviewSessions"].tap()
-        if !app.staticTexts["Guided take"].waitForExistence(timeout: 3) {
+        if !app.staticTexts["Practice take"].waitForExistence(timeout: 3) {
             openTab("Sessions", in: app)
         }
-        let demoTake = app.staticTexts["Guided take"]
-        XCTAssertTrue(demoTake.waitForExistence(timeout: 5), "Stopping a guided recording should create a saved session")
-        demoTake.tap()
+        let practiceTake = app.staticTexts["Practice take"]
+        XCTAssertTrue(practiceTake.waitForExistence(timeout: 5), "Stopping a practice recording should create a saved session")
+        practiceTake.tap()
         let deleteSessionButton = app.descendants(matching: .any)["session.deleteButton"]
         XCTAssertTrue(waitForElementOrScroll(deleteSessionButton, in: app), "Session detail should expose a delete control")
         deleteSessionButton.tap()

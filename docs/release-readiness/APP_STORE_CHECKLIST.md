@@ -22,7 +22,7 @@ Official Apple sources checked on 2026-06-18 and refreshed for this run on 2026-
 - In-app privacy, terms, support, data export, and account deletion surfaces exist.
 - Account deletion can be initiated in app.
 - Simulator Debug/Release builds pass with Xcode 26.2 / iOS 26.2 SDK.
-- Web score practice and metronome were added, but native equivalents are not complete.
+- Native Score Practice import metadata and native metronome are implemented for repository scope; physical camera/audio validation remains device-gated.
 
 ## Owner Decisions Required
 

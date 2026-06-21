@@ -22,6 +22,7 @@
 		1A0000010000000000000013 /* BrassTuneCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000000301 /* BrassTuneCore */; };
 		1A0000010000000000000014 /* BrassTuneAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000112 /* BrassTuneAppUITests.swift */; };
 		1A0000010000000000000015 /* BrassTuneDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000116 /* BrassTuneDesignSystem.swift */; };
+		1A0000010000000000000016 /* GeneratedThemeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000117 /* GeneratedThemeTokens.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,6 +59,7 @@
 		1A0000010000000000000114 /* BrassTuneAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrassTuneAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0000010000000000000115 /* BrassTuneAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BrassTuneAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0000010000000000000116 /* BrassTuneDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrassTuneDesignSystem.swift; sourceTree = "<group>"; };
+		1A0000010000000000000117 /* GeneratedThemeTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedThemeTokens.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -144,6 +146,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0000010000000000000116 /* BrassTuneDesignSystem.swift */,
+				1A0000010000000000000117 /* GeneratedThemeTokens.swift */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
@@ -260,6 +263,7 @@
 				1A0000010000000000000007 /* AppRootView.swift in Sources */,
 				1A0000010000000000000008 /* SettingsViews.swift in Sources */,
 				1A0000010000000000000015 /* BrassTuneDesignSystem.swift in Sources */,
+				1A0000010000000000000016 /* GeneratedThemeTokens.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

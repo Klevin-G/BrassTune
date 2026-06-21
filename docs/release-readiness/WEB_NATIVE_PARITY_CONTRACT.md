@@ -1,26 +1,24 @@
 # Web Native Parity Contract
 
-Updated: 2026-06-20 UTC.
+Updated: 2026-06-21T06:30:28Z
 
 | Feature | Web Status | Native Status | Current Release Claim |
 |---|---|---|---|
-| Home | Complete enough for closed-beta web. | Visual shell exists. | Web closed-beta candidate; native visual parity not final. |
-| Practice tuner | Guest demo and mic paths exist with recording/review. | Fixture-backed simulator practice shell. | Native is test/demo scope until real API/audio parity and physical-device mic pass. |
-| Metronome | Added `/metronome` with Web Audio scheduler, count-in, subdivisions, signatures, ramp, mute, and timing stats. | Deferred. | Web feature exists; accuracy/bleed claims require timing/device validation. |
-| Sessions | Web list/review routes exist with guest fallback improvements. | Fixture/session surfaces exist. | Web beta surface; native not functionally equivalent. |
-| Review | Web recovery from missing sessions added. | Fixture-backed review. | Native review is test-only. |
-| Analytics | Web route now exposes API failure state. | Fixture analytics. | Web beta surface; native not production-equivalent. |
-| Coach | Web route now exposes API failure state. | Fixture guidance. | Web beta surface; native not production-equivalent. |
-| Ensemble | Web local/server authorization is partially covered. | Fixture/shell scope. | Teacher/student live personas remain beta follow-up. |
-| Score Practice | Added `/practice/score` with PDF/image/camera import, preview, confirmation, and local storage. | Deferred. | Web beta feature with explicit OMR/native scanner caveats. |
-| Auth | Web guest-disabled state and provider-gated UI improved. | Keychain/auth scaffold only. | Live provider tests required for any account-readiness claim. |
-| Settings | Web export/delete/guest data behavior improved. | Settings/data surfaces exist. | Account deletion needs disposable live-provider verification. |
-| Export/delete | Backend/user flows covered locally; guest export fixed. | Native fixture export surfaces. | Live storage/identity deletion remains blocked. |
-| Legal/support | Web surfaces exist. | Native links/surfaces exist. | Owner/legal final URLs and App Store metadata remain. |
+| Auth gateway | Production guest-first web gateway deployed. | Native auth-first gateway, session restoration, Continue as guest, email/password, reset, and Apple token exchange surfaces implemented. | Live provider lifecycle remains credential-gated. |
+| Home | Web `/home` production surface deployed. | Native branded Home with five-tab clearance and local/account status. | Parity claim limited to repository UI behavior. |
+| Practice tuner | Guest microphone and recording journeys deployed for web. | Normal native path uses `AVAudioSession`/`AVAudioEngine` tap and local recording; deterministic frames are UI-test-only. | Simulator proves repository behavior, not physical brass quality. |
+| Metronome | Web Audio metronome deployed. | Native metronome settings, scheduler, click generation, persistence, and bleed messaging implemented. | Acoustic timing and bleed require hardware validation. |
+| Sessions/review | Web local/cloud sessions deployed. | Native local sessions persist, review, playback retained files, export summaries, and delete files/metadata. | Cloud sync remains account/provider-gated. |
+| Analytics/progress/coach | Web analytics surfaces deployed. | Native derives metrics and recommendations from recorded local sessions with insufficient-data states. | No generated focus notes are represented as measured facts. |
+| Ensemble | Web teacher/student workflows deployed for web scope. | Native hides generated roster data and shows account-required/account-backed states. | Live memberships require account/provider data. |
+| Score Practice | Web PDF/image/camera Score Practice deployed for web scope. | Native file/photo/camera import metadata, PDF page count, local markers, and review linkage implemented. | Printed-note comparison/OMR remains conservative and user-confirmed. |
+| Themes | Web shared-token themes deployed. | Native generated tokens, six themes, Liquid Glass/fallback surfaces, and Settings/gateway selectors implemented. | Visual parity validated on simulator screenshot only. |
+| Legal/support | Web public routes deployed. | Native Privacy, Terms, and Support surfaces implemented. | Owner/legal final wording remains external. |
 
 ## Contract Rules
 
-- Do not call native complete when it only passes simulator fixture tests.
-- Do not claim score-following, printed-note verification, or OMR accuracy unless the score interpretation and alignment confidence gates are implemented and tested.
-- Do not use web success as Apple readiness evidence. Apple readiness needs signed archive, TestFlight/App Store Connect, privacy/legal metadata, and physical-device evidence.
-- Web and native status must be reported separately in final release notes.
+- Do not use simulator evidence as physical microphone quality evidence.
+- Do not claim App Store/TestFlight readiness without signing, archive, upload, metadata, and review evidence.
+- Do not claim live Supabase/Google/Apple account readiness until disposable provider tests pass.
+- Do not claim printed-note recognition unless score interpretation/alignment confidence gates are implemented and tested.
+- Report web and native status separately in release notes.

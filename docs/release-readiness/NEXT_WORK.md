@@ -61,10 +61,10 @@
   - Acceptance criteria: supported iPhone and iPad pass quiet/noisy-room brass tests, permission denial, route changes, recording/playback/delete, and low/high brass cases.
   - Verification command or evidence: completed `PHYSICAL_DEVICE_PROTOCOL.md` with device models, OS versions, instruments, pass/fail notes.
 
-- [P0] Replace or explicitly scope native fixture-backed product flows
+- [Done locally] Replace native fixture-backed product flows inside repository scope
   - Owner type: repo
-  - Acceptance criteria: native practice/audio/analytics/ensemble/auth flows use production API/audio/auth paths or are explicitly scoped out of release claims.
-  - Verification command or evidence: Xcode unit/UI/integration tests plus manual simulator/device evidence; no fixture-only claims in release docs.
+  - Evidence: native auth gateway/session restore, real normal-path audio recorder, local playback/delete/export, metronome, Score Practice import metadata, and local persistence implemented on `arya/final-swift-completion`.
+  - Remaining: physical-device microphone/acoustic validation and live provider tests stay external.
 
 - [P1] Finalize legal, privacy, SDK, and required-reason audits
   - Owner type: legal

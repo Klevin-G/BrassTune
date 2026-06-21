@@ -124,6 +124,122 @@ struct PracticeSession: Codable, Equatable, Identifiable {
     }
 }
 
+enum AppLaunchState: Equatable {
+    case restoring
+    case gateway
+    case app
+}
+
+enum NativeFeature: String, CaseIterable, Identifiable {
+    case home
+    case practice
+    case score
+    case sessions
+    case metronome
+    case analytics
+    case progress
+    case coach
+    case ensemble
+    case settings
+    case account
+    case privacy
+    case terms
+    case support
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .home: return "Home"
+        case .practice: return "Practice"
+        case .score: return "Score"
+        case .sessions: return "Sessions"
+        case .metronome: return "Metronome"
+        case .analytics: return "Analytics"
+        case .progress: return "Progress"
+        case .coach: return "Coach"
+        case .ensemble: return "Ensemble"
+        case .settings: return "Settings"
+        case .account: return "Account"
+        case .privacy: return "Privacy"
+        case .terms: return "Terms"
+        case .support: return "Support"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .home: return "house"
+        case .practice: return "gauge.with.dots.needle.67percent"
+        case .score: return "doc.viewfinder"
+        case .sessions: return "music.note.list"
+        case .metronome: return "metronome"
+        case .analytics: return "chart.bar.xaxis"
+        case .progress: return "chart.line.uptrend.xyaxis"
+        case .coach: return "lightbulb"
+        case .ensemble: return "person.3"
+        case .settings: return "gearshape"
+        case .account: return "person.crop.circle"
+        case .privacy: return "hand.raised"
+        case .terms: return "doc.text"
+        case .support: return "questionmark.circle"
+        }
+    }
+}
+
+struct MetronomeSettings: Codable, Equatable {
+    var bpm = 96
+    var beatsPerMeasure = 4
+    var beatUnit = 4
+    var subdivision = 1
+    var volume = 0.7
+    var accentFirstBeat = true
+    var countInMeasures = 1
+    var muted = false
+    var rampEnabled = false
+    var rampTargetBPM = 120
+    var rampSeconds = 120
+
+    mutating func clamp() {
+        bpm = min(300, max(20, bpm))
+        beatsPerMeasure = min(12, max(1, beatsPerMeasure))
+        beatUnit = [2, 4, 8].contains(beatUnit) ? beatUnit : 4
+        subdivision = min(8, max(1, subdivision))
+        volume = min(1, max(0, volume))
+        rampTargetBPM = min(300, max(20, rampTargetBPM))
+        rampSeconds = min(3600, max(10, rampSeconds))
+    }
+}
+
+enum ScoreSourceKind: String, Codable, CaseIterable, Identifiable {
+    case pdf
+    case image
+    case camera
+    case photos
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .pdf: return "PDF"
+        case .image: return "Image"
+        case .camera: return "Camera"
+        case .photos: return "Photos"
+        }
+    }
+}
+
+struct ScorePracticeDocument: Codable, Equatable, Identifiable {
+    let id: UUID
+    var name: String
+    var sourceKind: ScoreSourceKind
+    var pageCount: Int
+    var importedAt: Date
+    var currentPage: Int
+    var markers: [String]
+    var reviewNote: String
+}
+
 struct AnalyticsSnapshot: Equatable {
     let sessionCount: Int
     let totalFrameCount: Int
@@ -219,6 +335,7 @@ enum UserVisibleError: LocalizedError, Equatable {
     case accountDeletionRequiresConfirmation
     case missingAuthConfiguration
     case authenticationFailed
+    case noRecordedPitch
 
     var errorDescription: String? {
         switch self {
@@ -228,8 +345,9 @@ enum UserVisibleError: LocalizedError, Equatable {
         case .timeout: return "The request timed out."
         case .appleSignInCancelled: return "Apple sign-in was cancelled."
         case .accountDeletionRequiresConfirmation: return "Type delete my account to confirm deletion."
-        case .missingAuthConfiguration: return "Accounts are not enabled in this beta build yet. Guest practice still works on this device."
+        case .missingAuthConfiguration: return "Accounts are not enabled in this release yet. Guest practice is fully available."
         case .authenticationFailed: return "BrassTune could not complete authentication."
+        case .noRecordedPitch: return "No stable pitch was recorded. Try again with a longer held note."
         }
     }
 }

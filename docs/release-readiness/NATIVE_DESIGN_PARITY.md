@@ -1,44 +1,43 @@
 # Native Design Parity
 
-Status: native visual polish upgraded locally; App Store, physical microphone, and provider gates remain open.
+Updated: 2026-06-21T06:30:28Z
 
-## Web Sources
+Status: repository-actionable native design parity is implemented for the current engineering scope. App Store, physical microphone, and live provider gates remain external.
 
-- `frontend/src/styles/layout.css`
-- `frontend/src/styles/responsive.css`
-- `frontend/src/components/ui/AppPrimitives.tsx`
-- `frontend/src/pages/DashboardPage.tsx`
-- `frontend/src/pages/PracticePage.tsx`
-- `frontend/src/pages/AnalyticsPage.tsx`
-- `frontend/src/pages/SettingsPage.tsx`
+## Shared Sources
+
+- Web tokens: `design/brasstune-tokens.json`
+- Native generated tokens: `swift/BrassTuneApp/BrassTuneApp/DesignSystem/GeneratedThemeTokens.swift`
+- Native primitives: `swift/BrassTuneApp/BrassTuneApp/DesignSystem/BrassTuneDesignSystem.swift`
+- Native shell/screens: `swift/BrassTuneApp/BrassTuneApp/AppRootView.swift`
 
 ## SwiftUI Equivalents
 
-- `swift/BrassTuneApp/BrassTuneApp/DesignSystem/BrassTuneDesignSystem.swift`
-- `swift/BrassTuneApp/BrassTuneApp/AppRootView.swift`
-- `swift/BrassTuneApp/BrassTuneApp/SettingsViews.swift`
-
-The native app now uses shared SwiftUI primitives for screens, cards, metric tiles, status pills, empty states, and branded buttons. The main screens use card-based scroll layouts rather than default scaffold lists.
+- `ThemeManager`, `BTThemeHost`, and `BTThemeSelector` provide System, Brass Night, Brass Day, Liquid Brass Clear, Liquid Brass Tinted, and High Contrast.
+- `BTBentoGrid`, `BTBentoCard`, `BTHeroCard`, `BTMetricCard`, `BTQuickActionCard`, `BTStatusCard`, `BTChartCard`, `BTGlassToolbar`, `BTGlassCapsule`, and `BTAdaptiveSection` provide native Bento-style layout primitives.
+- `BTLiquidGlassModifier` uses iOS 26 `glassEffect` where available and falls back to solid/material-like surfaces when transparency or contrast settings require it.
 
 ## Current Native Behavior
 
-- Home shows a beta account state and local-practice focus.
-- Practice has a prominent local sample-take tuner, microphone permission state, and saved-take actions.
-- Sessions supports review and delete for local demo sessions.
-- Analytics derives metrics from local sessions.
-- Ensemble clearly labels account-required/demo state.
-- Settings exposes account, tuner, export, delete, legal, support, and beta limitations.
+- Home uses a branded hero, status pill, and tab-clear first viewport.
+- Practice uses the real native audio path for normal recording and deterministic test injection only during UI tests.
+- Score Practice provides local file/photo/camera import metadata, PDF page limits, local markers, and conservative page/time review copy.
+- Sessions supports review, local playback, export, and deletion of retained recordings.
+- Metronome exposes native tempo, meter, subdivision, accent, mute, and recording-aware bleed messaging.
+- Analytics, Progress, and Coach derive from local recorded sessions; insufficient-data states stay honest.
+- Ensemble shows account-required or account-backed states without generated roster data.
+- Settings exposes theme, account, tuner, export/delete, legal, and support controls.
 
 ## Evidence
 
-- Native unit tests pass.
-- iPhone Debug/Release and iPad Debug simulator builds pass.
-- `BrassTuneAppUISmoke` passes the first-launch, practice, record/stop, analytics, session review, delete, and settings journey.
-
-Screenshot capture instructions live in `docs/release-readiness/native-screenshots/README.md`.
+- `swift/BrassTuneCore`: `swift test` passed, `3` tests.
+- `BrassTuneAppTests`: passed, `9` XCTest cases.
+- `BrassTuneAppUISmoke`: passed, `1` XCUITest.
+- Debug and Release simulator builds passed with no warnings.
+- Screenshot: `docs/release-readiness/native-screenshots/iphone-home-tabs-2026-06-21.jpg`.
 
 ## Remaining Differences
 
-- Native microphone quality is not validated on physical brass hardware.
-- Native live cloud sync and Apple account flows remain provider/config gated.
-- Visual tuning can continue after tester screenshots from real iPhone/iPad hardware.
+- Physical microphone quality and acoustic click bleed require real iPhone/iPad brass-device validation.
+- Live cloud sync and provider sign-in require owner-approved Supabase/Google/Apple credentials.
+- Visual tuning can continue after real tester screenshots from iPhone/iPad hardware.

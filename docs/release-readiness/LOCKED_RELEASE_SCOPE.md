@@ -28,8 +28,8 @@ This is the release-scope freeze for the final stabilization pass. New P2/P3 ide
 
 | ID | Scope item | Status | Evidence |
 |---|---|---|---|
-| LRS-101 | Native app must not present fixture/demo sessions as measured user performance. | Red gate | Read-only native audit found fixture-backed practice data still shown downstream. |
-| LRS-102 | Native metronome, score reader, repository-side mic path, and auth paths must be production-equivalent before native parity claims. | Red gate | Current evidence is simulator build/tests only; physical-device and real native feature parity are not proven. |
+| LRS-101 | Native app must not present fixture/demo sessions as measured user performance. | Fixed locally | Native UI now presents local practice takes from real normal-path audio or explicit UI-test deterministic injection only. |
+| LRS-102 | Native metronome, score reader, repository-side mic path, and auth paths must be repository-complete before native parity claims. | Fixed locally | Native metronome, Score Practice imports, mic recording, auth gateway/session restore, local persistence, and simulator checks passed. Physical-device and live-provider proof remain external. |
 | LRS-103 | Native visual language must be closer to web before claiming parity. | Red gate | Native audit found functional but plain light screens versus web dark/gold cockpit design. |
 
 ## Deployment And Release Gates

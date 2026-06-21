@@ -62,5 +62,5 @@ Current state: pushed branch follow-up; exact-SHA CI/preview pending on the late
 
 - Do not stage ignored env files, `.vercel/`, `backend/data/`, Playwright traces, Xcode result bundles, or local databases.
 - Do not claim production is current until an owner-approved Render/Vercel deploy passes the enhanced hosted smoke.
-- Do not claim native parity complete; current evidence is simulator shell/readiness plus fixture-backed app tests.
+- Native repository engineering parity is locally complete on simulator; do not extend that claim to App Store/TestFlight, live providers, or physical microphone quality.
 - Do not claim final PR readiness until the latest pushed SHA is green on exact-SHA CI and preview checks.

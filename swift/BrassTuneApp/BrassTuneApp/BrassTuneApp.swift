@@ -3,11 +3,14 @@ import SwiftUI
 @main
 struct BrassTuneApp: App {
     @StateObject private var appModel = AppModel()
+    @StateObject private var themeManager = ThemeManager()
 
     var body: some Scene {
         WindowGroup {
-            AppRootView()
-                .environmentObject(appModel)
+            BTThemeHost(manager: themeManager) {
+                AppRootView()
+                    .environmentObject(appModel)
+            }
         }
     }
 }

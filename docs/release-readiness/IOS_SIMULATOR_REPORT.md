@@ -1,8 +1,13 @@
 # iOS Simulator Report
 
-## Native App Added
+Updated: 2026-06-21T06:30:28Z
 
-Native SwiftUI app created under `swift/BrassTuneApp` with:
+Branch: `arya/final-swift-completion`
+Base main SHA: `1c998d5480f52b5fcf0e2c143f5078893caead66`
+
+## Native App Status
+
+Native SwiftUI app location: `swift/BrassTuneApp`
 
 - Xcode project: `swift/BrassTuneApp/BrassTuneApp.xcodeproj`
 - App target: `BrassTuneApp`
@@ -13,19 +18,17 @@ Native SwiftUI app created under `swift/BrassTuneApp` with:
 
 ## Implemented Native Surfaces
 
-- Launch and onboarding.
-- Instrument/reference-pitch setup.
-- Guest/demo mode.
-- Home/dashboard.
-- Practice tuner with no-lock/fixture states.
-- Deterministic recording fixture and saved sessions.
-- Session review, relisten fixture state, export/share, deletion surface.
-- Analytics, progress, recommendations.
-- Ensemble summary/student view fixture state.
-- Settings, sign-in/sign-out surfaces, account deletion confirmation, data export link.
-- Privacy Policy, Terms of Service, Support.
+- Auth-first launch with session restoration, gateway, Continue as guest, and sign-out return to gateway.
+- Shared BrassTune themes from generated tokens: System, Brass Night, Brass Day, Liquid Clear, Liquid Tinted, High Contrast.
+- iOS 26 Liquid Glass wrapper with reduced-transparency and solid fallback.
+- Five-tab iPhone shell: Home, Practice, Score, Sessions, More.
+- iPad `NavigationSplitView` shell with the full feature list.
+- Home, Practice, Score Practice, Sessions, Metronome, Analytics, Progress, Coach, Ensemble, Settings, Privacy, Terms, and Support surfaces.
+- Real normal-path native microphone recording through `AVAudioSession` and `AVAudioEngine`; deterministic pitch generation is limited to UI-test injection.
+- Local recording playback, text export, deletion, and persisted session metadata.
+- Native metronome scheduler and click engine with persisted tempo/meter/subdivision/mute/accent settings.
+- Native Score Practice local file import, PDF page counting, image/photo import, VisionKit scanner flow, local source metadata, markers, and delete.
 - Keychain-backed auth session storage with Supabase Auth REST request paths.
-- AVAudioEngine permission/request path and deterministic audio fixture path.
 
 ## Commands And Results
 
@@ -35,28 +38,22 @@ Native SwiftUI app created under `swift/BrassTuneApp` with:
 | `swift --version` | Apple Swift version 6.2.3. |
 | `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj` | Passed; schemes `BrassTuneApp`, `BrassTuneAppUISmoke`, `BrassTuneCore`. |
 | `cd swift/BrassTuneCore && swift test` | Passed: `3` Swift Testing tests. |
-| Current app unit tests | `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination 'id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppTests` passed: `7` XCTest cases. |
-| Current app UI smoke | `xcodebuild test -quiet -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneAppUISmoke -destination 'id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces -resultBundlePath /tmp/BrassTuneAppUISmoke.xcresult` exited `0`. |
-| Current Release simulator build | `xcodebuild build -quiet -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Release -destination 'id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO` passed. |
-| iPhone Debug build | Passed on simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`; derived data `/tmp/brasstune-dd-debug-iphone-handoff-final`. |
-| iPhone Release build | Passed on simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`; derived data `/tmp/brasstune-dd-release-iphone-handoff-final`. |
-| iPad Debug build | Passed on simulator `C86B38C3-D50B-48F3-8E21-1FD7A44FCC81`; derived data `/tmp/brasstune-dd-debug-ipad-handoff-final`. |
-| App unit tests | Current local XcodeBuildMCP pass on iPhone 17 simulator `F05D449A-5102-489A-913A-8CD9BB37EF5E` with `7` XCTest cases; result bundle under `~/Library/Developer/XcodeBuildMCP/workspaces/BrassTune-bf33874b45f4/result-bundles/`. |
-| App UI tests | Current local XcodeBuildMCP pass on iPhone 17 simulator `F05D449A-5102-489A-913A-8CD9BB37EF5E` with `1` XCUITest, `UITEST_DEMO=1`, `UITEST_RESET_STATE=1`; result bundle under `~/Library/Developer/XcodeBuildMCP/workspaces/BrassTune-bf33874b45f4/result-bundles/`. |
+| Debug simulator build | XcodeBuildMCP `build_sim`, scheme `BrassTuneApp`, Debug, iPhone 17 iOS 26.2 `F05D449A-5102-489A-913A-8CD9BB37EF5E`: passed, no warnings. |
+| App unit tests | XcodeBuildMCP `test_sim`, `-only-testing:BrassTuneAppTests`: passed, `9` XCTest cases. |
+| App UI smoke | XcodeBuildMCP `test_sim`, scheme `BrassTuneAppUISmoke`, focused first-launch/practice/session/settings journey: passed, `1` XCUITest. |
+| Release simulator build | XcodeBuildMCP `build_sim`, scheme `BrassTuneApp`, Release: passed, no warnings. |
+| Screenshot | `docs/release-readiness/native-screenshots/iphone-home-tabs-2026-06-21.jpg` captured from iPhone 17 simulator and visually inspected. |
 | Signed archive | Not run; blocked by Apple Developer credentials/signing profiles. |
 
 ## Simulator Notes
 
-- Explicit `xcodebuild` commands were used with dynamically discovered simulator IDs.
-- Dynamic simulator discovery and explicit simulator boot/wait are required in CI and are implemented in `.github/workflows/swift.yml`.
-- Xcode emitted non-blocking `[MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.` warnings; builds/tests still passed.
-- The iPhone compact tab bar collapses Settings under `More`; the UI test now follows that route and the Settings Data section is first so export/delete controls are immediately discoverable.
-- The practice tuner now observes nested `NativeAudioEngine` state directly, so recording/ready transitions are visible to users and deterministic for UI smoke assertions.
-- Two intermediate UI attempts failed before the test body completed with CoreSimulator `Busy` runner preflight errors. Restarting CoreSimulator and running on a fresh iPhone Air simulator produced the passing UI result above.
-- Release build settings still show unsigned local simulator execution only: `CODE_SIGNING_ALLOWED=NO`, empty `DEVELOPMENT_TEAM`, and bundle id `com.brasstune.BrassTuneApp.dev`.
+- UI smoke runs through guest mode with deterministic test injection; normal app recording path uses the microphone engine.
+- The compact iPhone tab bar now has exactly five primary tabs and the screenshot shows no visible Home content behind the floating tab surface.
+- Score Practice camera scanning reports unavailable on devices/simulators that do not support `VNDocumentCameraViewController`.
+- Simulator evidence does not prove physical microphone quality, Bluetooth/wired routing, brass-room acoustics, or App Store signing.
 
-## Blockers
+## External Blockers
 
 - No signed archive was produced because Apple Developer credentials/signing profiles are not available.
-- Simulator testing does not validate physical microphone quality, route changes, Bluetooth/wired input, or real brass-room acoustics.
-- Several native product flows remain deterministic fixture surfaces rather than production API/audio-backed implementations; simulator pass is not a native closed-beta readiness claim.
+- Physical microphone/brass validation remains hardware-gated.
+- Live Supabase, Google, and Apple provider lifecycle validation remains owner-credential-gated.

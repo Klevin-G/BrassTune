@@ -32,7 +32,13 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Tuner", subtitle: "Instrument and reference pitch affect local sample takes.")
+                BTSectionHeader(title: "Appearance", subtitle: "Choose a BrassTune theme for this device.")
+                BTThemeSelector()
+                    .accessibilityIdentifier("settings.themeSelector")
+            }
+
+            BTCard {
+                BTSectionHeader(title: "Tuner", subtitle: "Instrument and reference pitch affect local recordings.")
                 Picker("Instrument", selection: $model.selectedInstrumentId) {
                     instrumentPickerOptions()
                 }
@@ -49,7 +55,7 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Sign in", subtitle: accountActionsEnabled ? "Use beta account email or Apple sign-in." : "Accounts are not enabled in this beta build yet.")
+                BTSectionHeader(title: "Sign in", subtitle: accountActionsEnabled ? "Use account email or Apple sign-in." : "Accounts are not enabled in this release yet.")
                 TextField("Email", text: $email)
                     .textContentType(.emailAddress)
                     .keyboardType(.emailAddress)
@@ -99,7 +105,7 @@ struct SettingsView: View {
 
                 HStack(spacing: BTSpacing.md) {
                     Button("Continue as guest") {
-                        model.enterGuestDemo()
+                        model.continueAsGuest()
                     }
                     .buttonStyle(BTSecondaryButtonStyle())
                     .accessibilityIdentifier("settings.continueAsGuest")
@@ -183,7 +189,7 @@ struct SettingsView: View {
         if model.authState.usesRemoteAccount {
             return "Deletion sends the account request to cloud sync when an account session is available, then clears local sessions and credentials."
         }
-        return "No remote account is active. The confirmation clears local sessions, demo ensemble state, and stored credentials on this device."
+        return "No remote account is active. The confirmation clears local sessions, local score metadata, and stored credentials on this device."
     }
 
     private func handleAppleSignIn(_ result: Result<ASAuthorization, Error>) {
@@ -249,7 +255,7 @@ struct LegalDetailView: View {
                     title: "Privacy Policy",
                     messages: [
                         "BrassTune uses account, practice, pitch, recommendation, ensemble, export, and optional recording data to provide tuning feedback and account lifecycle controls.",
-                        "Local media imports are analyzed on device; source video or audio is not uploaded by the native demo flow.",
+                        "Local media imports are analyzed on device; source video, audio, and score pages are not uploaded by default.",
                     ]
                 )
             case .terms:
@@ -265,7 +271,7 @@ struct LegalDetailView: View {
                     title: "Support",
                     messages: [
                         "Contact the teacher, director, or organization that provided BrassTune access.",
-                        "Include the affected screen, approximate time of the issue, account state, and whether the take was a sample or microphone session.",
+                        "Include the affected screen, approximate time of the issue, account state, and whether the take used local recording or account sync.",
                     ]
                 )
             }

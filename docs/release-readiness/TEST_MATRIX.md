@@ -1,6 +1,6 @@
 # Release Test Matrix
 
-Updated: 2026-06-21T05:51:09Z
+Updated: 2026-06-21T06:30:28Z
 
 ## Web Production Gates
 
@@ -24,12 +24,23 @@ Updated: 2026-06-21T05:51:09Z
 | Render headers | `curl -D - -H 'Origin: https://brass-tune.vercel.app' https://brasstune.onrender.com/api/health` | Passed | API security headers observed. |
 | Diff hygiene | `git diff --check` | Passed | No whitespace errors. |
 
+## Native Repository Gates
+
+| Gate | Command | Result | Notes |
+|---|---|---|---|
+| Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3` tests | Shared pitch/transposition fixtures. |
+| Native Debug build | XcodeBuildMCP `build_sim`, scheme `BrassTuneApp`, Debug | Passed | iPhone 17 simulator, iOS 26.2, UDID `F05D449A-5102-489A-913A-8CD9BB37EF5E`; no warnings. |
+| Native app unit tests | XcodeBuildMCP `test_sim -only-testing:BrassTuneAppTests` | Passed: `9` tests | Includes auth gateway entry, deterministic test recording, score metadata, metronome clamping, export, delete. |
+| Native UI smoke | XcodeBuildMCP `test_sim`, scheme `BrassTuneAppUISmoke` | Passed: `1` XCUITest | Home -> Practice -> recording -> Analytics -> Sessions/delete -> Settings. |
+| Native Release build | XcodeBuildMCP `build_sim`, scheme `BrassTuneApp`, Release | Passed | No warnings. |
+| Native screenshot | `docs/release-readiness/native-screenshots/iphone-home-tabs-2026-06-21.jpg` | Passed visual inspection | Five tabs: Home, Practice, Score, Sessions, More; no visible Home content under tab bar. |
+| Native completion gate | `docs/release-readiness/NATIVE_REPOSITORY_COMPLETION_GATE.md` | Passed | Repository engineering gate only; external Apple/provider/device gates remain separate. |
+
 ## Remaining External Gates
 
 | Gate | Status | Reason |
 |---|---|---|
 | Live Supabase account lifecycle | Owner-gated | Requires disposable provider credentials/users. |
 | Google/Apple provider lifecycle | Owner-gated | Provider configuration and disposable users are external. |
-| Native Swift phase | Allowed to start | Web production gate passed; native completion is still separate. |
 | App Store/TestFlight | External | Requires Apple signing, App Store Connect, approved wording, and submission access. |
 | Physical-device microphone/brass validation | External | Simulator and browser checks do not prove physical brass input quality. |
