@@ -85,6 +85,8 @@ def ensure_additive_columns() -> None:
         "group_members": {
             "role_in_group": "VARCHAR DEFAULT 'student'",
             "status": "VARCHAR DEFAULT 'active'",
+            "active_since": "DATETIME",
+            "removed_at": "DATETIME",
         },
     }
     for table_name, columns in additions.items():

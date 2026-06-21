@@ -36,8 +36,10 @@ export function PracticePage() {
   const start = async () => {
     if (transitionBusy || recorder.busy || recorder.recording) return;
     setTransitionBusy(true);
+    let openedMicrophone = false;
     try {
       const inputStream = demoMode ? null : await stream.startMicrophone();
+      openedMicrophone = !demoMode && Boolean(inputStream);
       if (!demoMode && !inputStream) {
         recorder.setError('Microphone access is needed for live recording. You can switch to guided mode or retry microphone access.');
         return;
@@ -45,6 +47,7 @@ export function PracticePage() {
       const session = await recorder.start(`Practice ${new Date().toLocaleDateString()}`);
       await audioRecorder.start(session.id, demoMode, inputStream);
     } catch (error) {
+      if (openedMicrophone) stream.stopMicrophone();
       recorder.setError(String(error));
     } finally {
       setTransitionBusy(false);

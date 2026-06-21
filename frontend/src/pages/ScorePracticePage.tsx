@@ -1,5 +1,6 @@
-import { Camera, CheckCircle2, FileText, Image as ImageIcon, Maximize2, Music2, RotateCw, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Camera, CheckCircle2, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Maximize2, Music2, RotateCw, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
 
@@ -134,6 +135,78 @@ function formatSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function PdfCanvasPreview({
+  file,
+  name,
+  pageNumber,
+  zoom,
+  rotation,
+  onPageCount,
+}: {
+  file: File;
+  name: string;
+  pageNumber: number;
+  zoom: number;
+  rotation: number;
+  onPageCount: (count: number) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [renderStatus, setRenderStatus] = useState('Loading PDF page.');
+
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+
+    async function renderPdfPage() {
+      setRenderStatus('Loading PDF page.');
+      const pdfjs = await import('pdfjs-dist');
+      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+      cleanup = () => {
+        void loadingTask.destroy();
+      };
+      try {
+        const pdf = await loadingTask.promise;
+        if (cancelled) return;
+        onPageCount(pdf.numPages);
+        const safePageNumber = Math.min(Math.max(1, pageNumber), pdf.numPages);
+        const page = await pdf.getPage(safePageNumber);
+        if (cancelled) return;
+        const viewport = page.getViewport({ scale: zoom, rotation });
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext('2d');
+        if (!canvas || !context) throw new Error('Canvas unavailable.');
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        canvas.style.width = `${Math.ceil(viewport.width)}px`;
+        canvas.style.height = `${Math.ceil(viewport.height)}px`;
+        const renderTask = page.render({ canvas, canvasContext: context, viewport });
+        cleanup = () => {
+          renderTask.cancel();
+          void loadingTask.destroy();
+        };
+        await renderTask.promise;
+        if (!cancelled) setRenderStatus(`PDF page ${safePageNumber} of ${pdf.numPages} rendered locally.`);
+      } catch (error) {
+        if (!cancelled) setRenderStatus(error instanceof Error && error.message !== 'Rendering cancelled, page 0' ? 'PDF page could not render in this browser.' : 'PDF rendering cancelled.');
+      }
+    }
+
+    void renderPdfPage();
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [file, name, onPageCount, pageNumber, rotation, zoom]);
+
+  return (
+    <>
+      <canvas ref={canvasRef} aria-label={`PDF preview for ${name}`} />
+      <span className="score-render-status" role="status">{renderStatus}</span>
+    </>
+  );
+}
+
 export function ScorePracticePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const photosInputRef = useRef<HTMLInputElement | null>(null);
@@ -147,8 +220,20 @@ export function ScorePracticePage() {
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
+  const [pdfPageNumber, setPdfPageNumber] = useState(1);
+  const [pdfPageCount, setPdfPageCount] = useState(1);
   const canUseCamera = typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
   const selected = pages.find((page) => page.id === selectedId) ?? pages[0];
+
+  useEffect(() => {
+    setPdfPageNumber(1);
+    setPdfPageCount(1);
+  }, [selected?.id]);
+
+  const updatePdfPageCount = useCallback((count: number) => {
+    setPdfPageCount(count);
+    setPdfPageNumber((value) => Math.min(Math.max(1, value), count));
+  }, []);
 
   useEffect(() => {
     pagesRef.current = pages;
@@ -363,12 +448,26 @@ export function ScorePracticePage() {
                 <button className="icon-button" type="button" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} aria-label="Zoom in score preview" title="Zoom in"><ZoomIn size={18} /></button>
                 <button className="icon-button" type="button" onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))} aria-label="Zoom out score preview" title="Zoom out"><ZoomOut size={18} /></button>
                 <button className="icon-button" type="button" onClick={() => setRotation((value) => (value + 90) % 360)} aria-label="Rotate score preview" title="Rotate"><RotateCw size={18} /></button>
+                {selected.kind === 'pdf' && (
+                  <>
+                    <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.max(1, value - 1))} disabled={pdfPageNumber <= 1} aria-label="Previous PDF page" title="Previous PDF page"><ChevronLeft size={18} /></button>
+                    <span className="score-page-counter">Page {pdfPageNumber} / {pdfPageCount}</span>
+                    <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.min(pdfPageCount, value + 1))} disabled={pdfPageNumber >= pdfPageCount} aria-label="Next PDF page" title="Next PDF page"><ChevronRight size={18} /></button>
+                  </>
+                )}
                 <button className="icon-button" type="button" onClick={() => setFocusMode((value) => !value)} aria-label={focusMode ? 'Exit focused score preview' : 'Focus score preview'} aria-pressed={focusMode} title={focusMode ? 'Exit focus mode' : 'Focus mode'}><Maximize2 size={18} /></button>
                 <button className="icon-button danger-action" type="button" onClick={() => void removeSelected()} aria-label="Remove selected score page" title="Remove"><Trash2 size={18} /></button>
               </div>
               <div className="score-preview-frame">
                 {selected.kind === 'pdf' ? (
-                  <iframe title={`Preview ${selected.name}`} src={selected.url} />
+                  <PdfCanvasPreview
+                    file={selected.file}
+                    name={selected.name}
+                    pageNumber={pdfPageNumber}
+                    zoom={zoom}
+                    rotation={rotation}
+                    onPageCount={updatePdfPageCount}
+                  />
                 ) : (
                   <img alt={`Preview ${selected.name}`} src={selected.url} style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }} />
                 )}

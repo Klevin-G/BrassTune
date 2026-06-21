@@ -1,6 +1,6 @@
 # Metronome Validation
 
-Updated: 2026-06-20 UTC.
+Updated: 2026-06-21 UTC.
 
 ## Implemented
 
@@ -16,14 +16,15 @@ Updated: 2026-06-20 UTC.
 - Optional tempo ramp with bars-per-step.
 - Separate mute/volume state.
 - Visual beat and subdivision indicators.
+- Running accent and tempo-ramp settings update through refs instead of waiting for restart.
+- UI labels timing values as scheduled queue stats, not measured acoustic timing.
 
 ## Automated Evidence
 
 - `frontend/src/domain/metronome.test.ts` covers BPM bounds, signature normalization, tick scheduling, subdivision timing, tap tempo, ramp behavior, and timing-stat calculation.
-- `cd frontend && npm test` passed: `9` test files, `35` tests.
+- `cd frontend && npm test` passed: `9` test files, `38` tests.
 - `cd frontend && npm run build` passed.
-- Full local E2E and device simulation passed after mobile overlap fixes.
-- Rendered browser spot check verified Tap tempo updates BPM/status with no console errors or framework overlay.
+- Full local E2E passed: `75` tests.
 
 ## Not Yet Measured
 
@@ -37,4 +38,4 @@ Updated: 2026-06-20 UTC.
 
 ## Release Claim
 
-It is valid to say the web beta includes a local Web Audio metronome with count-in, subdivisions, time signatures, and tempo ramp controls. It is not valid to claim professional metronome accuracy, no audio bleed, or native parity until measured timing and physical-device tests are complete.
+It is valid to say the web beta includes a local Web Audio metronome with count-in, subdivisions, time signatures, live-updating tempo ramp controls, and scheduled queue stats. It is not valid to claim professional metronome accuracy, no audio bleed, measured acoustic jitter, or native parity until measured timing and physical-device tests are complete.

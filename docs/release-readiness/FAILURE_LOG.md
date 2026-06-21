@@ -2,6 +2,12 @@
 
 Date: 2026-06-18
 
+## 2026-06-21 Final Stabilization Pass
+
+| Failure | Reproduction | Root Cause | Resolution | Current Status |
+|---|---|---|---|---|
+| Production hosted smoke failed after local stabilization patch | `cd frontend && BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Production Vercel is still serving an older app that lacks the current Audio Lab `Cloud sync stream` content, and Firefox/WebKit/mobile-WebKit still logged hosted fetch failures. The local patch is not deployed yet. | No merge or production deploy performed while gates are red. Local repository fixes passed backend/frontend/Swift checks and must be committed, pushed, deployed, and re-smoked before merge/release. | Red merge/deploy gate; 22 passed, 8 failed, 5 skipped in hosted smoke |
+
 ## 2026-06-20 Current Run
 
 | Failure | Reproduction | Root Cause | Resolution | Current Status |

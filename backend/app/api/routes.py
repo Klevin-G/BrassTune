@@ -16,7 +16,7 @@ from app.core.instruments.profiles import get_all_profiles, get_instrument_profi
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
 from app.db.database import get_db
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
-from app.models.db import Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, User
+from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
 from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, sample_to_dict, session_to_dict, user_to_dict
@@ -259,8 +259,10 @@ def start_practice_session(payload: StartSessionRequest, db: Session = Depends(g
 
 @router.post("/sessions/{session_id}/samples")
 def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    _require_session_access(db, session_id, auth)
+    session = _require_session_access(db, session_id, auth)
     _validate_instrument(frame.instrument_id)
+    if frame.instrument_id != session.instrument_id:
+        raise HTTPException(status_code=400, detail="Pitch frame instrument must match the practice session instrument.")
     sample = save_pitch_frame(db, session_id, _schema_dict(frame))
     if sample is None:
         return {"saved": False, "reason": "Frame was invalid, silent, or session was not found."}
@@ -269,11 +271,13 @@ def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depen
 
 @router.post("/sessions/{session_id}/samples/batch")
 def add_session_samples_batch(session_id: int, frames: List[PitchFrameIn], db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    _require_session_access(db, session_id, auth)
+    session = _require_session_access(db, session_id, auth)
     if len(frames) > MAX_BATCH_PITCH_FRAMES:
         raise HTTPException(status_code=413, detail="Too many pitch frames in one request.")
     for frame in frames:
         _validate_instrument(frame.instrument_id)
+        if frame.instrument_id != session.instrument_id:
+            raise HTTPException(status_code=400, detail="Pitch frame instrument must match the practice session instrument.")
     samples = save_pitch_frames(db, session_id, [_schema_dict(frame) for frame in frames])
     return {"saved": len(samples), "rejected": max(0, len(frames) - len(samples))}
 
@@ -669,6 +673,35 @@ def export_me_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(get
     return _account_export_zip(db, auth)
 
 
+def _mark_deletion_job(job: AccountDeletionJob, stage: str, status: str, error_category: Optional[str] = None) -> None:
+    job.stage = stage
+    job.status = status
+    job.safe_error_category = error_category
+    job.updated_at = dt.datetime.utcnow()
+    if status == "completed":
+        job.completed_at = job.completed_at or dt.datetime.utcnow()
+        job.next_retry_at = None
+    elif status == "retryable_failure":
+        job.retry_count = int(job.retry_count or 0) + 1
+        job.next_retry_at = dt.datetime.utcnow() + dt.timedelta(minutes=min(60, 2 ** min(job.retry_count, 6)))
+
+
+def _deletion_job_payload(job: AccountDeletionJob):
+    try:
+        counts = json.loads(job.counts_json or "{}")
+    except json.JSONDecodeError:
+        counts = {}
+    return {
+        "deleted": job.status == "completed",
+        "deletion_status": job.status,
+        "deletion_stage": job.stage,
+        "counts": counts,
+        "supabase_sessions_revoked": job.status == "completed",
+        "supabase_identity_deleted": job.status == "completed",
+        "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
+    }
+
+
 @router.delete("/users/me")
 def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     confirmation = payload.confirmation.strip().lower()
@@ -677,6 +710,10 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
     user = auth.user
     user_id = user.id
     supabase_user_id = user.supabase_user_id
+    job_key = "delete-user-%s" % user_id
+    job = db.query(AccountDeletionJob).filter(AccountDeletionJob.idempotency_key == job_key).first()
+    if job and job.status == "completed" and db.query(User).filter(User.id == user_id).first() is None:
+        return _deletion_job_payload(job)
     sessions = db.query(PracticeSession).filter(PracticeSession.user_id == user_id).all()
     owned_groups = db.query(Group).filter(Group.director_user_id == user_id).all()
     group_ids = [group.id for group in owned_groups]
@@ -687,13 +724,30 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
         "invitations": db.query(Invitation).filter((Invitation.invited_user_id == user_id) | (Invitation.invited_by_user_id == user_id)).count(),
         "recommendations": db.query(Recommendation).filter(Recommendation.user_id == user_id).count(),
     }
-    supabase_sessions_revoked = False
-    supabase_identity_deleted = False
-    if not auth.is_guest and supabase_user_id:
-        supabase_sessions_revoked = supabase_global_sign_out(auth.access_token)
-        supabase_identity_deleted = delete_supabase_identity(supabase_user_id)
+    if job is None:
+        job = AccountDeletionJob(
+            user_id=user_id,
+            supabase_user_id=supabase_user_id,
+            idempotency_key=job_key,
+            counts_json=json.dumps(deleted_counts, sort_keys=True),
+        )
+    else:
+        job.supabase_user_id = job.supabase_user_id or supabase_user_id
+        job.counts_json = json.dumps(deleted_counts, sort_keys=True)
+    _mark_deletion_job(job, "local_cleanup_started", "in_progress")
+    db.add(job)
+    db.commit()
+
+    try:
+        for session in sessions:
+            delete_audio_for_session(session)
+    except Exception as exc:
+        _mark_deletion_job(job, "local_cleanup_failed", "retryable_failure", "audio_cleanup_failed")
+        db.add(job)
+        db.commit()
+        raise HTTPException(status_code=503, detail="Account deletion is queued for retry because local media cleanup is temporarily unavailable.") from exc
+
     for session in sessions:
-        delete_audio_for_session(session)
         db.delete(session)
     if group_ids:
         db.query(Invitation).filter(Invitation.group_id.in_(group_ids)).delete(synchronize_session=False)
@@ -703,9 +757,40 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
     db.query(GroupMember).filter(GroupMember.user_id == user_id).delete(synchronize_session=False)
     db.query(Recommendation).filter(Recommendation.user_id == user_id).delete(synchronize_session=False)
     db.delete(user)
+    _mark_deletion_job(job, "local_cleanup_completed", "in_progress")
+    db.add(job)
+    db.commit()
+
+    supabase_sessions_revoked = False
+    supabase_identity_deleted = False
+    if not auth.is_guest and supabase_user_id:
+        try:
+            _mark_deletion_job(job, "external_cleanup_started", "in_progress")
+            db.add(job)
+            db.commit()
+            supabase_sessions_revoked = supabase_global_sign_out(auth.access_token)
+            supabase_identity_deleted = delete_supabase_identity(supabase_user_id)
+        except Exception:
+            supabase_sessions_revoked = False
+            supabase_identity_deleted = False
+        if not supabase_identity_deleted:
+            _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "external_identity_cleanup_failed")
+            db.add(job)
+            db.commit()
+            return {
+                "deleted": True,
+                "deletion_status": "external_cleanup_queued",
+                "counts": deleted_counts,
+                "supabase_sessions_revoked": supabase_sessions_revoked,
+                "supabase_identity_deleted": False,
+                "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
+            }
+    _mark_deletion_job(job, "completed", "completed")
+    db.add(job)
     db.commit()
     return {
         "deleted": True,
+        "deletion_status": "completed",
         "counts": deleted_counts,
         "supabase_sessions_revoked": supabase_sessions_revoked,
         "supabase_identity_deleted": supabase_identity_deleted,
@@ -717,6 +802,10 @@ def _group_member_ids(db: Session, group_id: int):
     return [member.user_id for member in db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()]
 
 
+def _member_active_since(member: GroupMember) -> dt.datetime:
+    return member.active_since or member.created_at
+
+
 def _group_scoped_sessions(db: Session, group_id: int) -> List[PracticeSession]:
     members = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()
     sessions_by_id = {}
@@ -726,7 +815,7 @@ def _group_scoped_sessions(db: Session, group_id: int) -> List[PracticeSession]:
             .options(joinedload(PracticeSession.note_events))
             .filter(
                 PracticeSession.user_id == member.user_id,
-                PracticeSession.started_at >= member.created_at,
+                PracticeSession.started_at >= _member_active_since(member),
             )
             .all()
         )
@@ -805,13 +894,20 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     if user is None:
         raise HTTPException(status_code=404, detail="No user exists with that username.")
     existing = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    now = dt.datetime.utcnow()
     if existing:
+        previous_status = existing.status
         existing.instrument_id = payload.instrument_id
         existing.role_in_group = payload.role_in_group
         existing.status = "active"
+        if previous_status != "active":
+            existing.active_since = now
+        else:
+            existing.active_since = existing.active_since or existing.created_at
+        existing.removed_at = None
         member = existing
     else:
-        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=payload.instrument_id, role_in_group=payload.role_in_group, status="active")
+        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=payload.instrument_id, role_in_group=payload.role_in_group, status="active", active_since=now)
         db.add(member)
     db.commit()
     db.refresh(member)
@@ -834,7 +930,13 @@ def update_ensemble_member(group_id: int, member_id: int, payload: UpdateGroupMe
     if payload.status:
         if payload.status not in {"active", "invited", "removed"}:
             raise HTTPException(status_code=400, detail="Invalid member status.")
+        previous_status = member.status
         member.status = payload.status
+        if payload.status == "active" and previous_status != "active":
+            member.active_since = dt.datetime.utcnow()
+            member.removed_at = None
+        elif payload.status in {"invited", "removed"} and previous_status == "active":
+            member.removed_at = dt.datetime.utcnow()
     db.add(member)
     db.commit()
     db.refresh(member)
@@ -848,6 +950,7 @@ def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(
     if member is None:
         raise HTTPException(status_code=404, detail="Group member not found.")
     member.status = "removed"
+    member.removed_at = dt.datetime.utcnow()
     db.add(member)
     db.commit()
     return {"removed": True}

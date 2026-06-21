@@ -49,6 +49,11 @@ export function MetronomePage() {
   const bpmRef = useRef(bpm);
   const volumeRef = useRef(volume);
   const mutedRef = useRef(muted);
+  const accentDownbeatRef = useRef(accentDownbeat);
+  const rampEnabledRef = useRef(rampEnabled);
+  const targetBpmRef = useRef(targetBpm);
+  const rampStepRef = useRef(rampStep);
+  const barsPerStepRef = useRef(barsPerStep);
   const subdivisionRef = useRef(subdivision);
   const signatureRef = useRef(normalizeTimeSignature(4, 4));
   const scheduledTimesRef = useRef<number[]>([]);
@@ -60,11 +65,16 @@ export function MetronomePage() {
     bpmRef.current = clampBpm(bpm);
     volumeRef.current = volume;
     mutedRef.current = muted;
+    accentDownbeatRef.current = accentDownbeat;
+    rampEnabledRef.current = rampEnabled;
+    targetBpmRef.current = targetBpm;
+    rampStepRef.current = rampStep;
+    barsPerStepRef.current = barsPerStep;
     subdivisionRef.current = subdivision;
     signatureRef.current = signature;
     localStorage.setItem('brasstune.metronome.bpm', String(clampBpm(bpm)));
     localStorage.setItem('brasstune.metronome.volume', String(volume));
-  }, [bpm, volume, muted, subdivision, signature]);
+  }, [accentDownbeat, barsPerStep, bpm, muted, rampEnabled, rampStep, signature, subdivision, targetBpm, volume]);
 
   const scheduleClick = (context: AudioContext, time: number, accented: boolean, subdivisionHit: boolean) => {
     if (mutedRef.current) return;
@@ -87,7 +97,7 @@ export function MetronomePage() {
     while (nextTickTimeRef.current < context.currentTime + 0.12) {
       const beatIndex = beatIndexRef.current;
       const subdivisionIndex = subdivisionIndexRef.current;
-      const accented = accentDownbeat && beatIndex === 0 && subdivisionIndex === 0;
+      const accented = accentDownbeatRef.current && beatIndex === 0 && subdivisionIndex === 0;
       scheduleClick(context, nextTickTimeRef.current, accented, subdivisionIndex > 0);
       const visualDelayMs = Math.max(0, (nextTickTimeRef.current - context.currentTime) * 1000);
       window.setTimeout(() => {
@@ -105,8 +115,8 @@ export function MetronomePage() {
       if (beatIndexRef.current >= signatureRef.current.numerator) {
         beatIndexRef.current = 0;
         barCountRef.current += 1;
-        if (rampEnabled && barCountRef.current % Math.max(1, barsPerStep) === 0) {
-          setBpm((current) => nextRampBpm(current, targetBpm, rampStep));
+        if (rampEnabledRef.current && barCountRef.current % Math.max(1, barsPerStepRef.current) === 0) {
+          setBpm((current) => nextRampBpm(current, targetBpmRef.current, rampStepRef.current));
         }
       }
     }
@@ -264,8 +274,8 @@ export function MetronomePage() {
       </div>
       <div className="stats-grid">
         <MetricTile label="Tick interval" value={`${(secondsPerTick(bpm, signature, subdivision) * 1000).toFixed(0)} ms`} detail="scheduled target" tone="gold" />
-        <MetricTile label="Measured avg" value={`${stats.averageMs.toFixed(1)} ms`} detail={`${stats.intervals} intervals`} />
-        <MetricTile label="Max jitter" value={`${stats.maxJitterMs.toFixed(1)} ms`} detail="scheduled-time spread" tone={stats.maxJitterMs < 2 ? 'green' : 'amber'} />
+        <MetricTile label="Queue avg" value={`${stats.averageMs.toFixed(1)} ms`} detail={`${stats.intervals} scheduled intervals`} />
+        <MetricTile label="Queue spread" value={`${stats.maxJitterMs.toFixed(1)} ms`} detail="scheduled-time variance" tone={stats.maxJitterMs < 2 ? 'green' : 'amber'} />
         <MetricTile label="Target BPM" value={`${targetBpm}`} detail={rampEnabled ? 'ramp enabled' : 'ramp off'} />
       </div>
       <SectionCard title="Practice tempo ramp" eyebrow="Optional">

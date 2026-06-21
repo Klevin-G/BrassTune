@@ -1,4 +1,4 @@
-import { frequencyToMidi, pitchFrameFromFrequency } from './music';
+import { demoProfileFrequencyRanges, frequencyToMidi, pitchFrameFromFrequency } from './music';
 import type { PitchFrame } from './types';
 
 const DEFAULT_MIN_FREQUENCY = 55;
@@ -106,7 +106,17 @@ export function pitchFrameFromPcm(
   referencePitch: number,
   timestampMs: number,
 ): PitchFrame {
-  const estimate = estimatePitchFromPcm(samples, sampleRate);
+  const range = demoProfileFrequencyRanges[instrumentId];
+  const estimate = estimatePitchFromPcm(
+    samples,
+    sampleRate,
+    range
+      ? {
+          minFrequencyHz: Math.min(DEFAULT_MIN_FREQUENCY, range.minFrequencyHz),
+          maxFrequencyHz: Math.max(DEFAULT_MAX_FREQUENCY, range.maxFrequencyHz),
+        }
+      : undefined,
+  );
   if (!estimate.frequencyHz) {
     return pitchFrameFromFrequency(null, 0, instrumentId, referencePitch, timestampMs, estimate.confidence, estimate.rms, 'browser_local_pitch');
   }

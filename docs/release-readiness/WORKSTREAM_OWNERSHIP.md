@@ -1,5 +1,21 @@
 # Workstream Ownership
 
+## 2026-06-21 Final Stabilization Addendum
+
+Branch: `arya/release-readiness-hardening`
+Base SHA for this pass: `eef7f865085859d877703c7652b941aaf6815134`
+
+| Workstream | Owner/source | Scope | Outcome |
+|---|---|---|---|
+| Coordination/release gate | Coordinator plus read-only release/deployment agents | Scope lock, validation matrix, hosted smoke, merge decision | Local repository hardening passed; production hosted smoke failed, so merge/release remained blocked. |
+| Backend/security | Backend security audit plus coordinator implementation | Canonical pitch samples, account deletion jobs/order, ensemble reactivation windows, migration | Fixed locally with backend regression tests; full backend suite passed `69`. |
+| Frontend/audio/auth/score | Web/auth and audio findings plus coordinator implementation | Friendly auth errors, mic cleanup, instrument ranges, PDF.js reader, metronome live refs/wording | Fixed locally; frontend unit/build/audit and local E2E passed. |
+| Documentation/evidence | Coordinator | Locked release scope, interaction matrix, release evidence, failure log | Added current source-of-truth docs and moved non-blocking ideas to backlog. |
+| Native | Native iOS read-only audit | Simulator and parity gap review | No native code changed in this pass; Swift core tests passed, native production parity remains a red gate. |
+| Artifact/security hygiene | Artifact hygiene audit plus coordinator checks | Ignored artifacts, tracked secrets, whitespace, dependency/SAST checks | No tracked secret pattern found; Bandit and resolved pip-audit passed. |
+
+---
+
 Date: 2026-06-20
 Branch: `arya/release-readiness-hardening`
 Remote PR head at start of this pass: `36b29c8cff85f3364648763fd36d6472fb1ef8a3`

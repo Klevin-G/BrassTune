@@ -1018,13 +1018,6 @@ meter {
   background: rgba(2, 4, 7, 0.76);
 }
 
-.score-preview-frame iframe,
-.score-preview-frame img {
-  width: 100%;
-  min-height: 420px;
-  border: 0;
-}
-
 .score-preview-frame img {
   width: auto;
   max-width: 92%;
@@ -1032,6 +1025,30 @@ meter {
   max-height: 720px;
   object-fit: contain;
   transition: transform 160ms ease;
+}
+
+.score-preview-frame canvas {
+  display: block;
+  max-width: none;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.score-render-status {
+  align-self: end;
+  justify-self: start;
+  margin: 0 0 12px 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.score-page-counter {
+  display: inline-flex;
+  min-width: 92px;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.86rem;
 }
 
 .import-progress {

@@ -9,13 +9,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
 from app.api.auth import AuthContext, _sync_supabase_user
-from app.api.routes import _filtered_events, _group_scoped_sessions, _read_limited_body
+from app.api.routes import _filtered_events, _group_scoped_sessions, _read_limited_body, delete_my_account
 from app.core.analytics.stats import build_instrument_heatmap, calculate_most_improved_notes, calculate_note_stats
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
@@ -24,8 +25,8 @@ from app.db.database import Base, DATABASE_URL, engine
 from app.db.maintenance import clear_practice_data, repair_demo_data
 from app.db.seed import seed_demo_data
 from app.main import app
-from app.models.db import Group, GroupMember, NoteEvent, PitchSample, PracticeSession, User
-from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES
+from app.models.db import AccountDeletionJob, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, User
+from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest
 from app.services.audio_storage import delete_audio_for_session
 from app.services.session_service import save_pitch_frames
 
@@ -234,6 +235,39 @@ def test_batch_save_commits_multiple_pitch_frames():
         assert len(samples) == 2
     finally:
         db.close()
+
+
+def test_saved_pitch_frames_are_canonicalized_server_side():
+    db = _test_db()
+    try:
+        session = _session(db, 112, "trumpet", dt.datetime(2026, 6, 15))
+        frame = frequency_to_pitch_frame(midi_to_frequency(60), 0.98, 0.1, 0, "trumpet", 440.0).to_dict()
+        frame["concert_note_name"] = "Z"
+        frame["written_note_name"] = "Z"
+        frame["written_octave"] = 9
+        frame["cents_deviation"] = 999
+        frame["tuning_status"] = "sharp"
+
+        samples = save_pitch_frames(db, session.id, [frame])
+
+        assert len(samples) == 1
+        assert samples[0].concert_note != "Z"
+        assert samples[0].written_note != "Z"
+        assert samples[0].written_octave != 9
+        assert abs(samples[0].cents_deviation) < 0.01
+        assert samples[0].tuning_status == "in_tune"
+    finally:
+        db.close()
+
+
+def test_pitch_frame_instrument_must_match_session_instrument():
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        frame = frequency_to_pitch_frame(midi_to_frequency(60), MIN_RECORDING_CONFIDENCE, 0.1, 0, "horn", 440.0).to_dict()
+        response = client.post(f"/api/sessions/{session['id']}/samples", json=frame)
+
+    assert response.status_code == 400
+    assert "instrument" in response.json()["detail"].lower()
 
 
 def test_batch_sample_endpoint_saves_imported_media_frames():
@@ -670,6 +704,39 @@ def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():
         db.close()
 
 
+def test_ensemble_reactivation_excludes_sessions_from_removed_interval():
+    db = _test_db()
+    try:
+        director = User(id=180, username="director180", name="Director", role="director", primary_instrument_id="trumpet")
+        student = User(id=181, username="student181", name="Student", role="student", primary_instrument_id="trumpet")
+        group = Group(id=182, name="Wind Ensemble", director_user_id=director.id, created_at=dt.datetime(2026, 6, 1))
+        db.add_all([director, student, group])
+        db.commit()
+        before = _session(db, student.id, "trumpet", dt.datetime(2026, 6, 8))
+        removed_interval = _session(db, student.id, "trumpet", dt.datetime(2026, 6, 20))
+        after_reactivation = _session(db, student.id, "trumpet", dt.datetime(2026, 7, 2))
+        member = GroupMember(
+            group_id=group.id,
+            user_id=student.id,
+            instrument_id="trumpet",
+            role_in_group="student",
+            status="active",
+            created_at=dt.datetime(2026, 6, 5),
+            active_since=dt.datetime(2026, 7, 1),
+            removed_at=None,
+        )
+        db.add(member)
+        db.commit()
+
+        rows = _group_scoped_sessions(db, group.id)
+
+        assert [row.id for row in rows] == [after_reactivation.id]
+        assert before.id not in {row.id for row in rows}
+        assert removed_interval.id not in {row.id for row in rows}
+    finally:
+        db.close()
+
+
 def test_account_export_contains_profile_and_lifecycle_data():
     with TestClient(app) as client:
         response = client.get("/api/users/me/export.zip", headers={"Authorization": "Bearer dev-user-1"})
@@ -738,6 +805,72 @@ def test_supabase_audio_delete_is_called_before_metadata_is_cleared(monkeypatch)
         assert calls == ["50/%s/recording.webm" % session.id]
         assert session.audio_object_key is None
         assert session.audio_storage_provider is None
+    finally:
+        db.close()
+
+
+def test_account_deletion_local_cleanup_failure_does_not_delete_external_identity(monkeypatch):
+    db = _test_db()
+    external_calls = []
+    try:
+        user = User(id=150, username="delete150", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-150")
+        db.add(user)
+        db.commit()
+        session = _session(db, user.id, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "150/%s/recording.webm" % session.id
+        db.add(session)
+        db.commit()
+
+        def fail_local_audio_cleanup(_session):
+            raise RuntimeError("storage unavailable")
+
+        monkeypatch.setattr("app.api.routes.delete_audio_for_session", fail_local_audio_cleanup)
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda token: external_calls.append(("signout", token)) or True)
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda user_id: external_calls.append(("delete", user_id)) or True)
+
+        with pytest.raises(HTTPException) as exc:
+            delete_my_account(
+                AccountDeletionRequest(confirmation="delete my account"),
+                db,
+                AuthContext(user=user, is_guest=False, access_token="access-token"),
+            )
+
+        assert exc.value.status_code == 503
+        assert external_calls == []
+        assert db.query(User).filter(User.id == user.id).first() is not None
+        job = db.query(AccountDeletionJob).filter(AccountDeletionJob.user_id == user.id).one()
+        assert job.status == "retryable_failure"
+        assert job.stage == "local_cleanup_failed"
+        assert job.safe_error_category == "audio_cleanup_failed"
+    finally:
+        db.close()
+
+
+def test_account_deletion_records_completed_job_and_external_cleanup_last(monkeypatch):
+    db = _test_db()
+    external_calls = []
+    try:
+        user = User(id=151, username="delete151", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-151")
+        db.add(user)
+        db.commit()
+        _session(db, user.id, "trumpet", dt.datetime(2026, 6, 15))
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda token: external_calls.append(("signout", token, db.query(User).filter(User.id == user.id).first() is None)) or True)
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda user_id: external_calls.append(("delete", user_id, db.query(User).filter(User.id == user.id).first() is None)) or True)
+
+        payload = delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=False, access_token="access-token"),
+        )
+
+        assert payload["deleted"] is True
+        assert payload["deletion_status"] == "completed"
+        assert db.query(User).filter(User.id == user.id).first() is None
+        assert external_calls == [("signout", "access-token", True), ("delete", "supabase-151", True)]
+        job = db.query(AccountDeletionJob).filter(AccountDeletionJob.user_id == user.id).one()
+        assert job.status == "completed"
+        assert job.stage == "completed"
     finally:
         db.close()
 

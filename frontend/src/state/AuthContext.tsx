@@ -43,6 +43,51 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 const accountsDisabledMessage = 'Accounts are not enabled in this build yet. You can still use guest practice.';
 
+export function friendlyAuthError(error: unknown) {
+  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const message = raw.trim();
+  const lower = message.toLowerCase();
+  if (!message) return 'Account access is unavailable right now. You can still use guest practice.';
+  if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
+    return 'Email or password did not match. Check your details and try again.';
+  }
+  if (lower.includes('already registered') || lower.includes('already exists') || lower.includes('duplicate')) {
+    return 'An account already exists for that email. Sign in or reset your password.';
+  }
+  if (lower.includes('weak password') || lower.includes('password should')) {
+    return 'Choose a stronger password and try again.';
+  }
+  if (lower.includes('email not confirmed') || lower.includes('confirmation')) {
+    return 'Confirm your email before signing in, then try again.';
+  }
+  if (lower.includes('expired') || lower.includes('invalid refresh token') || lower.includes('session')) {
+    return 'That account link or session expired. Request a new link and try again.';
+  }
+  if (lower.includes('cancel') || lower.includes('popup closed')) {
+    return 'Sign-in was cancelled. You can try again or continue as guest.';
+  }
+  if (lower.includes('network') || lower.includes('fetch') || lower.includes('failed to send')) {
+    return 'Account access could not reach the server. Check your connection and try again.';
+  }
+  if (
+    lower.includes('supabase') ||
+    lower.includes('env') ||
+    lower.includes('api key') ||
+    lower.includes('authapierror') ||
+    lower.includes('http://') ||
+    lower.includes('https://') ||
+    lower.includes('stack') ||
+    message.length > 180
+  ) {
+    return 'Account access is unavailable right now. You can still use guest practice.';
+  }
+  return message;
+}
+
+function throwFriendlyAuthError(error: unknown): never {
+  throw new Error(friendlyAuthError(error));
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -106,66 +151,90 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    await refreshProfile();
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      await refreshProfile();
+    } catch (error) {
+      throwFriendlyAuthError(error);
+    }
   }, [refreshProfile]);
 
   const signUp = useCallback(async (payload: SignUpPayload) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
-    const { error } = await supabase.auth.signUp({
-      email: payload.email,
-      password: payload.password,
-      options: {
-        data: {
-          username: payload.username,
-          display_name: payload.displayName,
-          primary_instrument_id: payload.primaryInstrumentId,
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: payload.email,
+        password: payload.password,
+        options: {
+          data: {
+            username: payload.username,
+            display_name: payload.displayName,
+            primary_instrument_id: payload.primaryInstrumentId,
+          },
         },
-      },
-    });
-    if (error) throw error;
-    await refreshProfile();
+      });
+      if (error) throw error;
+      await refreshProfile();
+    } catch (error) {
+      throwFriendlyAuthError(error);
+    }
   }, [refreshProfile]);
 
   const signInWithApple = useCallback(async () => {
     if (!supabase) throw new Error(accountsDisabledMessage);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'apple',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'apple',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+      if (error) throw error;
+    } catch (error) {
+      throwFriendlyAuthError(error);
+    }
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
     if (!supabase) throw new Error(accountsDisabledMessage);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        scopes: 'openid email profile',
-        queryParams: {
-          prompt: 'select_account',
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          scopes: 'openid email profile',
+          queryParams: {
+            prompt: 'select_account',
+          },
         },
-      },
-    });
-    if (error) throw error;
+      });
+      if (error) throw error;
+    } catch (error) {
+      throwFriendlyAuthError(error);
+    }
   }, []);
 
   const requestPasswordReset = useCallback(async (email: string) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset-password`,
-    });
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      });
+      if (error) throw error;
+    } catch (error) {
+      throwFriendlyAuthError(error);
+    }
   }, []);
 
   const updatePassword = useCallback(async (password: string) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+    } catch (error) {
+      throwFriendlyAuthError(error);
+    }
   }, []);
 
   const signOut = useCallback(async () => {

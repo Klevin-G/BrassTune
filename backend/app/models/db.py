@@ -135,6 +135,8 @@ class GroupMember(Base):
     instrument_id = Column(String, nullable=False)
     role_in_group = Column(String, nullable=False, default="student")
     status = Column(String, nullable=False, default="active")
+    active_since = Column(DateTime, nullable=True)
+    removed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
 
     group = relationship("Group", back_populates="members")
@@ -168,3 +170,21 @@ class Recommendation(Base):
     message = Column(Text, nullable=False)
     suggestions_json = Column(Text, nullable=False, default="[]")
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+
+class AccountDeletionJob(Base):
+    __tablename__ = "account_deletion_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    supabase_user_id = Column(String, nullable=True, index=True)
+    idempotency_key = Column(String, nullable=False, unique=True, index=True)
+    stage = Column(String, nullable=False, default="requested")
+    status = Column(String, nullable=False, default="pending")
+    retry_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime, nullable=True)
+    safe_error_category = Column(String, nullable=True)
+    counts_json = Column(Text, nullable=False, default="{}")
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)

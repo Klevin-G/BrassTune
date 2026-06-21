@@ -1,212 +1,125 @@
 {
-  "schema_version": 2,
-  "generated_at": "2026-06-20T19:39:44Z",
+  "schema_version": 3,
+  "generated_at": "2026-06-21T00:16:54Z",
   "repo": "aryasalem09/BrassTune",
   "branch": "arya/release-readiness-hardening",
-  "remote_head_sha": "26de9a223b64b7bbde3c3b4aacd963c17dad0dbd",
-  "local_worktree_base_sha": "26de9a223b64b7bbde3c3b4aacd963c17dad0dbd",
+  "base_sha_for_local_pass": "eef7f865085859d877703c7652b941aaf6815134",
   "current_sha": null,
-  "main_sha": "0e5eea2d80471af637b80906508564ba32bd9148",
+  "main_sha_at_start": "0e5eea2d80471af637b80906508564ba32bd9148",
   "pr_number": 2,
-  "evidence_state": "local follow-up fixes on top of green PR head 26de9a2; exact-SHA CI and preview are required again after commit/push",
-  "ci_status": {
-    "remote_head_sha": "26de9a223b64b7bbde3c3b4aacd963c17dad0dbd",
-    "verified_at": "2026-06-20T19:29:00Z",
-    "source": "GitHub API using local Git credential helper",
-    "pr_state": "open",
-    "draft": false,
-    "mergeable": true,
-    "mergeable_state": "clean",
-    "checks": [
-      {"name": "Backend / pytest", "status": "completed", "conclusion": "success"},
-      {"name": "Frontend / test-build-audit", "status": "completed", "conclusion": "success"},
-      {"name": "Security / dependency-and-secrets", "status": "completed", "conclusion": "success"},
-      {"name": "Swift / package-and-ios", "status": "completed", "conclusion": "success"}
-    ],
-    "blocker": "CI covered 26de9a2 only at generation time; the local follow-up fixes must be committed, pushed, and validated before merge."
-  },
-  "deployment_status": {
-    "vercel_latest_branch_preview_sha": "26de9a223b64b7bbde3c3b4aacd963c17dad0dbd",
-    "vercel_latest_branch_preview_id": "dpl_2pTQ98czTPCTaB2PeDnz2iEVMBEh",
-    "vercel_production_sha": "0e5eea2d80471af637b80906508564ba32bd9148",
-    "vercel_production_id": "dpl_4grTP7xCDV5rMZq6a4DTkGimpc3y",
-    "render_status": "production health and basic WS respond, but production is stale for current WebSocket hardening",
-    "blocker": "Exact-SHA Vercel deployment is READY but protected browser smoke still needs working preview access; Render deployment access was not available in this shell."
-  },
+  "evidence_state": "local hardening patch is validated but not yet committed/pushed in this evidence snapshot; exact-SHA CI, preview, production deploy, and hosted smoke remain required before merge",
+  "release_decision": "blocked",
+  "blockers": [
+    "latest local changes require commit, push, exact-SHA CI, and exact-SHA preview verification",
+    "production Vercel is stale and hosted smoke did not find current Audio Lab content",
+    "production Render/Vercel must be redeployed and production smoke must pass before merge/release",
+    "native production-equivalent mic/metronome/score/auth parity remains unproven"
+  ],
   "items": [
     {
-      "id": "git-remote-pr-baseline",
-      "gate": "PR state and remote CI",
-      "phase": "pre-merge",
-      "sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "git ls-remote plus authenticated GitHub REST API",
-      "environment": "GitHub remote",
-      "completed_at": "2026-06-20T18:15:00Z",
-      "status": "passed",
-      "result": "PR #2 is open, non-draft, mergeable clean; Backend, Frontend, Security, and Swift check runs completed success on 36b29c8.",
-      "artifact_location": "GitHub API response in Codex terminal output",
-      "blocker": "Does not cover follow-up commits after 36b29c8."
-    },
-    {
-      "id": "backend-tests",
-      "gate": "Backend full suite",
-      "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd backend && .venv/bin/python -m pytest -q",
-      "environment": "local backend .venv Python 3.9.6",
-      "completed_at": "2026-06-20T18:24:00Z",
-      "status": "passed",
-      "result": "60 tests passed after adding ensemble pre-membership report-scope regression coverage.",
-      "artifact_location": "terminal output",
-      "blocker": "Local .venv is below the repo Python 3.11+ floor; remote CI must validate the exact pushed SHA."
-    },
-    {
-      "id": "backend-hardening",
+      "id": "backend-hardening-targeted",
       "gate": "Backend hardening target",
       "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py -q",
-      "environment": "local backend .venv Python 3.9.6",
-      "completed_at": "2026-06-20T18:23:00Z",
+      "command": "cd backend && PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest app/tests/test_hardening.py -q",
       "status": "passed",
-      "result": "44 tests passed, including same-email no-link, WebSocket hardening, and ensemble pre-membership data-scope regression.",
-      "artifact_location": "terminal output",
-      "blocker": null
+      "result": "53 tests passed, including canonical pitch samples, instrument mismatch rejection, account deletion ordering/jobs, membership reactivation windows, WebSocket hardening, roster privacy, and export coverage."
+    },
+    {
+      "id": "backend-full",
+      "gate": "Backend full suite",
+      "phase": "local",
+      "command": "cd backend && PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q",
+      "status": "passed",
+      "result": "69 tests passed."
+    },
+    {
+      "id": "backend-bandit",
+      "gate": "Backend SAST",
+      "phase": "local",
+      "command": "cd backend && .venv/bin/python -m bandit -r app -x app/tests",
+      "status": "passed",
+      "result": "No issues identified."
+    },
+    {
+      "id": "backend-pip-audit-venv",
+      "gate": "Backend dependency audit in local venv",
+      "phase": "local",
+      "command": "cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt",
+      "status": "blocked",
+      "result": "Local .venv is Python 3.9 and cannot resolve FastAPI >=0.138 packages that require newer Python."
+    },
+    {
+      "id": "backend-pip-audit-resolved",
+      "gate": "Backend dependency audit with supported Python resolution",
+      "phase": "local",
+      "command": "cd backend && uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/... && .venv-audit/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/...",
+      "status": "passed",
+      "result": "No known vulnerabilities found."
+    },
+    {
+      "id": "frontend-domain-targeted",
+      "gate": "Frontend pitch-domain target",
+      "phase": "local",
+      "command": "cd frontend && npm test -- --run src/domain/music.test.ts src/domain/localPitchDetection.test.ts",
+      "status": "passed",
+      "result": "2 files and 9 tests passed."
     },
     {
       "id": "frontend-unit",
       "gate": "Frontend unit tests",
       "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd frontend && npm test",
-      "environment": "local macOS",
-      "completed_at": "2026-06-20T18:23:00Z",
+      "command": "cd frontend && npm test",
       "status": "passed",
-      "result": "9 files and 35 tests passed.",
-      "artifact_location": "terminal output",
-      "blocker": null
+      "result": "9 files and 38 tests passed."
     },
     {
       "id": "frontend-build",
       "gate": "Frontend build/typecheck",
       "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd frontend && npm run build",
-      "environment": "local macOS",
-      "completed_at": "2026-06-20T18:23:00Z",
+      "command": "cd frontend && npm run build",
       "status": "passed",
-      "result": "TypeScript and Vite production build passed; main JS 382.62 kB minified.",
-      "artifact_location": "frontend/dist ignored build output",
-      "blocker": null
+      "result": "TypeScript and Vite production build passed with lazy PDF.js worker/chunk output."
+    },
+    {
+      "id": "frontend-audit",
+      "gate": "Frontend npm audit",
+      "phase": "local",
+      "command": "cd frontend && npm audit --omit=dev",
+      "status": "passed",
+      "result": "0 vulnerabilities."
     },
     {
       "id": "frontend-e2e-local",
       "gate": "Local browser journeys and accessibility",
       "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd frontend && CI=true npm run e2e:local",
-      "environment": "local Playwright with local backend/web servers",
-      "completed_at": "2026-06-20T18:25:00Z",
+      "command": "cd frontend && CI=true npm run e2e:local",
       "status": "passed",
-      "result": "75 tests passed across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit.",
-      "artifact_location": "terminal output",
-      "blocker": null
+      "result": "75 tests passed across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit."
     },
     {
-      "id": "hosted-smoke-spec-local",
-      "gate": "Hosted-smoke spec local sanity",
+      "id": "swift-core",
+      "gate": "Swift package tests",
       "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd frontend && npx playwright test e2e/hosted-smoke.spec.ts --project=chromium",
-      "environment": "local Playwright",
-      "completed_at": "2026-06-20T18:26:00Z",
+      "command": "cd swift/BrassTuneCore && swift test",
       "status": "passed",
-      "result": "1 local route test passed; 6 hosted-only checks skipped as expected without hosted env variables.",
-      "artifact_location": "terminal output",
-      "blocker": null
+      "result": "3 Swift tests passed."
     },
     {
-      "id": "device-simulation",
-      "gate": "Device simulation screenshots",
+      "id": "hygiene",
+      "gate": "Diff and secret hygiene",
       "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd frontend && npm run simulate:devices",
-      "environment": "local Playwright device simulation",
-      "completed_at": "2026-06-20T18:29:00Z",
+      "command": "git diff --check; tracked high-confidence secret-pattern scan",
       "status": "passed",
-      "result": "Device simulation passed after UI fixes and refreshed tracked screenshots/report.",
-      "artifact_location": "docs/device-simulation-report.md and docs/assets/device-simulation/",
-      "blocker": null
-    },
-    {
-      "id": "frontend-audit",
-      "gate": "Frontend dependency audit",
-      "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd frontend && npm audit --omit=dev",
-      "environment": "local npm",
-      "completed_at": "2026-06-20T18:17:00Z",
-      "status": "passed",
-      "result": "0 vulnerabilities.",
-      "artifact_location": "terminal output",
-      "blocker": null
-    },
-    {
-      "id": "backend-security",
-      "gate": "Backend dependency and SAST checks",
-      "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": ".venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt; uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/...; .venv-audit/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/...; .venv/bin/python -m bandit -r app -x app/tests",
-      "environment": "local Python 3.9.6 plus Python 3.12.13 audit resolution",
-      "completed_at": "2026-06-20T18:17:00Z",
-      "status": "passed-with-blocker",
-      "result": "Exact .venv pip-audit is blocked by Python 3.9 dependency-floor mismatch; Python 3.12 uv-resolved audit found no known vulnerabilities; Bandit found no issues.",
-      "artifact_location": "terminal output",
-      "blocker": "Security workflow must pass on the exact pushed SHA."
-    },
-    {
-      "id": "native-simulator",
-      "gate": "Swift package and iOS simulator",
-      "phase": "local",
-      "sha": null,
-      "worktree_base_sha": "36b29c8cff85f3364648763fd36d6472fb1ef8a3",
-      "command_or_source": "cd swift/BrassTuneCore && swift test; XcodeBuildMCP test_sim for BrassTuneApp and BrassTuneAppUISmoke",
-      "environment": "Xcode 26.2, iPhone 16e simulator iOS 26.2",
-      "completed_at": "2026-06-20T18:26:00Z",
-      "status": "passed",
-      "result": "Swift package 3 tests passed; app unit tests 7 passed; UI smoke 1 passed.",
-      "artifact_location": "XcodeBuildMCP log and xcresult paths",
-      "blocker": "Simulator-only; native audio/score/metronome parity and physical-device evidence remain incomplete."
+      "result": "Whitespace check passed and tracked secret-pattern scan returned no matches."
     },
     {
       "id": "hosted-production-smoke",
       "gate": "Production smoke",
       "phase": "hosted",
-      "sha": "0e5eea2d80471af637b80906508564ba32bd9148",
-      "deployment_commit": "Render production commit not available from this shell",
-      "command_or_source": "BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted",
-      "environment": "hosted production",
-      "completed_at": "2026-06-20T18:20:00Z",
+      "command": "cd frontend && BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted",
       "status": "failed",
-      "result": "Root, Render health, CORS, and basic WS response passed; query-token WS rejection returned old behavior and bad-Origin probe timed out.",
-      "artifact_location": "deployment scout terminal output",
-      "blocker": "Production Render is stale for current WebSocket hardening; merge/release must not proceed until deploy access and hosted smoke pass."
+      "result": "22 passed, 8 failed, 5 skipped. Failures show stale production web content missing `Cloud sync stream` and browser fetch failures in Firefox/WebKit/mobile-WebKit.",
+      "release_impact": "merge and production release blocked"
     }
-  ],
-  "remaining_blockers": [
-    "Commit and push local fixes, then rerun exact-SHA CI on the new head.",
-    "Create/verify an exact-SHA Vercel preview for the new head.",
-    "Deploy Render backend to the final backend commit and rerun hosted smoke.",
-    "Durable account deletion tombstone/outbox/retry workflow remains incomplete.",
-    "Native audio, native metronome, native Score Practice, provider lifecycle, and physical-device evidence remain incomplete."
   ]
 }

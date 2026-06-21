@@ -792,9 +792,12 @@
     min-height: 280px;
   }
 
-  .score-preview-frame iframe,
   .score-preview-frame img {
     min-height: 280px;
+  }
+
+  .score-preview-frame canvas {
+    max-width: none;
   }
 
   .note-display {

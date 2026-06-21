@@ -70,6 +70,8 @@ def group_member_to_dict(member, include_identity: bool = True) -> Dict[str, Any
         "instrument_id": member.instrument_id,
         "role_in_group": getattr(member, "role_in_group", "student"),
         "status": getattr(member, "status", "active"),
+        "active_since": iso(getattr(member, "active_since", None)),
+        "removed_at": iso(getattr(member, "removed_at", None)),
         "created_at": iso(member.created_at),
     }
     if include_identity:

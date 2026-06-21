@@ -27,6 +27,15 @@ describe('local pitch detection', () => {
     expect(frame.detector_source).toBe('browser_local_pitch');
   });
 
+  it('uses the selected instrument range for browser-local frames', () => {
+    const frame = pitchFrameFromPcm(sineSamples(40, 48000, 1), 48000, 'tuba', 440, 120);
+
+    expect(frame.frequency_hz ?? 0).toBeGreaterThan(30);
+    expect(frame.frequency_hz ?? 0).toBeLessThan(50);
+    expect(frame.is_valid_for_recording).toBe(true);
+    expect(frame.detector_source).toBe('browser_local_pitch');
+  });
+
   it('keeps cent deviation at 44.1 kHz and 48 kHz sample rates', () => {
     const sharpA = midiToFrequency(69 + 10 / 100, 440);
     const frame441 = pitchFrameFromPcm(sineSamples(sharpA, 44100), 44100, 'trombone', 440, 0);

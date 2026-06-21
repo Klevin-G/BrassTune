@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-06-21T00:13:54Z",
+  "branch": "arya/release-readiness-hardening",
+  "base_sha": "eef7f865085859d877703c7652b941aaf6815134",
+  "controls": [
+    {
+      "platform": "web",
+      "route_or_screen": "/practice",
+      "name": "Start recording",
+      "expected_action": "Start guest/demo or live microphone practice session and audio capture.",
+      "implementation_file": "frontend/src/pages/PracticePage.tsx",
+      "success_assertion": "Recording state starts and timer advances.",
+      "error_assertion": "Mic denial or start failure shows a user-facing fallback and closes any opened mic stream.",
+      "automated_test": "local e2e plus frontend build",
+      "status": "pass"
+    },
+    {
+      "platform": "web",
+      "route_or_screen": "/metronome",
+      "name": "Metronome start, stop, tempo, accent, ramp",
+      "expected_action": "Schedule Web Audio ticks and live-update running settings.",
+      "implementation_file": "frontend/src/pages/MetronomePage.tsx",
+      "success_assertion": "Running status and queue stats update.",
+      "error_assertion": "Unsupported browser shows a Web Audio support message.",
+      "automated_test": "frontend build",
+      "status": "pass"
+    },
+    {
+      "platform": "web",
+      "route_or_screen": "/practice/score",
+      "name": "PDF/image/camera import and reader toolbar",
+      "expected_action": "Validate local file contents, render PDFs with PDF.js canvas, preview images, and persist confirmed pages locally.",
+      "implementation_file": "frontend/src/pages/ScorePracticePage.tsx",
+      "success_assertion": "Selected score page renders and toolbar changes reader state.",
+      "error_assertion": "Unsupported, oversized, or render-failed files show status without upload.",
+      "automated_test": "frontend build and score domain tests",
+      "status": "pass"
+    },
+    {
+      "platform": "web",
+      "route_or_screen": "/auth/*",
+      "name": "Email/password and provider auth actions",
+      "expected_action": "Use Supabase only when configured and show guest-first disabled state otherwise.",
+      "implementation_file": "frontend/src/state/AuthContext.tsx",
+      "success_assertion": "Configured flows call the provider.",
+      "error_assertion": "Raw Supabase/provider/env/URL/stack messages are mapped to friendly text.",
+      "automated_test": "frontend build; live provider tests externally gated",
+      "status": "partial"
+    },
+    {
+      "platform": "backend",
+      "route_or_screen": "/api/sessions/{session_id}/samples",
+      "name": "Save pitch frame",
+      "expected_action": "Canonicalize note labels, cents, status, and instrument from trusted server context.",
+      "implementation_file": "backend/app/services/session_service.py",
+      "success_assertion": "Forged client labels are overwritten.",
+      "error_assertion": "Instrument mismatch is rejected.",
+      "automated_test": "backend/app/tests/test_hardening.py",
+      "status": "pass"
+    },
+    {
+      "platform": "backend",
+      "route_or_screen": "/api/users/me",
+      "name": "Delete account",
+      "expected_action": "Clean local data before external identity deletion and record durable retry state.",
+      "implementation_file": "backend/app/api/routes.py",
+      "success_assertion": "Completed deletion job is recorded.",
+      "error_assertion": "Local cleanup failure queues retry and does not call external identity deletion.",
+      "automated_test": "backend/app/tests/test_hardening.py",
+      "status": "pass"
+    },
+    {
+      "platform": "backend",
+      "route_or_screen": "/api/ensemble/*",
+      "name": "Teacher/student ensemble actions",
+      "expected_action": "Enforce manager roles and active membership windows.",
+      "implementation_file": "backend/app/api/routes.py",
+      "success_assertion": "Active-member summaries include only current membership window sessions.",
+      "error_assertion": "Forbidden student access fails server-side.",
+      "automated_test": "backend/app/tests/test_hardening.py",
+      "status": "pass"
+    },
+    {
+      "platform": "hosted",
+      "route_or_screen": "production",
+      "name": "Hosted production smoke",
+      "expected_action": "Verify current Vercel and Render production behavior after deploy.",
+      "implementation_file": "scripts/hosted-smoke.mjs",
+      "success_assertion": "Root, health, CORS, WebSocket hardening, browser journeys pass.",
+      "error_assertion": "Stale Render/Vercel behavior blocks merge/release.",
+      "automated_test": "npm run smoke:hosted",
+      "status": "red_gate"
+    },
+    {
+      "platform": "native",
+      "route_or_screen": "SwiftUI app",
+      "name": "Native practice and supporting tabs",
+      "expected_action": "Launch and navigate simulator app without dead primary controls.",
+      "implementation_file": "swift/BrassTuneApp",
+      "success_assertion": "Simulator build/unit/UI smoke pass.",
+      "error_assertion": "Real native mic, score, metronome, auth parity remains unproven.",
+      "automated_test": "XcodeBuildMCP simulator tests",
+      "status": "partial"
+    }
+  ]
+}

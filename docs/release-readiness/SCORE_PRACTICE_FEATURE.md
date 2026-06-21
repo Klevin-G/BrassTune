@@ -1,6 +1,6 @@
 # Score Practice Feature
 
-Updated: 2026-06-20 UTC.
+Updated: 2026-06-21 UTC.
 
 ## Implemented Web Surface
 
@@ -15,22 +15,21 @@ Updated: 2026-06-20 UTC.
 - Raw SVG is rejected rather than rendered.
 - Camera capture uses `getUserMedia` with rear-camera preference where available.
 - Imported pages show preview, quality messages, page list, zoom, rotation, focus preview, remove, and confirm controls.
+- PDFs render through lazy-loaded PDF.js into a local canvas with previous/next page controls and page count.
 - Confirmed pages are saved locally in IndexedDB with source metadata and blob.
 - Source pages stay local by default.
 
 ## Automated Evidence
 
 - `frontend/src/domain/scorePractice.test.ts` covers accepted PDF/image formats, SVG rejection, and low-resolution/non-music review status.
-- `cd frontend && npm test` passed: `35` tests.
+- `cd frontend && npm test` passed: `38` tests.
 - `cd frontend && npm run build` passed.
-- Full local E2E and device simulation passed.
-- Rendered browser spot check verified Scan with Camera, Choose from Photos, Choose Files, local-default copy, and raw-SVG rejection copy with no console errors.
+- Full local E2E passed: `75` tests.
+- Rendered browser route coverage verified Scan with Camera, Choose from Photos, Choose Files, local-default copy, and raw-SVG rejection copy.
 
 ## Deliberately Not Claimed
 
-- Full PDF.js rendering.
 - Native VisionKit document scan.
-- EXIF stripping and magic-byte validation.
 - Perspective correction, crop, retake, page reorder, thumbnails, and browser Fullscreen API integration.
 - OCR metadata extraction.
 - Optical music recognition.
