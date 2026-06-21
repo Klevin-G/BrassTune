@@ -10,7 +10,8 @@
   "native_repository_completion_gate": "passed",
   "native_completion_branch": "arya/final-swift-completion",
   "native_completion_base_sha": "1c998d5480f52b5fcf0e2c143f5078893caead66",
-  "native_completion_branch_sha": "6b8110b17f06cc0796e920a75c583aa48ae4fa7e",
+  "native_completion_implementation_sha": "8bdf8ebf56f23b0b49a6383e886de4f49700d337",
+  "native_completion_branch_sha": "TBD_FINAL_NATIVE_BRANCH_HEAD",
   "native_completion_merge_sha": "TBD_NATIVE_MERGE_SHA",
   "native_simulator": {
     "model": "iPhone 17",

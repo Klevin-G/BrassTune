@@ -4,7 +4,8 @@ Updated: 2026-06-21T06:30:28Z
 
 Branch: `arya/final-swift-completion`
 Base main SHA: `1c998d5480f52b5fcf0e2c143f5078893caead66`
-Swift completion branch SHA: `6b8110b17f06cc0796e920a75c583aa48ae4fa7e`
+Swift completion implementation SHA: `8bdf8ebf56f23b0b49a6383e886de4f49700d337`
+Swift completion branch head after evidence update: `TBD_FINAL_NATIVE_BRANCH_HEAD`
 Swift merge SHA: `TBD_NATIVE_MERGE_SHA`
 
 ## Scope
