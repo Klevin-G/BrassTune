@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   dependency-and-secrets:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_SECURITY_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Frontend audit
         working-directory: frontend
         run: npm ci && npm audit --omit=dev

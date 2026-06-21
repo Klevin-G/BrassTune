@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 10
     env:
       BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brass-tune.vercel.app' }}

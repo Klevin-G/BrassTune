@@ -23,7 +23,7 @@ on:
 
 jobs:
   test-build-audit:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_FRONTEND_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 75
     defaults:
       run:
@@ -37,7 +37,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install dependencies
         run: npm ci
       - name: Install backend dependencies for browser journeys
