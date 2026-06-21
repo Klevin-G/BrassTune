@@ -451,11 +451,15 @@ private struct BTLiquidGlassModifier: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *), isEnabled {
+        #if compiler(>=6.2)
+            if #available(iOS 26.0, *), isEnabled {
+                content
+                    .glassEffect(.regular.tint(tint).interactive(), in: .rect(cornerRadius: cornerRadius))
+            } else {
+                content
+            }
+        #else
             content
-                .glassEffect(.regular.tint(tint).interactive(), in: .rect(cornerRadius: cornerRadius))
-        } else {
-            content
-        }
+        #endif
     }
 }

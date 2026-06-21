@@ -15,7 +15,7 @@ Status: repository-actionable native design parity is implemented for the curren
 
 - `ThemeManager`, `BTThemeHost`, and `BTThemeSelector` provide System, Brass Night, Brass Day, Liquid Brass Clear, Liquid Brass Tinted, and High Contrast.
 - `BTBentoGrid`, `BTBentoCard`, `BTHeroCard`, `BTMetricCard`, `BTQuickActionCard`, `BTStatusCard`, `BTChartCard`, `BTGlassToolbar`, `BTGlassCapsule`, and `BTAdaptiveSection` provide native Bento-style layout primitives.
-- `BTLiquidGlassModifier` uses iOS 26 `glassEffect` where available and falls back to solid/material-like surfaces when transparency or contrast settings require it.
+- `BTLiquidGlassModifier` uses iOS 26 `glassEffect` when compiled with an iOS 26-capable SDK, and falls back to solid/material-like surfaces on older SDKs or when transparency/contrast settings require it.
 
 ## Current Native Behavior
 

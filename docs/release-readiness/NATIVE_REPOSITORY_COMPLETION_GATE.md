@@ -18,7 +18,7 @@ This gate covers repository-actionable native engineering work after the web pro
 |---|---|
 | Auth-first launch | Implemented `AppLaunchState`, session restoration, `AuthGatewayView`, Continue as guest, sign-out to gateway, email/password, password reset, and Apple token exchange surfaces. Provider controls hide when account config is unavailable. |
 | Shared themes | Added generated token source `GeneratedThemeTokens.swift`, `ThemeManager`, `BTThemeHost`, six theme options, Settings/gateway selectors, system theme handling, and high-contrast resolution through `colorSchemeContrast`. |
-| Liquid Glass | Added `BTLiquidGlassModifier`, `BTGlassToolbar`, `BTGlassCapsule`, and glass-aware card surfaces with iOS 26 `glassEffect` plus reduced-transparency/solid fallbacks. |
+| Liquid Glass | Added `BTLiquidGlassModifier`, `BTGlassToolbar`, `BTGlassCapsule`, and glass-aware card surfaces with iOS 26 `glassEffect` when compiled with an iOS 26-capable SDK, plus reduced-transparency/solid fallbacks for older SDKs and accessibility modes. |
 | Bento layout | Added reusable Bento/card primitives and moved Home/Practice/Score/Sessions/More into stable card layouts. |
 | Navigation overlap | Compact iPhone uses exactly five tabs: Home, Practice, Score, Sessions, More. iPad uses `NavigationSplitView`. Screenshot evidence shows no visible tab/content overlap on Home. |
 | Native audio | Normal recording now configures `AVAudioSession`, starts `AVAudioEngine`, installs an input tap, estimates pitch from PCM buffers, writes a local `.caf`, and keeps deterministic pitch generation behind the UI-test injection path. |

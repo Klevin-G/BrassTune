@@ -27,7 +27,7 @@ Phase 1 web/backend production certification is complete for the guest-first bet
 
 - Native auth-first launch, session restoration, Continue as guest, sign-out to gateway, email/password, reset, and Apple token exchange surfaces.
 - Shared generated native theme tokens, six themes, gateway/Settings selectors, and high-contrast/system handling.
-- Liquid Glass wrappers with iOS 26 `glassEffect` and reduced-transparency/solid fallbacks.
+- Liquid Glass wrappers with iOS 26 `glassEffect` when built with an iOS 26-capable SDK, plus reduced-transparency/solid fallbacks.
 - Five-tab iPhone shell plus iPad `NavigationSplitView`.
 - Normal native recording path through `AVAudioSession` and `AVAudioEngine`; deterministic pitch generation remains UI-test-only.
 - Local recording playback, text export, deletion, and persistent session metadata.
