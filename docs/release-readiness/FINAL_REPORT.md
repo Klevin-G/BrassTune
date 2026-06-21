@@ -1,18 +1,16 @@
 # BrassTune Final Web-First Report
 
-Updated: 2026-06-21T05:24:54Z
-Branch: `arya/final-web-completion`
-Base SHA: `a8ce933a8ccfdac75b4244fe1c1bb2630655d14b`
+Updated: 2026-06-21T05:51:09Z
 
 ## Current State
 
-Phase 1 web/backend local completion work is implemented and locally validated. Production certification is pending.
+Phase 1 web/backend production certification is complete for the guest-first beta release. The final web main SHA is `6acb91d54a734e722ed937590aecb51dec53543c`.
 
-This report does not certify production completion and does not authorize Swift implementation. The required gate line is absent from `WEB_PRODUCTION_COMPLETION_GATE.md` until this branch is merged, deployed, and exact-SHA smoked.
+`WEB_PRODUCTION_COMPLETION_GATE.md` contains the required pass line, so Phase 2 Swift work may begin from `main` after this evidence commit and tag are published.
 
-## Implemented In This Branch
+## Implemented
 
-- `/` is now the authentication gateway; `/home` is the dashboard.
+- `/` is the authentication gateway; `/home` is the dashboard.
 - Unsigned private deep links redirect to `/` with a safe `next` value; Continue as guest enters the intended route or `/home`.
 - Returning signed-in users are held in a neutral restoration state before private routes render.
 - Account-disabled builds show guest-first copy and hide account/provider controls unless configured.
@@ -21,13 +19,9 @@ This report does not certify production completion and does not authorize Swift 
 - Visible dead/no-op controls were fixed across heat maps, microphone monitoring, guest session delete, export/copy status, ensemble forms, and score file inputs.
 - Vercel security headers and API security headers were added.
 - Backend JSON body limits, audio upload format validation, WebSocket deployed-origin behavior, unauthenticated socket limits, and production smoke defaults were hardened.
-- Device simulation was updated for the auth-gateway route model.
+- Device simulation and hosted smoke were updated for the auth-gateway route model.
 
 ## Evidence
-
-See `TEST_MATRIX.md` and `release-evidence.json`.
-
-Highlights:
 
 - Backend: `77 passed`.
 - Backend hardening: `61 passed`.
@@ -38,20 +32,22 @@ Highlights:
 - `npm audit --omit=dev`: 0 vulnerabilities.
 - Bandit: no issues.
 - Clean `uv` Python 3.12 `pip-audit`: no known vulnerabilities.
-- Read-only production smoke of the currently deployed app: passed, but it is not evidence that this branch is deployed.
+- PR #3 CI: Backend, Frontend, Security, Vercel passed.
+- PR #4 CI: Frontend, Security, Vercel passed.
+- Final production `npm run smoke:hosted`: passed.
+- Final strict hosted Playwright: `7 passed`.
 
-## Remaining Before Web Production Gate
+## Deployments
 
-- Commit and push the branch.
-- Open PR and wait for required CI.
-- Verify exact PR head before merge.
-- Merge normally to `main`.
-- Verify Vercel and Render serve the merge SHA.
-- Run strict hosted smoke and rollback/hotfix if needed.
-- Record deployment IDs, rollback target, release tag, and GitHub prerelease URL.
+- Vercel production deployment: `dpl_6pScePaqbs8fYYD44wanhdgZkAPN`.
+- Vercel production SHA: `6acb91d54a734e722ed937590aecb51dec53543c`.
+- Render deployment ID: not exposed by available tooling; backend production was verified live by new security headers and hosted smoke.
+- Rollback target: Vercel `dpl_2T68p4MQo8VbbAst4f7gnbHKitnP`.
+- Release tag: `web-beta-2026.06.21.1`.
 
 ## Still Gated
 
 - Live Supabase/Google/Apple account lifecycle without owner credentials.
-- SwiftUI/native source implementation until `WEB PRODUCTION COMPLETION GATE: PASSED`.
-- Apple signing/TestFlight/App Store submission and physical-device brass validation.
+- Apple signing/TestFlight/App Store submission.
+- Physical-device brass/microphone validation.
+- Native SwiftUI repository completion, now allowed to start as Phase 2 but not yet complete.

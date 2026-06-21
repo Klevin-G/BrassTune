@@ -1,14 +1,22 @@
 {
-  "schema_version": 5,
-  "generated_at": "2026-06-21T05:24:54Z",
+  "schema_version": 6,
+  "generated_at": "2026-06-21T05:51:09Z",
   "repo": "aryasalem09/BrassTune",
-  "branch": "arya/final-web-completion",
-  "base_sha": "a8ce933a8ccfdac75b4244fe1c1bb2630655d14b",
-  "phase": "phase_1_web_local_completion",
-  "evidence_state": "local web/backend checks passed on the completion branch; production completion is pending push, PR, merge, deploy, exact-SHA smoke, beta tag, and GitHub prerelease",
-  "production_auth_mode": "disabled_expected_for_guest_first_release",
-  "web_production_completion_gate": "pending",
-  "native_phase_allowed": false,
+  "phase": "phase_1_web_production_completion",
+  "production_auth_mode": "disabled",
+  "web_version": "0.1.0-beta.1",
+  "web_production_completion_gate": "passed",
+  "native_phase_allowed": true,
+  "web_completion_branch_sha": "a642508ab638233e1fe297653147b8ccd3ceaf54",
+  "web_completion_merge_sha": "b956cf5bc6914fcb07fc6a18c83eac75c1d70446",
+  "hosted_smoke_hotfix_sha": "d0cce2614710e17b955ae8f81815141ea6281df5",
+  "final_web_main_sha": "6acb91d54a734e722ed937590aecb51dec53543c",
+  "vercel_deployment_id": "dpl_6pScePaqbs8fYYD44wanhdgZkAPN",
+  "vercel_previous_production_deployment_id": "dpl_2T68p4MQo8VbbAst4f7gnbHKitnP",
+  "render_deployment_id": "not_exposed_by_available_tooling",
+  "render_runtime_request_id": "3d161b7d-d73f-4d77",
+  "release_tag": "web-beta-2026.06.21.1",
+  "github_release_url": "https://github.com/aryasalem09/BrassTune/releases/tag/web-beta-2026.06.21.1",
   "items": [
     {
       "id": "backend-full",
@@ -22,7 +30,7 @@
       "gate": "Backend hardening regression",
       "command": "cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py",
       "status": "passed",
-      "result": "61 tests passed, including security headers, WebSocket origin/auth hardening, audio upload spoof rejection, JSON body limits, and account/ensemble regressions"
+      "result": "61 tests passed"
     },
     {
       "id": "frontend-unit",
@@ -50,7 +58,7 @@
       "gate": "Responsive device simulation",
       "command": "cd frontend && npm run simulate:devices",
       "status": "passed",
-      "result": "All configured Chromium viewport simulations passed; report written to docs/device-simulation-report.md"
+      "result": "All configured Chromium viewport simulations passed"
     },
     {
       "id": "frontend-audit",
@@ -81,32 +89,45 @@
       "result": "No known vulnerabilities found"
     },
     {
+      "id": "pr-3-ci",
+      "gate": "PR #3 exact-head CI",
+      "command": "GitHub Actions and Vercel status for a642508ab638233e1fe297653147b8ccd3ceaf54",
+      "status": "passed",
+      "result": "Backend, Frontend, Security, and Vercel passed"
+    },
+    {
+      "id": "pr-4-ci",
+      "gate": "PR #4 hotfix CI",
+      "command": "GitHub Actions and Vercel status for d0cce2614710e17b955ae8f81815141ea6281df5",
+      "status": "passed",
+      "result": "Frontend, Security, and Vercel passed"
+    },
+    {
+      "id": "production-smoke",
+      "gate": "Final hosted smoke",
+      "command": "npm run smoke:hosted",
+      "status": "passed",
+      "result": "7/7 checks passed against production"
+    },
+    {
+      "id": "strict-hosted-playwright",
+      "gate": "Strict hosted browser smoke",
+      "command": "cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted -- --project=chromium",
+      "status": "passed",
+      "result": "7 passed"
+    },
+    {
       "id": "diff-check",
       "gate": "Diff hygiene",
       "command": "git diff --check",
       "status": "passed",
       "result": "No whitespace errors"
-    },
-    {
-      "id": "hosted-production-smoke-current-deploy",
-      "gate": "Read-only production smoke of currently deployed main",
-      "command": "BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted",
-      "status": "passed_current_deploy_only",
-      "result": "7/7 checks passed for the currently deployed production app before this branch was merged/deployed"
     }
   ],
-  "pending_production_fields": {
-    "web_completion_branch_sha": "pending_commit",
-    "web_merge_sha": "pending_merge",
-    "vercel_deployment_id": "pending_deploy",
-    "render_deployment_id": "pending_deploy",
-    "rollback_target": "pending_capture",
-    "release_tag": "pending",
-    "github_release_url": "pending"
-  },
-  "blockers": [
-    "This branch is not merged or deployed yet",
+  "remaining_external_gates": [
     "Live Supabase/Google/Apple provider lifecycle requires owner credentials and disposable users",
-    "Native Swift phase is blocked until WEB PRODUCTION COMPLETION GATE: PASSED"
-  ]
+    "Apple signing/TestFlight/App Store submission remains external",
+    "Physical-device microphone/brass validation remains hardware-gated"
+  ],
+  "gate_line": "WEB PRODUCTION COMPLETION GATE: PASSED"
 }
