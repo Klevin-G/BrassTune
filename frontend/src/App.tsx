@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
+import { useAuth } from './state/AuthContext';
+import { AuthGatewayPage } from './pages/AuthGatewayPage';
 import { AuthPage } from './pages/AuthPage';
 
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })));
@@ -18,24 +20,42 @@ const SessionReviewPage = lazy(() => import('./pages/SessionReviewPage').then((m
 const SessionsPage = lazy(() => import('./pages/SessionsPage').then((module) => ({ default: module.SessionsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })));
 
+function RequireAppAccess({ children }: { children: JSX.Element }) {
+  const auth = useAuth();
+  const location = useLocation();
+  if (auth.loading) {
+    return <div className="route-loading" role="status">Restoring session</div>;
+  }
+  if (auth.isSignedIn || auth.guestMode) {
+    return children;
+  }
+  const next = encodeURIComponent(`${location.pathname}${location.search}`);
+  return <Navigate to={`/?next=${next}`} replace />;
+}
+
+function appRoute(element: JSX.Element) {
+  return <RequireAppAccess>{element}</RequireAppAccess>;
+}
+
 export default function App() {
   return (
     <AppShell>
       <Suspense fallback={<div className="route-loading" role="status">Loading</div>}>
         <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/practice" element={<PracticePage />} />
-          <Route path="/practice/score" element={<ScorePracticePage />} />
-          <Route path="/metronome" element={<MetronomePage />} />
-          <Route path="/sessions" element={<SessionsPage />} />
-          <Route path="/sessions/:id" element={<SessionReviewPage />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/progress" element={<ProgressPage />} />
-          <Route path="/coach" element={<CoachPage />} />
-          <Route path="/more" element={<MorePage />} />
-          <Route path="/ensemble" element={<EnsemblePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/settings/audio-lab" element={<AudioLabPage />} />
+          <Route path="/" element={<AuthGatewayPage />} />
+          <Route path="/home" element={appRoute(<DashboardPage />)} />
+          <Route path="/practice" element={appRoute(<PracticePage />)} />
+          <Route path="/practice/score" element={appRoute(<ScorePracticePage />)} />
+          <Route path="/metronome" element={appRoute(<MetronomePage />)} />
+          <Route path="/sessions" element={appRoute(<SessionsPage />)} />
+          <Route path="/sessions/:id" element={appRoute(<SessionReviewPage />)} />
+          <Route path="/analytics" element={appRoute(<AnalyticsPage />)} />
+          <Route path="/progress" element={appRoute(<ProgressPage />)} />
+          <Route path="/coach" element={appRoute(<CoachPage />)} />
+          <Route path="/more" element={appRoute(<MorePage />)} />
+          <Route path="/ensemble" element={appRoute(<EnsemblePage />)} />
+          <Route path="/settings" element={appRoute(<SettingsPage />)} />
+          <Route path="/settings/audio-lab" element={appRoute(<AudioLabPage />)} />
           <Route path="/privacy" element={<LegalPage kind="privacy" />} />
           <Route path="/terms" element={<LegalPage kind="terms" />} />
           <Route path="/support" element={<LegalPage kind="support" />} />

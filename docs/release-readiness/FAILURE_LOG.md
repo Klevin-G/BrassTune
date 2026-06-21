@@ -1,3 +1,15 @@
+# Current Branch Notice
+
+Updated: 2026-06-21T05:24:54Z for `arya/final-web-completion`.
+
+Current branch failures encountered and resolved in this pass:
+
+- Local E2E theme persistence failed because the test harness cleared `brasstune.theme` on every navigation; fixed by preserving the theme key in the test cleanup script.
+- Device simulation hung on stale private-route/auth assumptions and an optional analytics heat-map click; fixed by seeding guest access, treating `/` as the auth gateway, using `/home` for dashboard simulation, and skipping optional heat-map clicks when no selectable data exists.
+- Backend JSON-body limit middleware initially broke FastAPI request parsing; fixed by moving the JSON cap to pure ASGI middleware with safe body replay.
+
+Older entries below are historical unless repeated in `release-evidence.json`.
+
 # Failure Log
 
 Date: 2026-06-18

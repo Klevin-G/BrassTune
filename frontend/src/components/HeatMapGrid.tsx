@@ -23,6 +23,25 @@ export function HeatMapGrid({
       {sorted.length === 0 && <p className="empty-state">No heat map data yet.</p>}
       {sorted.map((row) => {
         const detail = row.has_data === false ? 'no recorded attempts' : `${row.avg_signed_cents.toFixed(1)} cents signed, ${row.avg_abs_cents.toFixed(1)} cents average absolute, ${Math.round(row.in_tune_percentage)} percent in tune, ${Math.round(row.duration_seconds)} seconds, ${row.recommendation_summary ?? row.severity}`;
+        const content = (
+          <>
+            <strong>{row.note_label}</strong>
+            <span>{row.has_data === false ? 'no data' : `${Math.round(row.avg_signed_cents)}c`}</span>
+          </>
+        );
+        if (!onSelect) {
+          return (
+            <div
+              className={`heat-cell readonly ${row.severity_color ?? 'insufficient'}`}
+              key={row.note_label}
+              title={`${row.note_label}: ${detail}`}
+              aria-label={`${row.note_label}: ${detail}`}
+              role="img"
+            >
+              {content}
+            </div>
+          );
+        }
         return (
           <button
             className={`heat-cell ${row.severity_color ?? 'insufficient'} ${selectedNote === row.note_label ? 'selected' : ''}`}
@@ -33,8 +52,7 @@ export function HeatMapGrid({
             onClick={() => onSelect?.(row)}
             type="button"
           >
-            <strong>{row.note_label}</strong>
-            <span>{row.has_data === false ? 'no data' : `${Math.round(row.avg_signed_cents)}c`}</span>
+            {content}
           </button>
         );
       })}

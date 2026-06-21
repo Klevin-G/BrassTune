@@ -245,6 +245,12 @@ export function clearGuestSessions() {
   if (typeof localStorage !== 'undefined') localStorage.removeItem(GUEST_SESSIONS_KEY);
 }
 
+export function deleteGuestSession(id: string | number) {
+  const numeric = Number(id);
+  const remaining = readStored().filter((session) => session.id !== numeric);
+  writeStored(remaining);
+}
+
 export function guestSessionsExport() {
   return JSON.stringify({ exported_at: new Date().toISOString(), sessions: readStored() }, null, 2);
 }

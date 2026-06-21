@@ -10,6 +10,7 @@ export function SessionControls({
   onStart,
   onStop,
   onMicStart,
+  onMicStop,
 }: {
   recording: boolean;
   elapsedSeconds: number;
@@ -20,6 +21,7 @@ export function SessionControls({
   onStart: () => void;
   onStop: () => void;
   onMicStart: () => void;
+  onMicStop?: () => void;
 }) {
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = String(elapsedSeconds % 60).padStart(2, '0');
@@ -32,9 +34,9 @@ export function SessionControls({
         <span>{actionText}</span>
       </button>
       {!demoMode && (
-        <button className="ghost-button icon-first-action" aria-label={micActive ? 'Microphone is listening' : 'Enable microphone'} onClick={onMicStart} disabled={micActive} type="button">
+        <button className="ghost-button icon-first-action" aria-label={micActive ? 'Stop microphone monitoring' : 'Enable microphone'} onClick={micActive ? onMicStop : onMicStart} disabled={micActive && !onMicStop} type="button">
           <Mic size={18} />
-          <span>{microphoneLabel ?? (micActive ? 'Listening' : 'Mic')}</span>
+          <span>{microphoneLabel ?? (micActive ? 'Stop mic' : 'Mic')}</span>
         </button>
       )}
       <div className="timer-chip" role="timer" aria-live="polite" aria-label={`Recording timer ${minutes} minutes ${seconds} seconds`}>

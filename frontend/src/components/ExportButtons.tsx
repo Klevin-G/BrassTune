@@ -1,4 +1,5 @@
 import { Download } from 'lucide-react';
+import { useState } from 'react';
 import { downloadExport } from '../api/client';
 import type { GuestSessionDetail } from '../domain/guestSessions';
 
@@ -45,9 +46,23 @@ function guestEventsCsv(session: GuestSessionDetail) {
   return [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n');
 }
 
+function audioExtension(mimeType?: string | null) {
+  if (!mimeType) return 'webm';
+  if (mimeType.includes('wav')) return 'wav';
+  if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'm4a';
+  if (mimeType.includes('ogg')) return 'ogg';
+  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3';
+  if (mimeType.includes('webm')) return 'webm';
+  return 'audio';
+}
+
 export function ExportButtons({ sessionId, guestSession }: { sessionId: number; guestSession?: GuestSessionDetail | null }) {
+  const [status, setStatus] = useState<string | null>(null);
   const download = (path: string, filename: string) => {
-    downloadExport(path, filename).catch(() => undefined);
+    setStatus(null);
+    downloadExport(path, filename)
+      .then(() => setStatus(`${filename} export started.`))
+      .catch(() => setStatus('Export is unavailable right now. Try again after reconnecting.'));
   };
 
   if (guestSession) {
@@ -66,11 +81,12 @@ export function ExportButtons({ sessionId, guestSession }: { sessionId: number; 
           JSON
         </button>
         {guestSession.guest_audio_data_url && (
-          <a className="ghost-button" href={guestSession.guest_audio_data_url} download={`guest-session-${Math.abs(sessionId)}-audio.wav`}>
+          <a className="ghost-button" href={guestSession.guest_audio_data_url} download={`guest-session-${Math.abs(sessionId)}-audio.${audioExtension(guestSession.audio_mime_type)}`}>
             <Download size={17} />
             Audio
           </a>
         )}
+        {status && <p className="settings-status" aria-live="polite">{status}</p>}
       </div>
     );
   }
@@ -97,6 +113,7 @@ export function ExportButtons({ sessionId, guestSession }: { sessionId: number; 
         <Download size={17} />
         Audio
       </button>
+      {status && <p className="settings-status" aria-live="polite">{status}</p>}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/client';
 import { apiBase } from '../api/runtimeConfig';
-import { supabase, supabaseConfigured } from '../lib/supabase';
+import { authProviders, supabase, supabaseConfigured } from '../lib/supabase';
 
 interface BackendProfile {
   id: number;
@@ -29,10 +29,14 @@ interface AuthState {
   user: User | null;
   profile: BackendProfile | null;
   isSignedIn: boolean;
+  guestMode: boolean;
+  providers: typeof authProviders;
+  continueAsGuest: () => void;
+  exitGuest: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  signInWithApple: () => Promise<void>;
+  signInWithGoogle: (redirectTo?: string) => Promise<void>;
+  signInWithApple: (redirectTo?: string) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -42,6 +46,7 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 const accountsDisabledMessage = 'Accounts are not enabled in this build yet. You can still use guest practice.';
+const guestAccessKey = 'brasstune.guestAccess';
 
 export function friendlyAuthError(error: unknown) {
   const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
@@ -74,6 +79,15 @@ export function friendlyAuthError(error: unknown) {
     lower.includes('env') ||
     lower.includes('api key') ||
     lower.includes('authapierror') ||
+    lower.includes('database') ||
+    lower.includes('provider') ||
+    lower.includes('oauth') ||
+    lower.includes('redirect') ||
+    lower.includes('jwks') ||
+    lower.includes('jwt') ||
+    lower.includes('schema') ||
+    lower.includes('sql') ||
+    lower.includes('relation') ||
     lower.includes('http://') ||
     lower.includes('https://') ||
     lower.includes('stack') ||
@@ -93,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<BackendProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [guestMode, setGuestMode] = useState(() => localStorage.getItem(guestAccessKey) === 'true');
 
   const loadProfile = useCallback(async (activeSession: Session | null) => {
     if (supabase && !activeSession) {
@@ -154,6 +169,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      localStorage.removeItem(guestAccessKey);
+      setGuestMode(false);
       await refreshProfile();
     } catch (error) {
       throwFriendlyAuthError(error);
@@ -175,19 +192,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       });
       if (error) throw error;
+      localStorage.removeItem(guestAccessKey);
+      setGuestMode(false);
       await refreshProfile();
     } catch (error) {
       throwFriendlyAuthError(error);
     }
   }, [refreshProfile]);
 
-  const signInWithApple = useCallback(async () => {
+  const signInWithApple = useCallback(async (redirectTo = `${window.location.origin}/auth/callback`) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
+    if (!authProviders.apple) throw new Error('Apple sign-in is not available in this release.');
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'apple',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo,
         },
       });
       if (error) throw error;
@@ -196,13 +216,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const signInWithGoogle = useCallback(async () => {
+  const signInWithGoogle = useCallback(async (redirectTo = `${window.location.origin}/auth/callback`) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
+    if (!authProviders.google) throw new Error('Google sign-in is not available in this release.');
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo,
           scopes: 'openid email profile',
           queryParams: {
             prompt: 'select_account',
@@ -239,8 +260,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (supabase) {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) throw new Error(friendlyAuthError(error));
     }
+    localStorage.removeItem(guestAccessKey);
+    setGuestMode(false);
     setSession(null);
     setUser(null);
     if (supabase) {
@@ -255,9 +279,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (supabase) {
       await supabase.auth.signOut();
     }
+    localStorage.removeItem(guestAccessKey);
+    setGuestMode(false);
     setSession(null);
     setUser(null);
     setProfile(null);
+  }, []);
+
+  const continueAsGuest = useCallback(() => {
+    localStorage.setItem(guestAccessKey, 'true');
+    setGuestMode(true);
+  }, []);
+
+  const exitGuest = useCallback(() => {
+    localStorage.removeItem(guestAccessKey);
+    setGuestMode(false);
   }, []);
 
   const value = useMemo<AuthState>(
@@ -268,6 +304,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       profile,
       isSignedIn: Boolean(session),
+      guestMode,
+      providers: authProviders,
+      continueAsGuest,
+      exitGuest,
       signIn,
       signUp,
       signInWithGoogle,
@@ -278,7 +318,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       refreshProfile,
     }),
-    [deleteAccount, loading, profile, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
+    [continueAsGuest, deleteAccount, exitGuest, guestMode, loading, profile, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

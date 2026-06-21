@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-06-21T05:24:54Z",
+  "branch": "arya/final-web-completion",
+  "base_sha": "a8ce933a8ccfdac75b4244fe1c1bb2630655d14b",
+  "status": "local_passed_production_pending",
+  "routes": [
+    {
+      "route": "/",
+      "persona": "unsigned",
+      "controls": ["email", "password", "sign in", "create account", "forgot password", "configured provider sign-in", "continue as guest", "theme selector", "privacy", "terms", "support"],
+      "implementation_files": ["frontend/src/pages/AuthGatewayPage.tsx", "frontend/src/state/AuthContext.tsx", "frontend/src/state/ThemeContext.tsx"],
+      "success_assertion": "Gateway renders first; Continue as guest sets guest access and routes to /home; theme persists across reload.",
+      "failure_assertion": "No raw provider/config/backend terms are displayed.",
+      "browser_test": "frontend/e2e/release-journeys.spec.ts root gateway starts guest practice and persists theme selection",
+      "final_result": "local_passed"
+    },
+    {
+      "route": "/home",
+      "persona": "guest_or_signed_in",
+      "controls": ["start practice", "build plan", "diagnose notes", "open sessions"],
+      "implementation_files": ["frontend/src/pages/DashboardPage.tsx", "frontend/src/App.tsx"],
+      "success_assertion": "Dashboard only renders after signed-in or guest access.",
+      "failure_assertion": "Unsigned private deep links redirect to / with safe next.",
+      "browser_test": "critical routes render identifiable content",
+      "final_result": "local_passed"
+    },
+    {
+      "route": "/practice",
+      "persona": "guest_or_signed_in",
+      "controls": ["start recording", "stop recording", "enable microphone", "stop microphone monitoring", "import recording", "review session"],
+      "implementation_files": ["frontend/src/pages/PracticePage.tsx", "frontend/src/components/SessionControls.tsx", "frontend/src/hooks/usePitchStream.ts", "frontend/src/hooks/useAudioRecorder.ts"],
+      "success_assertion": "Guest recording saves a local reviewable session and does not call protected cloud session endpoints.",
+      "failure_assertion": "Mic live copy is not shown unless samples are flowing; persistence failures do not show saved.",
+      "browser_test": "demo recording creates a reviewable session with playback surface",
+      "final_result": "local_passed"
+    },
+    {
+      "route": "/sessions",
+      "persona": "guest_or_signed_in",
+      "controls": ["filter chips", "review", "export", "playback", "delete guest session"],
+      "implementation_files": ["frontend/src/pages/SessionsPage.tsx", "frontend/src/components/ExportButtons.tsx", "frontend/src/domain/guestSessions.ts"],
+      "success_assertion": "Guest sessions can be reviewed, exported, played back when audio exists, and deleted locally.",
+      "failure_assertion": "Export failures surface visible status.",
+      "browser_test": "device simulation and release journey",
+      "final_result": "local_passed"
+    },
+    {
+      "route": "/practice/score",
+      "persona": "guest_or_signed_in",
+      "controls": ["camera", "capture page", "choose photos", "choose files", "drag/drop", "paste", "select page", "confirm page", "remove page", "preview toolbar"],
+      "implementation_files": ["frontend/src/pages/ScorePracticePage.tsx", "frontend/src/domain/scorePractice.ts"],
+      "success_assertion": "Local score import supports allowed formats by capability detection and resets file inputs after import.",
+      "failure_assertion": "Unsupported raw SVG and oversized inputs are rejected with user guidance.",
+      "browser_test": "route/accessibility smoke",
+      "final_result": "local_passed"
+    },
+    {
+      "route": "/ensemble",
+      "persona": "director_student_guest_safe",
+      "controls": ["print/export report", "select group", "create group", "add member"],
+      "implementation_files": ["frontend/src/pages/EnsemblePage.tsx", "backend/app/api/routes.py", "backend/app/tests/test_hardening.py"],
+      "success_assertion": "Forbidden student writes are rejected server-side; empty create/add controls are disabled and guided.",
+      "failure_assertion": "No self-promotion or cross-member data leak is exposed.",
+      "browser_test": "server-side ensemble authorization rejects forbidden writes",
+      "final_result": "local_passed"
+    },
+    {
+      "route": "/settings",
+      "persona": "guest_or_signed_in",
+      "controls": ["instrument", "reference pitch", "guide mode", "theme selector", "sign in", "sign out", "privacy", "terms", "support", "open audio lab", "reopen onboarding", "export all data", "clear preferences", "export account data", "delete account"],
+      "implementation_files": ["frontend/src/pages/SettingsPage.tsx", "frontend/src/components/ThemeSelector.tsx"],
+      "success_assertion": "Theme selector is reachable; export before delete is visible; delete is disabled for guests.",
+      "failure_assertion": "Sign-out and export failures surface visible status.",
+      "browser_test": "settings exposes export before account deletion and legal links",
+      "final_result": "local_passed"
+    }
+  ],
+  "global_gates": {
+    "unit_tests": "passed",
+    "build": "passed",
+    "local_e2e": "passed",
+    "device_simulation": "passed",
+    "backend_tests": "passed",
+    "security_scans": "passed_or_documented_fallback",
+    "production_merge_deploy_smoke": "pending"
+  }
+}

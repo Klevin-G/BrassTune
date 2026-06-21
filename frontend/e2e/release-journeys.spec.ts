@@ -10,15 +10,18 @@ test.beforeEach(async ({ page, request }) => {
   await page.addInitScript(() => {
     Object.keys(localStorage)
       .filter((key) => key.startsWith('brasstune.'))
+      .filter((key) => key !== 'brasstune.theme')
       .forEach((key) => localStorage.removeItem(key));
     localStorage.setItem('brasstune.onboardingComplete', 'true');
     localStorage.setItem('brasstune.demoMode', 'true');
+    localStorage.setItem('brasstune.guestAccess', 'true');
   });
 });
 
 test('critical routes render identifiable content', async ({ page }) => {
   const routes = [
-    ['/', /Today's intonation focus/i],
+    ['/', /Sign in or start a guest practice session/i],
+    ['/home', /Today's intonation focus/i],
     ['/practice', /Live tuner cockpit/i],
     ['/metronome', /Metronome/i],
     ['/practice/score', /Score practice/i],
@@ -54,12 +57,26 @@ test('auth unavailable surfaces route testers into guest practice', async ({ pag
 
   await page.goto('/auth/sign-in');
   await page.getByRole('link', { name: /continue as guest/i }).click();
-  await expect(page).toHaveURL(/\/practice$/);
+  await expect(page).toHaveURL(/\/home$/);
 
   await page.goto('/auth/callback#error=access_denied&error_description=SUPABASE_SECRET_KEY%20missing');
   await expect(page.getByText(/accounts are not enabled in this build yet/i)).toBeVisible();
   await expect(page.getByRole('link', { name: /continue as guest/i })).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/SUPABASE|SECRET_KEY|Supabase/i);
+});
+
+test('root gateway starts guest practice and persists theme selection', async ({ page }) => {
+  await page.addInitScript(() => localStorage.removeItem('brasstune.guestAccess'));
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: /sign in or start a guest practice session/i })).toBeVisible();
+  await page.getByLabel(/theme/i).selectOption('brass-day');
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('brass-day');
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.theme'))).toBe('brass-day');
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('brass-day');
+  await page.getByRole('button', { name: /continue as guest/i }).click();
+  await expect(page).toHaveURL(/\/home$/);
+  await expect(page.getByText(/Today's intonation focus/i)).toBeVisible();
 });
 
 test('onboarding traps keyboard focus and closes with Escape', async ({ page }) => {

@@ -1,4 +1,5 @@
 import { Activity, Bug, FileText, LogIn, LogOut, Music2, Settings, Timer, UserRound, Users } from 'lucide-react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
@@ -18,6 +19,7 @@ const moreItems = [
 
 export function MorePage() {
   const auth = useAuth();
+  const [status, setStatus] = useState('');
   return (
     <ScreenContainer className="more-screen">
       <PageHeader
@@ -50,17 +52,18 @@ export function MorePage() {
             <em>{auth.profile?.username ? `@${auth.profile.username}` : 'Guest practice mode'}</em>
           </div>
           {auth.isSignedIn ? (
-            <button className="ghost-button" type="button" onClick={() => auth.signOut()}>
+            <button className="ghost-button" type="button" onClick={() => auth.signOut().then(() => setStatus('Signed out.')).catch(() => setStatus('Sign-out could not complete. Try again.'))}>
               <LogOut size={17} />
               Sign out
             </button>
           ) : (
-            <Link className="primary-button" to={auth.configured ? '/auth/sign-in' : '/practice'}>
+            <Link className="primary-button" to={auth.configured ? '/' : '/home'} onClick={!auth.configured ? auth.continueAsGuest : undefined}>
               <LogIn size={17} />
               {auth.configured ? 'Sign in' : 'Continue as guest'}
             </Link>
           )}
         </div>
+        {status && <p className="settings-status" aria-live="polite">{status}</p>}
       </SectionCard>
       <SectionCard title="Quick export" eyebrow="Reports">
         <div className="insight-grid">

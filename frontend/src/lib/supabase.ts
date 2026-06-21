@@ -4,6 +4,10 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 export const supabaseConfigured = Boolean(supabaseUrl && supabasePublishableKey);
+export const authProviders = {
+  google: import.meta.env.VITE_AUTH_GOOGLE_ENABLED === 'true' || import.meta.env.VITE_SUPABASE_GOOGLE_ENABLED === 'true',
+  apple: import.meta.env.VITE_AUTH_APPLE_ENABLED === 'true' || import.meta.env.VITE_SUPABASE_APPLE_ENABLED === 'true',
+};
 
 export const supabase = supabaseConfigured
   ? createClient(supabaseUrl, supabasePublishableKey, {

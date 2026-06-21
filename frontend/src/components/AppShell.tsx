@@ -8,7 +8,7 @@ import { OnboardingFlow } from './OnboardingFlow';
 import { FloatingTabBar, StatusBadge } from './ui/AppPrimitives';
 
 const primaryNav = [
-  { to: '/', label: 'Home', icon: Home },
+  { to: '/home', label: 'Home', icon: Home },
   { to: '/practice', label: 'Practice', icon: Gauge },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/coach', label: 'Coach', icon: GraduationCap },
@@ -29,12 +29,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const location = useLocation();
   const moreActive = location.pathname === '/more' || secondaryNav.some((item) => location.pathname.startsWith(item.to));
-  const authRoute = location.pathname.startsWith('/auth/');
+  const authRoute = location.pathname === '/' || location.pathname.startsWith('/auth/');
 
   return (
     <div className={`app-shell ${authRoute ? 'auth-shell' : ''}`}>
       {!authRoute && <aside className="sidebar">
-        <NavLink to="/" className="brand">
+        <NavLink to="/home" className="brand">
           <span className="brand-mark">
             <SlidersHorizontal size={19} />
           </span>
@@ -96,12 +96,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span>{auth.profile?.username ?? 'Profile'}</span>
               </Link>
             ) : !auth.configured ? (
-              <Link to="/practice" className="icon-button labeled" aria-label="Continue as guest">
+              <Link to="/home" className="icon-button labeled" aria-label="Continue as guest" onClick={auth.continueAsGuest}>
                 <UserRound size={18} />
                 <span>Guest</span>
               </Link>
             ) : (
-              <Link to="/auth/sign-in" className="icon-button labeled" aria-label="Sign in">
+              <Link to="/" className="icon-button labeled" aria-label="Sign in">
                 <LogIn size={18} />
                 <span>Sign in</span>
               </Link>
@@ -109,7 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>}
         <main className="content">{children}</main>
-        <OnboardingFlow />
+        {!authRoute && <OnboardingFlow />}
         {!authRoute && <FloatingTabBar>
           {primaryNav.map((item) => (
             <NavLink

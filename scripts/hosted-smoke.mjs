@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import net from 'node:net';
 import tls from 'node:tls';
 
-const DEFAULT_WEB_BASE_URL = 'https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app';
+const DEFAULT_WEB_BASE_URL = 'https://brass-tune.vercel.app';
 const DEFAULT_API_BASE_URL = 'https://brasstune.onrender.com';
 const DEFAULT_WS_BASE_URL = 'wss://brasstune.onrender.com';
 

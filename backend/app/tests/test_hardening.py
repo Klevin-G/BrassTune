@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -29,6 +30,8 @@ from app.models.db import AccountDeletionJob, Group, GroupMember, NoteEvent, Pit
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest
 from app.services.audio_storage import delete_audio_for_session
 from app.services.session_service import save_pitch_frames
+
+WEBM_AUDIO_BYTES = b"\x1a\x45\xdf\xa3webm-audio-bytes"
 
 
 def _test_db():
@@ -126,6 +129,8 @@ def test_global_json_body_limit_rejects_oversized_payload(monkeypatch):
         )
     assert response.status_code == 413
     assert response.json()["detail"] == "Request body is too large."
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
 
 
 def test_configurable_rate_limit_rejects_repeated_requests(monkeypatch):
@@ -136,7 +141,19 @@ def test_configurable_rate_limit_rejects_repeated_requests(monkeypatch):
         second = client.get("/api/instruments")
     assert first.status_code == 200
     assert second.status_code == 429
+    assert second.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in second.headers["content-security-policy"]
     main_module._RATE_LIMIT_BUCKETS.clear()
+
+
+def test_api_responses_include_security_headers():
+    with TestClient(app) as client:
+        response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert response.headers["x-frame-options"] == "DENY"
 
 
 def test_websocket_audio_frame_returns_pitch_frame_for_synthetic_pcm():
@@ -497,14 +514,27 @@ def test_audio_upload_playback_and_bad_mime_are_validated():
         assert bad.status_code == 400
         uploaded = client.post(
             f"/api/sessions/{session['id']}/audio",
-            content=b"webm-audio-bytes",
+            content=WEBM_AUDIO_BYTES,
             headers={"Content-Type": "audio/webm", "X-Audio-Duration-Seconds": "2.5"},
         )
         assert uploaded.status_code == 200
         assert uploaded.json()["audio"]["audio_available"] is True
         playback = client.get(f"/api/sessions/{session['id']}/audio")
         assert playback.status_code == 200
-        assert playback.content == b"webm-audio-bytes"
+        assert playback.content == WEBM_AUDIO_BYTES
+
+
+def test_audio_upload_rejects_spoofed_audio_mime():
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        for payload in (b"<html>not audio</html>", b"%PDF-1.7", b"PK\x03\x04zip"):
+            response = client.post(
+                f"/api/sessions/{session['id']}/audio",
+                content=payload,
+                headers={"Content-Type": "audio/webm"},
+            )
+            assert response.status_code == 400
+            assert "format" in response.json()["detail"].lower()
 
 
 def test_session_zip_contains_expected_files():
@@ -512,7 +542,7 @@ def test_session_zip_contains_expected_files():
         session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
         client.post(
             f"/api/sessions/{session['id']}/audio",
-            content=b"zip-audio",
+            content=WEBM_AUDIO_BYTES,
             headers={"Content-Type": "audio/webm", "X-Audio-Duration-Seconds": "1"},
         )
         response = client.get(f"/api/export/session/{session['id']}.zip")
@@ -587,6 +617,28 @@ def test_websocket_rejects_unapproved_origin():
             message = websocket.receive_json()
     assert message["type"] == "error"
     assert "origin" in message["message"].lower()
+
+
+def test_deployed_websocket_rejects_missing_origin(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "preview")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            message = websocket.receive_json()
+    assert "origin" in message["message"].lower()
+
+
+def test_websocket_closes_after_repeated_unauthenticated_frames(monkeypatch):
+    _set_production_auth_env(monkeypatch)
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch", headers={"Origin": "https://brass-tune.vercel.app"}) as websocket:
+            for _ in range(3):
+                websocket.send_json({"type": "ping"})
+                message = websocket.receive_json()
+                assert "authenticate" in message["message"].lower()
+            with pytest.raises(WebSocketDisconnect):
+                websocket.receive_json()
 
 
 def test_websocket_raw_message_size_is_limited():
@@ -954,7 +1006,7 @@ def test_account_deletion_removes_sessions_audio_and_teacher_owned_group():
         upload = client.post(
             f"/api/sessions/{session['id']}/audio",
             headers={"Authorization": "Bearer dev-user-2", "Content-Type": "audio/webm"},
-            content=b"delete-me",
+            content=WEBM_AUDIO_BYTES,
         )
         assert upload.status_code == 200
         response = client.request(

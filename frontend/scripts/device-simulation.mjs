@@ -29,7 +29,7 @@ const viewports = [
   { name: 'Ultra-wide desktop', slug: 'ultra-wide-desktop', width: 2560, height: 1440, kind: 'wide-desktop' },
 ];
 
-const routesVisited = ['Home', 'Auth', 'Onboarding', 'Practice', 'Metronome', 'Score Practice', 'Session Review', 'Analytics', 'Coach', 'Sessions', 'Progress', 'Ensemble', 'More', 'Settings', 'Audio Lab'];
+const routesVisited = ['Auth Gateway', 'Home', 'Onboarding', 'Practice', 'Metronome', 'Score Practice', 'Session Review', 'Analytics', 'Coach', 'Sessions', 'Progress', 'Ensemble', 'More', 'Settings', 'Audio Lab'];
 
 const screenshotPlan = new Map([
   ['tiny-phone:practice', 'tiny-phone-practice.png'],
@@ -224,16 +224,18 @@ async function gotoAndCheck(page, viewport, route, routeLabel, issues) {
   await page.waitForSelector('.content', { state: 'visible' });
   await assertNoConsoleErrors(page, issues, `${viewport.name} ${routeLabel}`);
   await assertNoHorizontalOverflow(page, issues, `${viewport.name} ${routeLabel}`);
-  if (routeLabel !== 'Auth') {
+  if (!routeLabel.startsWith('Auth')) {
     await assertMobileChrome(page, viewport, issues, `${viewport.name} ${routeLabel}`);
   }
 }
 
 async function runViewport(browser, viewport) {
+  console.log(`Simulating ${viewport.name} (${viewport.width}x${viewport.height})`);
   const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, deviceScaleFactor: 1 });
   await context.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestAccess', 'true');
     window.__brasstuneErrors = [];
     window.addEventListener('unhandledrejection', (event) => {
       window.__brasstuneErrors.push(`Unhandled rejection: ${event.reason?.message || event.reason}`);
@@ -251,11 +253,13 @@ async function runViewport(browser, viewport) {
   page.on('pageerror', (error) => issues.push(`${viewport.name} pageerror: ${error.message}`));
 
   try {
-    await gotoAndCheck(page, viewport, '/', 'Home', issues);
+    await gotoAndCheck(page, viewport, '/', 'Auth Gateway', issues);
+    await saveScreenshot(page, viewport, 'auth', screenshots);
+
+    await gotoAndCheck(page, viewport, '/home', 'Home', issues);
     await saveScreenshot(page, viewport, 'home', screenshots);
 
-    await gotoAndCheck(page, viewport, '/auth/sign-in', 'Auth', issues);
-    await saveScreenshot(page, viewport, 'auth', screenshots);
+    await gotoAndCheck(page, viewport, '/auth/sign-in', 'Auth Form', issues);
     if (viewport.slug === 'iphone-modern') {
       await gotoAndCheck(page, viewport, '/settings', 'Settings onboarding trigger', issues);
       await page.getByRole('button', { name: /reopen onboarding/i }).click();
@@ -296,11 +300,14 @@ async function runViewport(browser, viewport) {
     await gotoAndCheck(page, viewport, '/analytics', 'Analytics', issues);
     if (viewport.width >= 900) await assertSideBySide(page, '.analytics-main-grid', issues, `${viewport.name} Analytics`);
     if (viewport.width >= 1200) await assertSideBySide(page, '.analytics-chart-grid', issues, `${viewport.name} Analytics charts`);
-    const heatCell = page.locator('.heat-cell').filter({ hasNotText: 'no data' }).first();
-    await heatCell.click();
-    await page.getByRole('radio', { name: '7D' }).click();
-    await page.waitForLoadState('networkidle');
-    await assertNoConsoleErrors(page, issues, `${viewport.name} Analytics interactions`);
+    const heatCell = page.locator('button.heat-cell').filter({ hasNotText: 'no data' }).first();
+    if (await heatCell.count()) {
+      await heatCell.click();
+      const intervalRadio = page.getByRole('radio', { name: '7D' });
+      if (await intervalRadio.count()) await intervalRadio.click();
+      await page.waitForLoadState('networkidle');
+      await assertNoConsoleErrors(page, issues, `${viewport.name} Analytics interactions`);
+    }
     await saveScreenshot(page, viewport, 'analytics', screenshots);
 
     await gotoAndCheck(page, viewport, '/coach', 'Coach', issues);

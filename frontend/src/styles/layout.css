@@ -15,7 +15,7 @@
   padding: 20px 14px;
   border-right: 1px solid var(--line);
   background: rgba(5, 8, 13, 0.78);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .brand {
@@ -127,7 +127,7 @@
   padding: 14px 28px;
   border-bottom: 1px solid var(--line);
   background: rgba(7, 10, 15, 0.72);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .topbar h1 {
@@ -262,7 +262,7 @@
 
 .glass-panel {
   padding: 18px;
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .section-card-heading,

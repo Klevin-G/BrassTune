@@ -71,7 +71,10 @@ export function EnsemblePage() {
   }, [auth.isSignedIn, canManage]);
 
   const createGroup = async () => {
-    if (!newGroupName.trim()) return;
+    if (!newGroupName.trim()) {
+      setEnsembleStatus('Enter a group name before creating an ensemble.');
+      return;
+    }
     try {
       const group = await createEnsembleGroup(newGroupName);
       setGroups((old) => [group, ...old]);
@@ -84,7 +87,14 @@ export function EnsemblePage() {
   };
 
   const addMember = async () => {
-    if (!selectedGroup?.id || !memberUsername.trim()) return;
+    if (!selectedGroup?.id) {
+      setEnsembleStatus('Choose a group before adding a member.');
+      return;
+    }
+    if (!memberUsername.trim()) {
+      setEnsembleStatus('Enter a username before adding a member.');
+      return;
+    }
     try {
       await addEnsembleMemberByUsername(selectedGroup.id, { username: memberUsername, instrument_id: instrumentId, role_in_group: 'student' });
       await selectGroup(selectedGroup.id);
@@ -136,7 +146,7 @@ export function EnsemblePage() {
                   <span>New group</span>
                   <input value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Concert Brass" />
                 </label>
-                <button className="ghost-button" type="button" onClick={createGroup}>
+                <button className="ghost-button" type="button" onClick={createGroup} disabled={!newGroupName.trim()}>
                   <Plus size={17} />
                   Create
                 </button>
@@ -144,7 +154,7 @@ export function EnsemblePage() {
                   <span>Add by username</span>
                   <input value={memberUsername} onChange={(event) => setMemberUsername(event.target.value.toLowerCase())} placeholder="avery" />
                 </label>
-                <button className="ghost-button" type="button" onClick={addMember}>
+                <button className="ghost-button" type="button" onClick={addMember} disabled={!selectedGroup?.id || !memberUsername.trim()}>
                   <UserPlus size={17} />
                   Add
                 </button>

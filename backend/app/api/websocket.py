@@ -1,11 +1,12 @@
 import json
+import asyncio
 from collections import defaultdict
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.api.auth import AuthContext, auth_context_from_token, local_auth_enabled
-from app.core.security import allowed_origins, app_environment
+from app.core.security import LOCAL_ENVIRONMENTS, allowed_origins, app_environment
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.core.pitch.detector import PitchDetector
 from app.db.database import SessionLocal
@@ -16,6 +17,9 @@ from app.services.session_service import save_pitch_frames, start_session, stop_
 router = APIRouter()
 
 MAX_WS_MESSAGE_BYTES = 256 * 1024
+MAX_UNAUTHENTICATED_ERRORS = 3
+UNAUTHENTICATED_TIMEOUT_SECONDS = 15
+IDLE_TIMEOUT_SECONDS = 120
 
 
 async def _reject(websocket: WebSocket, message: str) -> None:
@@ -27,7 +31,7 @@ async def _reject(websocket: WebSocket, message: str) -> None:
 def _origin_allowed(websocket: WebSocket) -> bool:
     origin = websocket.headers.get("origin")
     if not origin:
-        return app_environment() != "production"
+        return app_environment() in LOCAL_ENVIRONMENTS
     return origin in allowed_origins()
 
 
@@ -55,6 +59,7 @@ async def pitch_socket(websocket: WebSocket):
         db.close()
         return
     pending_frames = defaultdict(list)
+    unauthenticated_errors = 0
 
     def flush_session(session_id: int) -> None:
         frames = pending_frames.get(session_id, [])
@@ -78,7 +83,15 @@ async def pitch_socket(websocket: WebSocket):
 
     try:
         while True:
-            raw = await websocket.receive_text()
+            try:
+                raw = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=UNAUTHENTICATED_TIMEOUT_SECONDS if auth is None else IDLE_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "error", "message": "WebSocket authentication timed out." if auth is None else "WebSocket idle timeout."})
+                await websocket.close(code=1008 if auth is None else 1001)
+                return
             if len(raw.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
                 await websocket.send_json({"type": "error", "message": "WebSocket message is too large."})
                 await websocket.close(code=1009)
@@ -92,6 +105,10 @@ async def pitch_socket(websocket: WebSocket):
             if auth is None:
                 if msg_type != "authenticate":
                     await websocket.send_json({"type": "error", "message": "Authenticate before sending pitch frames."})
+                    unauthenticated_errors += 1
+                    if unauthenticated_errors >= MAX_UNAUTHENTICATED_ERRORS:
+                        await websocket.close(code=1008)
+                        return
                     continue
                 try:
                     token = message.get("token")
