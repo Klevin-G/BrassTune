@@ -61,14 +61,14 @@ Required Render env vars:
 
 - `APP_ENV=production`
 - `BRASSTUNE_SEED_DEMO_DATA` should be unset or `0` in production. Set `1` only for a deliberate disposable demo environment.
-- `FRONTEND_ORIGIN`
-- `CORS_ALLOWED_ORIGINS`
-- `CORS_ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app` for HTTP CORS only
+- `FRONTEND_ORIGIN=https://brass-tune.vercel.app`
+- `CORS_ALLOWED_ORIGINS` as an exact comma-separated allowlist for production and approved preview origins.
+- Leave `CORS_ALLOWED_ORIGIN_REGEX` empty in production unless the owner approves a tightly anchored temporary preview pattern.
 - `BRASSTUNE_DATABASE_URL` or `DATABASE_URL`
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_JWKS_URL`
+- `SUPABASE_JWKS_URL` and `SUPABASE_JWT_SECRET` are reserved for a future JWKS validation path and are not required by the current backend.
 - `SESSION_AUDIO_STORAGE_BACKEND=supabase`
 - `SUPABASE_STORAGE_BUCKET=session-audio`
 

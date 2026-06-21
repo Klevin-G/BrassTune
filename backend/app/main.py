@@ -47,6 +47,55 @@ def cors_origins():
     return allowed_origins()
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+class JSONBodyLimitMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.decode("latin1").lower(): value.decode("latin1") for key, value in scope.get("headers", [])}
+        content_type = headers.get("content-type", "")
+        max_json_bytes = _positive_int_env("BRASSTUNE_MAX_JSON_BODY_BYTES", 1_000_000)
+        if not max_json_bytes or "application/json" not in content_type.lower():
+            await self.app(scope, receive, send)
+            return
+
+        body = bytearray()
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message.get("type") != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if len(body) > max_json_bytes:
+                response = JSONResponse({"detail": "Request body is too large."}, status_code=413)
+                await response(scope, receive, send)
+                return
+            more_body = message.get("more_body", False)
+
+        replayed = False
+
+        async def replay_receive():
+            nonlocal replayed
+            if replayed:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            replayed = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay_receive, send)
+
+
+app.add_middleware(JSONBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins(),
@@ -57,27 +106,30 @@ app.add_middleware(
 )
 
 
-def _positive_int_env(name: str, default: int) -> int:
-    try:
-        return max(0, int(os.getenv(name, str(default))))
-    except ValueError:
-        return default
-
-
 @app.middleware("http")
 async def request_abuse_limits(request: Request, call_next):
+    def harden_response(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), browsing-topics=()")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+        if request.url.scheme == "https" or app_environment() in {"production", "staging", "preview"}:
+            response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+        return response
+
     if request.method.upper() == "OPTIONS":
-        return await call_next(request)
+        return harden_response(await call_next(request))
 
     content_type = request.headers.get("content-type", "")
-    content_length = request.headers.get("content-length")
     max_json_bytes = _positive_int_env("BRASSTUNE_MAX_JSON_BODY_BYTES", 1_000_000)
+    content_length = request.headers.get("content-length")
     if max_json_bytes and "application/json" in content_type.lower() and content_length:
         try:
             if int(content_length) > max_json_bytes:
-                return JSONResponse({"detail": "Request body is too large."}, status_code=413)
+                return harden_response(JSONResponse({"detail": "Request body is too large."}, status_code=413))
         except ValueError:
-            return JSONResponse({"detail": "Invalid request size."}, status_code=400)
+            return harden_response(JSONResponse({"detail": "Invalid request size."}, status_code=400))
 
     rate_limit = _positive_int_env("BRASSTUNE_RATE_LIMIT_PER_MINUTE", 900)
     if rate_limit and request.url.path != "/api/health":
@@ -88,10 +140,11 @@ async def request_abuse_limits(request: Request, call_next):
         while bucket and now - bucket[0] > 60:
             bucket.popleft()
         if len(bucket) >= rate_limit:
-            return JSONResponse({"detail": "Too many requests. Try again soon."}, status_code=429)
+            return harden_response(JSONResponse({"detail": "Too many requests. Try again soon."}, status_code=429))
         bucket.append(now)
 
-    return await call_next(request)
+    response = await call_next(request)
+    return harden_response(response)
 
 
 app.include_router(api_router)

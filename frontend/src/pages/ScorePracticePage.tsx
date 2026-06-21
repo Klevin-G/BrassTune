@@ -433,8 +433,32 @@ export function ScorePracticePage() {
               Choose Files
             </button>
           </div>
-          <input ref={photosInputRef} className="visually-hidden" type="file" accept={scoreAcceptAttribute()} multiple onChange={(event) => void importFiles(Array.from(event.target.files ?? []), 'photos')} aria-label="Choose score images from Photos" />
-          <input ref={fileInputRef} className="visually-hidden" type="file" accept={scoreAcceptAttribute()} multiple onChange={(event) => void importFiles(Array.from(event.target.files ?? []), 'files')} aria-label="Choose score files" />
+          <input
+            ref={photosInputRef}
+            className="visually-hidden"
+            type="file"
+            accept={scoreAcceptAttribute()}
+            multiple
+            onChange={(event) => {
+              void importFiles(Array.from(event.target.files ?? []), 'photos').finally(() => {
+                event.currentTarget.value = '';
+              });
+            }}
+            aria-label="Choose score images from Photos"
+          />
+          <input
+            ref={fileInputRef}
+            className="visually-hidden"
+            type="file"
+            accept={scoreAcceptAttribute()}
+            multiple
+            onChange={(event) => {
+              void importFiles(Array.from(event.target.files ?? []), 'files').finally(() => {
+                event.currentTarget.value = '';
+              });
+            }}
+            aria-label="Choose score files"
+          />
           <p>Drag and drop or paste images here. Raw SVG is rejected instead of rendered.</p>
           {cameraActive && (
             <div className="camera-preview">

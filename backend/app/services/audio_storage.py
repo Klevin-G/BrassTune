@@ -19,6 +19,13 @@ ALLOWED_AUDIO_MIME_TYPES = {
     "audio/wav": ".wav",
     "audio/ogg": ".ogg",
 }
+MAGIC_BYTES = {
+    "audio/webm": (b"\x1a\x45\xdf\xa3",),
+    "audio/mp4": (b"ftyp",),
+    "audio/mpeg": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
+    "audio/wav": (b"RIFF",),
+    "audio/ogg": (b"OggS",),
+}
 MAX_AUDIO_UPLOAD_BYTES = int(os.getenv("SESSION_AUDIO_MAX_BYTES", str(50 * 1024 * 1024)))
 LOCAL_AUDIO_DIR = DATA_DIR / "audio"
 
@@ -40,6 +47,15 @@ def read_audio_bytes(data: bytes, mime_type: str) -> Tuple[bytes, str]:
         raise HTTPException(status_code=400, detail="Audio upload was empty.")
     if len(data) > MAX_AUDIO_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Audio upload is too large.")
+    signatures = MAGIC_BYTES.get(mime_type, ())
+    if mime_type == "audio/mp4":
+        if len(data) < 12 or data[4:8] not in signatures:
+            raise HTTPException(status_code=400, detail="Audio upload does not match its declared format.")
+    elif mime_type == "audio/wav":
+        if len(data) < 12 or not data.startswith(b"RIFF") or data[8:12] != b"WAVE":
+            raise HTTPException(status_code=400, detail="Audio upload does not match its declared format.")
+    elif signatures and not any(data.startswith(signature) for signature in signatures):
+        raise HTTPException(status_code=400, detail="Audio upload does not match its declared format.")
     return data, mime_type
 
 

@@ -1,3 +1,11 @@
+# Current Branch Notice
+
+Updated: 2026-06-21T05:24:54Z for `arya/final-web-completion`.
+
+Current local E2E result for this branch: `cd frontend && CI=true npm run e2e:local` passed `80` tests across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. Exact-SHA preview and production smoke remain pending for this branch until it is pushed, merged, and deployed.
+
+Older entries below are retained as historical evidence from previous PRs/deployments.
+
 # Web E2E Report
 
 ## Implementation

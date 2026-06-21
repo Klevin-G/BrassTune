@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clearLocalSessions, downloadExport, repairDemoData, resetDemoData } from '../api/client';
 import { InstrumentSelector } from '../components/InstrumentSelector';
+import { ThemeSelector } from '../components/ThemeSelector';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { guestSessionsExport } from '../domain/guestSessions';
 import { useAppSettings } from '../state/AppSettingsContext';
@@ -103,12 +104,12 @@ export function SettingsPage() {
           </div>
           <div className="settings-actions">
             {auth.isSignedIn ? (
-              <button className="ghost-button" type="button" onClick={() => auth.signOut()}>
+              <button className="ghost-button" type="button" onClick={() => auth.signOut().then(() => setMaintenanceStatus('Signed out.')).catch(() => setMaintenanceStatus('Sign-out could not complete. Try again.'))}>
                 <LogOut size={18} />
                 Sign out
               </button>
             ) : (
-              <Link className="primary-button" to={auth.configured ? '/auth/sign-in' : '/practice'}>
+              <Link className="primary-button" to={auth.configured ? '/' : '/home'} onClick={!auth.configured ? auth.continueAsGuest : undefined}>
                 <LogIn size={18} />
                 {auth.configured ? 'Sign in' : 'Continue as guest'}
               </Link>
@@ -119,6 +120,9 @@ export function SettingsPage() {
             <Link className="ghost-button" to="/terms">Terms</Link>
             <Link className="ghost-button" to="/support">Support</Link>
           </div>
+        </SectionCard>
+        <SectionCard title="Appearance" eyebrow="Theme">
+          <ThemeSelector />
         </SectionCard>
         <SectionCard title="Practice tools" eyebrow="Device and data">
           <div className="insight-grid">

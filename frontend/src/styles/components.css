@@ -667,6 +667,17 @@ meter {
   align-items: stretch;
 }
 
+.gateway-layout {
+  min-height: calc(100vh - 56px);
+  align-items: center;
+}
+
+.gateway-stack {
+  display: grid;
+  gap: 18px;
+  align-content: center;
+}
+
 .auth-panel {
   display: flex;
   flex-direction: column;
@@ -687,6 +698,35 @@ meter {
   margin-top: 32px;
   font-size: clamp(2.2rem, 5vw, 4.8rem);
   line-height: 0.95;
+}
+
+.gateway-links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 28px;
+}
+
+.gateway-links a,
+.theme-selector span {
+  color: var(--gold-soft);
+  font-weight: 800;
+}
+
+.theme-selector {
+  display: grid;
+  gap: 8px;
+}
+
+.theme-selector.compact {
+  grid-template-columns: auto minmax(160px, 1fr);
+  align-items: center;
+}
+
+.theme-selector span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .auth-form {
@@ -719,6 +759,9 @@ meter {
 
 .auth-switcher a,
 .timeline-row a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--gold-soft);
   font-weight: 800;
 }
@@ -1099,12 +1142,16 @@ meter {
   cursor: pointer;
 }
 
+.heat-cell.readonly {
+  cursor: default;
+}
+
 .heat-cell strong {
   font-size: 1.02rem;
 }
 
 .heat-cell span {
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--muted);
   font-size: 0.78rem;
 }
 

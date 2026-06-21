@@ -89,7 +89,7 @@ export function PracticePage() {
   };
   const latestValid = stream.history.find((frame) => frame.is_valid_for_recording);
   const eligibility = describeSaveEligibility(stream.currentFrame);
-  const microphoneLabel = stream.micActive ? 'Listening' : stream.statusMessage.startsWith('Requesting') || stream.statusMessage.startsWith('Connecting') ? 'Connecting' : 'Mic';
+  const microphoneLabel = stream.micActive ? 'Stop mic' : stream.statusMessage.startsWith('Requesting') || stream.statusMessage.startsWith('Connecting') || stream.statusMessage.startsWith('Asking') ? 'Connecting' : 'Mic';
 
   return (
     <ScreenContainer>
@@ -116,6 +116,7 @@ export function PracticePage() {
             onStart={start}
             onStop={stop}
             onMicStart={stream.startMicrophone}
+            onMicStop={stream.stopMicrophone}
           />
           <SignalMeter frame={stream.currentFrame} />
           {recorder.error && <div className="alert">{recorder.error}</div>}

@@ -1,6 +1,6 @@
 import { ArrowRight, KeyRound, LogIn, Mail, ShieldCheck, UserPlus } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
@@ -8,6 +8,12 @@ import { useAuth } from '../state/AuthContext';
 export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'callback' }) {
   const auth = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = (() => {
+    const value = params.get('next');
+    if (!value || !value.startsWith('/') || value.startsWith('//') || value === '/' || value.startsWith('/auth/')) return '/home';
+    return value;
+  })();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -33,7 +39,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     try {
       if (mode === 'sign-in') {
         await auth.signIn(email, password);
-        navigate('/');
+        navigate(next);
       } else if (mode === 'sign-up') {
         await auth.signUp({ email, password, username, displayName, primaryInstrumentId: instrumentId });
         setMessage('Account created. If email confirmation is enabled, confirm your email before signing in.');
@@ -57,7 +63,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
       <ScreenContainer>
         <SectionCard title="Finishing sign in" eyebrow="Account access">
           <p className="muted-copy" role="status">{auth.configured ? message ?? 'Finishing sign-in. Continue when your account session is ready.' : 'Accounts are not enabled in this build yet. You can still use guest practice.'}</p>
-          <Link className="primary-button" to={auth.configured ? '/' : '/practice'}>
+          <Link className="primary-button" to={auth.configured ? next : next} onClick={!auth.configured ? auth.continueAsGuest : undefined}>
             {auth.configured ? 'Continue' : 'Continue as guest'}
             <ArrowRight size={18} />
           </Link>
@@ -92,7 +98,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 body="You can still use guest practice. Sign-in, syncing, and ensemble membership will be available when account access is enabled."
                 icon={Mail}
               />
-              <Link className="primary-button full-width-action" to="/practice">
+              <Link className="primary-button full-width-action" to="/home" onClick={auth.continueAsGuest}>
                 Continue as guest
                 <ArrowRight size={18} />
               </Link>
@@ -137,13 +143,17 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
           )}
           {mode !== 'reset' && auth.configured && (
             <div className="provider-button-stack">
-              <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle().catch(() => setMessage('Google sign-in could not start. Try again later.'))}>
-                Continue with Google
-              </button>
-              <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple().catch(() => setMessage('Apple sign-in could not start. Try again later.'))}>
-                <ShieldCheck size={18} />
-                Continue with Apple
-              </button>
+              {auth.providers.google && (
+                <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`).catch((error) => setMessage(error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.'))}>
+                  Continue with Google
+                </button>
+              )}
+              {auth.providers.apple && (
+                <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`).catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in could not start. Try again later.'))}>
+                  <ShieldCheck size={18} />
+                  Continue with Apple
+                </button>
+              )}
             </div>
           )}
           {message && <div className="alert" role="status">{message}</div>}

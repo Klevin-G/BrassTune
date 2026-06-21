@@ -1,3 +1,11 @@
+# Current Branch Notice
+
+Updated: 2026-06-21T05:24:54Z for `arya/final-web-completion` at base SHA `a8ce933a8ccfdac75b4244fe1c1bb2630655d14b`.
+
+Current evidence is maintained in `FINAL_REPORT.md`, `TEST_MATRIX.md`, `release-evidence.json`, `FINAL_WEB_SCOPE.md`, `WEB_CONTROL_MANIFEST.md`, and `WEB_PRODUCTION_COMPLETION_GATE.md`.
+
+Older entries below are historical unless they are repeated in the current evidence files. Do not use older merged PR SHAs or deployment IDs below as evidence that this branch has been merged, deployed, or production-certified.
+
 # Master Findings
 
 Updated: 2026-06-21T04:22:00Z

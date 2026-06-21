@@ -1,11 +1,11 @@
-import { CalendarDays, Download, Gauge, Music2, Plus, Sparkles } from 'lucide-react';
+import { CalendarDays, Download, Gauge, Music2, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listSessions } from '../api/client';
 import { ExportButtons } from '../components/ExportButtons';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { EmptyActionState, PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
-import { listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
+import { deleteGuestSession, listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
 import type { PracticeSession } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
 
@@ -23,6 +23,7 @@ export function SessionsPage() {
   const auth = useAuth();
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   const [filter, setFilter] = useState<SessionFilter>('all');
+  const [status, setStatus] = useState('');
 
   useEffect(() => {
     const guestSessions = listGuestSessions();
@@ -34,6 +35,14 @@ export function SessionsPage() {
       .then((cloudSessions) => setSessions([...guestSessions, ...cloudSessions].sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())))
       .catch(() => setSessions(guestSessions));
   }, [auth.isSignedIn]);
+
+  const deleteGuest = (session: PracticeSession) => {
+    if (!session.guest_session) return;
+    if (!window.confirm('Delete this guest session and its local audio from this device?')) return;
+    deleteGuestSession(session.id);
+    setSessions((current) => current.filter((item) => item.id !== session.id));
+    setStatus('Guest session deleted from this device.');
+  };
 
   const filtered = useMemo(() => {
     if (filter === 'week') return sessions.filter((session) => isThisWeek(session.started_at));
@@ -57,6 +66,7 @@ export function SessionsPage() {
         }
       />
       <SectionCard title="Saved takes" eyebrow={`${filtered.length} visible`}>
+        {status && <p className="settings-status" aria-live="polite">{status}</p>}
         <div className="chip-row">
           <SelectionChip active={filter === 'all'} onClick={() => setFilter('all')}>All</SelectionChip>
           <SelectionChip active={filter === 'week'} onClick={() => setFilter('week')}>This week</SelectionChip>
@@ -120,6 +130,12 @@ export function SessionsPage() {
                   </summary>
                   <ExportButtons sessionId={session.id} guestSession={session.guest_session ? session as GuestSessionDetail : null} />
                 </details>
+                {session.guest_session && (
+                  <button className="ghost-button danger-action" type="button" onClick={() => deleteGuest(session)}>
+                    <Trash2 size={16} />
+                    Delete
+                  </button>
+                )}
               </div>
             </article>
           ))}

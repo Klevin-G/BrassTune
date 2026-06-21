@@ -1,0 +1,109 @@
+{
+  "brand": {
+    "name": "BrassTune",
+    "identity": {
+      "navy": "#07111d",
+      "gold": "#d8a53f",
+      "goldSoft": "#f0c970"
+    }
+  },
+  "color": {
+    "palette": {
+      "navy950": "#05080d",
+      "navy900": "#070a0f",
+      "navy850": "#0b1118",
+      "navy800": "#111923",
+      "navy700": "#172330",
+      "gold600": "#d8a53f",
+      "gold400": "#f0c970",
+      "gold800": "#8d6f33",
+      "dayBg": "#f7f3e9",
+      "dayPanel": "#fffaf0",
+      "clearGlass": "rgba(10, 18, 28, 0.58)",
+      "tintedGlass": "rgba(34, 27, 15, 0.64)",
+      "green": "#6bd287",
+      "teal": "#59c9b2",
+      "amber": "#e5c45c",
+      "orange": "#e58b43",
+      "red": "#e25d5d",
+      "blue": "#75b7ff"
+    },
+    "semantic": {
+      "background": "var(--bg)",
+      "surface": "var(--panel)",
+      "surfaceSolid": "var(--panel-solid)",
+      "text": "var(--text)",
+      "mutedText": "var(--muted)",
+      "border": "var(--line)",
+      "focus": "rgba(240, 201, 112, 0.82)",
+      "success": "var(--green)",
+      "warning": "var(--amber)",
+      "danger": "var(--red)",
+      "info": "var(--blue)"
+    }
+  },
+  "typography": {
+    "family": "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    "weights": {
+      "regular": 400,
+      "bold": 800,
+      "black": 900
+    },
+    "scale": {
+      "body": "1rem",
+      "small": "0.82rem",
+      "pageTitleMin": "2rem",
+      "pageTitleMax": "4.35rem"
+    }
+  },
+  "spacing": {
+    "xs": "4px",
+    "sm": "8px",
+    "md": "12px",
+    "lg": "18px",
+    "xl": "28px",
+    "tap": "44px"
+  },
+  "radii": {
+    "sm": "14px",
+    "md": "18px",
+    "lg": "24px",
+    "xl": "28px",
+    "pill": "999px"
+  },
+  "shadows": {
+    "elevated": "0 22px 70px rgba(0, 0, 0, 0.34)",
+    "soft": "0 14px 36px rgba(0, 0, 0, 0.24)"
+  },
+  "glass": {
+    "blur": "18px",
+    "clearOpacity": 0.58,
+    "tintedOpacity": 0.64,
+    "fallbackSurface": "#111923"
+  },
+  "statusColors": {
+    "inTune": "#6bd287",
+    "sharp": "#e58b43",
+    "flat": "#75b7ff",
+    "unstable": "#9dabbb",
+    "error": "#e25d5d"
+  },
+  "chartColors": ["#f0c970", "#59c9b2", "#75b7ff", "#e5c45c", "#e58b43", "#6bd287"],
+  "tunerColors": {
+    "flat": "#75b7ff",
+    "inTune": "#6bd287",
+    "sharp": "#e58b43",
+    "danger": "#e25d5d"
+  },
+  "breakpoints": {
+    "phone": "640px",
+    "tablet": "900px",
+    "desktop": "1180px",
+    "wide": "1600px"
+  },
+  "animationTimings": {
+    "fast": "120ms",
+    "standard": "160ms",
+    "slow": "240ms"
+  }
+}

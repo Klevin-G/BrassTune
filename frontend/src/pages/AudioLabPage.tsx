@@ -28,6 +28,7 @@ export function AudioLabPage() {
   const [profiles, setProfiles] = useState<InstrumentProfile[]>([]);
   const [permissionState, setPermissionState] = useState('unknown');
   const [wsUrl, setWsUrl] = useState('');
+  const [copyStatus, setCopyStatus] = useState('');
   const apiBase = runtimeApiBase() || `${window.location.origin}`;
   const recorder = useSessionRecorder(instrumentId, referencePitch, { cloudEnabled: auth.isSignedIn });
   const stream = usePitchStream({
@@ -82,7 +83,13 @@ export function AudioLabPage() {
       instrumentId,
       referencePitch,
     };
-    navigator.clipboard?.writeText(JSON.stringify(payload, null, 2)).catch(() => undefined);
+    if (!navigator.clipboard?.writeText) {
+      setCopyStatus('Clipboard copy is not available in this browser.');
+      return;
+    }
+    navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+      .then(() => setCopyStatus('Diagnostics copied.'))
+      .catch(() => setCopyStatus('Clipboard permission blocked the diagnostics copy.'));
   };
 
   return (
@@ -215,6 +222,7 @@ export function AudioLabPage() {
             <Clipboard size={18} />
             Copy frame diagnostics
           </button>
+          {copyStatus && <p className="settings-status" aria-live="polite">{copyStatus}</p>}
 
           <div className="inline-panel">
             <div className="section-card-heading">
@@ -230,11 +238,12 @@ export function AudioLabPage() {
               elapsedSeconds={recorder.elapsedSeconds}
               demoMode={demoMode}
               micActive={stream.micActive}
-              microphoneLabel={stream.micActive ? 'Listening' : 'Mic'}
+              microphoneLabel={stream.micActive ? 'Stop mic' : 'Mic'}
               busy={recorder.busy}
               onStart={start}
               onStop={stop}
               onMicStart={stream.startMicrophone}
+              onMicStop={stream.stopMicrophone}
             />
             {recorder.lastSummary && (
               <div className="saved-session-card">
