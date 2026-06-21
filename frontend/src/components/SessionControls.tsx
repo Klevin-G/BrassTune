@@ -5,6 +5,8 @@ export function SessionControls({
   elapsedSeconds,
   demoMode,
   micActive,
+  microphoneLabel,
+  busy,
   onStart,
   onStop,
   onMicStart,
@@ -13,25 +15,29 @@ export function SessionControls({
   elapsedSeconds: number;
   demoMode: boolean;
   micActive: boolean;
+  microphoneLabel?: string;
+  busy?: boolean;
   onStart: () => void;
   onStop: () => void;
   onMicStart: () => void;
 }) {
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = String(elapsedSeconds % 60).padStart(2, '0');
+  const actionLabel = busy ? (recording ? 'Stopping recording' : 'Starting recording') : recording ? 'Stop recording' : 'Start recording';
+  const actionText = busy ? (recording ? 'Stopping' : 'Starting') : recording ? 'Stop' : 'Record';
   return (
     <div className="session-controls">
-      <button className="primary-button icon-first-action" aria-label={recording ? 'Stop recording' : 'Start recording'} onClick={recording ? onStop : onStart} type="button">
+      <button className="primary-button icon-first-action" aria-label={actionLabel} aria-busy={busy || undefined} disabled={busy} onClick={recording ? onStop : onStart} type="button">
         {recording ? <Square size={18} /> : <Circle size={18} />}
-        <span>{recording ? 'Stop' : 'Record'}</span>
+        <span>{actionText}</span>
       </button>
       {!demoMode && (
-        <button className="ghost-button icon-first-action" aria-label={micActive ? 'Microphone is live' : 'Enable microphone'} onClick={onMicStart} disabled={micActive} type="button">
+        <button className="ghost-button icon-first-action" aria-label={micActive ? 'Microphone is listening' : 'Enable microphone'} onClick={onMicStart} disabled={micActive} type="button">
           <Mic size={18} />
-          <span>{micActive ? 'Mic live' : 'Mic'}</span>
+          <span>{microphoneLabel ?? (micActive ? 'Listening' : 'Mic')}</span>
         </button>
       )}
-      <div className="timer-chip">
+      <div className="timer-chip" role="timer" aria-live="polite" aria-label={`Recording timer ${minutes} minutes ${seconds} seconds`}>
         <Timer size={17} />
         {minutes}:{seconds}
       </div>

@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.instruments.profiles import require_instrument_profile
-from app.core.music.theory import MIN_RECORDING_CONFIDENCE, transpose_concert_to_written
+from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, transpose_concert_to_written
 from app.core.sessions.segmentation import compute_session_summary, segment_note_events
 from app.models.db import NoteEvent, PitchSample, PracticeSession, User
 from app.services.serializers import sample_to_frame_dict, session_to_dict
@@ -54,30 +54,41 @@ def save_pitch_frame(db: Session, session_id: int, frame: Dict[str, object]) -> 
 
 
 def _sample_from_frame(session: PracticeSession, frame: Dict[str, object]) -> Optional[PitchSample]:
-    if not frame.get("is_valid_for_recording"):
-        return None
-    if frame.get("frequency_hz") is None or frame.get("cents_deviation") is None:
+    if str(frame.get("instrument_id") or session.instrument_id) != session.instrument_id:
         return None
     confidence = float(frame.get("confidence") or 0)
     if confidence < MIN_RECORDING_CONFIDENCE:
         return None
-    nearest_midi = int(frame.get("nearest_midi") or 0)
-    written_midi = transpose_concert_to_written(nearest_midi, require_instrument_profile(str(frame.get("instrument_id") or session.instrument_id)))
+    frequency_hz = frame.get("frequency_hz")
+    if frequency_hz is None:
+        return None
+    canonical = frequency_to_pitch_frame(
+        float(frequency_hz),
+        confidence,
+        float(frame.get("rms") or 0),
+        int(frame.get("timestamp_ms") or 0),
+        session.instrument_id,
+        float(session.reference_pitch_hz or 440.0),
+        str(frame.get("detector_source") or "backend-canonicalized"),
+    )
+    if not canonical.is_valid_for_recording or canonical.nearest_midi is None or canonical.cents_deviation is None:
+        return None
+    written_midi = transpose_concert_to_written(canonical.nearest_midi, require_instrument_profile(session.instrument_id))
     return PitchSample(
         session_id=session.id,
-        timestamp_ms=int(frame.get("timestamp_ms") or 0),
-        frequency_hz=float(frame.get("frequency_hz") or 0),
-        confidence=confidence,
-        rms=float(frame.get("rms") or 0),
-        concert_midi_float=float(frame.get("midi_note_float") or nearest_midi),
-        concert_nearest_midi=nearest_midi,
-        concert_note=str(frame.get("concert_note_name") or ""),
-        concert_octave=int(frame.get("concert_octave") or 0),
+        timestamp_ms=canonical.timestamp_ms,
+        frequency_hz=float(canonical.frequency_hz or 0),
+        confidence=canonical.confidence,
+        rms=canonical.rms,
+        concert_midi_float=float(canonical.midi_note_float or canonical.nearest_midi),
+        concert_nearest_midi=canonical.nearest_midi,
+        concert_note=str(canonical.concert_note_name or ""),
+        concert_octave=int(canonical.concert_octave or 0),
         written_midi=written_midi,
-        written_note=str(frame.get("written_note_name") or ""),
-        written_octave=int(frame.get("written_octave") or 0),
-        cents_deviation=float(frame.get("cents_deviation") or 0),
-        tuning_status=str(frame.get("tuning_status") or "unstable"),
+        written_note=str(canonical.written_note_name or ""),
+        written_octave=int(canonical.written_octave or 0),
+        cents_deviation=float(canonical.cents_deviation),
+        tuning_status=canonical.tuning_status,
         is_valid_for_recording=1,
     )
 

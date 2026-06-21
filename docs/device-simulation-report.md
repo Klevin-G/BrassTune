@@ -1,6 +1,6 @@
 # Device Simulation Report
 
-Generated: 2026-06-18T16:32:52.789Z
+Generated: 2026-06-20T18:29:14.087Z
 
 The committed Playwright harness was used for repeatable multi-viewport browser automation.
 
@@ -8,18 +8,18 @@ The committed Playwright harness was used for repeatable multi-viewport browser 
 
 | Viewport | Size | Routes Visited | Result | Issues |
 | --- | ---: | --- | --- | --- |
-| Tiny phone | 320x568 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| Phone small | 360x740 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| iPhone modern | 393x852 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| Large phone | 430x932 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| Foldable narrow tablet | 540x720 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| iPad portrait | 768x1024 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| iPad landscape | 1024x768 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| iPad Pro landscape | 1366x1024 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| Laptop | 1440x900 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| Wide desktop analytics | 1728x1117 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| Desktop HD | 1920x1080 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
-| Ultra-wide desktop | 2560x1440 | Home, Auth, Onboarding, Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| Tiny phone | 320x568 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| Phone small | 360x740 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| iPhone modern | 393x852 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| Large phone | 430x932 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| Foldable narrow tablet | 540x720 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| iPad portrait | 768x1024 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| iPad landscape | 1024x768 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| iPad Pro landscape | 1366x1024 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| Laptop | 1440x900 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| Wide desktop analytics | 1728x1117 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| Desktop HD | 1920x1080 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
+| Ultra-wide desktop | 2560x1440 | Home, Auth, Onboarding, Practice, Metronome, Score Practice, Session Review, Analytics, Coach, Sessions, Progress, Ensemble, More, Settings, Audio Lab | Pass | None |
 
 ## Screenshots Generated
 

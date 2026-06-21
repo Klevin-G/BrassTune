@@ -12,12 +12,12 @@ export function SignalMeter({ frame }: { frame: PitchFrame | null }) {
         <span>{eligibility.label}</span>
         <strong>{hasPitchLock ? `${confidence}%` : 'No lock'}</strong>
       </div>
-      <meter min={0} max={100} value={confidence} />
+      <meter min={0} max={100} value={confidence} aria-label="Pitch confidence percentage" />
       <div>
         <span>Signal</span>
         <strong>{rms}%</strong>
       </div>
-      <meter min={0} max={100} value={rms} />
+      <meter min={0} max={100} value={rms} aria-label="Input signal level percentage" />
     </div>
   );
 }

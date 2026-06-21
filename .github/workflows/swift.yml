@@ -1,0 +1,76 @@
+name: Swift
+
+on:
+  pull_request:
+    paths:
+      - "swift/**"
+      - "fixtures/**"
+      - ".github/workflows/swift.yml"
+  push:
+    branches: [main, swift-migration]
+    paths:
+      - "swift/**"
+      - "fixtures/**"
+      - ".github/workflows/swift.yml"
+
+jobs:
+  package-and-ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: List Xcode and simulator environment
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun simctl list
+      - name: Swift package tests
+        working-directory: swift/BrassTuneCore
+        run: swift test
+      - name: Select available iPhone simulator
+        id: simulator
+        run: |
+          xcrun simctl list -j devices available | ruby -rjson -e '
+            devices = JSON.parse(STDIN.read).fetch("devices").values.flatten
+            match = devices.find { |d| d["isAvailable"] && d["name"].start_with?("iPhone") }
+            abort("No available iPhone simulator") unless match
+            udid = match.fetch("udid")
+            name = match.fetch("name")
+            File.open(ENV.fetch("GITHUB_OUTPUT"), "a") do |out|
+              out.puts "id=#{udid}"
+              out.puts "name=#{name}"
+            end
+            puts "Selected #{name} (#{udid})"
+          '
+      - name: Boot selected simulator
+        run: |
+          xcrun simctl boot "${{ steps.simulator.outputs.id }}" || true
+          xcrun simctl bootstatus "${{ steps.simulator.outputs.id }}" -b
+      - name: Native app Debug build
+        run: xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Debug -destination "id=${{ steps.simulator.outputs.id }}" CODE_SIGNING_ALLOWED=NO build
+      - name: Native app unit tests
+        run: xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination "id=${{ steps.simulator.outputs.id }}" CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppTests
+      - name: Reset app state before UI smoke
+        run: |
+          xcrun simctl terminate "${{ steps.simulator.outputs.id }}" com.brasstune.BrassTuneApp.dev || true
+          xcrun simctl uninstall "${{ steps.simulator.outputs.id }}" com.brasstune.BrassTuneApp.dev || true
+          xcrun simctl bootstatus "${{ steps.simulator.outputs.id }}" -b
+      - name: Native app UI smoke test
+        run: |
+          rm -rf "$RUNNER_TEMP/BrassTuneAppUISmoke.xcresult"
+          xcodebuild test \
+            -project swift/BrassTuneApp/BrassTuneApp.xcodeproj \
+            -scheme BrassTuneAppUISmoke \
+            -destination "id=${{ steps.simulator.outputs.id }}" \
+            -destination-timeout 60 \
+            CODE_SIGNING_ALLOWED=NO \
+            -parallel-testing-enabled NO \
+            -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces \
+            -resultBundlePath "$RUNNER_TEMP/BrassTuneAppUISmoke.xcresult"
+      - name: Upload UI smoke result bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrassTuneAppUISmoke-xcresult
+          path: ${{ runner.temp }}/BrassTuneAppUISmoke.xcresult
+          if-no-files-found: ignore

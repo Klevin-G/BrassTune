@@ -5,8 +5,10 @@ import { getHeatmap, getProgress, getRecommendations, listSessions } from '../ap
 import { HeatMapGrid } from '../components/HeatMapGrid';
 import { RecommendationCard } from '../components/RecommendationCard';
 import { EmptyActionState, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { listGuestSessions } from '../domain/guestSessions';
 import type { NoteStats, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 
 function minutes(seconds: number | undefined) {
   return Math.round((seconds ?? 0) / 60);
@@ -20,6 +22,7 @@ function topMeasuredNote(rows: NoteStats[]) {
 
 export function DashboardPage() {
   const { instrumentId } = useAppSettings();
+  const auth = useAuth();
   const [progress, setProgress] = useState<ProgressMetrics | null>(null);
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
@@ -27,6 +30,14 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!auth.isSignedIn) {
+      setProgress(null);
+      setSessions(listGuestSessions().slice(0, 3));
+      setHeatmap([]);
+      setRecommendations([]);
+      setError(null);
+      return;
+    }
     Promise.all([getProgress(instrumentId), listSessions(), getHeatmap(instrumentId), getRecommendations(instrumentId)])
       .then(([progressData, sessionData, heatmapData, recommendationData]) => {
         setProgress(progressData);
@@ -35,8 +46,8 @@ export function DashboardPage() {
         setRecommendations(recommendationData.slice(0, 3));
         setError(null);
       })
-      .catch(() => setError('Backend unavailable. Start the FastAPI server or keep using the tuner in demo mode.'));
-  }, [instrumentId]);
+      .catch(() => setError('Practice mode is still available. Analytics will refresh when the service reconnects.'));
+  }, [auth.isSignedIn, instrumentId]);
 
   const latestPoint = progress?.timeseries[progress.timeseries.length - 1];
   const focusNote = useMemo(() => topMeasuredNote(heatmap), [heatmap]);
@@ -88,7 +99,7 @@ export function DashboardPage() {
         <MetricTile label="Avg error" value={`${(latestPoint?.avg_abs_cents ?? 0).toFixed(1)}c`} detail="recent sessions" icon={Gauge} tone="gold" />
         <MetricTile label="In tune" value={`${Math.round(latestPoint?.in_tune_percentage ?? 0)}%`} detail="within +/-5 cents" icon={Percent} tone="green" />
         <MetricTile label="Practice" value={`${minutes(progress?.total_practice_time_seconds)} min`} detail={progress?.consistency.practice_days_label} icon={CalendarClock} />
-        <MetricTile label="Sessions" value={`${progress?.session_count ?? 0}`} detail="stored locally" icon={Music2} />
+        <MetricTile label="Sessions" value={`${progress?.session_count ?? 0}`} detail="saved reviews" icon={Music2} />
       </div>
       <div className="two-column-grid">
         <SectionCard title="Full-range heat map" eyebrow="Written notes" action={<Link to="/analytics">Open analytics</Link>}>

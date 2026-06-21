@@ -29,7 +29,7 @@ const viewports = [
   { name: 'Ultra-wide desktop', slug: 'ultra-wide-desktop', width: 2560, height: 1440, kind: 'wide-desktop' },
 ];
 
-const routesVisited = ['Home', 'Auth', 'Onboarding', 'Practice', 'Session Review', 'Analytics', 'Coach', 'Sessions', 'Progress', 'Ensemble', 'More', 'Settings', 'Audio Lab'];
+const routesVisited = ['Home', 'Auth', 'Onboarding', 'Practice', 'Metronome', 'Score Practice', 'Session Review', 'Analytics', 'Coach', 'Sessions', 'Progress', 'Ensemble', 'More', 'Settings', 'Audio Lab'];
 
 const screenshotPlan = new Map([
   ['tiny-phone:practice', 'tiny-phone-practice.png'],
@@ -102,7 +102,11 @@ async function ensureServers() {
   const started = [];
   if (!(await isReachable(apiUrl))) {
     const backend = await backendServerCommand();
-    started.push(spawnServer(backend.command, backend.args, backendDir));
+    started.push(spawnServer(backend.command, backend.args, backendDir, {
+      APP_ENV: 'local',
+      FRONTEND_ORIGIN: appUrl,
+      CORS_ALLOWED_ORIGINS: `${appUrl},http://localhost:5173,http://127.0.0.1:5173`,
+    }));
   }
   if (!(await isReachable(appUrl))) {
     started.push(spawnServer(isWindows ? 'npm.cmd' : 'npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173'], frontendDir, {
@@ -220,7 +224,9 @@ async function gotoAndCheck(page, viewport, route, routeLabel, issues) {
   await page.waitForSelector('.content', { state: 'visible' });
   await assertNoConsoleErrors(page, issues, `${viewport.name} ${routeLabel}`);
   await assertNoHorizontalOverflow(page, issues, `${viewport.name} ${routeLabel}`);
-  await assertMobileChrome(page, viewport, issues, `${viewport.name} ${routeLabel}`);
+  if (routeLabel !== 'Auth') {
+    await assertMobileChrome(page, viewport, issues, `${viewport.name} ${routeLabel}`);
+  }
 }
 
 async function runViewport(browser, viewport) {
@@ -264,6 +270,10 @@ async function runViewport(browser, viewport) {
     if (viewport.kind === 'tablet-landscape') await assertSideBySide(page, '.practice-layout', issues, `${viewport.name} Practice`);
     await saveScreenshot(page, viewport, 'practice', screenshots);
 
+    await gotoAndCheck(page, viewport, '/metronome', 'Metronome', issues);
+    await gotoAndCheck(page, viewport, '/practice/score', 'Score Practice', issues);
+    await gotoAndCheck(page, viewport, '/practice', 'Practice return', issues);
+
     await page.getByRole('button', { name: /start recording/i }).click();
     await page.getByRole('button', { name: /stop recording/i }).waitFor({ state: 'visible' });
     await sleep(2600);
@@ -273,7 +283,7 @@ async function runViewport(browser, viewport) {
     const reviewHref = await reviewLink.getAttribute('href');
     if (!reviewHref) issues.push(`${viewport.name} Practice: saved session review link missing href`);
     await reviewLink.click();
-    await page.waitForURL(/\/sessions\/\d+/);
+    await page.waitForURL(/\/sessions\/-?\d+/);
     await page.waitForLoadState('networkidle');
     await page.waitForSelector('.two-column-grid', { state: 'visible', timeout: 15000 });
     await page.waitForSelector('.audio-player-card', { state: 'visible', timeout: 15000 }).catch(() => {

@@ -31,6 +31,16 @@ describe('pitchFrameFromFrequency', () => {
     expect(frame.is_valid_for_recording).toBe(true);
   });
 
+  it('rejects high-confidence pitches outside the selected instrument range', () => {
+    const trumpetLow = pitchFrameFromFrequency(100, 0, 'trumpet', 440, 0, MIN_RECORDING_CONFIDENCE, 0.1);
+    const tubaHigh = pitchFrameFromFrequency(620, 0, 'tuba', 440, 0, MIN_RECORDING_CONFIDENCE, 0.1);
+
+    expect(trumpetLow.is_valid_for_recording).toBe(false);
+    expect(trumpetLow.save_eligibility_reason).toBe('outside instrument range');
+    expect(tubaHigh.is_valid_for_recording).toBe(false);
+    expect(tubaHigh.save_eligibility_reason).toBe('outside instrument range');
+  });
+
   it('keeps high-jitter demo notes recordable while reserving no-lock for silence', () => {
     const frames = Array.from({ length: 18 }, (_, offset) => nextDemoPitchFrame(54 + offset, 'trumpet', 440));
     const recordable = frames.filter((frame) => frame.is_valid_for_recording);

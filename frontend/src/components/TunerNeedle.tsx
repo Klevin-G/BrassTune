@@ -5,7 +5,7 @@ export function TunerNeedle({ frame }: { frame: PitchFrame | null }) {
   const clamped = Math.max(-50, Math.min(50, cents));
   const degrees = (clamped / 50) * 42;
   return (
-    <div className="needle-panel" aria-label="Tuning needle">
+    <div className="needle-panel" role="meter" aria-label="Tuning needle cents deviation" aria-valuemin={-50} aria-valuemax={50} aria-valuenow={Math.round(clamped)} aria-valuetext={`${Math.round(clamped)} cents`}>
       <div className="needle-scale">
         <span>-50</span>
         <span>Flat</span>
@@ -25,4 +25,3 @@ export function TunerNeedle({ frame }: { frame: PitchFrame | null }) {
     </div>
   );
 }
-

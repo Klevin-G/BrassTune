@@ -5,14 +5,30 @@ import { AccuracyLineChart, PracticeBarChart } from '../components/ProgressChart
 import { InsightCard, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import type { ProgressMetrics } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 
 export function ProgressPage() {
   const { instrumentId } = useAppSettings();
+  const auth = useAuth();
   const [progress, setProgress] = useState<ProgressMetrics | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getProgress(instrumentId).then(setProgress);
-  }, [instrumentId]);
+    if (!auth.isSignedIn) {
+      setProgress(null);
+      setError('Progress sync is available after sign-in. Record or review guest sessions locally.');
+      return;
+    }
+    getProgress(instrumentId)
+      .then((next) => {
+        setProgress(next);
+        setError(null);
+      })
+      .catch(() => {
+        setProgress(null);
+        setError('Progress sync is unavailable right now. Record or review guest sessions locally.');
+      });
+  }, [auth.isSignedIn, instrumentId]);
 
   const latestPoint = progress?.timeseries[progress.timeseries.length - 1];
   const improved = progress?.most_improved_notes?.[0];
@@ -26,6 +42,7 @@ export function ProgressPage() {
         description="Track whether the tuning work is getting steadier, not just whether one note looked good for a moment."
         meta={<StatusBadge tone="gold">{progress?.period?.current ?? 'Current period'}</StatusBadge>}
       />
+      {error && <div className="alert">{error}</div>}
       <div className="stats-grid">
         <MetricTile label="Current error" value={`${latestPoint?.avg_abs_cents.toFixed(1) ?? '0.0'}c`} detail="average deviation" icon={TrendingDown} tone="gold" />
         <MetricTile label="In tune" value={`${Math.round(latestPoint?.in_tune_percentage ?? 0)}%`} detail="recent period" icon={Award} tone="green" />

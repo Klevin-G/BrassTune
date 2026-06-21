@@ -3,9 +3,9 @@ import type { NoteStats } from '../domain/types';
 export function NoteStatsTable({ rows }: { rows: NoteStats[] }) {
   return (
     <>
-      <div className="note-card-list" aria-label="Mobile note stats">
+      <div className="note-card-list" role="list" aria-label="Mobile note stats">
         {rows.map((row) => (
-          <article className="note-stat-card" key={row.note_label}>
+          <article className="note-stat-card" role="listitem" key={row.note_label}>
             <div className="note-stat-heading">
               <strong>{row.note_label}</strong>
               <span className={`severity-chip ${row.severity_color ?? 'green'}`}>{row.severity}</span>

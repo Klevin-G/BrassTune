@@ -1,7 +1,5 @@
 import type { InstrumentProfile, NoteEvent, NoteStats, PitchFrame, PracticePlan, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
-const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? '';
+import { apiBase, wsBase } from './runtimeConfig';
 let authTokenProvider: (() => Promise<string | null>) | null = null;
 
 export interface DateRangeParams {
@@ -22,32 +20,50 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const body = options?.body;
   const isFormBody = typeof FormData !== 'undefined' && body instanceof FormData;
   const isBlobBody = typeof Blob !== 'undefined' && body instanceof Blob;
-  const headers = {
+  const headers = new Headers({
     ...(isFormBody || isBlobBody ? {} : { 'Content-Type': 'application/json' }),
     ...(await authHeaders()),
-    ...(options?.headers ?? {}),
-  };
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers,
+  });
+  new Headers(options?.headers).forEach((value, key) => headers.set(key, value));
+  const response = await fetch(`${apiBase()}${path}`, {
     ...options,
+    headers,
   });
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `Request failed: ${response.status}`);
+    throw new Error(friendlyRequestError(message, response.status));
   }
   return response.json() as Promise<T>;
 }
 
-export const exportUrl = (path: string) => `${API_BASE}${path}`;
+function friendlyRequestError(message: string, status: number) {
+  let raw = message;
+  try {
+    const parsed = JSON.parse(message);
+    raw = parsed.detail ?? parsed.message ?? message;
+  } catch {
+    raw = message;
+  }
+  if (status === 401 || /authentication required|auth|token|supabase/i.test(raw)) {
+    return 'Sign in to sync sessions and account features. Guest practice still works on this device.';
+  }
+  if (/fastapi|backend|env var|SUPABASE_|VITE_/i.test(raw)) {
+    return 'Cloud practice is unavailable right now. Guest practice still works on this device.';
+  }
+  return raw || `Request failed: ${status}`;
+}
+
+export const exportUrl = (path: string) => `${apiBase()}${path}`;
 
 export async function pitchWebSocketUrl() {
-  const base = WS_BASE || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  const base = wsBase() || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
   const url = new URL('/ws/pitch', base);
-  const token = authTokenProvider ? await authTokenProvider() : null;
-  if (token) {
-    url.searchParams.set('token', token);
-  }
   return url.toString();
+}
+
+export async function pitchWebSocketAuthPayload() {
+  const token = authTokenProvider ? await authTokenProvider() : null;
+  return token ? { type: 'authenticate', token } : null;
 }
 
 function queryString(params: Record<string, string | number | undefined>) {
@@ -133,7 +149,7 @@ export function sessionAudioUrl(sessionId: number | string) {
 }
 
 export async function downloadExport(path: string, filename: string) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: await authHeaders() });
+  const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -149,7 +165,7 @@ export async function downloadExport(path: string, filename: string) {
 }
 
 export async function objectUrlFor(path: string) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: await authHeaders() });
+  const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -183,12 +199,14 @@ export function getPracticePlan(instrumentId: string) {
   return request<PracticePlan>(`/api/practice-plan?instrument_id=${instrumentId}`);
 }
 
-export function getEnsembleSummary() {
-  return request<any>('/api/ensemble/summary');
+export function getEnsembleSummary(groupId?: number) {
+  const params = queryString({ group_id: groupId });
+  return request<any>(`/api/ensemble/summary${params}`);
 }
 
-export function getEnsembleReport() {
-  return request<any>('/api/ensemble/report');
+export function getEnsembleReport(groupId?: number) {
+  const params = queryString({ group_id: groupId });
+  return request<any>(`/api/ensemble/report${params}`);
 }
 
 export function getEnsembleGroups() {
@@ -213,6 +231,19 @@ export function updateEnsembleMember(groupId: number, memberId: number, payload:
 
 export function clearLocalSessions() {
   return request<{ cleared: Record<string, number> }>('/api/users/me/clear-sessions', { method: 'POST' });
+}
+
+export function deleteMyAccount(confirmation: string) {
+  return request<{
+    deleted: boolean;
+    counts: Record<string, number>;
+    supabase_sessions_revoked: boolean;
+    supabase_identity_deleted: boolean;
+    teacher_owned_group_policy: string;
+  }>('/api/users/me', {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmation }),
+  });
 }
 
 export function resetDemoData() {

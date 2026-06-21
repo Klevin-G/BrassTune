@@ -4,16 +4,27 @@ on:
   pull_request:
     paths:
       - "frontend/**"
+      - "backend/**"
+      - "fixtures/**"
+      - "render.yaml"
+      - "vercel.json"
+      - "frontend/vercel.json"
       - ".github/workflows/frontend.yml"
   push:
     branches: [main, swift-migration]
     paths:
       - "frontend/**"
+      - "backend/**"
+      - "fixtures/**"
+      - "render.yaml"
+      - "vercel.json"
+      - "frontend/vercel.json"
       - ".github/workflows/frontend.yml"
 
 jobs:
   test-build-audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     defaults:
       run:
         working-directory: frontend
@@ -21,14 +32,41 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Install dependencies
         run: npm ci
+      - name: Install backend dependencies for browser journeys
+        working-directory: backend
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
       - name: Unit tests
         run: npm test
       - name: Production build
         run: npm run build
       - name: Dependency audit
         run: npm audit --omit=dev
+      - name: Install Playwright browsers
+        timeout-minutes: 60
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Browser release journeys
+        timeout-minutes: 15
+        env:
+          DATABASE_URL: sqlite:///${{ runner.temp }}/brasstune-e2e-${{ github.run_id }}-${{ github.run_attempt }}.db
+          E2E_START_LOCAL_SERVERS: "1"
+          PLAYWRIGHT_HTML_OPEN: never
+        run: npm run e2e:local
+      - name: Clean browser journey temp database
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/brasstune-e2e-*.db*
+      - name: Upload Playwright artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: brass-tune-playwright
+          path: |
+            frontend/test-results/**
+            docs/release-readiness/playwright-report/**

@@ -4,6 +4,8 @@ import type { PitchFrame } from './types';
 const FRAME_SIZE = 4096;
 const HOP_SIZE = 4096;
 const MAX_ANALYSIS_SECONDS = 240;
+export const MAX_LOCAL_MEDIA_BYTES = 250 * 1024 * 1024;
+const SUPPORTED_MEDIA_TYPE = /^(audio|video)\//;
 
 const instrumentBounds: Record<string, { min: number; max: number }> = {
   trumpet: { min: 130, max: 1500 },
@@ -21,25 +23,43 @@ export interface LocalMediaAnalysisResult {
   sourceType: string;
 }
 
+export function validateLocalMediaFile(file: File) {
+  if (file.size <= 0) {
+    throw new Error('Choose a non-empty audio or video file.');
+  }
+  if (file.size > MAX_LOCAL_MEDIA_BYTES) {
+    throw new Error('Choose a file smaller than 250 MB for local analysis.');
+  }
+  if (file.type && !SUPPORTED_MEDIA_TYPE.test(file.type)) {
+    throw new Error('Choose a browser-supported audio or video file.');
+  }
+}
+
 export async function analyzeLocalMediaFile(
   file: File,
   instrumentId: string,
   referencePitch: number,
   onProgress?: (progress: number) => void,
+  signal?: AbortSignal,
 ): Promise<LocalMediaAnalysisResult> {
+  validateLocalMediaFile(file);
+  if (signal?.aborted) throw new Error('Local media analysis was canceled.');
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
   if (!AudioContextClass) {
     throw new Error('This browser cannot decode local audio/video for analysis.');
   }
   const audioContext = new AudioContextClass();
   try {
-    const buffer = await audioContext.decodeAudioData(await file.arrayBuffer());
+    const fileBuffer = await file.arrayBuffer();
+    if (signal?.aborted) throw new Error('Local media analysis was canceled.');
+    const buffer = await audioContext.decodeAudioData(fileBuffer);
     const mono = downmix(buffer);
     const sampleRate = buffer.sampleRate;
     const maxSamples = Math.min(mono.length, Math.floor(sampleRate * MAX_ANALYSIS_SECONDS));
     const bounds = instrumentBounds[instrumentId] ?? instrumentBounds.trumpet;
     const frames: PitchFrame[] = [];
     for (let start = 0; start + FRAME_SIZE <= maxSamples; start += HOP_SIZE) {
+      if (signal?.aborted) throw new Error('Local media analysis was canceled.');
       const slice = mono.subarray(start, start + FRAME_SIZE);
       const rms = calculateRms(slice);
       const timestampMs = Math.round((start / sampleRate) * 1000);

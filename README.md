@@ -121,14 +121,15 @@ Pitch frames must reach at least 95% confidence before the app treats them as re
 
 ## Microphone Mode
 
-Turn off Demo in the top bar or Settings, then use the Practice page's microphone button. The browser asks for microphone permission and streams mono PCM frames to `WS /ws/pitch`.
+Turn off Demo in the top bar or Settings, then use the Practice page's microphone button. The browser asks for microphone permission and analyzes mono PCM frames locally for guest live tuning. This path does not require login, Supabase, Render, or an authenticated WebSocket.
 
 Recording persistence is single-source:
 
 - Demo mode generates `PitchFrame` objects in the browser and saves them through `POST /api/sessions/{id}/samples`.
-- Microphone mode sends PCM to the WebSocket; the backend detects pitch and batch-saves valid frames when `session_id` is present.
+- Guest microphone mode derives pitch frames in the browser and stores guest practice on this device.
+- Signed cloud sync and backend diagnostics use the WebSocket path when account infrastructure is configured.
 
-Friendly failure states are shown for denied permission, missing browser audio APIs, backend/WebSocket disconnects, silence, and unstable pitch.
+Friendly failure states are shown for denied permission, missing browser audio APIs, cloud sync disconnects, silence, and unstable pitch.
 
 The browser streams 4096-sample audio frames to give the detector more context for steady notes. That adds a little live-tuner latency, but improves stability for low brass and noisy rooms.
 

@@ -199,7 +199,7 @@ export function SelectionChip({
   tone?: Tone;
 }) {
   return (
-    <button className={cx('selection-chip', active && 'active', `tone-${tone}`)} onClick={onClick} type="button">
+    <button aria-pressed={active} className={cx('selection-chip', active && 'active', `tone-${tone}`)} onClick={onClick} type="button">
       {children}
     </button>
   );
@@ -235,7 +235,7 @@ export function SegmentedControl<T extends string>({
 }
 
 export function FloatingTabBar({ children }: { children: ReactNode }) {
-  return <nav className="floating-tabbar">{children}</nav>;
+  return <nav className="floating-tabbar" aria-label="Primary mobile navigation">{children}</nav>;
 }
 
 export function BottomActionBar({ children }: { children: ReactNode }) {

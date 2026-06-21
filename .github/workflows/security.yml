@@ -6,16 +6,21 @@ on:
     branches: [main, swift-migration]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   dependency-and-secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-python@v5
@@ -27,19 +32,12 @@ jobs:
       - name: Backend dependency audit
         working-directory: backend
         run: |
-          python -m pip install --upgrade pip pip-audit
-          # These Starlette advisories currently list fixed versions outside FastAPI's
-          # supported Starlette range. Keep the ignores exact so new advisories fail CI.
-          pip-audit -r requirements.txt \
-            --ignore-vuln PYSEC-2026-161 \
-            --ignore-vuln GHSA-wqp7-x3pw-xc5r \
-            --ignore-vuln GHSA-x746-7m8f-x49c \
-            --ignore-vuln GHSA-82w8-qh3p-5jfq \
-            --ignore-vuln GHSA-jp82-jpqv-5vv3
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt -c constraints.txt
+          pip-audit -r requirements.txt -r requirements-dev.txt
       - name: Bandit backend scan
         working-directory: backend
         run: |
-          python -m pip install bandit
           bandit -r app -x app/tests
       - name: Gitleaks secret scan
         uses: gitleaks/gitleaks-action@v2

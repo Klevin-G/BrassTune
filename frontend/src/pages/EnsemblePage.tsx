@@ -14,27 +14,68 @@ export function EnsemblePage() {
   const [newGroupName, setNewGroupName] = useState('');
   const [memberUsername, setMemberUsername] = useState('');
   const [ensembleStatus, setEnsembleStatus] = useState('');
+  const [loading, setLoading] = useState(true);
   const { instrumentId } = useAppSettings();
   const auth = useAuth();
   const canManage = auth.profile?.role === 'director' || auth.profile?.role === 'admin';
 
-  useEffect(() => {
-    Promise.all([getEnsembleSummary(), getEnsembleReport(), getEnsembleGroups()]).then(([summaryData, reportData, groupsData]) => {
-      setSummary(summaryData);
-      setReport(reportData);
-      setGroups(groupsData);
-      if (groupsData[0]) {
-        getEnsembleGroup(groupsData[0].id).then(setSelectedGroup).catch(() => undefined);
+  const memberLabel = (member: any) => {
+    if (member.is_current_user) return 'You';
+    if (member.username) return `@${member.username}`;
+    return member.display_name ?? 'Member';
+  };
+
+  const selectGroup = async (groupId: number) => {
+    setLoading(true);
+    try {
+      const group = await getEnsembleGroup(groupId);
+      setSelectedGroup(group);
+      if (canManage) {
+        const [summaryData, reportData] = await Promise.all([getEnsembleSummary(groupId), getEnsembleReport(groupId)]);
+        setSummary(summaryData);
+        setReport(reportData);
+      } else {
+        setSummary(null);
+        setReport(null);
       }
-    });
-  }, []);
+      setEnsembleStatus('');
+    } catch (error) {
+      setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensemble data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!auth.isSignedIn) {
+      setGroups([]);
+      setSelectedGroup(null);
+      setSummary(null);
+      setReport(null);
+      setEnsembleStatus('Sign in with an ensemble account to view roster and director reports.');
+      setLoading(false);
+      return;
+    }
+    getEnsembleGroups()
+      .then((groupsData) => {
+        setGroups(groupsData);
+        if (groupsData[0]) {
+          return selectGroup(groupsData[0].id);
+        }
+        setSummary(null);
+        setReport(null);
+        return undefined;
+      })
+      .catch((error) => setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensembles.'))
+      .finally(() => setLoading(false));
+  }, [auth.isSignedIn, canManage]);
 
   const createGroup = async () => {
     if (!newGroupName.trim()) return;
     try {
       const group = await createEnsembleGroup(newGroupName);
       setGroups((old) => [group, ...old]);
-      setSelectedGroup(group);
+      await selectGroup(group.id);
       setNewGroupName('');
       setEnsembleStatus('Group created.');
     } catch (error) {
@@ -46,8 +87,7 @@ export function EnsemblePage() {
     if (!selectedGroup?.id || !memberUsername.trim()) return;
     try {
       await addEnsembleMemberByUsername(selectedGroup.id, { username: memberUsername, instrument_id: instrumentId, role_in_group: 'student' });
-      const group = await getEnsembleGroup(selectedGroup.id);
-      setSelectedGroup(group);
+      await selectGroup(selectedGroup.id);
       setMemberUsername('');
       setEnsembleStatus('Member added.');
     } catch (error) {
@@ -60,7 +100,7 @@ export function EnsemblePage() {
       <PageHeader
         eyebrow="Ensemble"
         title="Director briefing"
-        description="A local report view for seeing section-level intonation tendencies and turning them into a rehearsal focus."
+        description="A report view for seeing section-level intonation tendencies and turning them into a rehearsal focus."
         action={
           <button className="primary-button" onClick={() => window.print()} type="button">
             <Printer size={18} />
@@ -72,7 +112,7 @@ export function EnsemblePage() {
         <div className="ensemble-admin-grid">
           <div className="mini-stat-list">
             {groups.map((group) => (
-              <button className="mini-stat-row button-row" type="button" key={group.id} onClick={() => getEnsembleGroup(group.id).then(setSelectedGroup)}>
+              <button className="mini-stat-row button-row" type="button" key={group.id} onClick={() => selectGroup(group.id)} disabled={loading}>
                 <span>{group.name}</span>
                 <strong>{selectedGroup?.id === group.id ? 'Open' : 'View'}</strong>
               </button>
@@ -84,7 +124,7 @@ export function EnsemblePage() {
             <div className="roster-list">
               {selectedGroup?.members?.map((member: any) => (
                 <div className="history-row" key={member.id}>
-                  <span>@{member.username ?? member.user_id}</span>
+                  <span>{memberLabel(member)}</span>
                   <strong>{member.instrument_id}</strong>
                   <em>{member.status}</em>
                 </div>
@@ -110,7 +150,7 @@ export function EnsemblePage() {
                 </button>
               </div>
             )}
-            {ensembleStatus && <p className="settings-status">{ensembleStatus}</p>}
+            {ensembleStatus && <p className="settings-status" aria-live="polite">{ensembleStatus}</p>}
           </div>
         </div>
       </SectionCard>
@@ -129,7 +169,7 @@ export function EnsemblePage() {
         <InsightCard
           title="Briefing summary"
           detail="Director handoff"
-          body={report?.recommended_rehearsal_focus ?? 'Seed data will populate the rehearsal focus when the backend is running.'}
+          body={report?.recommended_rehearsal_focus ?? 'Ensemble data will populate the rehearsal focus when enough active member sessions are available.'}
           icon={FileText}
           tone="gold"
         />
@@ -143,7 +183,7 @@ export function EnsemblePage() {
         <InsightCard
           title="Priority lens"
           detail="Top problem notes"
-          body="The table below ranks note issues by severity across the seeded ensemble sessions."
+          body="The table below ranks note issues by severity across active ensemble sessions."
           icon={Target}
           tone="amber"
         />

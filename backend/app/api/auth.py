@@ -11,9 +11,10 @@ from typing import Optional
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.security import DEPLOYED_ENVIRONMENTS, LOCAL_ENVIRONMENTS, app_environment, auth_mode
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.db.database import get_db
-from app.models.db import User
+from app.models.db import AccountDeletionJob, User
 from app.services.session_service import get_or_create_default_user
 
 
@@ -24,10 +25,29 @@ USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,32}$")
 class AuthContext:
     user: User
     is_guest: bool = False
+    access_token: Optional[str] = None
 
 
 def local_auth_enabled() -> bool:
-    return os.getenv("APP_ENV", "local").lower() != "production" or os.getenv("BRASSTUNE_ALLOW_LOCAL_AUTH") == "1"
+    environment = app_environment()
+    if environment in DEPLOYED_ENVIRONMENTS:
+        return False
+    return auth_mode() == "disabled" and (environment in LOCAL_ENVIRONMENTS or os.getenv("BRASSTUNE_ALLOW_LOCAL_AUTH") == "1")
+
+
+def assert_auth_configured() -> None:
+    environment = app_environment()
+    if environment in DEPLOYED_ENVIRONMENTS and os.getenv("BRASSTUNE_ALLOW_LOCAL_AUTH") == "1":
+        raise RuntimeError("BRASSTUNE_ALLOW_LOCAL_AUTH cannot be enabled in deployed environments.")
+    mode = auth_mode()
+    if mode == "disabled":
+        return
+    if not os.getenv("SUPABASE_URL"):
+        raise RuntimeError("SUPABASE_URL is required when BRASSTUNE_AUTH_MODE=supabase.")
+    if not os.getenv("SUPABASE_PUBLISHABLE_KEY"):
+        raise RuntimeError("SUPABASE_PUBLISHABLE_KEY is required when BRASSTUNE_AUTH_MODE=supabase.")
+    if not os.getenv("SUPABASE_SECRET_KEY"):
+        raise RuntimeError("SUPABASE_SECRET_KEY is required when BRASSTUNE_AUTH_MODE=supabase.")
 
 
 def _bearer_token(authorization: Optional[str]) -> Optional[str]:
@@ -68,9 +88,19 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
     email = payload.get("email")
     metadata = payload.get("user_metadata") or {}
     app_metadata = payload.get("app_metadata") or {}
+    requested_role = app_metadata.get("role") if app_metadata.get("role") in {"student", "director", "admin"} else None
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
-    if user is None and email:
-        user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        deletion_job = (
+            db.query(AccountDeletionJob)
+            .filter(AccountDeletionJob.supabase_user_id == supabase_id)
+            .order_by(AccountDeletionJob.updated_at.desc())
+            .first()
+        )
+        if deletion_job is not None:
+            if deletion_job.status == "completed":
+                raise HTTPException(status_code=410, detail="This account has been deleted.")
+            raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
     if user is None:
         preferred_username = metadata.get("username") or (email.split("@")[0] if email else "player")
         user = User(
@@ -79,7 +109,7 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             username=_unique_username(db, preferred_username),
             name=metadata.get("display_name") or metadata.get("name") or email or "BrassTune Player",
             display_name=metadata.get("display_name") or metadata.get("name"),
-            role=app_metadata.get("role") or "student",
+            role=requested_role or "student",
             primary_instrument_id=metadata.get("primary_instrument_id") if is_valid_instrument_id(metadata.get("primary_instrument_id", "")) else "trumpet",
         )
         db.add(user)
@@ -93,8 +123,8 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             user.username = _unique_username(db, metadata["username"], user.id)
         if is_valid_instrument_id(metadata.get("primary_instrument_id", "")):
             user.primary_instrument_id = metadata["primary_instrument_id"]
-        if app_metadata.get("role") in {"student", "director", "admin"}:
-            user.role = app_metadata["role"]
+        if requested_role:
+            user.role = requested_role
     user.updated_at = dt.datetime.utcnow()
     db.commit()
     db.refresh(user)
@@ -123,12 +153,57 @@ def _fetch_supabase_user(token: str) -> dict:
         headers={"apikey": api_key, "Authorization": "Bearer %s" % token},
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310 - URL is validated as Supabase HTTPS/local dev HTTP.
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired Supabase token.") from exc
     except OSError as exc:
         raise HTTPException(status_code=503, detail="Could not validate Supabase token.") from exc
+
+
+def _supabase_service_key() -> str:
+    key = os.getenv("SUPABASE_SECRET_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="SUPABASE_SECRET_KEY is required for account deletion.")
+    return key
+
+
+def supabase_global_sign_out(token: Optional[str]) -> bool:
+    if not token or token.startswith("dev-user-"):
+        return False
+    service_key = _supabase_service_key()
+    request = urllib.request.Request(
+        _supabase_endpoint("/auth/v1/logout?scope=global"),
+        data=b"{}",
+        method="POST",
+        headers={"apikey": service_key, "Authorization": "Bearer %s" % token, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10):  # nosec B310
+            return True
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Supabase session revocation failed.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Could not reach Supabase to revoke sessions.") from exc
+
+
+def delete_supabase_identity(supabase_user_id: Optional[str]) -> bool:
+    if not supabase_user_id:
+        return False
+    service_key = _supabase_service_key()
+    encoded_user_id = urllib.parse.quote(supabase_user_id, safe="")
+    request = urllib.request.Request(
+        _supabase_endpoint("/auth/v1/admin/users/%s" % encoded_user_id),
+        method="DELETE",
+        headers={"apikey": service_key, "Authorization": "Bearer %s" % service_key},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10):  # nosec B310
+            return True
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Supabase identity deletion failed.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Could not reach Supabase to delete the identity.") from exc
 
 
 def _dev_token_user(db: Session, token: str) -> Optional[User]:
@@ -150,9 +225,11 @@ def auth_context_from_token(db: Session, token: Optional[str]) -> AuthContext:
     if token:
         dev_user = _dev_token_user(db, token)
         if dev_user is not None:
-            return AuthContext(user=dev_user, is_guest=False)
+            return AuthContext(user=dev_user, is_guest=False, access_token=token)
+        if auth_mode() == "disabled":
+            raise HTTPException(status_code=401, detail="Accounts are unavailable in this environment.")
         payload = _fetch_supabase_user(token)
-        return AuthContext(user=_sync_supabase_user(db, payload), is_guest=False)
+        return AuthContext(user=_sync_supabase_user(db, payload), is_guest=False, access_token=token)
     if local_auth_enabled():
         user = get_or_create_default_user(db)
         if not user.username:
@@ -161,7 +238,7 @@ def auth_context_from_token(db: Session, token: Optional[str]) -> AuthContext:
             db.add(user)
             db.commit()
             db.refresh(user)
-        return AuthContext(user=user, is_guest=True)
+        return AuthContext(user=user, is_guest=True, access_token=None)
     raise HTTPException(status_code=401, detail="Authentication required.")
 
 

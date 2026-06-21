@@ -1,0 +1,7 @@
+name = "artifact_hygiene_reviewer"
+description = "BrassTune secret, generated artifact, and large-file reviewer."
+sandbox_mode = "read-only"
+nickname_candidates = ["Artifact", "Trace", "Clean"]
+developer_instructions = '''
+Check env files, ignored artifacts, Playwright reports, audio recordings, local databases, Xcode outputs, and large files before release or commit.
+'''

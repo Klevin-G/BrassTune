@@ -1,5 +1,6 @@
 import { Gauge, Music2, Percent, Timer } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useParams } from 'react-router-dom';
 import { getSession, getSessionAnalytics } from '../api/client';
 import { ExportButtons } from '../components/ExportButtons';
@@ -8,6 +9,7 @@ import { NoteStatsTable } from '../components/NoteStatsTable';
 import { RecommendationCard } from '../components/RecommendationCard';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { LoadingSkeleton, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { getGuestSession, isGuestSessionId, type GuestSessionDetail } from '../domain/guestSessions';
 import type { NoteEvent, NoteStats, PracticeSession, Recommendation } from '../domain/types';
 
 type SessionDetail = PracticeSession & { samples_count: number; note_events: NoteEvent[] };
@@ -18,22 +20,69 @@ export function SessionReviewPage() {
   const [stats, setStats] = useState<NoteStats[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([getSession(id), getSessionAnalytics(id)]).then(([sessionData, analytics]) => {
-      setSession(sessionData);
-      setStats(analytics.note_stats);
-      setHeatmap(analytics.heatmap);
-      setRecommendations(analytics.recommendations);
-    });
+    setLoading(true);
+    setNotFound(false);
+    if (isGuestSessionId(id)) {
+      const guestSession = getGuestSession(id);
+      if (guestSession) {
+        setSession(guestSession);
+        setStats(guestSession.note_stats);
+        setHeatmap(guestSession.heatmap);
+        setRecommendations(guestSession.recommendations);
+        setLoading(false);
+      } else {
+        setNotFound(true);
+        setLoading(false);
+      }
+      return;
+    }
+    Promise.all([getSession(id), getSessionAnalytics(id)])
+      .then(([sessionData, analytics]) => {
+        setSession(sessionData);
+        setStats(analytics.note_stats);
+        setHeatmap(analytics.heatmap);
+        setRecommendations(analytics.recommendations);
+        setLoading(false);
+      })
+      .catch(() => {
+        const guestSession = getGuestSession(id);
+        if (!guestSession) {
+          setNotFound(true);
+          setLoading(false);
+          return;
+        }
+        setSession(guestSession);
+        setStats(guestSession.note_stats);
+        setHeatmap(guestSession.heatmap);
+        setRecommendations(guestSession.recommendations);
+        setLoading(false);
+      });
   }, [id]);
 
-  if (!session) {
+  if (!session && loading) {
     return (
       <ScreenContainer>
         <SectionCard title="Loading session">
           <LoadingSkeleton rows={4} />
+        </SectionCard>
+      </ScreenContainer>
+    );
+  }
+
+  if (!session || notFound) {
+    return (
+      <ScreenContainer>
+        <SectionCard title="Session not found" eyebrow="Review">
+          <p className="muted-copy">This session is not available on this device or account.</p>
+          <div className="settings-actions">
+            <Link className="primary-button" to="/practice">Record a take</Link>
+            <Link className="ghost-button" to="/sessions">Open sessions</Link>
+          </div>
         </SectionCard>
       </ScreenContainer>
     );
@@ -44,9 +93,13 @@ export function SessionReviewPage() {
       <PageHeader
         eyebrow="Session review"
         title={session.name}
-        description={`Recorded ${new Date(session.started_at).toLocaleString()} with ${session.notes_count} detected note events.`}
-        action={<ExportButtons sessionId={session.id} />}
-        meta={<StatusBadge tone="gold">{session.instrument_id}</StatusBadge>}
+        description={
+          session.guest_session
+            ? `Guest session saved on this device ${new Date(session.started_at).toLocaleString()} with ${session.notes_count} detected note events.`
+            : `Recorded ${new Date(session.started_at).toLocaleString()} with ${session.notes_count} detected note events.`
+        }
+        action={<ExportButtons sessionId={session.id} guestSession={session.guest_session ? session as GuestSessionDetail : null} />}
+        meta={<StatusBadge tone="gold">{session.guest_session ? 'guest practice' : session.instrument_id}</StatusBadge>}
       />
       <div className="stats-grid">
         <MetricTile label="Avg abs" value={`${session.average_abs_cents.toFixed(1)}c`} icon={Gauge} tone="gold" />

@@ -4,21 +4,37 @@ import { Link } from 'react-router-dom';
 import { clearLocalSessions, downloadExport, repairDemoData, resetDemoData } from '../api/client';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { guestSessionsExport } from '../domain/guestSessions';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
+
+function downloadTextFile(content: string, filename: string, type = 'application/json') {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function SettingsPage() {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
   const auth = useAuth();
+  const internalToolsEnabled = import.meta.env.VITE_ENABLE_INTERNAL_TOOLS === 'true';
   const [maintenanceStatus, setMaintenanceStatus] = useState('Ready');
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
 
-  const runMaintenance = async (label: string, action: () => Promise<unknown>) => {
+  const runMaintenance = async (label: string, action: () => Promise<unknown>, confirmation?: string) => {
+    if (confirmation && !window.confirm(confirmation)) return;
     setBusyAction(label);
     setMaintenanceStatus(`${label}...`);
     try {
-      const result = await action();
-      setMaintenanceStatus(`${label} complete: ${JSON.stringify(result)}`);
+      await action();
+      setMaintenanceStatus(`${label} complete.`);
     } catch (error) {
       setMaintenanceStatus(`${label} failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -26,16 +42,39 @@ export function SettingsPage() {
     }
   };
 
+  const deleteAccount = async () => {
+    await runMaintenance('Delete account', () => auth.deleteAccount(deleteConfirmation), 'This permanently deletes your BrassTune account data and owned ensembles according to the documented policy. Continue?');
+    setDeleteConfirmation('');
+  };
+
+  const exportAllData = () => {
+    if (auth.isSignedIn) {
+      downloadExport('/api/export/all.zip', 'brasstune-export.zip').catch(() => setMaintenanceStatus('Cloud export is unavailable right now. Try again later.'));
+      return;
+    }
+    downloadTextFile(guestSessionsExport(), 'brasstune-guest-practice-export.json');
+    setMaintenanceStatus('Guest practice export downloaded from this device.');
+  };
+
+  const clearPreferences = () => {
+    if (!window.confirm('Clear BrassTune preferences on this device?')) return;
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith('brasstune.'))
+      .filter((key) => key !== 'brasstune.guestSessions.v1')
+      .forEach((key) => localStorage.removeItem(key));
+    setMaintenanceStatus('Preferences cleared on this device. Guest sessions were preserved.');
+  };
+
   return (
-    <ScreenContainer>
+    <ScreenContainer className="settings-screen">
       <PageHeader
         eyebrow="Settings"
         title="Practice preferences"
-        description="Keep the tuner behavior explicit: instrument transposition, reference pitch, demo mode, and local export utilities."
+        description="Keep the tuner behavior explicit: instrument transposition, reference pitch, guided audio, account access, export, and deletion controls."
         meta={<StatusBadge tone="gold">{instrumentId}</StatusBadge>}
       />
       <div className="two-column-grid">
-        <SectionCard title="Tuner setup" eyebrow="Core controls">
+        <SectionCard className="settings-tuner-card" title="Tuner setup" eyebrow="Core controls">
           <div className="settings-grid">
             <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
             <label className="field">
@@ -48,11 +87,11 @@ export function SettingsPage() {
             </label>
             <label className="field">
               <span>In-tune threshold</span>
-              <input type="text" value="+/-5 cents" readOnly />
+              <output>+/-5 cents</output>
             </label>
           </div>
         </SectionCard>
-        <SectionCard title="Profile" eyebrow={auth.isSignedIn ? 'Supabase account' : 'Guest demo'}>
+        <SectionCard className="settings-profile-card" title="Profile" eyebrow={auth.isSignedIn ? 'Account' : 'Guest practice'}>
           <div className="account-card vertical">
             <span className="insight-icon">
               <UserRound size={18} />
@@ -69,19 +108,24 @@ export function SettingsPage() {
                 Sign out
               </button>
             ) : (
-              <Link className="primary-button" to="/auth/sign-in">
+              <Link className="primary-button" to={auth.configured ? '/auth/sign-in' : '/practice'}>
                 <LogIn size={18} />
-                Sign in
+                {auth.configured ? 'Sign in' : 'Continue as guest'}
               </Link>
             )}
           </div>
+          <div className="settings-actions">
+            <Link className="ghost-button" to="/privacy">Privacy</Link>
+            <Link className="ghost-button" to="/terms">Terms</Link>
+            <Link className="ghost-button" to="/support">Support</Link>
+          </div>
         </SectionCard>
-        <SectionCard title="Local utilities" eyebrow="MVP">
+        <SectionCard title="Practice tools" eyebrow="Device and data">
           <div className="insight-grid">
             <InsightCard
               title="Audio Lab"
-              detail="Developer testing"
-              body="Open the calibration readout for real-device microphone checks, save eligibility, and detector diagnostics."
+              detail="Microphone checks"
+              body="Open the calibration readout for microphone checks, save eligibility, and detector diagnostics."
               icon={Bug}
               tone="gold"
             />
@@ -94,14 +138,14 @@ export function SettingsPage() {
             <InsightCard
               title="Export all local data"
               detail="JSON"
-              body="Download local users, sessions, samples, note events, and seeded ensemble metadata."
+              body="Download guest practice saved in this browser, or account data after sign-in."
               icon={Download}
               tone="gold"
             />
             <InsightCard
               title="Clear preferences"
               detail="Browser storage"
-              body="Resets local UI preferences without touching saved backend sessions."
+              body="Resets local UI preferences without touching saved cloud sessions."
               icon={Trash2}
               tone="red"
             />
@@ -115,39 +159,59 @@ export function SettingsPage() {
               <SlidersHorizontal size={18} />
               Reopen onboarding
             </button>
-            <button className="ghost-button" type="button" onClick={() => downloadExport('/api/export/all.zip', 'brasstune-export.zip')}>
+            <button className="ghost-button" type="button" onClick={exportAllData}>
               <Download size={18} />
               Export all data
             </button>
-            <button className="ghost-button" type="button" onClick={() => localStorage.clear()}>
+            <button className="ghost-button" type="button" onClick={clearPreferences}>
               <Trash2 size={18} />
               Clear preferences
             </button>
           </div>
         </SectionCard>
       </div>
-      <SectionCard title="Local data controls" eyebrow="Repair and reset">
+      {internalToolsEnabled && (
+        <SectionCard title="Internal data controls" eyebrow="Maintenance">
+          <div className="settings-actions">
+            <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Repair demo data', repairDemoData)}>
+              <RefreshCcw size={18} />
+              Repair demo data
+            </button>
+            <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Reset demo data', resetDemoData, 'Reset generated practice data for this environment?')}>
+              <DatabaseBackup size={18} />
+              Reset demo data
+            </button>
+            <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Clear sessions', clearLocalSessions, 'Delete your saved practice sessions and recordings?')}>
+              <RotateCcw size={18} />
+              Clear sessions
+            </button>
+          </div>
+          <p className="settings-status" aria-live="polite">{maintenanceStatus}</p>
+        </SectionCard>
+      )}
+      {!internalToolsEnabled && <p className="settings-status" aria-live="polite">{maintenanceStatus}</p>}
+      <SectionCard title="Delete account" eyebrow="Account lifecycle">
+        <p className="muted-copy">Export your data first. Deletion removes your profile, sessions, pitch samples, note events, recommendations, group memberships, and owned ensembles. Teacher-owned groups are deleted with their memberships and invitations.</p>
         <div className="settings-actions">
-          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Repair demo data', repairDemoData)}>
-            <RefreshCcw size={18} />
-            Repair demo data
-          </button>
-          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Reset demo data', resetDemoData)}>
-            <DatabaseBackup size={18} />
-            Reset demo data
-          </button>
-          <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance('Clear sessions', clearLocalSessions)}>
-            <RotateCcw size={18} />
-            Clear sessions
+          <button className="ghost-button" type="button" onClick={auth.isSignedIn ? () => downloadExport('/api/users/me/export.zip', 'brasstune-account-export.zip') : exportAllData}>
+            <Download size={18} />
+            Export account data
           </button>
         </div>
-        <p className="settings-status">{maintenanceStatus}</p>
+        <label className="field">
+          <span>Type delete my account</span>
+          <input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} placeholder="delete my account" />
+        </label>
+        <button className="ghost-button danger-action" type="button" disabled={!auth.isSignedIn || busyAction !== null || deleteConfirmation.trim().toLowerCase() !== 'delete my account'} onClick={deleteAccount}>
+          <Trash2 size={18} />
+          Delete account
+        </button>
       </SectionCard>
-      <SectionCard title="Portability note" eyebrow="Swift-ready core">
+      <SectionCard title="Beta limitations" eyebrow="What sync requires">
         <InsightCard
-          title="Pure domain logic stays portable"
-          detail="Pitch math, profiles, segmentation, analytics"
-          body="The frontend controls assume the backend owns microphone persistence and note math, so the same core models can still move toward Swift cleanly."
+          title="Guest practice stays on this device"
+          detail="Sign in to sync"
+          body="Account sync, ensemble membership, and cloud exports require beta account access. Guest practice remains available in this browser."
           icon={SlidersHorizontal}
         />
       </SectionCard>

@@ -4,6 +4,10 @@
   min-height: 100vh;
 }
 
+.app-shell.auth-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -151,6 +155,12 @@
   max-width: var(--content-max);
   margin: 0 auto;
   padding: 28px;
+  padding-bottom: calc(28px + env(safe-area-inset-bottom));
+}
+
+.auth-shell .content {
+  max-width: 100%;
+  min-height: 100vh;
 }
 
 .screen-container {

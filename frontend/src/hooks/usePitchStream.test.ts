@@ -9,11 +9,19 @@ describe('shouldPersistFrameFromFrontend', () => {
     expect(shouldPersistFrameFromFrontend(true, true, 42, validFrame)).toBe(true);
   });
 
+  it('persists browser-generated microphone frames', () => {
+    expect(shouldPersistFrameFromFrontend(false, true, 42, { ...validFrame, detector_source: 'browser_local_pitch' })).toBe(true);
+  });
+
   it('does not persist returned microphone WebSocket frames', () => {
     expect(shouldPersistFrameFromFrontend(false, true, 42, validFrame)).toBe(false);
   });
 
   it('does not persist invalid frames', () => {
     expect(shouldPersistFrameFromFrontend(true, true, 42, { is_valid_for_recording: false } as PitchFrame)).toBe(false);
+  });
+
+  it('does not persist local guest demo frames to backend', () => {
+    expect(shouldPersistFrameFromFrontend(true, true, -42, validFrame, false)).toBe(false);
   });
 });

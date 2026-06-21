@@ -9,16 +9,16 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.auth import AuthContext, get_auth_context, require_roles
+from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
 from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics
 from app.core.ensemble.analytics import calculate_ensemble_summary, generate_rehearsal_report
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
 from app.db.database import get_db
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
-from app.models.db import Group, GroupMember, NoteEvent, PitchSample, PracticeSession, User
-from app.schemas.schemas import AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import attach_audio_to_session, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
+from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, User
+from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
+from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 
@@ -87,6 +87,21 @@ def _group_or_404(db: Session, group_id: int) -> Group:
 
 def _can_manage_group(user: User, group: Group) -> bool:
     return user.role == "admin" or group.director_user_id == user.id
+
+
+def _viewer_membership(db: Session, group_id: int, user_id: int) -> Optional[GroupMember]:
+    return (
+        db.query(GroupMember)
+        .filter(GroupMember.group_id == group_id, GroupMember.user_id == user_id, GroupMember.status == "active")
+        .first()
+    )
+
+
+def _can_view_full_roster(db: Session, group: Group, user: User) -> bool:
+    if _can_manage_group(user, group):
+        return True
+    membership = _viewer_membership(db, group.id, user.id)
+    return membership is not None and getattr(membership, "role_in_group", "student") in {"assistant", "director"}
 
 
 def _require_group_manager(db: Session, group_id: int, auth: AuthContext) -> Group:
@@ -172,6 +187,26 @@ def _schema_dict(model):
     return model.dict()
 
 
+def _write_session_audio_to_archive(archive: zipfile.ZipFile, session: PracticeSession, folder: str) -> None:
+    audio = audio_bytes_for_export(session)
+    if audio is None:
+        return
+    filename, data = audio
+    archive_path = "audio/%s" % filename if folder in {"", "."} else "%s/audio/%s" % (folder, filename)
+    archive.writestr(archive_path, data)
+
+
+async def _read_limited_body(request: Request, max_bytes: int = MAX_AUDIO_UPLOAD_BYTES) -> bytes:
+    chunks = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail="Audio upload is too large.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.get("/health")
 def health():
     return {"ok": True, "service": "BrassTune Analytics API"}
@@ -224,8 +259,10 @@ def start_practice_session(payload: StartSessionRequest, db: Session = Depends(g
 
 @router.post("/sessions/{session_id}/samples")
 def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    _require_session_access(db, session_id, auth)
+    session = _require_session_access(db, session_id, auth)
     _validate_instrument(frame.instrument_id)
+    if frame.instrument_id != session.instrument_id:
+        raise HTTPException(status_code=400, detail="Pitch frame instrument must match the practice session instrument.")
     sample = save_pitch_frame(db, session_id, _schema_dict(frame))
     if sample is None:
         return {"saved": False, "reason": "Frame was invalid, silent, or session was not found."}
@@ -234,9 +271,13 @@ def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depen
 
 @router.post("/sessions/{session_id}/samples/batch")
 def add_session_samples_batch(session_id: int, frames: List[PitchFrameIn], db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    _require_session_access(db, session_id, auth)
+    session = _require_session_access(db, session_id, auth)
+    if len(frames) > MAX_BATCH_PITCH_FRAMES:
+        raise HTTPException(status_code=413, detail="Too many pitch frames in one request.")
     for frame in frames:
         _validate_instrument(frame.instrument_id)
+        if frame.instrument_id != session.instrument_id:
+            raise HTTPException(status_code=400, detail="Pitch frame instrument must match the practice session instrument.")
     samples = save_pitch_frames(db, session_id, [_schema_dict(frame) for frame in frames])
     return {"saved": len(samples), "rejected": max(0, len(frames) - len(samples))}
 
@@ -303,7 +344,7 @@ async def upload_session_audio(
     auth: AuthContext = Depends(get_auth_context),
 ):
     session = _require_session_access(db, session_id, auth)
-    data, mime_type = read_audio_bytes(await request.body(), content_type or "")
+    data, mime_type = read_audio_bytes(await _read_limited_body(request), content_type or "")
     attach_audio_to_session(session, data, mime_type, x_audio_duration_seconds)
     db.add(session)
     db.commit()
@@ -490,17 +531,14 @@ def export_session_zip(session_id: int, db: Session = Depends(get_db), auth: Aut
             "README.txt",
             "BrassTune session export. pitch_samples.csv contains detector frames; note_events.csv contains segmented note statistics; recommendations.json contains generated practice guidance.",
         )
-        if session.audio_object_key and session.audio_storage_provider == "local":
-            path = local_audio_path(session.audio_object_key)
-            if path.exists():
-                archive.write(path, "audio/%s" % path.name)
+        _write_session_audio_to_archive(archive, session, ".")
     buffer.seek(0)
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=session-%s-export.zip" % session_id})
 
 
 @router.get("/export/all.json")
 def export_all_json(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    if auth.user.role != "admin" and auth.user.id != 1:
+    if auth.user.role != "admin" and not auth.is_guest:
         raise HTTPException(status_code=403, detail="Full local export is limited to local demo/admin users.")
     return Response(export_all_data(db), media_type="application/json", headers={"Content-Disposition": "attachment; filename=brasstune-local-data.json"})
 
@@ -521,12 +559,78 @@ def export_all_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(ge
             archive.writestr("%s/session.json" % folder, json.dumps(payload, indent=2))
             archive.writestr("%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
             archive.writestr("%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
-            if session.audio_object_key and session.audio_storage_provider == "local":
-                path = local_audio_path(session.audio_object_key)
-                if path.exists():
-                    archive.write(path, "%s/audio/%s" % (folder, path.name))
+            _write_session_audio_to_archive(archive, session, folder)
     buffer.seek(0)
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=brasstune-export.zip"})
+
+
+def _iso(value):
+    return value.isoformat() if value else None
+
+
+def _recommendation_to_dict(row: Recommendation):
+    return {
+        "id": row.id,
+        "session_id": row.session_id,
+        "note_event_id": row.note_event_id,
+        "written_note": row.written_note,
+        "written_octave": row.written_octave,
+        "severity": row.severity,
+        "title": row.title,
+        "message": row.message,
+        "suggestions": json.loads(row.suggestions_json or "[]"),
+        "created_at": _iso(row.created_at),
+    }
+
+
+def _invitation_to_dict(row: Invitation):
+    return {
+        "id": row.id,
+        "group_id": row.group_id,
+        "invited_username": row.invited_username,
+        "invited_user_id": row.invited_user_id,
+        "invited_by_user_id": row.invited_by_user_id,
+        "status": row.status,
+        "created_at": _iso(row.created_at),
+        "accepted_at": _iso(row.accepted_at),
+    }
+
+
+def _account_export_zip(db: Session, auth: AuthContext):
+    user = auth.user
+    sessions = db.query(PracticeSession).filter(PracticeSession.user_id == user.id).order_by(PracticeSession.started_at.asc()).all()
+    memberships = db.query(GroupMember).filter(GroupMember.user_id == user.id).order_by(GroupMember.group_id.asc()).all()
+    owned_groups = db.query(Group).filter(Group.director_user_id == user.id).order_by(Group.id.asc()).all()
+    invitations = (
+        db.query(Invitation)
+        .filter((Invitation.invited_user_id == user.id) | (Invitation.invited_by_user_id == user.id))
+        .order_by(Invitation.created_at.asc())
+        .all()
+    )
+    recommendations = db.query(Recommendation).filter(Recommendation.user_id == user.id).order_by(Recommendation.created_at.asc()).all()
+    account = user_to_dict(user)
+    account["email"] = user.email
+    account["supabase_user_id"] = user.supabase_user_id
+    account["created_at"] = _iso(user.created_at)
+    account["updated_at"] = _iso(user.updated_at)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("README.txt", "BrassTune account export for the authenticated user. Source recordings are included only for this user's sessions when available.")
+        archive.writestr("account.json", json.dumps(account, indent=2))
+        archive.writestr("sessions.json", json.dumps([session_to_dict(session) for session in sessions], indent=2))
+        archive.writestr("memberships.json", json.dumps([group_member_to_dict(member) for member in memberships], indent=2))
+        archive.writestr("owned_groups.json", json.dumps([group_to_dict(group) for group in owned_groups], indent=2))
+        archive.writestr("invitations.json", json.dumps([_invitation_to_dict(row) for row in invitations], indent=2))
+        archive.writestr("recommendations.json", json.dumps([_recommendation_to_dict(row) for row in recommendations], indent=2))
+        for session in sessions:
+            folder = "sessions/%s" % session.id
+            payload = _session_json_payload(db, session)
+            archive.writestr("%s/session.json" % folder, json.dumps(payload, indent=2))
+            archive.writestr("%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
+            archive.writestr("%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
+            _write_session_audio_to_archive(archive, session, folder)
+    buffer.seek(0)
+    return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=brasstune-account-export.zip"})
 
 
 @router.post("/admin/sessions/clear")
@@ -566,17 +670,177 @@ def clear_my_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends
 
 @router.get("/users/me/export.zip")
 def export_me_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    return export_all_zip(db, auth)
+    return _account_export_zip(db, auth)
+
+
+def _mark_deletion_job(job: AccountDeletionJob, stage: str, status: str, error_category: Optional[str] = None) -> None:
+    job.stage = stage
+    job.status = status
+    job.safe_error_category = error_category
+    job.updated_at = dt.datetime.utcnow()
+    if status == "completed":
+        job.completed_at = job.completed_at or dt.datetime.utcnow()
+        job.next_retry_at = None
+    elif status == "retryable_failure":
+        job.retry_count = int(job.retry_count or 0) + 1
+        job.next_retry_at = dt.datetime.utcnow() + dt.timedelta(minutes=min(60, 2 ** min(job.retry_count, 6)))
+
+
+def _deletion_job_payload(job: AccountDeletionJob):
+    try:
+        counts = json.loads(job.counts_json or "{}")
+    except json.JSONDecodeError:
+        counts = {}
+    return {
+        "deleted": job.status == "completed",
+        "deletion_status": job.status,
+        "deletion_stage": job.stage,
+        "counts": counts,
+        "supabase_sessions_revoked": job.status == "completed",
+        "supabase_identity_deleted": job.status == "completed",
+        "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
+    }
+
+
+@router.delete("/users/me")
+def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    confirmation = payload.confirmation.strip().lower()
+    if confirmation not in {"delete", "delete my account"}:
+        raise HTTPException(status_code=400, detail='Type "delete my account" to confirm account deletion.')
+    user = auth.user
+    user_id = user.id
+    supabase_user_id = user.supabase_user_id
+    job_key = "delete-user-%s" % user_id
+    job = db.query(AccountDeletionJob).filter(AccountDeletionJob.idempotency_key == job_key).first()
+    if job and job.status == "completed" and db.query(User).filter(User.id == user_id).first() is None:
+        return _deletion_job_payload(job)
+    sessions = db.query(PracticeSession).filter(PracticeSession.user_id == user_id).all()
+    owned_groups = db.query(Group).filter(Group.director_user_id == user_id).all()
+    group_ids = [group.id for group in owned_groups]
+    deleted_counts = {
+        "practice_sessions": len(sessions),
+        "teacher_owned_groups": len(owned_groups),
+        "group_memberships": db.query(GroupMember).filter(GroupMember.user_id == user_id).count(),
+        "invitations": db.query(Invitation).filter((Invitation.invited_user_id == user_id) | (Invitation.invited_by_user_id == user_id)).count(),
+        "recommendations": db.query(Recommendation).filter(Recommendation.user_id == user_id).count(),
+    }
+    if job is None:
+        job = AccountDeletionJob(
+            user_id=user_id,
+            supabase_user_id=supabase_user_id,
+            idempotency_key=job_key,
+            counts_json=json.dumps(deleted_counts, sort_keys=True),
+        )
+    else:
+        job.supabase_user_id = job.supabase_user_id or supabase_user_id
+        job.counts_json = json.dumps(deleted_counts, sort_keys=True)
+    _mark_deletion_job(job, "local_cleanup_started", "in_progress")
+    db.add(job)
+    db.commit()
+
+    try:
+        for session in sessions:
+            delete_audio_for_session(session)
+    except Exception as exc:
+        _mark_deletion_job(job, "local_cleanup_failed", "retryable_failure", "audio_cleanup_failed")
+        db.add(job)
+        db.commit()
+        raise HTTPException(status_code=503, detail="Account deletion is queued for retry because local media cleanup is temporarily unavailable.") from exc
+
+    for session in sessions:
+        db.delete(session)
+    if group_ids:
+        db.query(Invitation).filter(Invitation.group_id.in_(group_ids)).delete(synchronize_session=False)
+        db.query(GroupMember).filter(GroupMember.group_id.in_(group_ids)).delete(synchronize_session=False)
+        db.query(Group).filter(Group.id.in_(group_ids)).delete(synchronize_session=False)
+    db.query(Invitation).filter((Invitation.invited_user_id == user_id) | (Invitation.invited_by_user_id == user_id)).delete(synchronize_session=False)
+    db.query(GroupMember).filter(GroupMember.user_id == user_id).delete(synchronize_session=False)
+    db.query(Recommendation).filter(Recommendation.user_id == user_id).delete(synchronize_session=False)
+    db.delete(user)
+    _mark_deletion_job(job, "local_cleanup_completed", "in_progress")
+    db.add(job)
+    db.commit()
+
+    supabase_sessions_revoked = False
+    supabase_identity_deleted = False
+    if not auth.is_guest and supabase_user_id:
+        try:
+            _mark_deletion_job(job, "external_cleanup_started", "in_progress")
+            db.add(job)
+            db.commit()
+            supabase_sessions_revoked = supabase_global_sign_out(auth.access_token)
+            supabase_identity_deleted = delete_supabase_identity(supabase_user_id)
+        except Exception:
+            supabase_sessions_revoked = False
+            supabase_identity_deleted = False
+        if not supabase_identity_deleted:
+            _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "external_identity_cleanup_failed")
+            db.add(job)
+            db.commit()
+            return {
+                "deleted": True,
+                "deletion_status": "external_cleanup_queued",
+                "counts": deleted_counts,
+                "supabase_sessions_revoked": supabase_sessions_revoked,
+                "supabase_identity_deleted": False,
+                "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
+            }
+    _mark_deletion_job(job, "completed", "completed")
+    db.add(job)
+    db.commit()
+    return {
+        "deleted": True,
+        "deletion_status": "completed",
+        "counts": deleted_counts,
+        "supabase_sessions_revoked": supabase_sessions_revoked,
+        "supabase_identity_deleted": supabase_identity_deleted,
+        "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
+    }
 
 
 def _group_member_ids(db: Session, group_id: int):
     return [member.user_id for member in db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()]
 
 
+def _member_active_since(member: GroupMember) -> dt.datetime:
+    return member.active_since or member.created_at
+
+
+def _group_scoped_sessions(db: Session, group_id: int) -> List[PracticeSession]:
+    members = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()
+    sessions_by_id = {}
+    for member in members:
+        rows = (
+            db.query(PracticeSession)
+            .options(joinedload(PracticeSession.note_events))
+            .filter(
+                PracticeSession.user_id == member.user_id,
+                PracticeSession.started_at >= _member_active_since(member),
+            )
+            .all()
+        )
+        for session in rows:
+            sessions_by_id[session.id] = session
+    return list(sessions_by_id.values())
+
+
 def _can_view_group(user: User, group: Group, db: Session) -> bool:
     if _can_manage_group(user, group):
         return True
-    return db.query(GroupMember).filter(GroupMember.group_id == group.id, GroupMember.user_id == user.id, GroupMember.status == "active").first() is not None
+    return _viewer_membership(db, group.id, user.id) is not None
+
+
+def _visible_group_members(db: Session, group: Group, user: User):
+    if _can_view_full_roster(db, group, user):
+        members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group.id).order_by(GroupMember.created_at.asc()).all()
+        return [group_member_to_dict(member) for member in members], True
+    membership = (
+        db.query(GroupMember)
+        .options(joinedload(GroupMember.user))
+        .filter(GroupMember.group_id == group.id, GroupMember.user_id == user.id, GroupMember.status == "active")
+        .first()
+    )
+    return ([group_member_to_dict(membership, include_identity=False)] if membership else []), False
 
 
 @router.post("/ensemble/groups")
@@ -597,7 +861,8 @@ def list_ensemble_groups(db: Session = Depends(get_db), auth: AuthContext = Depe
     else:
         group_ids = [row.group_id for row in db.query(GroupMember).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").all()]
         groups = db.query(Group).filter(Group.id.in_(group_ids)).order_by(Group.name.asc()).all() if group_ids else []
-    return [group_to_dict(group) for group in groups]
+    include_director_identity = auth.user.role in {"admin", "director"}
+    return [group_to_dict(group, include_director_identity=include_director_identity) for group in groups]
 
 
 @router.get("/ensemble/groups/{group_id}")
@@ -605,8 +870,10 @@ def get_ensemble_group(group_id: int, db: Session = Depends(get_db), auth: AuthC
     group = _group_or_404(db, group_id)
     if not _can_view_group(auth.user, group, db):
         raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
-    members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group_id).order_by(GroupMember.created_at.asc()).all()
-    return group_to_dict(group, [group_member_to_dict(member) for member in members])
+    members, full_roster = _visible_group_members(db, group, auth.user)
+    payload = group_to_dict(group, members, include_director_identity=full_roster)
+    payload["roster_scope"] = "full" if full_roster else "self"
+    return payload
 
 
 @router.get("/ensemble/groups/{group_id}/members")
@@ -614,8 +881,8 @@ def get_ensemble_members(group_id: int, db: Session = Depends(get_db), auth: Aut
     group = _group_or_404(db, group_id)
     if not _can_view_group(auth.user, group, db):
         raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
-    members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group_id).all()
-    return [group_member_to_dict(member) for member in members]
+    members, _ = _visible_group_members(db, group, auth.user)
+    return members
 
 
 @router.post("/ensemble/groups/{group_id}/members/by-username")
@@ -628,13 +895,20 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     if user is None:
         raise HTTPException(status_code=404, detail="No user exists with that username.")
     existing = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    now = dt.datetime.utcnow()
     if existing:
+        previous_status = existing.status
         existing.instrument_id = payload.instrument_id
         existing.role_in_group = payload.role_in_group
         existing.status = "active"
+        if previous_status != "active":
+            existing.active_since = now
+        else:
+            existing.active_since = existing.active_since or existing.created_at
+        existing.removed_at = None
         member = existing
     else:
-        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=payload.instrument_id, role_in_group=payload.role_in_group, status="active")
+        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=payload.instrument_id, role_in_group=payload.role_in_group, status="active", active_since=now)
         db.add(member)
     db.commit()
     db.refresh(member)
@@ -657,7 +931,13 @@ def update_ensemble_member(group_id: int, member_id: int, payload: UpdateGroupMe
     if payload.status:
         if payload.status not in {"active", "invited", "removed"}:
             raise HTTPException(status_code=400, detail="Invalid member status.")
+        previous_status = member.status
         member.status = payload.status
+        if payload.status == "active" and previous_status != "active":
+            member.active_since = dt.datetime.utcnow()
+            member.removed_at = None
+        elif payload.status in {"invited", "removed"} and previous_status == "active":
+            member.removed_at = dt.datetime.utcnow()
     db.add(member)
     db.commit()
     db.refresh(member)
@@ -671,6 +951,7 @@ def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(
     if member is None:
         raise HTTPException(status_code=404, detail="Group member not found.")
     member.status = "removed"
+    member.removed_at = dt.datetime.utcnow()
     db.add(member)
     db.commit()
     return {"removed": True}
@@ -678,21 +959,15 @@ def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(
 
 @router.get("/ensemble/groups/{group_id}/summary")
 def ensemble_group_summary(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    group = _group_or_404(db, group_id)
-    if not _can_view_group(auth.user, group, db):
-        raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
-    member_ids = _group_member_ids(db, group_id)
-    sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
+    _require_group_manager(db, group_id, auth)
+    sessions = _group_scoped_sessions(db, group_id)
     return calculate_ensemble_summary(group_id, sessions)
 
 
 @router.get("/ensemble/groups/{group_id}/report")
 def ensemble_group_report(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    group = _group_or_404(db, group_id)
-    if not _can_view_group(auth.user, group, db):
-        raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
-    member_ids = _group_member_ids(db, group_id)
-    sessions = db.query(PracticeSession).options(joinedload(PracticeSession.note_events)).filter(PracticeSession.user_id.in_(member_ids)).all()
+    _require_group_manager(db, group_id, auth)
+    sessions = _group_scoped_sessions(db, group_id)
     return generate_rehearsal_report(group_id, sessions)
 
 

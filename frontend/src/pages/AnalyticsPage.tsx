@@ -10,6 +10,7 @@ import { NoteStatsTable } from '../components/NoteStatsTable';
 import { InsightCard, MetricTile, PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge } from '../components/ui/AppPrimitives';
 import type { NoteStats } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { useAuth } from '../state/AuthContext';
 import { measuredRows, selectDefaultNoteLabel } from './analyticsSelection';
 
 type Period = '7d' | '30d' | 'all' | 'custom';
@@ -28,18 +29,33 @@ function rangeForPeriod(period: Period) {
 
 export function AnalyticsPage() {
   const { instrumentId, setInstrumentId } = useAppSettings();
+  const auth = useAuth();
   const [stats, setStats] = useState<NoteStats[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
   const [period, setPeriod] = useState<Period>('30d');
   const [range, setRange] = useState(rangeForPeriod('30d'));
   const [selectedNote, setSelectedNote] = useState<string | undefined>();
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getNoteStats(instrumentId, range), getHeatmap(instrumentId, range)]).then(([noteData, heatmapData]) => {
-      setStats(noteData);
-      setHeatmap(heatmapData);
-    });
-  }, [instrumentId, range]);
+    if (!auth.isSignedIn) {
+      setStats([]);
+      setHeatmap([]);
+      setError('Analytics are available after sign-in. Guest practice and local review still work on this device.');
+      return;
+    }
+    Promise.all([getNoteStats(instrumentId, range), getHeatmap(instrumentId, range)])
+      .then(([noteData, heatmapData]) => {
+        setStats(noteData);
+        setHeatmap(heatmapData);
+        setError(null);
+      })
+      .catch(() => {
+        setStats([]);
+        setHeatmap([]);
+        setError('Analytics are unavailable right now. Guest practice and local review still work on this device.');
+      });
+  }, [auth.isSignedIn, instrumentId, range]);
 
   useEffect(() => {
     const nextSelection = selectDefaultNoteLabel(heatmap, selectedNote);
@@ -83,6 +99,7 @@ export function AnalyticsPage() {
           </div>
         }
       />
+      {error && <div className="alert">{error}</div>}
       <SectionCard
         className="analytics-controls"
         title="Period and instrument"

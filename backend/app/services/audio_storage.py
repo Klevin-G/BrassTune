@@ -89,11 +89,41 @@ def _upload_to_supabase(object_key: str, data: bytes, mime_type: str) -> None:
         headers={**_supabase_headers(mime_type), "x-upsert": "true"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=20):  # nosec B310 - URL is built from a validated Supabase HTTPS/local dev endpoint.
+        with urllib.request.urlopen(request, timeout=20):  # nosec B310
             return
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "ignore")
-        raise HTTPException(status_code=502, detail="Supabase audio upload failed: %s" % detail) from exc
+        raise HTTPException(status_code=502, detail="Supabase audio upload failed.") from exc
+
+
+def _read_supabase_object(object_key: str) -> bytes:
+    bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "session-audio")
+    encoded_key = urllib.parse.quote(object_key)
+    request = urllib.request.Request(
+        _supabase_url("/storage/v1/object/%s/%s" % (bucket, encoded_key)),
+        headers=_supabase_headers(),
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Supabase audio download failed.") from exc
+
+
+def _delete_supabase_object(object_key: str) -> None:
+    bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "session-audio")
+    encoded_key = urllib.parse.quote(object_key)
+    request = urllib.request.Request(
+        _supabase_url("/storage/v1/object/%s/%s" % (bucket, encoded_key)),
+        method="DELETE",
+        headers=_supabase_headers(),
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20):  # nosec B310
+            return
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return
+        raise HTTPException(status_code=502, detail="Supabase audio deletion failed.") from exc
 
 
 def create_supabase_signed_url(object_key: str, expires_in: int = 900) -> str:
@@ -106,11 +136,10 @@ def create_supabase_signed_url(object_key: str, expires_in: int = 900) -> str:
         headers={**_supabase_headers("application/json")},
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310 - URL is built from a validated Supabase HTTPS/local dev endpoint.
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "ignore")
-        raise HTTPException(status_code=502, detail="Supabase signed URL failed: %s" % detail) from exc
+        raise HTTPException(status_code=502, detail="Supabase signed URL failed.") from exc
     signed = payload.get("signedURL") or payload.get("signedUrl") or payload.get("signed_url")
     if not signed:
         raise HTTPException(status_code=502, detail="Supabase did not return a signed playback URL.")
@@ -146,11 +175,25 @@ def delete_audio_for_session(session: PracticeSession) -> None:
         path = local_audio_path(session.audio_object_key)
         if path.exists():
             path.unlink()
-    # Supabase deletion is intentionally left to lifecycle rules until project
-    # credentials and retention policy are finalized.
+    elif session.audio_storage_provider == "supabase":
+        _delete_supabase_object(session.audio_object_key)
     session.audio_storage_provider = None
     session.audio_object_key = None
     session.audio_mime_type = None
     session.audio_duration_seconds = None
     session.audio_size_bytes = None
     session.audio_uploaded_at = None
+
+
+def audio_bytes_for_export(session: PracticeSession) -> Optional[Tuple[str, bytes]]:
+    if not session.audio_object_key:
+        return None
+    filename = Path(session.audio_object_key).name
+    if session.audio_storage_provider == "local":
+        path = local_audio_path(session.audio_object_key)
+        if not path.exists():
+            return None
+        return filename, path.read_bytes()
+    if session.audio_storage_provider == "supabase":
+        return filename, _read_supabase_object(session.audio_object_key)
+    return None

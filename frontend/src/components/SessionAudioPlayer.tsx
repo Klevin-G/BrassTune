@@ -12,26 +12,26 @@ function formatBytes(size?: number | null) {
 export function SessionAudioPlayer({ session, compact = false }: { session: PracticeSession; compact?: boolean }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!session.audio_available) return undefined;
-    let revoked = false;
-    let localUrl: string | null = null;
-    objectUrlFor(`/api/sessions/${session.id}/audio`)
-      .then((url) => {
-        if (revoked) {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        localUrl = url;
-        setAudioUrl(url);
-      })
-      .catch(() => setAudioError('Audio could not be loaded.'));
     return () => {
-      revoked = true;
-      if (localUrl) URL.revokeObjectURL(localUrl);
+      if (audioUrl?.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
     };
-  }, [session.audio_available, session.id]);
+  }, [audioUrl]);
+
+  const loadAudio = async () => {
+    if (audioUrl || loading) return;
+    setAudioError(null);
+    setLoading(true);
+    try {
+      setAudioUrl(session.guest_audio_data_url ?? await objectUrlFor(`/api/sessions/${session.id}/audio`));
+    } catch {
+      setAudioError('Audio could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (!session.audio_available) {
     return (
@@ -65,7 +65,10 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
           <track kind="captions" />
         </audio>
       ) : (
-        <em>Preparing playback...</em>
+        <button className="ghost-button" type="button" onClick={loadAudio} disabled={loading}>
+          <Play size={17} />
+          {loading ? 'Preparing playback...' : 'Load playback'}
+        </button>
       )}
     </div>
   );

@@ -29,6 +29,14 @@ export const demoProfileTransposition: Record<string, number> = {
   tuba: 0,
 };
 
+export const demoProfileFrequencyRanges: Record<string, { minFrequencyHz: number; maxFrequencyHz: number }> = {
+  trumpet: { minFrequencyHz: 130, maxFrequencyHz: 1500 },
+  horn: { minFrequencyHz: 80, maxFrequencyHz: 1200 },
+  trombone: { minFrequencyHz: 50, maxFrequencyHz: 700 },
+  euphonium: { minFrequencyHz: 55, maxFrequencyHz: 800 },
+  tuba: { minFrequencyHz: 30, maxFrequencyHz: 500 },
+};
+
 export const MIN_RECORDING_CONFIDENCE = 0.95;
 
 export function midiToFrequency(midi: number, referencePitch = 440): number {
@@ -79,6 +87,28 @@ export function pitchFrameFromFrequency(
       reference_pitch_hz: referencePitch,
       is_valid_for_recording: false,
       save_eligibility_reason: rms < 0.01 ? 'silence' : 'unstable/no pitch lock',
+      detector_source: detectorSource,
+    };
+  }
+  const range = demoProfileFrequencyRanges[instrumentId];
+  if (range && (frequency < range.minFrequencyHz || frequency > range.maxFrequencyHz)) {
+    return {
+      timestamp_ms: timestampMs,
+      frequency_hz: frequency,
+      confidence,
+      rms,
+      midi_note_float: null,
+      nearest_midi: null,
+      concert_note_name: null,
+      concert_octave: null,
+      written_note_name: null,
+      written_octave: null,
+      cents_deviation: null,
+      tuning_status: 'unstable',
+      instrument_id: instrumentId,
+      reference_pitch_hz: referencePitch,
+      is_valid_for_recording: false,
+      save_eligibility_reason: 'outside instrument range',
       detector_source: detectorSource,
     };
   }

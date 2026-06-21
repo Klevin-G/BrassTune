@@ -10,12 +10,14 @@ services:
     envVars:
       - key: APP_ENV
         value: production
+      - key: BRASSTUNE_AUTH_MODE
+        value: disabled
       - key: FRONTEND_ORIGIN
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
       - key: CORS_ALLOWED_ORIGIN_REGEX
-        value: https://.*\.vercel\.app
+        sync: false
       - key: BACKEND_PUBLIC_URL
         value: https://brasstune.onrender.com
       - key: BRASSTUNE_DATABASE_URL

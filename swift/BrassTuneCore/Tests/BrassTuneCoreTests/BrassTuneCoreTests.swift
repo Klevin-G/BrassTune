@@ -60,4 +60,6 @@ private func loadFixture<T: Decodable>(_ name: String, as type: T.Type) throws -
     #expect(BrassTuneCore.tuningStatus(cents: 0, confidence: 0.94, rms: 0.1) == .unstable)
     #expect(BrassTuneCore.tuningStatus(cents: 0, confidence: 0.95, rms: 0.1) == .inTune)
     #expect(BrassTuneCore.tuningStatus(cents: nil, confidence: 0.99, rms: 0.0) == .silence)
+    #expect(BrassTuneCore.tuningStatus(cents: 0, confidence: 0.99, rms: 0.0099) == .silence)
+    #expect(BrassTuneCore.tuningStatus(cents: nil, confidence: 0.99, rms: 0.01) == .unstable)
 }

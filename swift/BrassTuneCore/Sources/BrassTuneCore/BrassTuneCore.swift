@@ -20,6 +20,7 @@ public struct InstrumentProfile: Codable, Equatable {
 
 public enum BrassTuneCore {
     public static let minimumRecordingConfidence = 0.95
+    public static let silenceRMSThreshold = 0.01
 
     public static func frequencyToMidi(_ frequencyHz: Double, referencePitchHz: Double = 440.0) -> Double {
         69.0 + 12.0 * log2(frequencyHz / referencePitchHz)
@@ -38,7 +39,7 @@ public enum BrassTuneCore {
     }
 
     public static func tuningStatus(cents: Double?, confidence: Double, rms: Double) -> TuningStatus {
-        guard rms > 0.0001 else { return .silence }
+        guard rms >= silenceRMSThreshold else { return .silence }
         guard confidence >= minimumRecordingConfidence, let cents else { return .unstable }
         if cents < -5 { return .flat }
         if cents > 5 { return .sharp }

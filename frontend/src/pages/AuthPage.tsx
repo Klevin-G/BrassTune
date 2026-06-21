@@ -1,5 +1,5 @@
-import { ArrowRight, LogIn, Mail, ShieldCheck, UserPlus } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { ArrowRight, KeyRound, LogIn, Mail, ShieldCheck, UserPlus } from 'lucide-react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
@@ -10,6 +10,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [instrumentId, setInstrumentId] = useState('trumpet');
@@ -17,6 +18,13 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const [busy, setBusy] = useState(false);
 
   const isSignup = mode === 'sign-up';
+
+  useEffect(() => {
+    if (mode !== 'callback') return;
+    const params = new URLSearchParams(window.location.search || window.location.hash.replace(/^#/, '?'));
+    const error = params.get('error_description') || params.get('error');
+    setMessage(error ? 'Sign-in was not completed. You can keep using guest practice and try account access again later.' : 'Finishing sign-in. Continue when your account session is ready.');
+  }, [mode]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -29,8 +37,13 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
       } else if (mode === 'sign-up') {
         await auth.signUp({ email, password, username, displayName, primaryInstrumentId: instrumentId });
         setMessage('Account created. If email confirmation is enabled, confirm your email before signing in.');
+      } else if (auth.isSignedIn && newPassword) {
+        await auth.updatePassword(newPassword);
+        setMessage('Password updated. Use the new password the next time you sign in.');
+        setNewPassword('');
       } else {
-        setMessage('Password reset is configured in Supabase. Use the Supabase dashboard email templates for production redirects.');
+        await auth.requestPasswordReset(email);
+        setMessage('Password reset email sent. Open the link on this device to choose a new password.');
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Authentication failed.');
@@ -42,10 +55,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   if (mode === 'callback') {
     return (
       <ScreenContainer>
-        <SectionCard title="Finishing sign in" eyebrow="Auth callback">
-          <p className="muted-copy">Supabase will restore the browser session automatically. You can return to BrassTune once the session is ready.</p>
-          <Link className="primary-button" to="/">
-            Continue
+        <SectionCard title="Finishing sign in" eyebrow="Account access">
+          <p className="muted-copy" role="status">{auth.configured ? message ?? 'Finishing sign-in. Continue when your account session is ready.' : 'Accounts are not enabled in this build yet. You can still use guest practice.'}</p>
+          <Link className="primary-button" to={auth.configured ? '/' : '/practice'}>
+            {auth.configured ? 'Continue' : 'Continue as guest'}
             <ArrowRight size={18} />
           </Link>
         </SectionCard>
@@ -68,51 +81,78 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
           </div>
           <h1>{isSignup ? 'Start tracking your tuning patterns.' : 'Welcome back to your practice cockpit.'}</h1>
           <p>
-            Sign in keeps your sessions, audio playback, analytics, and ensemble membership tied to your account. Guest demo mode stays available for local testing.
+            Account access keeps your sessions, audio playback, analytics, and ensemble membership synced. Guest practice remains available on this device.
           </p>
         </section>
-        <SectionCard title={isSignup ? 'Sign up' : mode === 'reset' ? 'Reset password' : 'Sign in'} eyebrow={auth.configured ? 'Supabase Auth' : 'Guest mode active'}>
+        <SectionCard title={isSignup ? 'Sign up' : mode === 'reset' ? 'Reset password' : 'Sign in'} eyebrow={auth.configured ? 'Account access' : 'Guest mode active'}>
           {!auth.configured && (
-            <EmptyActionState
-              title="Supabase env vars are not configured"
-              body="Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to enable real sign up/sign in. You can keep using the local demo now."
-              icon={Mail}
-            />
+            <>
+              <EmptyActionState
+                title="Accounts are not enabled in this build yet"
+                body="You can still use guest practice. Sign-in, syncing, and ensemble membership will be available when account access is enabled."
+                icon={Mail}
+              />
+              <Link className="primary-button full-width-action" to="/practice">
+                Continue as guest
+                <ArrowRight size={18} />
+              </Link>
+            </>
           )}
-          <form className="auth-form" onSubmit={onSubmit}>
-            <label>
-              Email
-              <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={mode !== 'reset'} placeholder="you@example.com" />
-            </label>
-            {mode !== 'reset' && (
+          {auth.configured && (
+            <form className="auth-form" onSubmit={onSubmit}>
               <label>
-                Password
-                <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder="Minimum 6 characters" />
+                Email
+                <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={!auth.isSignedIn || mode !== 'reset'} placeholder="you@example.com" />
               </label>
-            )}
-            {isSignup && (
-              <>
+              {mode !== 'reset' && (
                 <label>
-                  Username
-                  <input value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} required minLength={3} placeholder="avery" />
+                  Password
+                  <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder="Minimum 6 characters" />
                 </label>
+              )}
+              {isSignup && (
+                <>
+                  <label>
+                    Username
+                    <input value={username} onChange={(event) => setUsername(event.target.value.toLowerCase())} required minLength={3} placeholder="avery" />
+                  </label>
+                  <label>
+                    Display name
+                    <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required placeholder="Avery Brass" />
+                  </label>
+                  <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
+                </>
+              )}
+              {mode === 'reset' && auth.isSignedIn && (
                 <label>
-                  Display name
-                  <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required placeholder="Avery Brass" />
+                  New password
+                  <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" minLength={8} placeholder="Minimum 8 characters" />
                 </label>
-                <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
-              </>
-            )}
-            <button className="primary-button" disabled={busy || !auth.configured} type="submit">
-              {isSignup ? <UserPlus size={18} /> : <LogIn size={18} />}
-              {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
-            </button>
-          </form>
-          {message && <div className="alert">{message}</div>}
-          <div className="auth-switcher">
-            {isSignup ? <Link to="/auth/sign-in">Already have an account?</Link> : <Link to="/auth/sign-up">Create an account</Link>}
-            <Link to="/auth/reset-password">Reset password</Link>
-          </div>
+              )}
+              <button className="primary-button" disabled={busy} type="submit">
+                {isSignup ? <UserPlus size={18} /> : mode === 'reset' ? <KeyRound size={18} /> : <LogIn size={18} />}
+                {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' && auth.isSignedIn && newPassword ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
+              </button>
+            </form>
+          )}
+          {mode !== 'reset' && auth.configured && (
+            <div className="provider-button-stack">
+              <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle().catch(() => setMessage('Google sign-in could not start. Try again later.'))}>
+                Continue with Google
+              </button>
+              <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple().catch(() => setMessage('Apple sign-in could not start. Try again later.'))}>
+                <ShieldCheck size={18} />
+                Continue with Apple
+              </button>
+            </div>
+          )}
+          {message && <div className="alert" role="status">{message}</div>}
+          {auth.configured && (
+            <div className="auth-switcher">
+              {isSignup ? <Link to="/auth/sign-in">Already have an account?</Link> : <Link to="/auth/sign-up">Create an account</Link>}
+              <Link to="/auth/reset-password">Reset password</Link>
+            </div>
+          )}
         </SectionCard>
       </div>
     </ScreenContainer>

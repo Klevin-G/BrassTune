@@ -8,17 +8,24 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "e2e": "npm run e2e:local",
+    "e2e:local": "playwright test e2e/release-journeys.spec.ts e2e/accessibility.spec.ts",
+    "e2e:hosted": "node scripts/run-hosted-smoke.mjs",
+    "e2e:hosted:strict": "E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted",
+    "smoke:hosted": "npm run e2e:hosted",
     "simulate:devices": "node scripts/device-simulation.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
     "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^6.0.227",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.23.1",
     "recharts": "^2.12.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^6.0.2",
