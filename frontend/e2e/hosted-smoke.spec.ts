@@ -71,6 +71,12 @@ async function skipProtectedPreview(response: Response | null, page: Page, route
   }
 }
 
+async function grantGuestAccess(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('brasstune.guestAccess', 'true');
+  });
+}
+
 test.describe('hosted read-only smoke', () => {
   test('deployed app loads root and deep links without mixed content', async ({ page }) => {
     const consoleErrors: string[] = [];
@@ -93,6 +99,7 @@ test.describe('hosted read-only smoke', () => {
 
   test('hosted runtime URLs do not fall back to localhost or Vercel same-origin API paths', async ({ page }) => {
     test.skip(!hostedMode, 'Hosted URL hygiene is covered only for deployed smoke runs.');
+    await grantGuestAccess(page);
     const appOrigin = new URL(process.env.E2E_BASE_URL ?? page.url()).origin;
     const badURLs: string[] = [];
     page.on('request', (request) => {
@@ -145,6 +152,7 @@ test.describe('hosted read-only smoke', () => {
 
   test('configured WebSocket URL uses secure transport for https app', async ({ page }) => {
     test.skip(!wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket URL checks.');
+    await grantGuestAccess(page);
     const response = await page.goto(routeURL('/settings/audio-lab'));
     await skipProtectedPreview(response, page, '/settings/audio-lab');
     const appUrl = new URL(process.env.E2E_BASE_URL ?? page.url());
@@ -155,6 +163,7 @@ test.describe('hosted read-only smoke', () => {
 
   test('configured WebSocket upgrades and returns an app-level auth response', async ({ page }) => {
     test.skip(!wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket handshake checks.');
+    await grantGuestAccess(page);
     await page.goto(routeURL('/settings/audio-lab'));
     const outcome = await page.evaluate(async (baseURL) => {
       const url = new URL('/ws/pitch', baseURL).toString();
@@ -194,6 +203,7 @@ test.describe('hosted read-only smoke', () => {
 
   test('strict hosted branch content is current when enabled', async ({ page }) => {
     test.skip(!strictHostedContent, 'Strict content validation runs only after deploying this branch.');
+    await grantGuestAccess(page);
     await page.goto(routeURL('/more'));
     await expect(page.locator('body')).not.toContainText(/\/dev\/calibration|MVP|Developer testing|FastAPI|Supabase env vars/i);
     await page.goto(routeURL('/privacy'));
