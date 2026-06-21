@@ -116,6 +116,29 @@ def test_invalid_instrument_rejected_by_api():
         assert response.status_code == 400
 
 
+def test_global_json_body_limit_rejects_oversized_payload(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_MAX_JSON_BODY_BYTES", "8")
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/start",
+            headers={"Content-Type": "application/json"},
+            content=b'{"instrument_id":"trumpet","reference_pitch_hz":440}',
+        )
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Request body is too large."
+
+
+def test_configurable_rate_limit_rejects_repeated_requests(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_RATE_LIMIT_PER_MINUTE", "1")
+    main_module._RATE_LIMIT_BUCKETS.clear()
+    with TestClient(app) as client:
+        first = client.get("/api/instruments")
+        second = client.get("/api/instruments")
+    assert first.status_code == 200
+    assert second.status_code == 429
+    main_module._RATE_LIMIT_BUCKETS.clear()
+
+
 def test_websocket_audio_frame_returns_pitch_frame_for_synthetic_pcm():
     sample_rate = 48000
     t = np.arange(4096) / sample_rate
@@ -675,6 +698,17 @@ def test_student_roster_view_is_self_only_and_redacted():
     assert "username" not in member
 
 
+def test_student_group_list_redacts_director_identity():
+    with TestClient(app) as client:
+        response = client.get("/api/ensemble/groups", headers={"Authorization": "Bearer dev-user-1"})
+        director_response = client.get("/api/ensemble/groups", headers={"Authorization": "Bearer dev-user-2"})
+    assert response.status_code == 200
+    assert director_response.status_code == 200
+    assert response.json()
+    assert all("director_user_id" not in group for group in response.json())
+    assert any("director_user_id" in group for group in director_response.json())
+
+
 def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():
     db = _test_db()
     try:
@@ -871,6 +905,41 @@ def test_account_deletion_records_completed_job_and_external_cleanup_last(monkey
         job = db.query(AccountDeletionJob).filter(AccountDeletionJob.user_id == user.id).one()
         assert job.status == "completed"
         assert job.stage == "completed"
+    finally:
+        db.close()
+
+
+def test_account_deletion_external_failure_blocks_supabase_recreation(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(id=152, username="delete152", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-152")
+        db.add(user)
+        db.commit()
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda token: True)
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda user_id: False)
+
+        payload = delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=False, access_token="access-token"),
+        )
+
+        assert payload["deletion_status"] == "external_cleanup_queued"
+        assert db.query(User).filter(User.id == user.id).first() is None
+        job = db.query(AccountDeletionJob).filter(AccountDeletionJob.supabase_user_id == "supabase-152").one()
+        assert job.status == "retryable_failure"
+        with pytest.raises(HTTPException) as exc:
+            _sync_supabase_user(
+                db,
+                {
+                    "id": "supabase-152",
+                    "email": "delete152@example.com",
+                    "user_metadata": {},
+                    "app_metadata": {},
+                },
+            )
+        assert exc.value.status_code == 423
+        assert db.query(User).filter(User.supabase_user_id == "supabase-152").first() is None
     finally:
         db.close()
 

@@ -286,7 +286,7 @@ private struct MicrophoneSection: View {
         BTCard {
             BTSectionHeader(
                 title: "Microphone",
-                subtitle: "Live tuning is available only after permission is granted by iOS."
+                subtitle: "This repository build uses permission checks plus deterministic sample takes; physical microphone tuning still requires the native audio path."
             )
             Button {
                 Task { _ = await audioEngine.requestMicrophonePermission() }

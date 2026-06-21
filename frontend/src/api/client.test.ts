@@ -71,4 +71,22 @@ describe('API client runtime URLs', () => {
     expect(exportUrl('/api/health')).toBe('/api/health');
     expect(await pitchWebSocketUrl()).toBe('wss://unrelated-preview.vercel.app/ws/pitch');
   });
+
+  it('keeps authorization headers when requests add upload headers', async () => {
+    const { setAuthTokenProvider, uploadSessionAudio } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ uploaded: true, audio: { id: 7 } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setAuthTokenProvider(async () => 'signed-in-token');
+
+    await uploadSessionAudio(7, new Blob(['audio'], { type: 'audio/webm' }), 1.5);
+
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer signed-in-token');
+    expect(headers.get('content-type')).toBe('audio/webm');
+    expect(headers.get('x-audio-duration-seconds')).toBe('1.5');
+  });
 });

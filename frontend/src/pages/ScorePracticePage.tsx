@@ -2,7 +2,7 @@ import { Camera, CheckCircle2, ChevronLeft, ChevronRight, FileText, Image as Ima
 import { useCallback, useEffect, useRef, useState } from 'react';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
-import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
+import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
 
 interface ImportedScorePage {
   id: string;
@@ -231,9 +231,32 @@ export function ScorePracticePage() {
   }, [selected?.id]);
 
   const updatePdfPageCount = useCallback((count: number) => {
+    const limitMessage = pdfPageLimitMessage(count);
+    if (limitMessage) {
+      setPages((current) => current.map((page) => (
+        page.id === selectedId
+          ? {
+            ...page,
+            confirmed: false,
+            persisted: false,
+            summary: {
+              ...page.summary,
+              supported: false,
+              label: 'Too many pages',
+              quality: {
+                status: 'unsupported',
+                messages: [limitMessage],
+                likelySheetMusicScore: page.summary.quality.likelySheetMusicScore,
+              },
+            },
+          }
+          : page
+      )));
+      setStatus(limitMessage);
+    }
     setPdfPageCount(count);
     setPdfPageNumber((value) => Math.min(Math.max(1, value), count));
-  }, []);
+  }, [selectedId]);
 
   useEffect(() => {
     pagesRef.current = pages;

@@ -24,23 +24,24 @@
 - Backend server-side checks enforce session, audio, analytics, recommendation, export, and ensemble scoping.
 - WebSocket URLs no longer carry bearer tokens; signed-in clients send an initial auth message, `stop_session` requires session ownership/admin, query-token auth is rejected, and production WebSocket origins must be explicitly allowed.
 - Audio upload, raw WebSocket message, pitch-frame, and PCM payload sizes are capped.
+- Global JSON request bodies are rejected before parsing when they exceed `BRASSTUNE_MAX_JSON_BODY_BYTES`, and repeated per-client path requests are throttled by `BRASSTUNE_RATE_LIMIT_PER_MINUTE`.
 - Score-practice source PDFs/images stay local by default; raw SVG is rejected instead of rendered.
 - Guest export uses local guest data instead of cloud export endpoints.
 - Supabase storage delete/read helpers avoid exposing upstream error bodies.
 - Account export includes account profile, sessions, memberships, owned groups, invitations, recommendations, and session files for the authenticated user.
-- Account deletion requires confirmation, preflights Supabase identity/session cleanup when configured, and removes sessions, audio, memberships, invitations, recommendations, teacher-owned groups, and user row.
+- Account deletion requires confirmation, records staged cleanup state, removes sessions, audio, memberships, invitations, recommendations, teacher-owned groups, and the user row, and blocks Supabase re-creation while external identity cleanup is queued.
 - Frontend account deletion requires export action visibility and exact confirmation text.
 - Aggregate ensemble summary/report endpoints require group manager access; active student members can view their group but not aggregate reports.
 
 ## Known Risks
 
-- Account deletion is not yet a durable deletion saga; add a tombstone/outbox/retry worker for stronger operational guarantees.
+- Account deletion now blocks re-login/re-creation while external cleanup is queued, but it still needs an automated outbox/retry worker for stronger operational guarantees.
 - WebSocket origin checks require explicit `CORS_ALLOWED_ORIGINS`; `CORS_ALLOWED_ORIGIN_REGEX` only applies to HTTP CORS middleware.
-- Score image/PDF validation still needs magic-byte validation, EXIF stripping, decoded-pixel caps, and stronger quality checks.
+- Score image/PDF validation includes magic-byte/active-content checks and decoded-pixel caps, but still needs EXIF orientation/private metadata handling and stronger visual quality checks.
 - Metronome click bleed, long-run drift, and physical-device audio behavior are not verified.
 - Hosted Render currently upgrades and returns an app-level auth-required response, but production is stale for the latest WebSocket hardening: query-token auth and bad-Origin rejection fail the enhanced hosted smoke until an owner-approved backend deploy is completed.
 - Live Supabase deletion/export was not tested because disposable live credentials were not provided.
 - Supabase live-project drift was remediated for `public.rls_auto_enable()` by revoking execute from `public`, `anon`, and `authenticated`; verification showed `anon_execute=false` and `authenticated_execute=false`.
 - A clean Supabase baseline migration now exists and was applied to the connected project; direct Data API policies remain intentionally closed while FastAPI mediates app access.
 - Native app production flows remain fixture-backed in several areas despite passing simulator builds/tests.
-- Dependency audit evidence must stay tied to the exact environment and pushed SHA. The exact `.venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` command is blocked locally because `.venv` is Python 3.9.6 and the backend dependency floor is Python 3.10+; equivalent Python 3.12 evidence passed by resolving `requirements-dev.txt` with `uv pip compile --python ...` and auditing the resolved file with `pip-audit --no-deps --disable-pip`. Treat the Security workflow on the exact pushed SHA as the remote merge gate.
+- Dependency audit evidence must stay tied to the exact environment and pushed SHA. The direct requirements-file `pip-audit` command was blocked locally by a temporary resolver venv `ensurepip` SIGABRT; equivalent Python 3.12 evidence passed by resolving `requirements-dev.txt` with `uv pip compile --python ...` and auditing the resolved file with `pip-audit --no-deps --disable-pip`. Treat the Security workflow on the exact pushed SHA as the remote merge gate.

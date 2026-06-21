@@ -2,6 +2,15 @@
 
 Date: 2026-06-18
 
+## 2026-06-21 Follow-Up Patch
+
+| Failure | Reproduction | Root Cause | Resolution | Current Status |
+|---|---|---|---|---|
+| Direct requirements-file `pip-audit` crashed while creating its temporary resolver venv | `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` | The local bundled Python 3.12 resolver path hit an `ensurepip` SIGABRT inside `pip-audit`'s temporary venv creation. The failure happened before vulnerability analysis. | Resolved requirements with `uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/brasstune-pip-audit-requirements.txt` and audited the pinned output with `.venv/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/brasstune-pip-audit-requirements.txt`. | Workaround passed; no known vulnerabilities found. |
+| Device simulation hung and partially rewrote tracked screenshots | `cd frontend && npm run simulate:devices` | Chromium stayed active silently for about six minutes during the screenshot traversal and left partial screenshot deletions/modifications. | Stopped the process and restored `docs/assets/device-simulation/` to the previous tracked state. | Device simulation skipped for this patch; no screenshot changes kept. |
+| Production smoke still fails WebSocket hardening before merge/deploy | `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Production Render has not yet been redeployed with the branch WebSocket hardening. | Local backend tests pass the hardened behavior; merge/deploy must update Render before production smoke can pass. | Red production gate: 5 passed, 2 failed. |
+| XcodeBuildMCP defaults were unavailable in this thread | `session_show_defaults` | The exposed XcodeBuildMCP session had no project, scheme, or simulator defaults and no setter tool was exposed in this thread. | Used shell `xcodebuild` with a dynamically discovered simulator instead. | Native app unit, UI smoke, and Release simulator build passed. |
+
 ## 2026-06-21 Final Stabilization Pass
 
 | Failure | Reproduction | Root Cause | Resolution | Current Status |

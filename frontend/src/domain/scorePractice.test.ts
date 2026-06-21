@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_SCORE_PIXELS, scoreAcceptAttribute, scoreSourceKind, verifiedScoreSourceKind, verifyScoreFile } from './scorePractice';
+import { MAX_SCORE_PAGES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, scoreSourceKind, verifiedScoreSourceKind, verifyScoreFile } from './scorePractice';
 
 function testFile(name: string, type: string, size = 120_000) {
   return new File([new Uint8Array(size)], name, { type });
@@ -36,5 +36,10 @@ describe('score practice imports', () => {
     const summary = verifyScoreFile(testFile('huge-score.png', 'image/png'), { width: side, height: side });
     expect(summary.supported).toBe(false);
     expect(summary.quality.messages.join(' ')).toMatch(/decoded dimensions/);
+  });
+
+  it('reports PDFs that exceed the local page budget', () => {
+    expect(pdfPageLimitMessage(MAX_SCORE_PAGES)).toBeNull();
+    expect(pdfPageLimitMessage(MAX_SCORE_PAGES + 1)).toMatch(/Split it into 64 pages or fewer/);
   });
 });

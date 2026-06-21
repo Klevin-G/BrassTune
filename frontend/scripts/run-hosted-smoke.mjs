@@ -5,6 +5,7 @@ const aliases = new Map([
   ['E2E_VERCEL_SHARE_URL', 'BRASSTUNE_WEB_ACCESS_URL'],
   ['E2E_API_BASE_URL', 'BRASSTUNE_API_BASE_URL'],
   ['E2E_WS_BASE_URL', 'BRASSTUNE_WS_BASE_URL'],
+  ['E2E_VERCEL_AUTOMATION_BYPASS_SECRET', 'BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET'],
 ]);
 
 const env = { ...process.env, E2E_START_LOCAL_SERVERS: '0' };
@@ -13,6 +14,9 @@ for (const [target, source] of aliases) {
   if (!env[target] && env[source]) {
     env[target] = env[source];
   }
+}
+if (!env.E2E_VERCEL_AUTOMATION_BYPASS_SECRET && env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+  env.E2E_VERCEL_AUTOMATION_BYPASS_SECRET = env.VERCEL_AUTOMATION_BYPASS_SECRET;
 }
 
 const required = ['E2E_BASE_URL', 'E2E_API_BASE_URL', 'E2E_WS_BASE_URL'];

@@ -861,7 +861,8 @@ def list_ensemble_groups(db: Session = Depends(get_db), auth: AuthContext = Depe
     else:
         group_ids = [row.group_id for row in db.query(GroupMember).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").all()]
         groups = db.query(Group).filter(Group.id.in_(group_ids)).order_by(Group.name.asc()).all() if group_ids else []
-    return [group_to_dict(group) for group in groups]
+    include_director_identity = auth.user.role in {"admin", "director"}
+    return [group_to_dict(group, include_director_identity=include_director_identity) for group in groups]
 
 
 @router.get("/ensemble/groups/{group_id}")

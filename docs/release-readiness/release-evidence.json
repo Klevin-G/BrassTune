@@ -1,19 +1,21 @@
 {
-  "schema_version": 3,
-  "generated_at": "2026-06-21T00:16:54Z",
+  "schema_version": 4,
+  "generated_at": "2026-06-21T03:55:22Z",
   "repo": "aryasalem09/BrassTune",
   "branch": "arya/release-readiness-hardening",
-  "base_sha_for_local_pass": "eef7f865085859d877703c7652b941aaf6815134",
+  "base_sha_for_local_pass": "4957cea963670be6b56f0dc5b6311e8bf684a166",
   "current_sha": null,
   "main_sha_at_start": "0e5eea2d80471af637b80906508564ba32bd9148",
   "pr_number": 2,
-  "evidence_state": "local hardening patch is validated but not yet committed/pushed in this evidence snapshot; exact-SHA CI, preview, production deploy, and hosted smoke remain required before merge",
+  "evidence_state": "local follow-up patch is validated but not yet committed/pushed in this evidence snapshot; exact-SHA CI, preview, production deploy, and hosted smoke remain required before merge/release",
   "release_decision": "blocked",
   "blockers": [
-    "latest local changes require commit, push, exact-SHA CI, and exact-SHA preview verification",
-    "production Vercel is stale and hosted smoke did not find current Audio Lab content",
-    "production Render/Vercel must be redeployed and production smoke must pass before merge/release",
-    "native production-equivalent mic/metronome/score/auth parity remains unproven"
+    "local follow-up patch requires commit, push, exact-SHA CI, and exact-SHA preview verification",
+    "production Render is stale for WebSocket query-token and bad-Origin hardening",
+    "production Vercel and Render must be deployed from merged main before final production smoke can pass",
+    "native production-equivalent mic/metronome/score/auth parity remains unproven",
+    "live Supabase/Google/Apple provider lifecycle remains owner-credential gated",
+    "device simulation hung in Chromium during this pass and was not counted as green"
   ],
   "items": [
     {
@@ -22,7 +24,7 @@
       "phase": "local",
       "command": "cd backend && PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest app/tests/test_hardening.py -q",
       "status": "passed",
-      "result": "53 tests passed, including canonical pitch samples, instrument mismatch rejection, account deletion ordering/jobs, membership reactivation windows, WebSocket hardening, roster privacy, and export coverage."
+      "result": "57 tests passed, including account deletion re-creation blocking, ensemble list redaction, JSON body limit, and configurable rate-limit coverage."
     },
     {
       "id": "backend-full",
@@ -30,7 +32,7 @@
       "phase": "local",
       "command": "cd backend && PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q",
       "status": "passed",
-      "result": "69 tests passed."
+      "result": "73 tests passed."
     },
     {
       "id": "backend-bandit",
@@ -41,28 +43,20 @@
       "result": "No issues identified."
     },
     {
-      "id": "backend-pip-audit-venv",
-      "gate": "Backend dependency audit in local venv",
+      "id": "backend-pip-audit-direct",
+      "gate": "Backend dependency audit direct requirements command",
       "phase": "local",
       "command": "cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt",
       "status": "blocked",
-      "result": "Local .venv is Python 3.9 and cannot resolve FastAPI >=0.138 packages that require newer Python."
+      "result": "Blocked by temporary resolver venv ensurepip SIGABRT before vulnerability analysis."
     },
     {
       "id": "backend-pip-audit-resolved",
       "gate": "Backend dependency audit with supported Python resolution",
       "phase": "local",
-      "command": "cd backend && uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/... && .venv-audit/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/...",
+      "command": "cd backend && uv pip compile --python /Users/aryasalem/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 requirements-dev.txt -o /tmp/brasstune-pip-audit-requirements.txt && .venv/bin/python -m pip_audit --no-deps --disable-pip -r /tmp/brasstune-pip-audit-requirements.txt",
       "status": "passed",
       "result": "No known vulnerabilities found."
-    },
-    {
-      "id": "frontend-domain-targeted",
-      "gate": "Frontend pitch-domain target",
-      "phase": "local",
-      "command": "cd frontend && npm test -- --run src/domain/music.test.ts src/domain/localPitchDetection.test.ts",
-      "status": "passed",
-      "result": "2 files and 9 tests passed."
     },
     {
       "id": "frontend-unit",
@@ -70,7 +64,7 @@
       "phase": "local",
       "command": "cd frontend && npm test",
       "status": "passed",
-      "result": "9 files and 38 tests passed."
+      "result": "9 files and 40 tests passed."
     },
     {
       "id": "frontend-build",
@@ -97,6 +91,14 @@
       "result": "75 tests passed across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit."
     },
     {
+      "id": "device-simulation",
+      "gate": "Responsive device simulation",
+      "phase": "local",
+      "command": "cd frontend && npm run simulate:devices",
+      "status": "skipped",
+      "result": "Stopped after about six minutes because Chromium hung silently and partially rewrote screenshot artifacts; generated artifacts were restored."
+    },
+    {
       "id": "swift-core",
       "gate": "Swift package tests",
       "phase": "local",
@@ -105,21 +107,45 @@
       "result": "3 Swift tests passed."
     },
     {
-      "id": "hygiene",
-      "gate": "Diff and secret hygiene",
+      "id": "ios-unit",
+      "gate": "iOS app unit tests",
       "phase": "local",
-      "command": "git diff --check; tracked high-confidence secret-pattern scan",
+      "command": "xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination 'id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppTests",
       "status": "passed",
-      "result": "Whitespace check passed and tracked secret-pattern scan returned no matches."
+      "result": "7 XCTest cases passed on iPhone 17 Pro simulator."
+    },
+    {
+      "id": "ios-ui-smoke",
+      "gate": "iOS UI smoke",
+      "phase": "local",
+      "command": "xcodebuild test -quiet -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneAppUISmoke -destination 'id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces -resultBundlePath /tmp/BrassTuneAppUISmoke.xcresult",
+      "status": "passed",
+      "result": "Command exited 0."
+    },
+    {
+      "id": "ios-release-build",
+      "gate": "iOS Release simulator build",
+      "phase": "local",
+      "command": "xcodebuild build -quiet -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Release -destination 'id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO",
+      "status": "passed",
+      "result": "Unsigned Release simulator build passed."
+    },
+    {
+      "id": "hygiene",
+      "gate": "Diff hygiene",
+      "phase": "local",
+      "command": "git diff --check",
+      "status": "passed",
+      "result": "Whitespace check passed."
     },
     {
       "id": "hosted-production-smoke",
       "gate": "Production smoke",
       "phase": "hosted",
-      "command": "cd frontend && BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted",
+      "command": "BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted",
       "status": "failed",
-      "result": "22 passed, 8 failed, 5 skipped. Failures show stale production web content missing `Cloud sync stream` and browser fetch failures in Firefox/WebKit/mobile-WebKit.",
-      "release_impact": "merge and production release blocked"
+      "result": "5 passed, 2 failed. Production Render still returns invalid-token behavior for query-token auth and times out on bad-Origin rejection.",
+      "release_impact": "production release blocked until merge/deploy/hotfix loop makes hosted smoke pass"
     }
   ]
 }

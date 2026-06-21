@@ -20,14 +20,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const body = options?.body;
   const isFormBody = typeof FormData !== 'undefined' && body instanceof FormData;
   const isBlobBody = typeof Blob !== 'undefined' && body instanceof Blob;
-  const headers = {
+  const headers = new Headers({
     ...(isFormBody || isBlobBody ? {} : { 'Content-Type': 'application/json' }),
     ...(await authHeaders()),
-    ...(options?.headers ?? {}),
-  };
+  });
+  new Headers(options?.headers).forEach((value, key) => headers.set(key, value));
   const response = await fetch(`${apiBase()}${path}`, {
-    headers,
     ...options,
+    headers,
   });
   if (!response.ok) {
     const message = await response.text();

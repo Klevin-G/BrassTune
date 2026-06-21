@@ -6,6 +6,7 @@ const wsBaseURL = process.env.E2E_WS_BASE_URL;
 const strictHostedContent = process.env.E2E_STRICT_HOSTED_CONTENT === '1';
 const hostedMode = process.env.E2E_START_LOCAL_SERVERS === '0';
 const vercelShareURL = process.env.E2E_VERCEL_SHARE_URL;
+const vercelBypassSecret = process.env.E2E_VERCEL_AUTOMATION_BYPASS_SECRET || process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 const webBaseURL = process.env.E2E_BASE_URL;
 
 const routes = [
@@ -49,10 +50,18 @@ function routeURL(route: string) {
   return destination.toString();
 }
 
+if (hostedMode && vercelBypassSecret) {
+  test.use({
+    extraHTTPHeaders: {
+      'x-vercel-protection-bypass': vercelBypassSecret,
+    },
+  });
+}
+
 async function skipProtectedPreview(response: Response | null, page: Page, route: string) {
   if (strictHostedContent || response?.status() !== 401) return;
   const baseHostname = webBaseURL ? new URL(webBaseURL).hostname : '';
-  const unauthenticatedVercelPreview = baseHostname.endsWith('.vercel.app') && baseHostname !== 'brass-tune.vercel.app' && !vercelShareURL;
+  const unauthenticatedVercelPreview = baseHostname.endsWith('.vercel.app') && baseHostname !== 'brass-tune.vercel.app' && !vercelShareURL && !vercelBypassSecret;
   if (unauthenticatedVercelPreview) {
     test.skip(true, `Protected Vercel preview returned 401 for ${route}; provide E2E_VERCEL_SHARE_URL or an automation bypass for page journeys.`);
   }

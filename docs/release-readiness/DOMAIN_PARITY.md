@@ -6,12 +6,13 @@
 - Frontend consumes backend outputs and includes client-side display logic for tuner state, charts, heat maps, and reports.
 - `swift/BrassTuneCore` exposes portable pitch helpers used by the native app.
 - `swift/BrassTuneApp` imports `BrassTuneCore` and verifies that native app code can call shared tuning status logic.
+- Swift Core now uses the same `rms < 0.01` silence boundary as backend/frontend tuning status logic.
 
 ## Verified Fixtures/Checks
 
 | Case | Backend | Frontend | Swift |
 |---|---|---|---|
-| Pitch status from cents/confidence/rms | Covered by backend tests | Rendered in tuner components | `testCoreTuningStatusIsAvailableToApp` |
+| Pitch status from cents/confidence/rms | Covered by backend tests | Rendered in tuner components | Swift Core boundary test covers `rms < 0.01` silence and `rms >= 0.01` non-silence behavior |
 | Invalid/oversized PCM | `test_websocket_pcm_frame_size_is_limited` | N/A | Not yet mirrored |
 | Batch frame limit | `test_batch_pitch_frame_size_is_limited` | N/A | N/A |
 | Deterministic fixture recording | Backend demo data and browser journeys | Playwright record/stop review | `testFixtureRecordingCreatesDeterministicSession` |

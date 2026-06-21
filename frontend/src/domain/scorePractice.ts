@@ -126,6 +126,12 @@ export function verifyScoreFile(file: File, dimensions?: { width: number; height
   };
 }
 
+export function pdfPageLimitMessage(pageCount: number) {
+  return pageCount > MAX_SCORE_PAGES
+    ? `PDF has ${pageCount} pages. Split it into ${MAX_SCORE_PAGES} pages or fewer before import.`
+    : null;
+}
+
 export function scoreAcceptAttribute() {
   return 'application/pdf,image/jpeg,image/png,image/heic,image/heif,image/webp,image/tiff,image/bmp,image/avif,image/gif';
 }

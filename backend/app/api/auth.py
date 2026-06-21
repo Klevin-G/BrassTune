@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.security import DEPLOYED_ENVIRONMENTS, LOCAL_ENVIRONMENTS, app_environment, auth_mode
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.db.database import get_db
-from app.models.db import User
+from app.models.db import AccountDeletionJob, User
 from app.services.session_service import get_or_create_default_user
 
 
@@ -90,6 +90,17 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
     app_metadata = payload.get("app_metadata") or {}
     requested_role = app_metadata.get("role") if app_metadata.get("role") in {"student", "director", "admin"} else None
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
+    if user is None:
+        deletion_job = (
+            db.query(AccountDeletionJob)
+            .filter(AccountDeletionJob.supabase_user_id == supabase_id)
+            .order_by(AccountDeletionJob.updated_at.desc())
+            .first()
+        )
+        if deletion_job is not None:
+            if deletion_job.status == "completed":
+                raise HTTPException(status_code=410, detail="This account has been deleted.")
+            raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
     if user is None:
         preferred_username = metadata.get("username") or (email.split("@")[0] if email else "player")
         user = User(

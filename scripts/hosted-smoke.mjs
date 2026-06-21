@@ -12,6 +12,7 @@ const apiBaseURL = cleanBase(process.env.BRASSTUNE_API_BASE_URL || DEFAULT_API_B
 const wsBaseURL = cleanBase(process.env.BRASSTUNE_WS_BASE_URL || DEFAULT_WS_BASE_URL);
 const liveAuth = process.env.E2E_LIVE_AUTH === '1';
 const authToken = process.env.BRASSTUNE_WS_AUTH_TOKEN || process.env.BRASSTUNE_AUTH_TOKEN || '';
+const vercelBypassSecret = process.env.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '';
 
 const results = [];
 
@@ -50,7 +51,8 @@ async function checkHTTP(name, fn) {
 }
 
 async function checkWebRoot() {
-  const response = await fetch(webAccessURL, { redirect: 'follow' });
+  const headers = vercelBypassSecret ? { 'x-vercel-protection-bypass': vercelBypassSecret } : {};
+  const response = await fetch(webAccessURL, { redirect: 'follow', headers });
   const text = await response.text();
   if (response.status === 401 || response.status === 403 || /vercel authentication|single sign-on/i.test(text)) {
     throw new Error(`web app is protected by Vercel auth/SSO: HTTP ${response.status}`);
