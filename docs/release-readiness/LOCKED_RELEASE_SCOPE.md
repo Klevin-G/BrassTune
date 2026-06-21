@@ -1,8 +1,9 @@
 # Locked Release Scope
 
-Updated: 2026-06-21T00:13:54Z
-Branch: `arya/release-readiness-hardening`
-Base SHA for this pass: `eef7f865085859d877703c7652b941aaf6815134`
+Updated: 2026-06-21T04:22:00Z
+Branch: `main`
+Merged PR head: `ede7960fb0f543a8d0b329357199d782257a0d46`
+Merged main SHA: `4bda5691a05988471e412519bbfdcf4078430ee0`
 
 This is the release-scope freeze for the final stabilization pass. New P2/P3 ideas belong in `POST_RELEASE_BACKLOG.md`; only new P0/P1 security, data-loss, deployment, critical-journey, dead-control, accessibility-blocking, or explicitly required native parity findings may enter this file.
 
@@ -19,9 +20,9 @@ This is the release-scope freeze for the final stabilization pass. New P2/P3 ide
 | LRS-007 | Failed signed-in recording start must not leave an opened microphone stream active. | Fixed locally | Practice start failure cleanup added; frontend build passed. |
 | LRS-008 | PDF Score Practice must use a real local PDF reader, not iframe-only browser PDF behavior. | Fixed locally | Lazy PDF.js canvas reader added; frontend build passed. |
 | LRS-009 | Metronome running controls must update live and UI must not label scheduled queue math as acoustic measurement. | Fixed locally | Live refs and queue-stat wording added; frontend build passed. |
-| LRS-010 | Production Render must serve current WebSocket hardening behavior. | Red gate | Hosted smoke against production still showed stale query-token and bad-Origin behavior before this patch; must redeploy and re-smoke. |
-| LRS-011 | Vercel production must serve merged `main` at the final SHA. | Red gate | Current production was still `0e5eea2...` before this patch. |
-| LRS-012 | Exact-SHA PR CI and preview must be green after the final commit is pushed. | Red gate | Current local changes are not yet committed/pushed. |
+| LRS-010 | Production Render must serve current WebSocket hardening behavior. | Passed | Render deploy `dep-d8rmafreo5us73di4as0` is live for `4bda5691...`; hosted smoke passed query-token and bad-Origin rejection. |
+| LRS-011 | Vercel production must serve merged `main` at the final SHA. | Passed | Vercel production deploy `dpl_5jR3Qnv71v58YfWN77VxrLihYPk9` is READY for `4bda5691...`. |
+| LRS-012 | Exact-SHA PR CI and preview must be green after the final commit is pushed. | Passed for PR #2 | Backend, Frontend, Security, Swift, and Vercel were green for `ede7960...` before merge. |
 
 ## Native Scope
 
@@ -33,9 +34,9 @@ This is the release-scope freeze for the final stabilization pass. New P2/P3 ide
 
 ## Deployment And Release Gates
 
-Do not merge PR #2, tag, create a GitHub release, invite testers, or declare production current until:
+For any future release/hotfix, do not tag, create a GitHub release, invite testers beyond the approved closed-beta group, or declare production current until:
 
-- Latest pushed PR head SHA is verified immediately before merge.
+- Latest pushed SHA is verified immediately before merge/deploy.
 - Required GitHub checks are green on that exact SHA.
 - Vercel exact-SHA preview is browser-verified through an owner-approved protection bypass/share flow.
 - Render production is deployed to the final backend commit and hosted WebSocket hardening smoke passes.

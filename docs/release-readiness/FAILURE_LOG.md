@@ -2,6 +2,13 @@
 
 Date: 2026-06-18
 
+## 2026-06-21 Post-Merge Deploy And Smoke
+
+| Failure | Reproduction | Root Cause | Resolution | Current Status |
+|---|---|---|---|---|
+| Render backend deploy failed on merge commit `4bda5691...` | Render deploys `dep-d8rm7g28qa3s73a4mplg` and `dep-d8rm8egjs32c73c761ig` reached `update_failed` | Production startup now requires an explicit `BRASSTUNE_AUTH_MODE` in `APP_ENV=production`; the live Render service was missing that env var even though `render.yaml` declares `BRASSTUNE_AUTH_MODE=disabled`. | Set service env `BRASSTUNE_AUTH_MODE=disabled` through the Render API without printing secret values, then triggered deploy hook. | Fixed: Render deploy `dep-d8rmafreo5us73di4as0` is live for `4bda5691...`. |
+| Hosted smoke rejected normal WebSocket app check after backend deploy | `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app ... npm run smoke:hosted` failed `WebSocket /ws/pitch app-level response` with `WebSocket origin is not allowed.` | The smoke script used Node's built-in `WebSocket`, which did not send the production web `Origin`; real browsers do send this header and the backend correctly requires it in production. | Updated `scripts/hosted-smoke.mjs` to use the raw WebSocket probe for the normal app-level check as well, sending `Origin: https://brass-tune.vercel.app` and a masked client `ping` frame. | Fixed: hosted production smoke passed all 7 checks. |
+
 ## 2026-06-21 Follow-Up Patch
 
 | Failure | Reproduction | Root Cause | Resolution | Current Status |

@@ -39,7 +39,7 @@
 - WebSocket origin checks require explicit `CORS_ALLOWED_ORIGINS`; `CORS_ALLOWED_ORIGIN_REGEX` only applies to HTTP CORS middleware.
 - Score image/PDF validation includes magic-byte/active-content checks and decoded-pixel caps, but still needs EXIF orientation/private metadata handling and stronger visual quality checks.
 - Metronome click bleed, long-run drift, and physical-device audio behavior are not verified.
-- Hosted Render currently upgrades and returns an app-level auth-required response, but production is stale for the latest WebSocket hardening: query-token auth and bad-Origin rejection fail the enhanced hosted smoke until an owner-approved backend deploy is completed.
+- Hosted Render is live on merge commit `4bda5691a05988471e412519bbfdcf4078430ee0`; enhanced hosted smoke passed query-token rejection, bad-Origin rejection, and browser-origin app-level WebSocket response after `BRASSTUNE_AUTH_MODE=disabled` was set in the live Render service.
 - Live Supabase deletion/export was not tested because disposable live credentials were not provided.
 - Supabase live-project drift was remediated for `public.rls_auto_enable()` by revoking execute from `public`, `anon`, and `authenticated`; verification showed `anon_execute=false` and `authenticated_execute=false`.
 - A clean Supabase baseline migration now exists and was applied to the connected project; direct Data API policies remain intentionally closed while FastAPI mediates app access.

@@ -1,22 +1,21 @@
 # Closed Beta Handoff
 
-Status: web/backend closed-beta candidate for owner-controlled testing after the post-fix PR head has green required GitHub Actions; external provider/App Store/device gates remain.
+Status: web/backend closed-beta production path deployed and smoke-passed in guest/auth-disabled mode; external provider/App Store/device gates remain.
 
 ## Tester URLs
 
-- Web preview for this PR branch: `https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app`
-- Production web URL after merge/deploy: `https://brass-tune.vercel.app`
+- Production web URL: `https://brass-tune.vercel.app`
 - Backend API: `https://brasstune.onrender.com`
 - Backend health: `https://brasstune.onrender.com/api/health`
 - WebSocket endpoint: `wss://brasstune.onrender.com/ws/pitch`
 
-The branch preview may require Vercel Authentication. If external testers receive `401`, the owner must provide a Vercel automation/tester bypass, temporarily allow preview access, or wait until the reviewed PR is deployed to production.
+The old branch preview may require Vercel Authentication and should not be the primary tester URL now that PR #2 is merged.
 
 ## Supported Platforms For This Beta
 
 - Web: current desktop Chromium, Firefox, WebKit/Safari-like browsers, and mobile browser viewports covered by local Playwright/device simulation.
 - Native iOS: simulator smoke only. Do not treat simulator results as physical microphone, TestFlight, or App Store evidence.
-- Backend: hosted Render health, CORS, and unauthenticated WebSocket upgrade smoke passed.
+- Backend: hosted Render health, CORS, browser-origin WebSocket app response, query-token rejection, and bad-origin rejection smoke passed.
 
 ## What To Try
 

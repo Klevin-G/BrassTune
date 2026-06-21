@@ -1,5 +1,16 @@
 # Workstream Ownership
 
+## 2026-06-21 Post-Merge Deploy Addendum
+
+Branch: `main`
+Merged main SHA: `4bda5691a05988471e412519bbfdcf4078430ee0`
+
+| Workstream | Owner/source | Scope | Outcome |
+|---|---|---|---|
+| Merge/release gate | Coordinator plus GitHub connector | Exact-SHA CI, PR state, merge guard | PR #2 merged after Backend, Frontend, Security, Swift, and Vercel were green for `ede7960fb0f543a8d0b329357199d782257a0d46`. |
+| Production deploy | Coordinator plus Vercel/Render APIs | Vercel production deploy, Render env/deploy hook, hosted smoke | Vercel production is READY on `4bda5691...`; Render deploy `dep-d8rmafreo5us73di4as0` is live after setting `BRASSTUNE_AUTH_MODE=disabled`; hosted smoke passed. |
+| Smoke hotfix | Coordinator | Node hosted-smoke WebSocket Origin behavior | `scripts/hosted-smoke.mjs` now uses the raw WebSocket probe for the normal app-level check so the production web Origin is sent. |
+
 ## 2026-06-21 Final Stabilization Addendum
 
 Branch: `arya/release-readiness-hardening`

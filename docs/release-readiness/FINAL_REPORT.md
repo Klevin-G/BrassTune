@@ -1,9 +1,10 @@
 # BrassTune Final Report
 
-Updated: 2026-06-21T03:55:22Z
-Branch: `arya/release-readiness-hardening`
-Remote PR head at start of this pass: `4957cea963670be6b56f0dc5b6311e8bf684a166`
-Current state: local follow-up fixes on top of green PR head `4957cea963670be6b56f0dc5b6311e8bf684a166`; commit/push, exact-SHA CI, exact-SHA Vercel preview, Render deployment, and hosted smoke are still required.
+Updated: 2026-06-21T04:22:00Z
+Branch: `main`
+Merged PR head: `ede7960fb0f543a8d0b329357199d782257a0d46`
+Merged main SHA: `4bda5691a05988471e412519bbfdcf4078430ee0`
+Current state: PR #2 merged; Vercel production and Render backend deployed the merge commit; post-deploy hosted smoke passed after aligning Render `BRASSTUNE_AUTH_MODE=disabled` with `render.yaml` and fixing the smoke WebSocket app check to send the production `Origin` header.
 
 ## Summary
 
@@ -28,9 +29,10 @@ This pass preserved the prior release hardening and fixed additional bounded P1 
 - Account deletion now blocks Supabase user re-creation while external identity cleanup remains queued.
 - Backend JSON body size and per-client path rate limits are now explicit configurable controls.
 - Hosted Playwright/root smoke can use Vercel's `x-vercel-protection-bypass` automation header from an approved secret.
+- Production hosted smoke now verifies the browser-origin WebSocket path plus query-token and bad-origin rejection.
 - Swift Core now matches the backend/frontend RMS silence threshold.
 
-No production deploy, merge, or tag was performed in this pass.
+PR #2 was merged. No release tag or GitHub Release was created in this pass.
 
 ## Current Evidence
 
@@ -51,21 +53,16 @@ See `TEST_MATRIX.md` and `release-evidence.json` for the full command matrix. Cu
 - App UI smoke on iPhone 17 Pro simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`: command exited `0`.
 - Release simulator build on iPhone 17 Pro simulator `4B4489C4-295C-4565-9544-30812B4EA0EB`: passed.
 
-GitHub connector checks verified PR #2 was open, mergeable, non-draft, and green on Backend, Frontend, Security, and Swift for `4957cea963670be6b56f0dc5b6311e8bf684a166`. Remote CI and preview evidence do not cover the local changes from this pass until they are committed, pushed, and CI/deployment complete on the exact new SHA.
+GitHub connector checks verified PR #2 was open, mergeable, non-draft, and green on Backend, Frontend, Security, Swift, and Vercel for `ede7960fb0f543a8d0b329357199d782257a0d46`. The PR was merged into `main` as `4bda5691a05988471e412519bbfdcf4078430ee0`.
 
 ## Hosted Status
 
-Production connectivity is healthy but stale:
+Production connectivity is green for the web/backend closed-beta path:
 
-- `https://brass-tune.vercel.app` root loaded.
-- `https://brasstune.onrender.com/api/health` passed.
-- CORS preflights for `/api/health` and `/api/sessions/start` passed.
-- Basic `/ws/pitch` app-level response passed.
-- WS hardening checks failed:
-  - `wss://brasstune.onrender.com/ws/pitch?token=dev-user-1` returned `Invalid or expired Supabase token` instead of `WebSocket query-token auth is disabled.`
-  - A forged `Origin: https://evil.example` did not produce the current branch's explicit origin rejection before timeout.
-
-This means production Render is not serving the current WebSocket hardening. The local backend tests pass and include query-token and unapproved-origin WebSocket rejection coverage, so this hosted failure is classified as an expected stale-production deployment gate, not a local code failure. Owner-approved backend deployment and post-deploy hosted smoke are required before beta claims.
+- Vercel production deployment `dpl_5jR3Qnv71v58YfWN77VxrLihYPk9` is READY for merge commit `4bda5691a05988471e412519bbfdcf4078430ee0`.
+- Render backend deploy `dep-d8rmafreo5us73di4as0` is live for merge commit `4bda5691a05988471e412519bbfdcf4078430ee0`.
+- `npm run smoke:hosted` passed with web root, Render health, CORS, WebSocket app-level response, query-token rejection, and bad-origin rejection all green.
+- Render production required setting `BRASSTUNE_AUTH_MODE=disabled`; this matches the checked-in `render.yaml` closed-beta guest-practice configuration.
 
 ## Remaining Blockers
 
@@ -75,18 +72,17 @@ Repository-actionable before broad public/App Store release:
 - Full Score Practice reader workflow with timeline, flags, review/export, crop/reorder, and native parity.
 - Measured metronome timing, click-bleed rejection, and native metronome parity.
 - Native real audio capture, native Score Practice, native provider parity, and broader Swift domain parity.
-- Exact-SHA CI and Vercel/Render preview/deploy evidence for the latest pushed PR head.
-- Reliable protected-preview browser access for exact-SHA Playwright smoke, or an approved Vercel bypass path that works in local/CI browser automation.
+- Keep exact-SHA CI, Vercel/Render deploy evidence, and hosted smoke green for any follow-up hotfix commits.
 
 External or owner-gated:
 
 - Supabase/Google/Apple provider credentials, callback allowlists, disposable live auth users, and provider lifecycle tests.
 - Apple Developer team, bundle ID, signing profiles, App Store Connect/TestFlight, public privacy/support/legal URLs, and review metadata.
 - Physical iPhone/iPad microphone and real brass validation.
-- Owner-approved production deployment.
+- Owner approval for switching production auth from disabled guest practice to live Supabase provider mode.
 
 ## Release Decision
 
-Current status: `local web closed-beta candidate patch pending commit/push, exact-SHA CI, exact-SHA preview, owner-approved Render/Vercel deployment, and final hosted smoke; native engineering parity in progress; external provider/App Store/device gates remaining`.
+Current status: `web/backend closed-beta production path deployed and smoke-passed; native engineering parity in progress; external provider/App Store/device gates remaining`.
 
-Do not call this release-ready and do not merge/deploy until the changes are committed, pushed, CI is green on the exact new SHA, an exact-SHA preview is verified, and hosted smoke passes after owner-approved production backend/frontend deployment.
+Do not call this App Store/TestFlight ready. Web/backend closed beta can proceed in guest/auth-disabled mode, while live Supabase auth, native real-audio parity, Apple signing/TestFlight, and physical-device brass validation remain separate gates.

@@ -1,6 +1,6 @@
 # Interaction Matrix
 
-Updated: 2026-06-21T00:13:54Z
+Updated: 2026-06-21T04:22:00Z
 
 This matrix tracks release-critical controls and their verification status. The machine-readable companion is `interaction-matrix.json`.
 
@@ -21,7 +21,7 @@ This matrix tracks release-critical controls and their verification status. The 
 | Backend | `/api/sessions/*/samples` | Save pitch frame | Canonicalizes note/cents/status server-side | `backend/app/services/session_service.py` | Forged labels overwritten | Instrument mismatch rejected | Backend hardening tests | Pass |
 | Backend | `/api/users/me` | Delete account | Cleans local data first; records deletion job; then external identity cleanup | `backend/app/api/routes.py` | Job completed or queued | Local cleanup failure returns 503 and does not delete identity | Backend hardening tests | Pass |
 | Backend | `/api/ensemble/*` | Teacher/student ensemble actions | Enforces manager roles and active membership windows | `backend/app/api/routes.py` | Allowed operations succeed | Forbidden access fails server-side | Backend hardening tests | Pass |
-| Hosted | Production smoke | Web/API/WS smoke | Verifies deployed web/backend behavior | `scripts/hosted-smoke.mjs` | Root, health, CORS, WS hardening pass | Query-token and bad-Origin must reject | Hosted smoke | Red gate |
+| Hosted | Production smoke | Web/API/WS smoke | Verifies deployed web/backend behavior | `scripts/hosted-smoke.mjs` | Root, health, CORS, browser-origin WS app response, query-token rejection, and bad-Origin rejection pass | Any hosted regression fails the smoke | Hosted smoke | Pass |
 | Native | App tabs/buttons | Practice/sessions/analytics/settings | Simulator app launches and smoke navigation works | `swift/BrassTuneApp` | Simulator tests pass | Native real mic/score/metronome not proven | XcodeBuildMCP evidence | Partial |
 
 Known exclusions from this matrix are tracked as release gates or post-release backlog, not hidden as passed controls.

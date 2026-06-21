@@ -91,54 +91,26 @@ async function checkCORS(path) {
 }
 
 async function checkWebSocket() {
-  const wsURL = urlWithPath(wsBaseURL, '/ws/pitch');
   if (liveAuth && !authToken) {
     throw new Error('E2E_LIVE_AUTH=1 requires BRASSTUNE_WS_AUTH_TOKEN or BRASSTUNE_AUTH_TOKEN');
   }
-  const outcome = await new Promise((resolve) => {
-    const ws = new WebSocket(wsURL);
-    let opened = false;
-    const timer = setTimeout(() => {
-      try {
-        ws.close(1000, 'smoke timeout');
-      } catch {}
-      resolve({ type: 'timeout', opened });
-    }, 10000);
-    ws.addEventListener('open', () => {
-      opened = true;
-      ws.send(JSON.stringify(liveAuth ? { type: 'authenticate', token: authToken } : { type: 'ping' }));
-    });
-    ws.addEventListener('message', (event) => {
-      clearTimeout(timer);
-      try {
-        ws.close(1000, 'smoke complete');
-      } catch {}
-      resolve({ type: 'message', data: String(event.data), opened });
-    });
-    ws.addEventListener('close', (event) => {
-      clearTimeout(timer);
-      resolve({ type: 'close', code: event.code, reason: event.reason, opened });
-    });
-    ws.addEventListener('error', () => {
-      if (!opened) {
-        clearTimeout(timer);
-        resolve({ type: 'error', opened });
-      }
-    });
-  });
-
-  if (outcome.type !== 'message') {
+  const outcome = await rawWebSocketProbe(
+    urlWithPath(wsBaseURL, '/ws/pitch'),
+    webBaseURL,
+    liveAuth ? { type: 'authenticate', token: authToken } : { type: 'ping' },
+  );
+  if (outcome.status !== 101 || !outcome.frameText) {
     throw new Error(`WebSocket did not produce an app-level message: ${JSON.stringify(outcome)}`);
   }
   let payload;
   try {
-    payload = JSON.parse(outcome.data);
+    payload = JSON.parse(outcome.frameText);
   } catch {
-    throw new Error(`WebSocket returned non-JSON payload: ${outcome.data}`);
+    throw new Error(`WebSocket returned non-JSON payload: ${outcome.frameText}`);
   }
   if (liveAuth) {
     if (payload.type !== 'authenticated' && payload.type !== 'pong') {
-      throw new Error(`live WebSocket auth did not succeed: ${outcome.data}`);
+      throw new Error(`live WebSocket auth did not succeed: ${outcome.frameText}`);
     }
     return;
   }
@@ -147,8 +119,33 @@ async function checkWebSocket() {
     'pong',
   ];
   if (payload.type !== 'pong' && !expectedGuestMessages.includes(payload.message)) {
-    throw new Error(`unexpected unauthenticated WebSocket message: ${outcome.data}`);
+    throw new Error(`unexpected unauthenticated WebSocket message: ${outcome.frameText}`);
   }
+}
+
+function encodeClientTextFrame(text) {
+  const payload = Buffer.from(text, 'utf8');
+  const mask = crypto.randomBytes(4);
+  let header;
+  if (payload.length < 126) {
+    header = Buffer.from([0x81, 0x80 | payload.length]);
+  } else if (payload.length <= 0xffff) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 0x80 | 126;
+    header.writeUInt16BE(payload.length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 0x80 | 127;
+    header.writeUInt32BE(0, 2);
+    header.writeUInt32BE(payload.length, 6);
+  }
+  const masked = Buffer.alloc(payload.length);
+  for (let index = 0; index < payload.length; index += 1) {
+    masked[index] = payload[index] ^ mask[index % 4];
+  }
+  return Buffer.concat([header, mask, masked]);
 }
 
 function decodeServerTextFrame(buffer) {
@@ -173,7 +170,7 @@ function decodeServerTextFrame(buffer) {
   return buffer.subarray(offset, offset + length).toString('utf8');
 }
 
-async function rawWebSocketProbe(wsURL, origin) {
+async function rawWebSocketProbe(wsURL, origin, message = null) {
   const url = new URL(wsURL);
   const secure = url.protocol === 'wss:';
   const port = Number(url.port || (secure ? 443 : 80));
@@ -196,6 +193,7 @@ async function rawWebSocketProbe(wsURL, origin) {
       ? tls.connect({ host: url.hostname, port, servername: url.hostname })
       : net.connect({ host: url.hostname, port });
     let buffer = Buffer.alloc(0);
+    let sentMessage = false;
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new Error(`WebSocket probe timed out for ${wsURL}`));
@@ -219,6 +217,11 @@ async function rawWebSocketProbe(wsURL, origin) {
         clearTimeout(timer);
         socket.destroy();
         resolve({ status, statusLine, frameText });
+        return;
+      }
+      if (message && !sentMessage) {
+        sentMessage = true;
+        socket.write(encodeClientTextFrame(JSON.stringify(message)));
       }
     });
     socket.on('close', () => {

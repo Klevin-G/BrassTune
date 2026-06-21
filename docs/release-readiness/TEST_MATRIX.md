@@ -1,9 +1,10 @@
 # Release Test Matrix
 
-Updated: 2026-06-21T03:55:22Z
-Branch: `arya/release-readiness-hardening`
-Remote PR head before this local follow-up patch: `4957cea963670be6b56f0dc5b6311e8bf684a166`
-Evidence state: local fixes validated; exact-SHA CI and preview must pass on the latest PR head after this patch is committed and pushed.
+Updated: 2026-06-21T04:22:00Z
+Branch: `main`
+Merged PR head: `ede7960fb0f543a8d0b329357199d782257a0d46`
+Merged main SHA: `4bda5691a05988471e412519bbfdcf4078430ee0`
+Evidence state: PR #2 merged; production Vercel and Render deployed the merge commit; hosted production smoke passed. Remaining native/provider/device gates are outside the web/backend closed-beta pass.
 
 ## Current Local Gates
 
@@ -24,23 +25,24 @@ Evidence state: local fixes validated; exact-SHA CI and preview must pass on the
 | iOS Release simulator build | `xcodebuild build -quiet -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Release -destination 'id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO` | Passed | Unsigned simulator build only. |
 | Hosted-smoke spec local sanity | `cd frontend && npx playwright test e2e/hosted-smoke.spec.ts --project=chromium` | Passed: `1 passed`, `6 skipped` | Hosted-only checks correctly skip without hosted env vars; route-content assertion matches current Audio Lab copy. |
 | Exact-SHA protected preview smoke | `cd frontend && E2E_START_LOCAL_SERVERS=0 E2E_BASE_URL=https://brass-tune-7es12gogt-aryaswebsites.vercel.app E2E_VERCEL_SHARE_URL=... E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted -- --project=chromium` | Failed before guest-fetch fix: `5 passed`, `1 failed`, `1 skipped` | Vercel preview for `72bb5a4` was READY and app/API/WS checks passed, but guest route visits logged protected backend `401` calls. The current local fix gates protected cloud fetches for guests and requires a new exact-SHA preview rerun. |
-| Hosted production smoke | `env BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Failed: `5` passed, `2` failed | Root, health, CORS, and basic WS response passed; query-token rejection and bad-Origin rejection failed because production Render is stale. |
+| Hosted production smoke | `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Passed: `7` checks | Root, Render health, CORS, browser-origin WS app response, query-token rejection, and bad-Origin rejection passed after Vercel/Render deploy. |
 | Smoke script syntax | `node --check scripts/hosted-smoke.mjs` | Passed | Validates the enhanced hosted-smoke script parses. |
 
 ## Remote Baseline
 
-GitHub connector checks verified PR #2 at `4957cea963670be6b56f0dc5b6311e8bf684a166` before this local follow-up patch:
+GitHub connector checks verified PR #2 at `ede7960fb0f543a8d0b329357199d782257a0d46` before merge:
 
 | Remote gate | Result |
 |---|---|
-| PR #2 metadata | Open, mergeable, non-draft; base `main`, head `arya/release-readiness-hardening`. |
+| PR #2 metadata | Open, mergeable, non-draft before merge; merged into `main` as `4bda5691a05988471e412519bbfdcf4078430ee0`. |
 | Backend workflow | Completed success. |
 | Frontend workflow | Completed success. |
 | Security workflow | Completed success. |
 | Swift workflow | Completed success. |
-| Vercel status | Commit status context `Vercel` succeeded for `4957cea`; exact browser preview smoke still needs a share URL or automation bypass. |
+| Vercel status | Commit status context `Vercel` succeeded for `ede7960`; production deployment `dpl_5jR3Qnv71v58YfWN77VxrLihYPk9` is READY for the merge commit. |
+| Render status | Deploy `dep-d8rmafreo5us73di4as0` is live for the merge commit after setting `BRASSTUNE_AUTH_MODE=disabled`. |
 
-Remote CI and preview must pass on the latest pushed PR head. Do not use `4957cea` as proof for the local follow-up patch after it is committed.
+Any future hotfix commit must get its own exact-SHA CI/deploy evidence.
 
 ## Blocked Or Scoped
 
@@ -49,6 +51,6 @@ Remote CI and preview must pass on the latest pushed PR head. Do not use `4957ce
 | Chrome plugin smoke | Blocked | Chrome connector runtime failed before browser commands with missing `sandboxPolicy` metadata. |
 | Direct requirements-file `pip-audit` | Blocked | Local `pip-audit` crashed while creating its temporary resolver venv. Use the Python 3.12 uv-resolved audit above plus Security workflow on the exact pushed SHA. |
 | Live Supabase auth/provider lifecycle | Blocked | Requires owner-issued Supabase, Google, and Apple provider configuration plus disposable live users. |
-| Production exact-SHA smoke | Blocked | Requires owner-approved deploy of the new commit to Vercel/Render. |
+| Production exact-SHA smoke | Passed for merge commit | Re-run after any follow-up commit or production env change. |
 | App Store/TestFlight signing | Blocked | Requires Apple Developer team, bundle ID, signing, App Store Connect, and review metadata. |
 | Physical microphone/device validation | Blocked | Requires iPhone/iPad hardware and real brass input. |

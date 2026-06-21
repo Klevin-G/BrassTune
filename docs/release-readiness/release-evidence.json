@@ -1,21 +1,20 @@
 {
   "schema_version": 4,
-  "generated_at": "2026-06-21T03:55:22Z",
+  "generated_at": "2026-06-21T04:22:00Z",
   "repo": "aryasalem09/BrassTune",
-  "branch": "arya/release-readiness-hardening",
-  "base_sha_for_local_pass": "4957cea963670be6b56f0dc5b6311e8bf684a166",
-  "current_sha": null,
+  "branch": "main",
+  "base_sha_for_local_pass": "ede7960fb0f543a8d0b329357199d782257a0d46",
+  "current_sha": "4bda5691a05988471e412519bbfdcf4078430ee0",
   "main_sha_at_start": "0e5eea2d80471af637b80906508564ba32bd9148",
   "pr_number": 2,
-  "evidence_state": "local follow-up patch is validated but not yet committed/pushed in this evidence snapshot; exact-SHA CI, preview, production deploy, and hosted smoke remain required before merge/release",
-  "release_decision": "blocked",
+  "evidence_state": "PR #2 merged to main; Vercel production and Render backend deployed main merge commit 4bda5691a05988471e412519bbfdcf4078430ee0; post-deploy hosted production smoke passed after aligning Render BRASSTUNE_AUTH_MODE with render.yaml and making the smoke WebSocket app check send the production Origin header.",
+  "release_decision": "web_backend_closed_beta_ready",
   "blockers": [
-    "local follow-up patch requires commit, push, exact-SHA CI, and exact-SHA preview verification",
-    "production Render is stale for WebSocket query-token and bad-Origin hardening",
-    "production Vercel and Render must be deployed from merged main before final production smoke can pass",
     "native production-equivalent mic/metronome/score/auth parity remains unproven",
     "live Supabase/Google/Apple provider lifecycle remains owner-credential gated",
-    "device simulation hung in Chromium during this pass and was not counted as green"
+    "Apple signing, TestFlight, App Store Connect, and physical-device microphone/brass validation remain owner/device gated",
+    "device simulation hung in Chromium during this pass and was not counted as green",
+    "automated account deletion outbox/retry worker remains future production-hardening work"
   ],
   "items": [
     {
@@ -143,9 +142,25 @@
       "gate": "Production smoke",
       "phase": "hosted",
       "command": "BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted",
-      "status": "failed",
-      "result": "5 passed, 2 failed. Production Render still returns invalid-token behavior for query-token auth and times out on bad-Origin rejection.",
-      "release_impact": "production release blocked until merge/deploy/hotfix loop makes hosted smoke pass"
+      "status": "passed",
+      "result": "7 checks passed: web root, Render health, CORS /api/health, CORS /api/sessions/start, WebSocket app-level response, query-token rejection, and bad-Origin rejection.",
+      "release_impact": "web/backend production closed-beta gate passed"
+    },
+    {
+      "id": "vercel-production-deploy",
+      "gate": "Vercel production deploy",
+      "phase": "hosted",
+      "command": "Vercel Git integration after PR #2 merge",
+      "status": "passed",
+      "result": "Production deployment dpl_5jR3Qnv71v58YfWN77VxrLihYPk9 is READY for merge commit 4bda5691a05988471e412519bbfdcf4078430ee0."
+    },
+    {
+      "id": "render-production-deploy",
+      "gate": "Render backend production deploy",
+      "phase": "hosted",
+      "command": "Render deploy hook after setting BRASSTUNE_AUTH_MODE=disabled",
+      "status": "passed",
+      "result": "Deploy dep-d8rmafreo5us73di4as0 is live for merge commit 4bda5691a05988471e412519bbfdcf4078430ee0."
     }
   ]
 }
