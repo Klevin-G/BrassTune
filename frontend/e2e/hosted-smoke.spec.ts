@@ -58,16 +58,16 @@ if (hostedMode && vercelBypassSecret) {
   });
 }
 
-async function skipProtectedPreview(response: Response | null, page: Page, route: string) {
-  if (strictHostedContent || response?.status() !== 401) return;
+async function assertNotProtectedPreview(response: Response | null, page: Page, route: string) {
+  if (response?.status() !== 401 && response?.status() !== 403) return;
   const baseHostname = webBaseURL ? new URL(webBaseURL).hostname : '';
   const unauthenticatedVercelPreview = baseHostname.endsWith('.vercel.app') && baseHostname !== 'brass-tune.vercel.app' && !vercelShareURL && !vercelBypassSecret;
   if (unauthenticatedVercelPreview) {
-    test.skip(true, `Protected Vercel preview returned 401 for ${route}; provide E2E_VERCEL_SHARE_URL or an automation bypass for page journeys.`);
+    throw new Error(`Protected Vercel preview returned ${response?.status()} for ${route}; provide E2E_VERCEL_SHARE_URL or an automation bypass for page journeys.`);
   }
   const bodyText = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
   if (/vercel authentication|log in to vercel|single sign-on|authentication required/i.test(bodyText)) {
-    test.skip(true, `Protected Vercel preview returned 401 for ${route}; provide E2E_VERCEL_SHARE_URL or an automation bypass for page journeys.`);
+    throw new Error(`Protected Vercel preview blocked ${route}; provide E2E_VERCEL_SHARE_URL or an automation bypass for page journeys.`);
   }
 }
 
@@ -87,7 +87,7 @@ test.describe('hosted read-only smoke', () => {
 
     for (const route of routes) {
       const response = await page.goto(routeURL(route));
-      await skipProtectedPreview(response, page, route);
+      await assertNotProtectedPreview(response, page, route);
       expect(response?.status(), `${route} should not be behind auth or missing`).toBeLessThan(400);
       await expect(page.getByRole('main')).toBeVisible();
       await expect(page.locator('body')).not.toContainText(/mixed content/i);
@@ -119,15 +119,15 @@ test.describe('hosted read-only smoke', () => {
       }
     });
     const response = await page.goto(routeURL('/settings/audio-lab'));
-    await skipProtectedPreview(response, page, '/settings/audio-lab');
+    await assertNotProtectedPreview(response, page, '/settings/audio-lab');
     await expect(page.getByText(/Cloud sync stream/i)).toBeVisible();
     await expect(page.getByText(/Connection diagnostics/i)).toBeVisible();
     expect(badURLs).toEqual([]);
   });
 
   test('configured backend health responds for hosted smoke', async ({ request }) => {
-    test.skip(!apiBaseURL, 'Set E2E_API_BASE_URL to include backend health in hosted smoke tests.');
-    const response = await request.get(`${apiBaseURL}/api/health`, {
+    expect(apiBaseURL, 'Set E2E_API_BASE_URL to include backend readiness in hosted smoke tests.').toBeTruthy();
+    const response = await request.get(`${apiBaseURL}/api/ready`, {
       headers: { Origin: process.env.E2E_BASE_URL ?? '' },
     });
     expect(response.ok()).toBe(true);
@@ -135,8 +135,8 @@ test.describe('hosted read-only smoke', () => {
   });
 
   test('configured backend CORS preflights app origins for read and write routes', async ({ request }) => {
-    test.skip(!apiBaseURL, 'Set E2E_API_BASE_URL to include backend CORS in hosted smoke tests.');
-    for (const [path, method] of [['/api/health', 'GET'], ['/api/sessions/start', 'POST']] as const) {
+    expect(apiBaseURL, 'Set E2E_API_BASE_URL to include backend CORS in hosted smoke tests.').toBeTruthy();
+    for (const [path, method] of [['/api/ready', 'GET'], ['/api/sessions/start', 'POST']] as const) {
       const response = await request.fetch(`${apiBaseURL}${path}`, {
         method: 'OPTIONS',
         headers: {
@@ -151,10 +151,10 @@ test.describe('hosted read-only smoke', () => {
   });
 
   test('configured WebSocket URL uses secure transport for https app', async ({ page }) => {
-    test.skip(!wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket URL checks.');
+    expect(wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket URL checks.').toBeTruthy();
     await grantGuestAccess(page);
     const response = await page.goto(routeURL('/settings/audio-lab'));
-    await skipProtectedPreview(response, page, '/settings/audio-lab');
+    await assertNotProtectedPreview(response, page, '/settings/audio-lab');
     const appUrl = new URL(process.env.E2E_BASE_URL ?? page.url());
     if (appUrl.protocol === 'https:') {
       expect(wsBaseURL?.startsWith('wss://')).toBe(true);
@@ -162,7 +162,7 @@ test.describe('hosted read-only smoke', () => {
   });
 
   test('configured WebSocket upgrades and returns an app-level auth response', async ({ page }) => {
-    test.skip(!wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket handshake checks.');
+    expect(wsBaseURL, 'Set E2E_WS_BASE_URL to include WebSocket handshake checks.').toBeTruthy();
     await grantGuestAccess(page);
     await page.goto(routeURL('/settings/audio-lab'));
     const outcome = await page.evaluate(async (baseURL) => {

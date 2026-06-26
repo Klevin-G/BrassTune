@@ -1,7 +1,9 @@
 import csv
 import datetime as dt
+import hmac
 import io
 import json
+import os
 import zipfile
 from typing import List, Optional
 
@@ -15,6 +17,7 @@ from app.core.ensemble.analytics import calculate_ensemble_summary, generate_reh
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
 from app.db.database import get_db
+from app.db.readiness import public_readiness_report, readiness_report, version_payload
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
@@ -210,6 +213,25 @@ async def _read_limited_body(request: Request, max_bytes: int = MAX_AUDIO_UPLOAD
 @router.get("/health")
 def health():
     return {"ok": True, "service": "BrassTune Analytics API"}
+
+
+@router.get("/live")
+def live():
+    return {"ok": True, "service": "BrassTune Analytics API"}
+
+
+@router.get("/version")
+def version():
+    return version_payload()
+
+
+@router.get("/ready")
+def ready():
+    report = readiness_report()
+    public_report = public_readiness_report(report)
+    if not report["ok"]:
+        raise HTTPException(status_code=503, detail=public_report)
+    return public_report
 
 
 @router.get("/instruments")
@@ -687,9 +709,14 @@ def _mark_deletion_job(job: AccountDeletionJob, stage: str, status: str, error_c
 
 
 def _deletion_job_payload(job: AccountDeletionJob):
-    try:
-        counts = json.loads(job.counts_json or "{}")
-    except json.JSONDecodeError:
+    if isinstance(job.counts_json, dict):
+        counts = job.counts_json
+    elif isinstance(job.counts_json, str):
+        try:
+            counts = json.loads(job.counts_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            counts = {}
+    else:
         counts = {}
     return {
         "deleted": job.status == "completed",
@@ -700,6 +727,81 @@ def _deletion_job_payload(job: AccountDeletionJob):
         "supabase_identity_deleted": job.status == "completed",
         "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
     }
+
+
+def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
+    now = dt.datetime.utcnow()
+    jobs = (
+        db.query(AccountDeletionJob)
+        .filter(AccountDeletionJob.status == "retryable_failure")
+        .filter((AccountDeletionJob.next_retry_at.is_(None)) | (AccountDeletionJob.next_retry_at <= now))
+        .order_by(AccountDeletionJob.updated_at.asc())
+        .limit(max(1, min(limit, 50)))
+        .all()
+    )
+    results = []
+    for job in jobs:
+        if job.stage == "local_cleanup_failed":
+            user = db.query(User).filter(User.id == job.user_id).first()
+            if user is not None:
+                try:
+                    payload = delete_my_account(
+                        AccountDeletionRequest(confirmation="delete my account"),
+                        db,
+                        AuthContext(user=user, is_guest=False, access_token=None),
+                    )
+                    results.append({"job_id": job.id, "status": payload.get("deletion_status", "unknown"), "stage": payload.get("deletion_stage")})
+                    continue
+                except HTTPException:
+                    db.refresh(job)
+                    results.append({"job_id": job.id, "status": job.status, "stage": job.stage})
+                    continue
+
+        if not job.supabase_user_id:
+            _mark_deletion_job(job, "completed", "completed")
+            db.add(job)
+            db.commit()
+            results.append({"job_id": job.id, "status": job.status, "stage": job.stage})
+            continue
+
+        _mark_deletion_job(job, "external_cleanup_started", "in_progress")
+        db.add(job)
+        db.commit()
+        try:
+            external_deleted = delete_supabase_identity(job.supabase_user_id)
+        except Exception:
+            external_deleted = False
+        if external_deleted:
+            _mark_deletion_job(job, "completed", "completed")
+        else:
+            _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "external_identity_cleanup_failed")
+        db.add(job)
+        db.commit()
+        results.append({"job_id": job.id, "status": job.status, "stage": job.stage})
+    return {
+        "processed": len(results),
+        "completed": sum(1 for row in results if row["status"] == "completed"),
+        "still_retryable": sum(1 for row in results if row["status"] == "retryable_failure"),
+        "results": results,
+    }
+
+
+def _require_account_deletion_retry_secret(header_value: Optional[str]) -> None:
+    expected = os.getenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Account deletion retry executor is not configured.")
+    if not header_value or not hmac.compare_digest(header_value, expected):
+        raise HTTPException(status_code=403, detail="Account deletion retry executor is not authorized.")
+
+
+@router.post("/maintenance/account-deletions/retry")
+def retry_account_deletions(
+    limit: int = Query(default=10, ge=1, le=50),
+    x_brasstune_maintenance_secret: Optional[str] = Header(default=None, alias="X-BrassTune-Maintenance-Secret"),
+    db: Session = Depends(get_db),
+):
+    _require_account_deletion_retry_secret(x_brasstune_maintenance_secret)
+    return retry_account_deletion_jobs(db, limit=limit)
 
 
 @router.delete("/users/me")
@@ -898,13 +1000,12 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     now = dt.datetime.utcnow()
     if existing:
         previous_status = existing.status
+        if previous_status == "active":
+            raise HTTPException(status_code=409, detail="This user is already an active ensemble member. Use the member edit controls to change role or instrument.")
         existing.instrument_id = payload.instrument_id
         existing.role_in_group = payload.role_in_group
         existing.status = "active"
-        if previous_status != "active":
-            existing.active_since = now
-        else:
-            existing.active_since = existing.active_since or existing.created_at
+        existing.active_since = now
         existing.removed_at = None
         member = existing
     else:

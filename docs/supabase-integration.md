@@ -19,6 +19,7 @@ Backend:
 - `SUPABASE_STORAGE_BUCKET=session-audio`
 - `CORS_ALLOWED_ORIGINS`
 - `APP_ENV=production`
+- `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET`
 
 Never expose `SUPABASE_SECRET_KEY` in Vercel or the browser bundle.
 
@@ -35,8 +36,10 @@ Configure Supabase before inviting auth testers:
 1. Set Site URL to `https://brass-tune.vercel.app`.
 2. Add redirect allowlist entries for:
    - `https://brass-tune.vercel.app/auth/callback`
+   - `https://brass-tune.vercel.app/auth/reset-password`
    - approved Vercel preview URL patterns used for owner-controlled testing
-   - local development callback URLs only for dev environments
+   - approved Vercel preview reset-password URL patterns used for owner-controlled testing
+   - local development callback and reset-password URLs only for dev environments
 3. Enable email/password auth and decide whether email confirmation is required.
 4. Configure custom SMTP before relying on password-reset delivery at beta scale.
 5. Configure Apple provider only after Apple Developer Services ID/native capability values are final.
@@ -53,6 +56,7 @@ Do not mark live auth complete until disposable live accounts verify:
 - Apple OAuth start, cancel/error, successful callback, and account profile completion
 - authenticated session save/export/delete
 - account deletion cleanup for app data, Supabase identity, storage objects, and session state
+- account deletion retry executor completion for retryable Supabase identity cleanup jobs
 
 Record results in `docs/release-readiness/LIVE_AUTH_TEST_PLAN.md`. Do not use real user data or paste tokens, reset links, service keys, or Apple private keys into docs.
 
@@ -78,22 +82,28 @@ Uploaded source videos are different: BrassTune does not store them in Supabase.
 
 Local development uses SQLite. Production can use Supabase Postgres via `DATABASE_URL` or `BRASSTUNE_DATABASE_URL`.
 
+Production deployments fail closed when `APP_ENV` is deployed and no PostgreSQL URL is configured. Local SQLite is only for local/test/dev.
+
 Migrations:
 
 ```text
 supabase/migrations/20260616_brasstune_baseline.sql
 supabase/migrations/20260617_brasstune_production_readiness.sql
 supabase/migrations/20260618_lock_down_rls_auto_enable.sql
+supabase/migrations/20260620_account_deletion_and_membership_windows.sql
+supabase/migrations/20260625_invitation_fk_indexes.sql
 ```
 
-`20260616_brasstune_baseline.sql` is the clean-database schema baseline. `20260617_brasstune_production_readiness.sql` remains additive for existing deployments, and `20260618_lock_down_rls_auto_enable.sql` revokes public execution from the drifted helper RPC reported by Supabase advisors.
+`20260616_brasstune_baseline.sql` is the clean-database schema baseline. `20260617_brasstune_production_readiness.sql` remains additive for existing deployments, `20260618_lock_down_rls_auto_enable.sql` revokes public execution from the drifted helper RPC reported by Supabase advisors, `20260620_account_deletion_and_membership_windows.sql` adds account deletion and membership-window schema, and `20260625_invitation_fk_indexes.sql` adds the missing invitation foreign-key indexes reported by Supabase advisors.
+
+As of the 2026-06-25 web recovery audit, the connected project recorded only the first three migrations. Apply the June 20 and June 25 migrations through an owner-approved production migration gate before deploying this branch.
 
 Supabase changed Data API exposure behavior in 2026, so after applying migrations verify exposed schema grants deliberately. Keep RLS enabled on public tables and do not add broad browser grants until direct browser-to-table access is designed.
 
 ## Security Notes
 
 - Do not use user-editable metadata for authorization.
-- Store roles in backend-controlled local rows or Supabase app metadata.
+- Store roles in backend-controlled local rows or explicit backend admin tooling. User/app metadata from Supabase Auth must not grant privileged local roles.
 - Keep the `session-audio` bucket private.
 - Use signed URLs for playback.
 - Restrict CORS with `CORS_ALLOWED_ORIGINS` in production.

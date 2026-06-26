@@ -6,6 +6,7 @@ import { InstrumentSelector } from '../components/InstrumentSelector';
 import { ThemeSelector } from '../components/ThemeSelector';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { guestSessionsExport } from '../domain/guestSessions';
+import { clearLocalScoreDocuments } from '../domain/scoreDocuments';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
 
@@ -44,13 +45,23 @@ export function SettingsPage() {
   };
 
   const deleteAccount = async () => {
-    await runMaintenance('Delete account', () => auth.deleteAccount(deleteConfirmation), 'This permanently deletes your BrassTune account data and owned ensembles according to the documented policy. Continue?');
-    setDeleteConfirmation('');
+    if (!window.confirm('This permanently deletes your BrassTune account data and owned ensembles according to the documented policy. Local score pages saved on this device are separate. Continue?')) return;
+    setBusyAction('Delete account');
+    setMaintenanceStatus('Delete account...');
+    try {
+      const result = await auth.deleteAccount(deleteConfirmation);
+      setMaintenanceStatus(result.deletionStatus && result.deletionStatus !== 'completed' ? 'Account data was removed and this browser was signed out. External identity cleanup is queued.' : 'Account deleted and this browser was signed out.');
+      setDeleteConfirmation('');
+    } catch (error) {
+      setMaintenanceStatus(`Delete account failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   const exportAllData = () => {
     if (auth.isSignedIn) {
-      downloadExport('/api/export/all.zip', 'brasstune-export.zip').catch(() => setMaintenanceStatus('Cloud export is unavailable right now. Try again later.'));
+      downloadExport('/api/users/me/export.zip', 'brasstune-account-export.zip').catch(() => setMaintenanceStatus('Cloud export is unavailable right now. Try again later.'));
       return;
     }
     downloadTextFile(guestSessionsExport(), 'brasstune-guest-practice-export.json');
@@ -153,6 +164,13 @@ export function SettingsPage() {
               icon={Trash2}
               tone="red"
             />
+            <InsightCard
+              title="Local score pages"
+              detail="Device only"
+              body="Remove score PDFs and images imported into Score Practice on this device."
+              icon={Trash2}
+              tone="red"
+            />
           </div>
           <div className="settings-actions">
             <Link className="primary-button" to="/settings/audio-lab">
@@ -170,6 +188,10 @@ export function SettingsPage() {
             <button className="ghost-button" type="button" onClick={clearPreferences}>
               <Trash2 size={18} />
               Clear preferences
+            </button>
+            <button className="ghost-button" type="button" onClick={() => runMaintenance('Clear local score pages', clearLocalScoreDocuments, 'Remove imported score PDFs and images saved on this device?')}>
+              <Trash2 size={18} />
+              Clear local score pages
             </button>
           </div>
         </SectionCard>
@@ -193,9 +215,9 @@ export function SettingsPage() {
           <p className="settings-status" aria-live="polite">{maintenanceStatus}</p>
         </SectionCard>
       )}
-      {!internalToolsEnabled && <p className="settings-status" aria-live="polite">{maintenanceStatus}</p>}
+      {!internalToolsEnabled && <p className="settings-status" aria-live="polite">{auth.profileError ?? maintenanceStatus}</p>}
       <SectionCard title="Delete account" eyebrow="Account lifecycle">
-        <p className="muted-copy">Export your data first. Deletion removes your profile, sessions, pitch samples, note events, recommendations, group memberships, and owned ensembles. Teacher-owned groups are deleted with their memberships and invitations.</p>
+        <p className="muted-copy">Export your data first. Deletion removes your profile, sessions, pitch samples, note events, recommendations, group memberships, and owned ensembles. Teacher-owned groups are deleted with their memberships and invitations. Local score pages saved on this device are cleared separately.</p>
         <div className="settings-actions">
           <button className="ghost-button" type="button" onClick={auth.isSignedIn ? () => downloadExport('/api/users/me/export.zip', 'brasstune-account-export.zip') : exportAllData}>
             <Download size={18} />

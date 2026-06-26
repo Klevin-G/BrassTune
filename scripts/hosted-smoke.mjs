@@ -13,6 +13,7 @@ const wsBaseURL = cleanBase(process.env.BRASSTUNE_WS_BASE_URL || DEFAULT_WS_BASE
 const liveAuth = process.env.E2E_LIVE_AUTH === '1';
 const authToken = process.env.BRASSTUNE_WS_AUTH_TOKEN || process.env.BRASSTUNE_AUTH_TOKEN || '';
 const vercelBypassSecret = process.env.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '';
+const expectedSHA = process.env.BRASSTUNE_EXPECTED_SHA || process.env.GITHUB_SHA || '';
 
 const results = [];
 
@@ -65,13 +66,28 @@ async function checkWebRoot() {
   }
 }
 
-async function checkHealth() {
-  const response = await fetch(urlWithPath(apiBaseURL, '/api/health'), {
+async function checkReadiness() {
+  const response = await fetch(urlWithPath(apiBaseURL, '/api/ready'), {
     headers: { Origin: webBaseURL },
   });
-  if (!response.ok) throw new Error(`/api/health returned HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`/api/ready returned HTTP ${response.status}: ${await response.text()}`);
   const body = await response.json();
-  if (body.ok !== true) throw new Error('/api/health did not report ok=true');
+  if (body.ok !== true) throw new Error('/api/ready did not report ok=true');
+  if (body.database_backend !== 'postgresql') {
+    throw new Error(`/api/ready reported database_backend=${body.database_backend}, expected postgresql`);
+  }
+}
+
+async function checkVersion() {
+  const response = await fetch(urlWithPath(apiBaseURL, '/api/version'), {
+    headers: { Origin: webBaseURL },
+  });
+  if (!response.ok) throw new Error(`/api/version returned HTTP ${response.status}`);
+  const body = await response.json();
+  if (!body.commit_sha) throw new Error('/api/version did not include commit_sha');
+  if (expectedSHA && body.commit_sha !== expectedSHA) {
+    throw new Error(`/api/version commit_sha ${body.commit_sha} did not match expected ${expectedSHA}`);
+  }
 }
 
 async function checkCORS(path) {
@@ -261,8 +277,9 @@ try {
 }
 
 await checkHTTP('web root loads', checkWebRoot);
-await checkHTTP('Render /api/health', checkHealth);
-await checkHTTP('CORS /api/health', () => checkCORS('/api/health'));
+await checkHTTP('Render /api/ready', checkReadiness);
+await checkHTTP('Render /api/version', checkVersion);
+await checkHTTP('CORS /api/ready', () => checkCORS('/api/ready'));
 await checkHTTP('CORS /api/sessions/start', () => checkCORS('/api/sessions/start'));
 await checkHTTP('WebSocket /ws/pitch app-level response', checkWebSocket);
 await checkHTTP('WebSocket rejects query-token auth', checkWebSocketQueryTokenRejected);

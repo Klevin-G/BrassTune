@@ -61,10 +61,12 @@ Required Render env vars:
 
 - `APP_ENV=production`
 - `BRASSTUNE_SEED_DEMO_DATA` should be unset or `0` in production. Set `1` only for a deliberate disposable demo environment.
+- `BRASSTUNE_AUTH_MODE=supabase`
 - `FRONTEND_ORIGIN=https://brass-tune.vercel.app`
 - `CORS_ALLOWED_ORIGINS` as an exact comma-separated allowlist for production and approved preview origins.
 - Leave `CORS_ALLOWED_ORIGIN_REGEX` empty in production unless the owner approves a tightly anchored temporary preview pattern.
-- `BRASSTUNE_DATABASE_URL` or `DATABASE_URL`
+- `BRASSTUNE_DATABASE_URL` or `DATABASE_URL` pointing to PostgreSQL. Render is IPv4-only, so use the Supabase pooler endpoint unless a compatible direct connection is explicitly available.
+- `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET` for the scheduled account deletion retry executor.
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_PUBLISHABLE_KEY`
@@ -72,10 +74,22 @@ Required Render env vars:
 - `SESSION_AUDIO_STORAGE_BACKEND=supabase`
 - `SUPABASE_STORAGE_BUCKET=session-audio`
 
-Health check:
+Liveness check for Render:
 
 ```text
-https://brasstune.onrender.com/api/health
+https://brasstune.onrender.com/api/live
+```
+
+Release readiness check:
+
+```text
+https://brasstune.onrender.com/api/ready
+```
+
+Version identity check:
+
+```text
+https://brasstune.onrender.com/api/version
 ```
 
 WebSocket:
@@ -86,12 +100,20 @@ wss://brasstune.onrender.com/ws/pitch
 
 WebSocket Origin checks use explicit `CORS_ALLOWED_ORIGINS`/`FRONTEND_ORIGIN` entries, not `CORS_ALLOWED_ORIGIN_REGEX`. Include `https://brass-tune.vercel.app` and any owner-approved preview/share origins explicitly when WebSocket smoke must pass from those hosts.
 
+`CORS_ALLOWED_ORIGIN_REGEX` is disabled in deployed environments unless `BRASSTUNE_ALLOW_CORS_REGEX=1` is also set. Prefer exact origins for production and previews.
+
+### Account Deletion Retry
+
+The backend exposes `POST /api/maintenance/account-deletions/retry` for retryable account deletion jobs. It is protected by the `X-BrassTune-Maintenance-Secret` header and the Render/GitHub secret-store value named `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET`.
+
+`.github/workflows/account-deletion-retry.yml` invokes the endpoint every 15 minutes and on manual dispatch. Configure the same secret name in the GitHub `production` environment and Render before treating account deletion as operationally durable.
+
 ### Render Keepalive
 
-`.github/workflows/render-keepalive.yml` pings the Render health endpoint every 10 minutes and on manual dispatch. The default URL is:
+`.github/workflows/render-keepalive.yml` pings the Render liveness endpoint every 10 minutes and on manual dispatch. The default URL is:
 
 ```text
-https://brasstune.onrender.com/api/health
+https://brasstune.onrender.com/api/live
 ```
 
 Optional overrides:
@@ -108,18 +130,19 @@ Use secret stores only. Do not commit values.
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_PUBLISHABLE_KEY`
+- `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET`
 - `VERCEL_TOKEN`
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 - `RENDER_DEPLOY_HOOK_URL`
 - `RENDER_API_KEY`
 - `RENDER_SERVICE_ID`
-- `RENDER_KEEPALIVE_URL` if overriding the default health URL
+- `RENDER_KEEPALIVE_URL` if overriding the default liveness URL
 
 The manual deployment workflow lives at `.github/workflows/deploy.yml`.
 Use `workflow_dispatch` with `target=frontend`, `backend`, or `all`.
 
-The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It currently runs on manual dispatch. It wraps:
+The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It runs after a successful `Deploy` workflow and can also be manually dispatched. It wraps:
 
 ```bash
 BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app \

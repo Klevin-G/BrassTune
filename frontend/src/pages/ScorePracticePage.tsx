@@ -2,6 +2,7 @@ import { Camera, CheckCircle2, ChevronLeft, ChevronRight, FileText, Image as Ima
 import { useCallback, useEffect, useRef, useState } from 'react';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { SCORE_DOCUMENTS_DB_NAME, SCORE_DOCUMENTS_STORE_NAME } from '../domain/scoreDocuments';
 import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
 
 interface ImportedScorePage {
@@ -17,14 +18,11 @@ interface ImportedScorePage {
   persisted: boolean;
 }
 
-const DB_NAME = 'brasstune-score-practice';
-const STORE_NAME = 'scoreDocuments';
-
 function openScoreDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(SCORE_DOCUMENTS_DB_NAME, 1);
     request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      request.result.createObjectStore(SCORE_DOCUMENTS_STORE_NAME, { keyPath: 'id' });
     };
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
@@ -34,8 +32,8 @@ function openScoreDb() {
 async function saveScoreDocument(page: ImportedScorePage) {
   const db = await openScoreDb();
   await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    transaction.objectStore(STORE_NAME).put({
+    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readwrite');
+    transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).put({
       id: page.id,
       name: page.name,
       source: page.source,
@@ -56,8 +54,8 @@ async function saveScoreDocument(page: ImportedScorePage) {
 async function deleteScoreDocument(id: string) {
   const db = await openScoreDb();
   await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    transaction.objectStore(STORE_NAME).delete(id);
+    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readwrite');
+    transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).delete(id);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -67,8 +65,8 @@ async function deleteScoreDocument(id: string) {
 async function loadScoreDocuments(): Promise<ImportedScorePage[]> {
   const db = await openScoreDb();
   const rows = await new Promise<any[]>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const request = transaction.objectStore(STORE_NAME).getAll();
+    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readonly');
+    const request = transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).getAll();
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });

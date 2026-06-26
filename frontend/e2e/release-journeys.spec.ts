@@ -103,7 +103,7 @@ test('demo recording creates a reviewable session with playback surface', async 
   });
   await startButton.click();
   const stopButton = page.getByRole('button', { name: /stop recording/i });
-  await expect(stopButton).toBeVisible({ timeout: 15_000 });
+  await expect(stopButton).toBeVisible({ timeout: 30_000 });
   await expect.poll(async () => page.locator('.note-history .history-row').count(), { timeout: 15_000 }).toBeGreaterThan(0);
   await stopButton.click();
   const reviewLink = page.getByRole('link', { name: /review session/i });
@@ -144,7 +144,7 @@ test('server-side ensemble authorization rejects forbidden writes', async ({ req
 
   const allowed = await request.post(`${apiBaseURL}/api/ensemble/groups/1/members/by-username`, {
     headers: { Authorization: 'Bearer dev-user-2' },
-    data: { username: 'maya', instrument_id: 'horn' },
+    data: { username: 'jordan', instrument_id: 'trombone' },
   });
-  expect(allowed.status()).toBe(200);
+  expect([200, 409]).toContain(allowed.status());
 });

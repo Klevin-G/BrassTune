@@ -41,6 +41,8 @@ def assert_auth_configured() -> None:
         raise RuntimeError("BRASSTUNE_ALLOW_LOCAL_AUTH cannot be enabled in deployed environments.")
     mode = auth_mode()
     if mode == "disabled":
+        if environment in DEPLOYED_ENVIRONMENTS:
+            raise RuntimeError("BRASSTUNE_AUTH_MODE=disabled is not allowed in deployed environments.")
         return
     if not os.getenv("SUPABASE_URL"):
         raise RuntimeError("SUPABASE_URL is required when BRASSTUNE_AUTH_MODE=supabase.")
@@ -87,8 +89,6 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
         raise HTTPException(status_code=401, detail="Supabase token did not include a user id.")
     email = payload.get("email")
     metadata = payload.get("user_metadata") or {}
-    app_metadata = payload.get("app_metadata") or {}
-    requested_role = app_metadata.get("role") if app_metadata.get("role") in {"student", "director", "admin"} else None
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
     if user is None:
         deletion_job = (
@@ -109,7 +109,7 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             username=_unique_username(db, preferred_username),
             name=metadata.get("display_name") or metadata.get("name") or email or "BrassTune Player",
             display_name=metadata.get("display_name") or metadata.get("name"),
-            role=requested_role or "student",
+            role="student",
             primary_instrument_id=metadata.get("primary_instrument_id") if is_valid_instrument_id(metadata.get("primary_instrument_id", "")) else "trumpet",
         )
         db.add(user)
@@ -123,8 +123,6 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             user.username = _unique_username(db, metadata["username"], user.id)
         if is_valid_instrument_id(metadata.get("primary_instrument_id", "")):
             user.primary_instrument_id = metadata["primary_instrument_id"]
-        if requested_role:
-            user.role = requested_role
     user.updated_at = dt.datetime.utcnow()
     db.commit()
     db.refresh(user)

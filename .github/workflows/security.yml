@@ -2,8 +2,26 @@ name: Security
 
 on:
   pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "fixtures/**"
+      - "supabase/**"
+      - "render.yaml"
+      - "vercel.json"
+      - "frontend/vercel.json"
+      - ".github/workflows/security.yml"
   push:
     branches: [main, swift-migration]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "fixtures/**"
+      - "supabase/**"
+      - "render.yaml"
+      - "vercel.json"
+      - "frontend/vercel.json"
+      - ".github/workflows/security.yml"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +38,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-python@v5

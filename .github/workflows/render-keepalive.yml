@@ -26,12 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      DEFAULT_RENDER_KEEPALIVE_URL: https://brasstune.onrender.com/api/health
+      DEFAULT_RENDER_KEEPALIVE_URL: https://brasstune.onrender.com/api/live
       INPUT_HEALTH_URL: ${{ github.event.inputs.health_url }}
       SECRET_HEALTH_URL: ${{ secrets.RENDER_KEEPALIVE_URL }}
       VAR_HEALTH_URL: ${{ vars.RENDER_KEEPALIVE_URL }}
     steps:
-      - name: Ping Render health endpoint
+      - name: Ping Render liveness endpoint
         shell: bash
         run: |
           set -euo pipefail
@@ -52,4 +52,4 @@ jobs:
             --connect-timeout 10 \
             --max-time 70 \
             "$url" >/dev/null
-          echo "Render health endpoint responded."
+          echo "Render liveness endpoint responded."

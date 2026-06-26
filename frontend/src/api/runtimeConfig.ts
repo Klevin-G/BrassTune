@@ -14,14 +14,19 @@ function currentHostname() {
 export function isKnownBrassTuneHostedOrigin(hostname = currentHostname()) {
   return (
     hostname === 'brass-tune.vercel.app' ||
+    hostname === 'brass-tune-aryaswebsites.vercel.app' ||
     /^brass-tune-git-[a-z0-9-]+-aryaswebsites\.vercel\.app$/i.test(hostname) ||
     /^brass-tune-[a-z0-9]+-aryaswebsites\.vercel\.app$/i.test(hostname)
   );
 }
 
+export function isVercelHostedOrigin(hostname = currentHostname()) {
+  return hostname.endsWith('.vercel.app');
+}
+
 export function apiBase() {
   if (CONFIGURED_API_BASE) return cleanBase(CONFIGURED_API_BASE);
-  return isKnownBrassTuneHostedOrigin() ? HOSTED_RENDER_API_BASE : '';
+  return isKnownBrassTuneHostedOrigin() || isVercelHostedOrigin() ? HOSTED_RENDER_API_BASE : '';
 }
 
 export function wsBase() {
@@ -35,6 +40,7 @@ export function runtimeDiagnostics() {
     apiConfigured: Boolean(CONFIGURED_API_BASE),
     wsConfigured: Boolean(CONFIGURED_WS_BASE),
     usingKnownHostedFallback: !CONFIGURED_API_BASE && isKnownBrassTuneHostedOrigin(),
+    usingVercelHostedFallback: !CONFIGURED_API_BASE && isVercelHostedOrigin(),
     hostname: currentHostname(),
   };
 }

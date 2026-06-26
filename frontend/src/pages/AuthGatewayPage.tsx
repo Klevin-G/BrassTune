@@ -133,7 +133,7 @@ export function AuthGatewayPage() {
                 </div>
               </>
             )}
-            {message && <div className="alert" role="status">{message}</div>}
+            {(message || auth.profileError) && <div className="alert" role="status">{message ?? auth.profileError}</div>}
           </SectionCard>
 
           <SectionCard title="Appearance" eyebrow="Theme">

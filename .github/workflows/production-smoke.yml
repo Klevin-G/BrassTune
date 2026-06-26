@@ -1,6 +1,9 @@
 name: Production Smoke
 
 on:
+  workflow_run:
+    workflows: ["Deploy"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       web_base_url:
@@ -29,16 +32,19 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    environment: production
     env:
       BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brass-tune.vercel.app' }}
       BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune.onrender.com' }}
       BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune.onrender.com' }}
       BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
       BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
+      BRASSTUNE_EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - name: Run hosted production smoke
         run: npm run smoke:hosted

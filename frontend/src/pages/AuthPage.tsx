@@ -5,6 +5,17 @@ import { InstrumentSelector } from '../components/InstrumentSelector';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
 
+function callbackParams() {
+  const merged = new URLSearchParams(window.location.search);
+  const hash = window.location.hash.replace(/^#/, '');
+  if (hash) {
+    new URLSearchParams(hash.startsWith('?') ? hash : `?${hash}`).forEach((value, key) => {
+      merged.set(key, value);
+    });
+  }
+  return merged;
+}
+
 export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'callback' }) {
   const auth = useAuth();
   const navigate = useNavigate();
@@ -27,7 +38,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
 
   useEffect(() => {
     if (mode !== 'callback') return;
-    const params = new URLSearchParams(window.location.search || window.location.hash.replace(/^#/, '?'));
+    const params = callbackParams();
     const error = params.get('error_description') || params.get('error');
     setMessage(error ? 'Sign-in was not completed. You can keep using guest practice and try account access again later.' : 'Finishing sign-in. Continue when your account session is ready.');
   }, [mode]);
@@ -43,7 +54,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
       } else if (mode === 'sign-up') {
         await auth.signUp({ email, password, username, displayName, primaryInstrumentId: instrumentId });
         setMessage('Account created. If email confirmation is enabled, confirm your email before signing in.');
-      } else if (auth.isSignedIn && newPassword) {
+      } else if (auth.hasAuthSession && newPassword) {
         await auth.updatePassword(newPassword);
         setMessage('Password updated. Use the new password the next time you sign in.');
         setNewPassword('');
@@ -108,7 +119,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
             <form className="auth-form" onSubmit={onSubmit}>
               <label>
                 Email
-                <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={!auth.isSignedIn || mode !== 'reset'} placeholder="you@example.com" />
+                <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={!auth.hasAuthSession || mode !== 'reset'} placeholder="you@example.com" />
               </label>
               {mode !== 'reset' && (
                 <label>
@@ -129,7 +140,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                   <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
                 </>
               )}
-              {mode === 'reset' && auth.isSignedIn && (
+              {mode === 'reset' && auth.hasAuthSession && (
                 <label>
                   New password
                   <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" minLength={8} placeholder="Minimum 8 characters" />
@@ -137,7 +148,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
               )}
               <button className="primary-button" disabled={busy} type="submit">
                 {isSignup ? <UserPlus size={18} /> : mode === 'reset' ? <KeyRound size={18} /> : <LogIn size={18} />}
-                {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' && auth.isSignedIn && newPassword ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
+                {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' && auth.hasAuthSession && newPassword ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
               </button>
             </form>
           )}
@@ -156,7 +167,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
               )}
             </div>
           )}
-          {message && <div className="alert" role="status">{message}</div>}
+          {(message || auth.profileError) && <div className="alert" role="status">{message ?? auth.profileError}</div>}
           {auth.configured && (
             <div className="auth-switcher">
               {isSignup ? <Link to="/auth/sign-in">Already have an account?</Link> : <Link to="/auth/sign-up">Create an account</Link>}

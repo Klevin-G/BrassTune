@@ -114,7 +114,7 @@ export function EnsemblePage() {
         action={
           <button className="primary-button" onClick={() => window.print()} type="button">
             <Printer size={18} />
-            Export report
+            Print report
           </button>
         }
       />

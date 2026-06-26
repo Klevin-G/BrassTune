@@ -5,12 +5,16 @@ on:
     paths:
       - "backend/**"
       - "fixtures/**"
+      - "supabase/**"
+      - "render.yaml"
       - ".github/workflows/backend.yml"
   push:
     branches: [main, swift-migration]
     paths:
       - "backend/**"
       - "fixtures/**"
+      - "supabase/**"
+      - "render.yaml"
       - ".github/workflows/backend.yml"
 
 jobs:

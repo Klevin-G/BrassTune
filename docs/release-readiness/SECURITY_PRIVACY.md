@@ -35,7 +35,7 @@
 
 ## Known Risks
 
-- Account deletion now blocks re-login/re-creation while external cleanup is queued, but it still needs an automated outbox/retry worker for stronger operational guarantees.
+- Account deletion now blocks re-login/re-creation while external cleanup is queued. The scheduled retry workflow exists, but production durability still requires `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET` in Render and the GitHub production environment plus live disposable-account verification.
 - WebSocket origin checks require explicit `CORS_ALLOWED_ORIGINS`; `CORS_ALLOWED_ORIGIN_REGEX` only applies to HTTP CORS middleware.
 - Score image/PDF validation includes magic-byte/active-content checks and decoded-pixel caps, but still needs EXIF orientation/private metadata handling and stronger visual quality checks.
 - Metronome click bleed, long-run drift, and physical-device audio behavior are not verified.

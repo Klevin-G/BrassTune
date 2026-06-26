@@ -1,11 +1,12 @@
 import type { Session, User } from '@supabase/supabase-js';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/client';
 import { apiBase } from '../api/runtimeConfig';
 import { authProviders, supabase, supabaseConfigured } from '../lib/supabase';
 
 interface BackendProfile {
   id: number;
+  supabase_user_id?: string | null;
   username: string | null;
   display_name: string;
   email: string | null;
@@ -28,7 +29,10 @@ interface AuthState {
   session: Session | null;
   user: User | null;
   profile: BackendProfile | null;
+  profileError: string | null;
+  hasAuthSession: boolean;
   isSignedIn: boolean;
+  cloudReady: boolean;
   guestMode: boolean;
   providers: typeof authProviders;
   continueAsGuest: () => void;
@@ -40,7 +44,7 @@ interface AuthState {
   requestPasswordReset: (email: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  deleteAccount: (confirmation: string) => Promise<void>;
+  deleteAccount: (confirmation: string) => Promise<{ deletionStatus?: string }>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -106,23 +110,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<BackendProfile | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [guestMode, setGuestMode] = useState(() => localStorage.getItem(guestAccessKey) === 'true');
+  const profileRequestId = useRef(0);
 
-  const loadProfile = useCallback(async (activeSession: Session | null) => {
+  const resetAccountState = useCallback(() => {
+    profileRequestId.current += 1;
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+    setProfileError(null);
+  }, []);
+
+  const loadProfile = useCallback(async (activeSession: Session | null, options: { required?: boolean } = {}) => {
+    const requestId = ++profileRequestId.current;
     if (supabase && !activeSession) {
       setProfile(null);
-      return;
+      setProfileError(null);
+      return null;
     }
     if (!supabase && apiBase()) {
       setProfile(null);
-      return;
+      setProfileError(null);
+      return null;
     }
     try {
       const current = await getCurrentUser();
+      if (supabase && activeSession) {
+        const { data } = await supabase.auth.getSession();
+        if (requestId !== profileRequestId.current || data.session?.user.id !== activeSession.user.id) {
+          return null;
+        }
+        if (current.supabase_user_id && current.supabase_user_id !== activeSession.user.id) {
+          throw new Error('Account profile did not match the active session.');
+        }
+      } else if (requestId !== profileRequestId.current) {
+        return null;
+      }
       setProfile(current);
-    } catch {
+      setProfileError(null);
+      return current;
+    } catch (error) {
+      if (requestId !== profileRequestId.current) {
+        return null;
+      }
       setProfile(null);
+      const message = friendlyAuthError(error);
+      setProfileError(message);
+      if (options.required) {
+        throw new Error(message);
+      }
+      return null;
     }
   }, []);
 
@@ -167,20 +206,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      setProfile(null);
+      setProfileError(null);
+      const loadedProfile = await loadProfile(data.session ?? null, { required: Boolean(data.session) });
+      if (data.session && !loadedProfile) {
+        throw new Error('Account profile is not ready yet. Try again in a moment.');
+      }
+      setSession(data.session ?? null);
+      setUser(data.session?.user ?? null);
       localStorage.removeItem(guestAccessKey);
       setGuestMode(false);
-      await refreshProfile();
     } catch (error) {
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+      resetAccountState();
       throwFriendlyAuthError(error);
     }
-  }, [refreshProfile]);
+  }, [loadProfile, resetAccountState]);
 
   const signUp = useCallback(async (payload: SignUpPayload) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: payload.email,
         password: payload.password,
         options: {
@@ -192,13 +240,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       });
       if (error) throw error;
+      setProfile(null);
+      setProfileError(null);
+      const loadedProfile = await loadProfile(data.session ?? null, { required: Boolean(data.session) });
+      if (data.session && !loadedProfile) {
+        throw new Error('Account profile is not ready yet. Try again in a moment.');
+      }
+      setSession(data.session ?? null);
+      setUser(data.session?.user ?? null);
       localStorage.removeItem(guestAccessKey);
       setGuestMode(false);
-      await refreshProfile();
     } catch (error) {
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+      resetAccountState();
       throwFriendlyAuthError(error);
     }
-  }, [refreshProfile]);
+  }, [loadProfile, resetAccountState]);
 
   const signInWithApple = useCallback(async (redirectTo = `${window.location.origin}/auth/callback`) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
@@ -259,32 +316,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    if (supabase) {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw new Error(friendlyAuthError(error));
+    try {
+      if (supabase) {
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
+        if (error) throw new Error(friendlyAuthError(error));
+      }
+    } finally {
+      localStorage.removeItem(guestAccessKey);
+      setGuestMode(false);
+      resetAccountState();
+      if (!supabase) {
+        await loadProfile(null);
+      }
     }
-    localStorage.removeItem(guestAccessKey);
-    setGuestMode(false);
-    setSession(null);
-    setUser(null);
-    if (supabase) {
-      setProfile(null);
-    } else {
-      await loadProfile(null);
-    }
-  }, [loadProfile]);
+  }, [loadProfile, resetAccountState]);
 
   const deleteAccount = useCallback(async (confirmation: string) => {
-    await deleteMyAccount(confirmation);
+    const result = await deleteMyAccount(confirmation);
     if (supabase) {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
     }
     localStorage.removeItem(guestAccessKey);
     setGuestMode(false);
-    setSession(null);
-    setUser(null);
-    setProfile(null);
-  }, []);
+    resetAccountState();
+    return { deletionStatus: result.deletion_status };
+  }, [resetAccountState]);
 
   const continueAsGuest = useCallback(() => {
     localStorage.setItem(guestAccessKey, 'true');
@@ -303,7 +359,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       user,
       profile,
-      isSignedIn: Boolean(session),
+      profileError,
+      hasAuthSession: Boolean(session),
+      isSignedIn: Boolean(session && profile),
+      cloudReady: Boolean(session && profile),
       guestMode,
       providers: authProviders,
       continueAsGuest,
@@ -318,7 +377,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       refreshProfile,
     }),
-    [continueAsGuest, deleteAccount, exitGuest, guestMode, loading, profile, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
+    [continueAsGuest, deleteAccount, exitGuest, guestMode, loading, profile, profileError, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

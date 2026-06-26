@@ -59,7 +59,7 @@ describe('API client runtime URLs', () => {
     expect(await pitchWebSocketUrl()).toBe('wss://brasstune.onrender.com/ws/pitch');
   });
 
-  it('does not silently use production Render from unknown hosted origins', async () => {
+  it('never falls back to Vercel same-origin API paths from hosted origins', async () => {
     const { exportUrl, pitchWebSocketUrl } = await loadClient();
     vi.stubGlobal('window', {
       location: {
@@ -68,8 +68,21 @@ describe('API client runtime URLs', () => {
         hostname: 'unrelated-preview.vercel.app',
       },
     });
-    expect(exportUrl('/api/health')).toBe('/api/health');
-    expect(await pitchWebSocketUrl()).toBe('wss://unrelated-preview.vercel.app/ws/pitch');
+    expect(exportUrl('/api/health')).toBe('https://brasstune.onrender.com/api/health');
+    expect(await pitchWebSocketUrl()).toBe('wss://brasstune.onrender.com/ws/pitch');
+  });
+
+  it('uses Render defaults on the Vercel team alias', async () => {
+    const { exportUrl, pitchWebSocketUrl } = await loadClient();
+    vi.stubGlobal('window', {
+      location: {
+        protocol: 'https:',
+        host: 'brass-tune-aryaswebsites.vercel.app',
+        hostname: 'brass-tune-aryaswebsites.vercel.app',
+      },
+    });
+    expect(exportUrl('/api/ready')).toBe('https://brasstune.onrender.com/api/ready');
+    expect(await pitchWebSocketUrl()).toBe('wss://brasstune.onrender.com/ws/pitch');
   });
 
   it('keeps authorization headers when requests add upload headers', async () => {

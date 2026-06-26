@@ -34,3 +34,12 @@ def allowed_origins() -> List[str]:
     if configured:
         origins.extend([item.strip() for item in configured.split(",") if item.strip()])
     return sorted(set(origins))
+
+
+def cors_allowed_origin_regex() -> str | None:
+    regex = os.getenv("CORS_ALLOWED_ORIGIN_REGEX")
+    if not regex:
+        return None
+    if app_environment() in DEPLOYED_ENVIRONMENTS and os.getenv("BRASSTUNE_ALLOW_CORS_REGEX", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise RuntimeError("CORS_ALLOWED_ORIGIN_REGEX is disabled in deployed environments unless BRASSTUNE_ALLOW_CORS_REGEX=1 is explicitly set.")
+    return regex

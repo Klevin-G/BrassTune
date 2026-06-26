@@ -3,6 +3,9 @@
   "version": "0.1.0-beta.1",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
@@ -11,7 +14,7 @@
     "e2e": "npm run e2e:local",
     "e2e:local": "playwright test e2e/release-journeys.spec.ts e2e/accessibility.spec.ts",
     "e2e:hosted": "node scripts/run-hosted-smoke.mjs",
-    "e2e:hosted:strict": "E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted",
+    "e2e:hosted:strict": "node scripts/run-hosted-smoke.mjs --strict",
     "smoke:hosted": "npm run e2e:hosted",
     "simulate:devices": "node scripts/device-simulation.mjs"
   },

@@ -84,6 +84,7 @@ export function getInstruments() {
 export function getCurrentUser() {
   return request<{
     id: number;
+    supabase_user_id?: string | null;
     username: string | null;
     name: string;
     display_name: string;
@@ -236,6 +237,8 @@ export function clearLocalSessions() {
 export function deleteMyAccount(confirmation: string) {
   return request<{
     deleted: boolean;
+    deletion_status?: string;
+    deletion_stage?: string;
     counts: Record<string, number>;
     supabase_sessions_revoked: boolean;
     supabase_identity_deleted: boolean;

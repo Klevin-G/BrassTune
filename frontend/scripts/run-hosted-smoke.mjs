@@ -8,7 +8,12 @@ const aliases = new Map([
   ['E2E_VERCEL_AUTOMATION_BYPASS_SECRET', 'BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET'],
 ]);
 
+const forwardedArgs = process.argv.slice(2).filter((arg) => arg !== '--strict');
+const strictMode = process.argv.slice(2).includes('--strict');
 const env = { ...process.env, E2E_START_LOCAL_SERVERS: '0' };
+if (strictMode) {
+  env.E2E_STRICT_HOSTED_CONTENT = '1';
+}
 
 for (const [target, source] of aliases) {
   if (!env[target] && env[source]) {
@@ -58,7 +63,7 @@ if (env.E2E_VERCEL_SHARE_URL) {
 
 const result = spawnSync(
   'npx',
-  ['playwright', 'test', 'e2e/hosted-smoke.spec.ts', ...process.argv.slice(2)],
+  ['playwright', 'test', 'e2e/hosted-smoke.spec.ts', ...forwardedArgs],
   {
     env,
     shell: process.platform === 'win32',

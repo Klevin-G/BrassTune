@@ -5,13 +5,14 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
+    preDeployCommand: python -m app.db.check_ready
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /api/health
+    healthCheckPath: /api/live
     envVars:
       - key: APP_ENV
         value: production
       - key: BRASSTUNE_AUTH_MODE
-        value: disabled
+        value: supabase
       - key: FRONTEND_ORIGIN
         sync: false
       - key: CORS_ALLOWED_ORIGINS
@@ -21,6 +22,10 @@ services:
       - key: BACKEND_PUBLIC_URL
         value: https://brasstune.onrender.com
       - key: BRASSTUNE_DATABASE_URL
+        sync: false
+      - key: BRASSTUNE_RELEASE_SHA
+        sync: false
+      - key: BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET
         sync: false
       - key: SUPABASE_URL
         sync: false
