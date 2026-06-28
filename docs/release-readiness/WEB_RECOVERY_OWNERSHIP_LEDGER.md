@@ -182,7 +182,8 @@ Actions inventory and interventions:
 - Accessible `aryasalem09/*` and `slhstsa/*` repositories were inventoried for active queued, in-progress, waiting, requested, and pending workflow runs. No safe active cross-repository run was present to cancel.
 - BrassTune Actions is enabled and not globally policy-blocked. PR #7 zero-step Backend, Frontend, and Security jobs had no runner name, no step records, and unavailable logs/artifacts, so they were treated as infrastructure scheduling failures rather than test failures.
 - BrassTune has no repository-scoped self-hosted runners and no existing `BRASSTUNE_*_RUNNER` repository variables. The workflows now support JSON `runs-on` variables with hosted defaults so an eligible self-hosted runner can be selected without another workflow edit.
-- The noncritical scheduled `Render Keepalive` workflow (`render-keepalive.yml`, workflow ID `299560762`) was temporarily disabled because it was repeatedly producing zero-step scheduled failures on `main`. It must be re-enabled after PR checks start successfully and runner capacity is stable.
+- The noncritical scheduled `Render Keepalive` workflow (`render-keepalive.yml`, workflow ID `299560762`) was temporarily disabled because it was repeatedly producing zero-step scheduled failures on `main`, then re-enabled after the billing/spending-limit root cause was proven. No workflow remains disabled.
+- PR #7 was rerun on `f97a3054dfa266b5a2771f87c6bf923b10bf828c`. Backend, Frontend, Security, and Swift still failed before any runner step, and check-run annotations identify the precise cause: recent account payments have failed or the Actions spending limit needs to be increased. Resolving that Billing & plans issue is outside the no-spend authorization.
 
 Implementation and verification summary:
 
