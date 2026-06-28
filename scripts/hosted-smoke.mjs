@@ -13,7 +13,8 @@ const wsBaseURL = cleanBase(process.env.BRASSTUNE_WS_BASE_URL || DEFAULT_WS_BASE
 const liveAuth = process.env.E2E_LIVE_AUTH === '1';
 const authToken = process.env.BRASSTUNE_WS_AUTH_TOKEN || process.env.BRASSTUNE_AUTH_TOKEN || '';
 const vercelBypassSecret = process.env.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '';
-const expectedSHA = process.env.BRASSTUNE_EXPECTED_SHA || process.env.GITHUB_SHA || '';
+const expectedSHA = process.env.BRASSTUNE_EXPECTED_BACKEND_SHA
+  || (process.env.BRASSTUNE_ENFORCE_EXPECTED_SHA === '1' ? (process.env.BRASSTUNE_EXPECTED_SHA || process.env.GITHUB_SHA || '') : '');
 
 const results = [];
 

@@ -23,7 +23,7 @@ concurrency:
 jobs:
   deploy-frontend:
     if: ${{ github.ref == 'refs/heads/main' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'frontend') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_DEPLOY_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 30
     environment: production
     env:
@@ -34,6 +34,10 @@ jobs:
       VITE_WS_BASE_URL: ${{ secrets.VITE_WS_BASE_URL }}
       VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
       VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      VITE_AUTH_GOOGLE_ENABLED: ${{ vars.VITE_AUTH_GOOGLE_ENABLED || secrets.VITE_AUTH_GOOGLE_ENABLED || 'false' }}
+      VITE_AUTH_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED || secrets.VITE_AUTH_APPLE_ENABLED || 'false' }}
+      VITE_SUPABASE_GOOGLE_ENABLED: ${{ vars.VITE_AUTH_GOOGLE_ENABLED || secrets.VITE_AUTH_GOOGLE_ENABLED || 'false' }}
+      VITE_SUPABASE_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED || secrets.VITE_AUTH_APPLE_ENABLED || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,7 +56,7 @@ jobs:
 
   deploy-backend:
     if: ${{ github.ref == 'refs/heads/main' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'backend') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_DEPLOY_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 10
     environment: production
     steps:

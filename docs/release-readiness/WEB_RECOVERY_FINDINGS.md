@@ -1,9 +1,9 @@
 # Web Recovery Findings Ledger
 
-Date: 2026-06-25
+Date: 2026-06-25, continued 2026-06-27
 Branch: `arya-s/web-production-recovery-20260625`
 Baseline SHA: `1c998d5480f52b5fcf0e2c143f5078893caead66`
-Scope: Web, backend, Supabase, Vercel, Render, and GitHub automation only. No Swift/native files are in scope.
+Scope: Web, backend, Supabase, Vercel, Render, GitHub automation, and the separately authorized Swift/native parity continuation from 2026-06-27.
 
 ## Findings
 
@@ -18,7 +18,7 @@ Scope: Web, backend, Supabase, Vercel, Render, and GitHub automation only. No Sw
 | WR-007 | P1 | Vercel runtime | Team alias was not recognized; unknown Vercel hosts could fall back to same-origin API/WS. | Hosted-origin matching was too narrow. | Runtime config recognizes team alias and all Vercel hosts use Render fallback unless explicitly configured. | Frontend URL tests, build, and local E2E passed. | Pending hosted redeploy verification. |
 | WR-008 | P1 | Vercel preview gate | Hosted Playwright skipped protected previews and optional API/WS checks. | Release tests treated preview protection as a skip. | Protected preview now fails without bypass/share; API/WS vars are required for hosted smoke. | Hosted strict Playwright reached the live backend gate and failed only because production Render is stale. | Pending CI/live bypass and redeploy. |
 | WR-009 | P1 | Vercel Swift-only builds | Vercel had no ignored-build step. | Static web project rebuilt for native-only changes. | Added `frontend/scripts/vercel-ignore-build.mjs` and wired both Vercel configs. | Local unit/build/E2E passed; Vercel production settings not mutated. | Pending Vercel verification. |
-| WR-010 | P1 | GitHub release flow | Production smoke was manual only and Vercel CLI floated latest. | Deployment workflow lacked automatic post-deploy smoke and supply-chain pinning. | Production smoke triggers after successful Deploy workflow; Node aligned to 24; Vercel CLI pinned; account deletion retry workflow added. | Workflow YAML parsed in audit; branch rules unavailable. | Partially fixed. |
+| WR-010 | P1 | GitHub release flow | Production smoke was manual only and Vercel CLI floated latest. | Deployment workflow lacked automatic post-deploy smoke, browser smoke, and runner-variable fallback routing. | Production smoke triggers after successful Deploy workflow; Node aligned to 24; Vercel CLI pinned; account deletion retry workflow added; BrassTune workflows now accept JSON `runs-on` repository variables with hosted defaults; production smoke includes protocol and browser-hosted jobs. | Touched workflow YAML parsed locally; Actions inventory completed with `gh`; zero-step remote checks still require rerun on pushed commit. | Locally fixed, pending PR check rerun. |
 | WR-011 | P2 | Supabase performance | Advisors reported missing invitation FK indexes. | Migration set was incomplete for FK lookup performance. | Added additive index migration `20260625_invitation_fk_indexes.sql`. | Live migration not applied. | Blocked on Supabase migration apply. |
 | WR-012 | P2 | Render keepalive docs | Keepalive used `/api/health` as if it were dependency health. | Liveness/readiness terminology drift. | Keepalive now uses `/api/live`; docs updated. | Workflow not run. | Pending deploy. |
 
@@ -26,9 +26,31 @@ Scope: Web, backend, Supabase, Vercel, Render, and GitHub automation only. No Sw
 
 - Render management connector, CLI, or `RENDER_API_KEY` is not available in this environment, so live Render env values, deployment IDs, logs, and rollback targets cannot be verified here.
 - The Supabase project is currently `ACTIVE_HEALTHY`, not the stale `INACTIVE` observation, but the live migration history still lacks `20260620_account_deletion_and_membership_windows` and `20260625_invitation_fk_indexes`.
-- GitHub branch protection/rulesets could not be verified because `gh` is not installed and the available connector did not expose ruleset inspection.
+- GitHub CLI is installed and authenticated as `aryasalem09` with `repo` and `workflow` scopes. Billing usage diagnostics require an additional `user` scope; organization-level runner/policy APIs for `slhstsa` require `admin:org`.
 - Live authenticated browser journeys require disposable credentials and provider/Supabase settings that were not available without printing or creating secrets.
 - Current production hosted smoke still fails because `https://brasstune.onrender.com/api/ready` and `/api/version` return 404 from the stale backend.
+
+## 2026-06-27 GitHub Actions Continuation
+
+- PR #7 was inspected at head SHA `4d258ce0a480c27b0c48b9a0321ccf7325c39487`; Backend, Frontend, and Security failed with zero-step jobs, no runner name, `ubuntu-latest` labels, and unavailable job logs/artifacts.
+- BrassTune Actions is enabled; allowed actions are not blocked; default workflow token permission is read; no BrassTune self-hosted repository runners or runner variables are configured.
+- Accessible `aryasalem09/*` and `slhstsa/*` repositories were inventoried for active queued/in-progress/waiting/requested/pending Actions runs. No safe active cross-repository runs were present to cancel.
+- The noncritical scheduled `Render Keepalive` workflow (`render-keepalive.yml`, workflow ID `299560762`) was temporarily disabled because it was repeatedly producing zero-step scheduled failures on `main`. Restoration is required after PR checks are rerun and runner capacity is stable.
+- Repository secret names required by the recovery workflows were checked by name only; values were not printed.
+
+## 2026-06-27 Local Validation
+
+- Backend: `cd backend && .venv/bin/python -m pytest` -> 90 passed.
+- Frontend unit: `cd frontend && npm test` -> 41 passed.
+- Frontend build: `cd frontend && npm run build` -> passed.
+- Frontend local E2E: `cd frontend && CI=true npm run e2e:local` -> 80 passed.
+- Frontend audit: `cd frontend && npm audit --omit=dev` -> 0 vulnerabilities.
+- Backend security: `cd backend && .venv/bin/python -m bandit -r app -x app/tests` -> no issues identified.
+- Backend dependency audit: `cd backend && .venv/bin/python -m pip_audit --local` -> no known vulnerabilities. Requirement-file audit still hits the local ensurepip crash.
+- Swift package: `cd swift/BrassTuneCore && swift test` -> 3 passed.
+- Native app: `xcodebuild ... -scheme BrassTuneApp ... build` -> build succeeded on iPhone 17 simulator (`F05D449A-5102-489A-913A-8CD9BB37EF5E`).
+- Native unit tests: `xcodebuild test ... -scheme BrassTuneApp ... -only-testing:BrassTuneAppTests` -> 7 tests, 0 failures.
+- Native UI smoke: `xcodebuild test ... -scheme BrassTuneAppUISmoke ... -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces` -> 1 test, 0 failures.
 
 ## Next Required Live Gates
 

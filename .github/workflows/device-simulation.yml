@@ -7,7 +7,7 @@ on:
 
 jobs:
   simulate-devices:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_DEVICE_SIMULATION_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

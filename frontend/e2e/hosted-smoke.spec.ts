@@ -79,6 +79,7 @@ async function grantGuestAccess(page: Page) {
 
 test.describe('hosted read-only smoke', () => {
   test('deployed app loads root and deep links without mixed content', async ({ page }) => {
+    await grantGuestAccess(page);
     const consoleErrors: string[] = [];
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
@@ -90,6 +91,9 @@ test.describe('hosted read-only smoke', () => {
       await assertNotProtectedPreview(response, page, route);
       expect(response?.status(), `${route} should not be behind auth or missing`).toBeLessThan(400);
       await expect(page.getByRole('main')).toBeVisible();
+      if (!route.startsWith('/auth/') && route !== '/') {
+        expect(new URL(page.url()).pathname, `${route} should render its own route instead of redirecting to the auth gateway`).toBe(route);
+      }
       await expect(page.locator('body')).not.toContainText(/mixed content/i);
       await expect(page.locator('body')).not.toContainText(/vercel authentication|log in to vercel|single sign-on|authentication required/i);
     }
