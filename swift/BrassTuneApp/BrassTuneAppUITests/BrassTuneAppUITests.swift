@@ -83,6 +83,23 @@ final class BrassTuneAppUITests: XCTestCase {
         deleteSessionButton.tap()
         XCTAssertTrue(app.staticTexts["No saved sessions"].waitForExistence(timeout: 5), "Deleting the session should remove it from the list")
 
+        openTab("Coach", in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["screen.coach"].waitForExistence(timeout: 5), "Coach tab should expose the native coach surface")
+
+        openTab("More", in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["screen.more"].waitForExistence(timeout: 5), "More tab should expose the native hub")
+
+        app.descendants(matching: .any)["more.sessions"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.sessions"].waitForExistence(timeout: 5), "More should link to saved sessions")
+        closeNavigationDetailIfPresent(in: app)
+
+        app.descendants(matching: .any)["more.scorepractice"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.tool.Score Practice"].waitForExistence(timeout: 5), "More should link to the native score practice shell")
+        closeNavigationDetailIfPresent(in: app)
+
+        app.descendants(matching: .any)["more.settings"].tap()
+        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["settings.deleteAccount"], in: app), "More should link to Settings")
+
         app.terminate()
         app.launchArguments = ["UITEST_SETTINGS", "UITEST_RESET_STATE"]
         app.launch()
@@ -123,6 +140,18 @@ final class BrassTuneAppUITests: XCTestCase {
             app.swipeUp()
         }
         return elements.first { $0.exists && $0.isHittable }
+    }
+
+    @MainActor
+    private func closeNavigationDetailIfPresent(in app: XCUIApplication) {
+        let backButtons = [
+            app.navigationBars.buttons["More"],
+            app.navigationBars.buttons["Back"]
+        ]
+        for button in backButtons where button.waitForExistence(timeout: 2) {
+            button.tap()
+            return
+        }
     }
 
     @MainActor
