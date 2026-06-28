@@ -1,6 +1,7 @@
 import datetime as dt
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -184,7 +185,7 @@ class AccountDeletionJob(Base):
     retry_count = Column(Integer, nullable=False, default=0)
     next_retry_at = Column(DateTime, nullable=True)
     safe_error_category = Column(String, nullable=True)
-    counts_json = Column(Text, nullable=False, default="{}")
+    counts_json = Column(JSON().with_variant(JSONB(), "postgresql"), nullable=False, default=dict)
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)

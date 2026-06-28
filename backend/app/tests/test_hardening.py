@@ -242,6 +242,19 @@ def test_ready_endpoint_redacts_operational_secret_names(monkeypatch):
     assert "BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET" not in json.dumps(body)
 
 
+def test_postgres_readiness_requires_account_deletion_counts_jsonb():
+    from app.db.readiness import _postgres_column_type_issues
+
+    assert _postgres_column_type_issues(
+        "account_deletion_jobs",
+        [{"name": "counts_json", "type": "TEXT"}],
+    ) == ["Column account_deletion_jobs.counts_json must be jsonb, not text."]
+    assert _postgres_column_type_issues(
+        "account_deletion_jobs",
+        [{"name": "counts_json", "type": "JSONB"}],
+    ) == []
+
+
 def test_websocket_audio_frame_returns_pitch_frame_for_synthetic_pcm():
     sample_rate = 48000
     t = np.arange(4096) / sample_rate
@@ -1104,6 +1117,8 @@ def test_account_deletion_records_completed_job_and_external_cleanup_last(monkey
         job = db.query(AccountDeletionJob).filter(AccountDeletionJob.user_id == user.id).one()
         assert job.status == "completed"
         assert job.stage == "completed"
+        assert isinstance(job.counts_json, dict)
+        assert job.counts_json["practice_sessions"] == 1
     finally:
         db.close()
 

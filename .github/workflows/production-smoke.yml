@@ -41,7 +41,7 @@ jobs:
       BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune.onrender.com' }}
       BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
       BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
-      BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ vars.BRASSTUNE_EXPECTED_BACKEND_SHA }}
+      BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.event.workflow_run.head_sha || vars.BRASSTUNE_EXPECTED_BACKEND_SHA || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

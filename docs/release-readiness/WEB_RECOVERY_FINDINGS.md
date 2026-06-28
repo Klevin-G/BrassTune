@@ -1,9 +1,11 @@
 # Web Recovery Findings Ledger
 
-Date: 2026-06-25, continued 2026-06-27
+Date: 2026-06-25, continued 2026-06-28
 Branch: `arya-s/web-production-recovery-20260625`
 Baseline SHA: `1c998d5480f52b5fcf0e2c143f5078893caead66`
-Scope: Web, backend, Supabase, Vercel, Render, GitHub automation, and the separately authorized Swift/native parity continuation from 2026-06-27.
+Scope: Web, backend, Supabase, Vercel, Render, GitHub automation, and release evidence.
+
+Swift/native parity work is split out of PR #7. The native continuation lives in PR #8 (`arya/native-swift-parity-surfaces-20260628`) so the web production recovery gate and native readiness gate remain separate.
 
 ## Findings
 
@@ -39,7 +41,7 @@ Scope: Web, backend, Supabase, Vercel, Render, GitHub automation, and the separa
 - Repository secret names required by the recovery workflows were checked by name only; values were not printed.
 - PR #7 checks were rerun on `f97a3054dfa266b5a2771f87c6bf923b10bf828c`; Backend, Frontend, Security, and Swift still failed with zero steps, and their check-run annotations state: "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings."
 
-## 2026-06-27 Local Validation
+## 2026-06-27 Local Web Validation
 
 - Backend: `cd backend && .venv/bin/python -m pytest` -> 90 passed.
 - Frontend unit: `cd frontend && npm test` -> 41 passed.
@@ -48,10 +50,12 @@ Scope: Web, backend, Supabase, Vercel, Render, GitHub automation, and the separa
 - Frontend audit: `cd frontend && npm audit --omit=dev` -> 0 vulnerabilities.
 - Backend security: `cd backend && .venv/bin/python -m bandit -r app -x app/tests` -> no issues identified.
 - Backend dependency audit: `cd backend && .venv/bin/python -m pip_audit --local` -> no known vulnerabilities. Requirement-file audit still hits the local ensurepip crash.
-- Swift package: `cd swift/BrassTuneCore && swift test` -> 3 passed.
-- Native app: `xcodebuild ... -scheme BrassTuneApp ... build` -> build succeeded on iPhone 17 simulator (`F05D449A-5102-489A-913A-8CD9BB37EF5E`).
-- Native unit tests: `xcodebuild test ... -scheme BrassTuneApp ... -only-testing:BrassTuneAppTests` -> 7 tests, 0 failures.
-- Native UI smoke: `xcodebuild test ... -scheme BrassTuneAppUISmoke ... -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces` -> 1 test, 0 failures.
+
+## 2026-06-28 Native Split Record
+
+- Swift/native files were removed from PR #7 and moved to draft PR #8, `Native Swift parity surfaces`.
+- PR #8 owns native SwiftUI design parity, `BRASSTUNE_SWIFT_RUNNER`, native build/test evidence, and the native readiness doc.
+- PR #7 must not use PR #8 native validation as web production evidence.
 
 ## Next Required Live Gates
 
@@ -60,4 +64,4 @@ Scope: Web, backend, Supabase, Vercel, Render, GitHub automation, and the separa
 3. Deploy the exact reviewed commit to Render and Vercel.
 4. Verify `https://brasstune.onrender.com/api/version` reports the expected SHA and `https://brasstune.onrender.com/api/ready` passes.
 5. Run strict hosted Playwright with Vercel automation bypass and disposable live auth users.
-6. Resolve the GitHub account billing/spending-limit block in Billing & plans, then rerun PR #7 Backend, Frontend, Security, Swift, PostgreSQL integration, and hosted-preview checks.
+6. Resolve the GitHub account billing/spending-limit block in Billing & plans or register configured BrassTune self-hosted runners, then rerun PR #7 Backend, Frontend, Security, PostgreSQL integration, and hosted-preview checks.

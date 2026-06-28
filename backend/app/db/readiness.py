@@ -43,6 +43,12 @@ REQUIRED_INDEX_COLUMN_SETS = {
     "invitations": {("invited_user_id",), ("invited_by_user_id",)},
 }
 
+REQUIRED_POSTGRES_COLUMN_TYPES = {
+    "account_deletion_jobs": {
+        "counts_json": "jsonb",
+    },
+}
+
 
 def _configured_engine():
     url = configured_database_url()
@@ -54,6 +60,23 @@ def _configured_engine():
 def _missing_columns(actual_columns: Iterable[str], required_columns: Iterable[str]) -> list[str]:
     actual = set(actual_columns)
     return sorted(column for column in required_columns if column not in actual)
+
+
+def _column_type_name(column: dict) -> str:
+    return str(column.get("type", "")).lower()
+
+
+def _postgres_column_type_issues(table_name: str, columns: list[dict]) -> list[str]:
+    columns_by_name = {column["name"]: column for column in columns}
+    issues = []
+    for column_name, expected_type in REQUIRED_POSTGRES_COLUMN_TYPES.get(table_name, {}).items():
+        actual_type = _column_type_name(columns_by_name.get(column_name, {}))
+        if actual_type != expected_type:
+            issues.append(
+                "Column %s.%s must be %s, not %s."
+                % (table_name, column_name, expected_type, actual_type or "unknown")
+            )
+    return issues
 
 
 def database_readiness_issues() -> list[str]:
@@ -76,9 +99,12 @@ def database_readiness_issues() -> list[str]:
                 if table_name not in table_names:
                     issues.append("Missing table: %s." % table_name)
                     continue
-                missing = _missing_columns([column["name"] for column in inspector.get_columns(table_name)], required_columns)
+                columns = inspector.get_columns(table_name)
+                missing = _missing_columns([column["name"] for column in columns], required_columns)
                 if missing:
                     issues.append("Missing columns on %s: %s." % (table_name, ", ".join(missing)))
+                if database_backend(url) == "postgresql":
+                    issues.extend(_postgres_column_type_issues(table_name, columns))
                 required_index_columns = REQUIRED_INDEX_COLUMN_SETS.get(table_name, set()) if database_backend(url) == "postgresql" else set()
                 if required_index_columns:
                     indexed_columns = {tuple(index.get("column_names") or []) for index in inspector.get_indexes(table_name)}

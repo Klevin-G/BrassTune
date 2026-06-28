@@ -1,9 +1,9 @@
 # Web Recovery Ownership Ledger
 
-Date: 2026-06-25
-Scope: React/Vite frontend, FastAPI backend, Supabase, Vercel, Render configuration, GitHub automation, and the follow-on Swift/native parity work authorized on 2026-06-27.
+Date: 2026-06-25, continued 2026-06-28
+Scope: React/Vite frontend, FastAPI backend, Supabase, Vercel, Render configuration, GitHub automation, and web production recovery evidence.
 
-Swift/native boundary: the original 2026-06-25 web-recovery pass prohibited Swift/native changes. The 2026-06-27 continuation supersedes that narrower boundary: prioritize backend/frontend and GitHub Actions recovery first, then implement Swift/native parity work under `swift/**` with simulator/build evidence. Production Apple signing, TestFlight, App Store Connect, and physical-device claims remain separately gated.
+Swift/native boundary: Swift/native parity work is authorized, but it is no longer carried by PR #7. PR #7 remains the web/backend/provider recovery gate. Native SwiftUI parity work is split to PR #8 (`arya/native-swift-parity-surfaces-20260628`) with its own build/test evidence. Production Apple signing, TestFlight, App Store Connect, and physical-device claims remain separately gated.
 
 Baseline captured: `HEAD` and `origin/main` both resolved to `1c998d5480f52b5fcf0e2c143f5078893caead66` after `git fetch origin` on 2026-06-25 at 19:03:59-04:00.
 
@@ -89,11 +89,13 @@ Relevant BrassTune repository variables:
 BRASSTUNE_BACKEND_RUNNER
 BRASSTUNE_FRONTEND_RUNNER
 BRASSTUNE_SECURITY_RUNNER
+BRASSTUNE_POSTGRES_RUNNER
 BRASSTUNE_PRODUCTION_SMOKE_RUNNER
 BRASSTUNE_RENDER_KEEPALIVE_RUNNER
 BRASSTUNE_DEPLOY_RUNNER
 BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER
 BRASSTUNE_DEVICE_SIMULATION_RUNNER
+BRASSTUNE_SWIFT_RUNNER
 ```
 
 The value must be valid JSON for `runs-on`, for example:
@@ -122,9 +124,9 @@ A `BlobNotFound` or missing-log result for zero-step jobs is not sufficient diag
 
 ### 4A.10 Completion Gate For Account-Wide Actions Work
 
-This phase is complete only when the root cause of zero-step Actions failures is proven; unnecessary active account-wide Actions consumption has been stopped safely; disabled workflows have restoration records; BrassTune has access to a working compatible runner; Backend, Frontend, Security, PostgreSQL integration, and required preview checks start and complete; logs/annotations are readable; required checks attach to PR #7; rulesets do not require impossible or obsolete checks; no unrelated production/security/backup workflow was damaged; all temporary cross-repository changes are restored or documented; and no Swift/native file is touched during the web-only recovery phase.
+This phase is complete only when the root cause of zero-step Actions failures is proven; unnecessary active account-wide Actions consumption has been stopped safely; disabled workflows have restoration records; BrassTune has access to a working compatible runner; Backend, Frontend, Security, PostgreSQL integration, and required preview checks start and complete; logs/annotations are readable; required checks attach to PR #7; rulesets do not require impossible or obsolete checks; no unrelated production/security/backup workflow was damaged; all temporary cross-repository changes are restored or documented; and no Swift/native file is touched in PR #7.
 
-For this 2026-06-27 continuation, the final "no Swift/native file" clause applies only to the web-only recovery phase. After web/backend and Actions recovery work, Swift/native files may be changed for the separately authorized parity implementation.
+Swift/native work remains allowed only in its separate native PR/gate.
 
 Do not mark BrassTune CI green by removing required checks. Do not bypass legitimate failed tests. Do not disable Backend, Frontend, Security, PostgreSQL integration, or strict preview checks to make PR #7 mergeable. The goal is to make the real checks execute and pass.
 
@@ -187,6 +189,6 @@ Actions inventory and interventions:
 
 Implementation and verification summary:
 
-- Backend/frontend were prioritized first: workflows, hosted smoke, Vercel deploy env flags, hosted deep-link auth setup, and backend SHA enforcement were updated before Swift/native work.
-- Swift/native parity work then updated the iOS app toward the web cockpit: dark BrassTune palette, glass panels, bento metrics, five-tab primary navigation, More hub, Coach surface, native tuner emphasis, and deterministic post-record analytics/session paths.
-- Local validation passed for backend pytest, frontend unit/build/E2E/audit, backend Bandit/local pip-audit, Swift package tests, native app build, native unit tests, and the native UI smoke path.
+- Backend/frontend were prioritized first: workflows, hosted smoke, Vercel deploy env flags, hosted deep-link auth setup, and backend SHA enforcement were updated.
+- Native Swift parity work was split out to PR #8 so it cannot block or certify the PR #7 web production recovery gate.
+- Local web validation passed for backend pytest, frontend unit/build/E2E/audit, backend Bandit, and local pip-audit. Native build/test evidence belongs to PR #8.

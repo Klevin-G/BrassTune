@@ -6,6 +6,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "smoke:hosted": "node scripts/hosted-smoke.mjs"
+    "smoke:hosted": "node scripts/hosted-smoke.mjs",
+    "wait:backend-release": "node scripts/wait-for-backend-release.mjs"
   }
 }

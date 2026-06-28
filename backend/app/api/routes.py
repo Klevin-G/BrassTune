@@ -831,11 +831,11 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
             user_id=user_id,
             supabase_user_id=supabase_user_id,
             idempotency_key=job_key,
-            counts_json=json.dumps(deleted_counts, sort_keys=True),
+            counts_json=deleted_counts,
         )
     else:
         job.supabase_user_id = job.supabase_user_id or supabase_user_id
-        job.counts_json = json.dumps(deleted_counts, sort_keys=True)
+        job.counts_json = deleted_counts
     _mark_deletion_job(job, "local_cleanup_started", "in_progress")
     db.add(job)
     db.commit()

@@ -33,3 +33,59 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt -c constraints.txt
       - name: Run pytest
         run: python -m pytest
+
+  postgresql-integration:
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_POSTGRES_RUNNER || vars.BRASSTUNE_BACKEND_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: brasstune_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: local
+      BRASSTUNE_AUTH_MODE: disabled
+      BRASSTUNE_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
+      BRASSTUNE_SEED_DEMO_DATA: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt -c constraints.txt
+      - name: Apply Supabase migrations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import psycopg
+
+          migrations_dir = Path("../supabase/migrations")
+          with psycopg.connect("postgresql://postgres:postgres@localhost:5432/brasstune_test", autocommit=True) as conn:
+              with conn.cursor() as cur:
+                  cur.execute("create schema if not exists storage")
+                  cur.execute(
+                      "create table if not exists storage.buckets "
+                      "(id text primary key, name text not null, public boolean not null default false)"
+                  )
+                  for path in sorted(migrations_dir.glob("*.sql")):
+                      print(f"Applying {path.name}")
+                      cur.execute(path.read_text())
+          PY
+      - name: Validate PostgreSQL readiness
+        run: python -m app.db.check_ready
+      - name: Run pytest against PostgreSQL
+        run: python -m pytest

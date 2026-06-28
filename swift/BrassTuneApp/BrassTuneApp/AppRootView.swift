@@ -3,9 +3,10 @@ import SwiftUI
 enum AppTab: String, CaseIterable, Identifiable {
     case home
     case practice
+    case sessions
     case analytics
-    case coach
-    case more
+    case ensemble
+    case settings
 
     var id: String { rawValue }
 
@@ -13,9 +14,10 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Home"
         case .practice: return "Practice"
+        case .sessions: return "Sessions"
         case .analytics: return "Analytics"
-        case .coach: return "Coach"
-        case .more: return "More"
+        case .ensemble: return "Ensemble"
+        case .settings: return "Settings"
         }
     }
 
@@ -23,9 +25,10 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "house"
         case .practice: return "gauge.with.dots.needle.67percent"
+        case .sessions: return "music.note.list"
         case .analytics: return "chart.bar.xaxis"
-        case .coach: return "sparkles"
-        case .more: return "square.grid.2x2"
+        case .ensemble: return "person.3"
+        case .settings: return "gearshape"
         }
     }
 }
@@ -58,15 +61,18 @@ struct AppRootView: View {
                     NavigationStack { PracticeView(selectedTab: $selectedTab) }
                         .tabItem { Label(AppTab.practice.title, systemImage: AppTab.practice.systemImage) }
                         .tag(AppTab.practice)
+                    NavigationStack { SessionsView() }
+                        .tabItem { Label(AppTab.sessions.title, systemImage: AppTab.sessions.systemImage) }
+                        .tag(AppTab.sessions)
                     NavigationStack { AnalyticsView(selectedTab: $selectedTab) }
                         .tabItem { Label(AppTab.analytics.title, systemImage: AppTab.analytics.systemImage) }
                         .tag(AppTab.analytics)
-                    NavigationStack { CoachNativeView(selectedTab: $selectedTab) }
-                        .tabItem { Label(AppTab.coach.title, systemImage: AppTab.coach.systemImage) }
-                        .tag(AppTab.coach)
-                    NavigationStack { MoreHubView(onboardingPresented: $onboardingPresented, selectedTab: $selectedTab) }
-                        .tabItem { Label(AppTab.more.title, systemImage: AppTab.more.systemImage) }
-                        .tag(AppTab.more)
+                    NavigationStack { EnsembleView(selectedTab: $selectedTab) }
+                        .tabItem { Label(AppTab.ensemble.title, systemImage: AppTab.ensemble.systemImage) }
+                        .tag(AppTab.ensemble)
+                    NavigationStack { SettingsView(onboardingPresented: $onboardingPresented) }
+                        .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage) }
+                        .tag(AppTab.settings)
                 }
                 .tint(BTTheme.accent)
                 .sheet(isPresented: $onboardingPresented) {
@@ -92,39 +98,39 @@ struct HomeView: View {
 
     var body: some View {
         BTScreen {
-            BTPageHeader(
-                eyebrow: "Practice cockpit",
-                title: "BrassTune",
-                subtitle: "A focused brass tuner and local practice log for honest session review.",
-                trailing: model.authState.displayTitle
-            )
+            BTCard {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: BTSpacing.sm) {
+                        Text("BrassTune")
+                            .font(.title.weight(.bold))
+                        Text("A focused brass tuner and local practice log for honest session review.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    BTStatusPill(text: model.authState.displayTitle)
+                        .accessibilityIdentifier("home.accountStatus")
+                }
+            }
             .accessibilityIdentifier("home.hero")
 
-            Button {
-                selectedTab = .practice
-            } label: {
-                Label("Start practice", systemImage: "play.fill")
-            }
-            .buttonStyle(BTPrimaryButtonStyle())
-            .accessibilityIdentifier("home.startPractice")
-
-            BTCard(tint: BTTheme.surfaceWarm) {
-                BTSectionHeader(title: "Today's intonation focus", subtitle: "Center the note before expanding range.")
-                VStack(alignment: .leading, spacing: BTSpacing.md) {
-                    Text(model.selectedInstrumentId == "horn" ? "G4" : "D5")
-                        .font(.system(size: 72, weight: .bold, design: .rounded))
-                        .foregroundStyle(BTTheme.accentSoft)
-                        .minimumScaleFactor(0.7)
-                    Text("Slow attacks, steady air, release cleanly. Guest practice stays on this device.")
-                        .font(.subheadline)
-                        .foregroundStyle(BTTheme.muted)
-                }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
+            BTCard {
+                BTSectionHeader(
+                    title: "Today",
+                    subtitle: "Center \(model.selectedInstrumentId == "horn" ? "G4" : "D5") before expanding range."
+                )
+                HStack(spacing: BTSpacing.md) {
                     BTMetricTile(title: "Instrument", value: instrumentName(model.selectedInstrumentId), detail: "Written pitch")
                     BTMetricTile(title: "Reference", value: String(format: "%.1f", model.referencePitchHz), detail: "A4 Hz", tint: BTTheme.secondaryAccent)
-                    BTMetricTile(title: "Saved", value: "\(model.sessions.count)", detail: "local takes", tint: BTTheme.blue)
-                    BTMetricTile(title: "In tune", value: model.analyticsSnapshot.hasSessions ? "\(String(format: "%.0f", model.analyticsSnapshot.averageInTunePercentage))%" : "--", detail: "local frames", tint: BTTheme.success)
                 }
+                Button {
+                    selectedTab = .practice
+                } label: {
+                    Label("Start practice", systemImage: "play.fill")
+                }
+                .buttonStyle(BTPrimaryButtonStyle())
+                .accessibilityIdentifier("home.startPractice")
             }
 
             if model.analyticsSnapshot.hasSessions {
@@ -196,19 +202,16 @@ struct PracticeView: View {
                 BTCard {
                     BTSectionHeader(title: "Saved take ready", subtitle: "Review the latest take or inspect local analytics derived from saved frames.")
                     VStack(spacing: BTSpacing.md) {
-                        BTMetricTile(title: "Analytics", value: "\(model.analyticsSnapshot.sessionCount)", detail: "saved take ready", tint: BTTheme.success)
-                            .accessibilityIdentifier("analytics.metrics")
-
-                        NavigationLink {
-                            SessionsView()
+                        Button {
+                            selectedTab = .sessions
                         } label: {
                             Label("Review sessions", systemImage: "music.note.list")
                         }
                         .buttonStyle(BTSecondaryButtonStyle())
-                        .accessibilityIdentifier("analytics.reviewSessions")
+                        .accessibilityIdentifier("practice.reviewSessions")
 
-                        NavigationLink {
-                            AnalyticsView(selectedTab: $selectedTab)
+                        Button {
+                            selectedTab = .analytics
                         } label: {
                             Label("View analytics", systemImage: "chart.bar.xaxis")
                         }
@@ -216,10 +219,13 @@ struct PracticeView: View {
                         .accessibilityIdentifier("practice.viewAnalytics")
                     }
                 }
+                .accessibilityIdentifier("practice.savedTakeActions")
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                BTInsightTile(title: "Metronome", detail: "Tempo and count-in controls live in More.", systemImage: "metronome", tint: BTTheme.warning)
-                BTInsightTile(title: "Score practice", detail: "Score import remains a local/demo shell in native until physical-device validation.", systemImage: "doc.viewfinder", tint: BTTheme.blue)
+            BTCard {
+                BTSectionHeader(
+                    title: "Session capture",
+                    subtitle: "Sample takes use bundled deterministic pitch frames. Microphone takes require permission and physical-device validation before release claims."
+                )
             }
         }
         .navigationTitle("Practice")
@@ -237,7 +243,22 @@ private struct PracticeTunerSection: View {
         let centsLabel = frame?.centsDeviation.map { String(format: "%+.1f cents", $0) } ?? "Silence or no lock"
         let statusLabel = displayStatus(frame?.tuningStatus.rawValue ?? "ready")
 
-        VStack(spacing: BTSpacing.md) {
+        BTCard {
+            HStack {
+                BTSectionHeader(title: "Practice tuner", subtitle: "Local sample take")
+                Spacer()
+                BTStatusPill(text: statusLabel, tint: statusTint(frame?.tuningStatus.rawValue))
+                    .accessibilityIdentifier("practice.tuningStatus")
+            }
+            Text(noteLabel)
+                .font(.system(size: 64, weight: .bold, design: .rounded))
+                .foregroundStyle(BTTheme.accent)
+                .minimumScaleFactor(0.7)
+                .accessibilityIdentifier("practice.note")
+            Text(centsLabel)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("practice.cents")
             Button {
                 if audioEngine.recording {
                     model.stopDemoRecording()
@@ -249,55 +270,13 @@ private struct PracticeTunerSection: View {
             }
             .buttonStyle(BTPrimaryButtonStyle())
             .accessibilityIdentifier("practice.recordButton")
-
-            BTCard(tint: BTTheme.surfaceWarm) {
-                HStack {
-                    BTSectionHeader(title: "Practice tuner", subtitle: "Local sample take")
-                    Spacer()
-                    BTStatusPill(text: statusLabel, tint: statusTint(frame?.tuningStatus.rawValue))
-                        .accessibilityIdentifier("practice.tuningStatus")
-                }
-                Text(audioEngine.recording ? "Recording" : "Ready")
-                    .font(.footnote.weight(.bold))
-                    .foregroundStyle(audioEngine.recording ? BTTheme.secondaryAccent : BTTheme.muted)
-                    .padding(.horizontal, BTSpacing.sm)
-                    .padding(.vertical, BTSpacing.xs)
-                    .background((audioEngine.recording ? BTTheme.secondaryAccent : BTTheme.surfaceAlt).opacity(0.14), in: Capsule())
-                    .accessibilityIdentifier("practice.recordingState")
-                    .accessibilityLabel(audioEngine.recording ? "Recording" : "Ready")
-                Text(noteLabel)
-                    .font(.system(size: 82, weight: .bold, design: .rounded))
-                    .foregroundStyle(BTTheme.accentSoft)
-                    .minimumScaleFactor(0.7)
-                    .accessibilityIdentifier("practice.note")
-                ZStack(alignment: .center) {
-                    Capsule()
-                        .fill(BTTheme.surfaceAlt)
-                        .frame(height: 14)
-                    Rectangle()
-                        .fill(LinearGradient(colors: [BTTheme.danger, BTTheme.warning, BTTheme.success, BTTheme.warning, BTTheme.danger], startPoint: .leading, endPoint: .trailing))
-                        .frame(height: 8)
-                        .clipShape(Capsule())
-                    Rectangle()
-                        .fill(BTTheme.accentSoft)
-                        .frame(width: 4, height: 34)
-                        .offset(x: needleOffset(frame?.centsDeviation))
-                        .clipShape(Capsule())
-                }
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("practice.tunerNeedle")
-                Text(centsLabel)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(BTTheme.muted)
-                    .accessibilityIdentifier("practice.cents")
-            }
+            Text(audioEngine.recording ? "Recording" : "Ready")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(audioEngine.recording ? BTTheme.secondaryAccent : .secondary)
+                .accessibilityIdentifier("practice.recordingState")
         }
+        .accessibilityIdentifier("practice.tunerCard")
     }
-}
-
-private func needleOffset(_ cents: Double?) -> CGFloat {
-    let clamped = min(max(cents ?? 0, -25), 25)
-    return CGFloat(clamped / 25) * 120
 }
 
 private struct MicrophoneSection: View {
@@ -456,7 +435,6 @@ struct AnalyticsView: View {
                 BTCard {
                     HStack(spacing: BTSpacing.md) {
                         BTMetricTile(title: "Sessions", value: "\(snapshot.sessionCount)", detail: "\(snapshot.validFrameCount) valid frames")
-                            .accessibilityIdentifier("analytics.metrics")
                         BTMetricTile(title: "Avg abs", value: String(format: "%.1f", snapshot.averageAbsCents), detail: "cents", tint: BTTheme.secondaryAccent)
                     }
                     HStack(spacing: BTSpacing.md) {
@@ -464,6 +442,7 @@ struct AnalyticsView: View {
                         BTMetricTile(title: "Practice", value: "\(String(format: "%.0f", snapshot.totalPracticeSeconds))s", detail: "sample duration")
                     }
                 }
+                .accessibilityIdentifier("analytics.metrics")
 
                 BTCard {
                     BTSectionHeader(title: "Recommendation", subtitle: snapshot.recommendation)
@@ -479,8 +458,8 @@ struct AnalyticsView: View {
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("analytics.latestSession")
                     }
-                    NavigationLink {
-                        SessionsView()
+                    Button {
+                        selectedTab = .sessions
                     } label: {
                         Label("Review sessions", systemImage: "music.note.list")
                     }
@@ -508,137 +487,6 @@ struct AnalyticsView: View {
     }
 }
 
-struct CoachNativeView: View {
-    @EnvironmentObject private var model: AppModel
-    @Binding var selectedTab: AppTab
-
-    var body: some View {
-        BTScreen {
-            BTPageHeader(
-                eyebrow: "Coach",
-                title: "Practice plan",
-                subtitle: "Native guidance mirrors the web cockpit with local, honest recommendations until live account coaching is validated.",
-                trailing: model.authState.usesRemoteAccount ? "Account" : "Local"
-            )
-            if model.analyticsSnapshot.hasSessions {
-                BTCard(tint: BTTheme.surfaceWarm) {
-                    BTSectionHeader(title: "Next best drill", subtitle: model.analyticsSnapshot.recommendation)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                        BTInsightTile(title: "Long tones", detail: "Hold the focus note for 8 counts at mezzo piano.", systemImage: "wind", tint: BTTheme.secondaryAccent)
-                        BTInsightTile(title: "Drone match", detail: "Match the center before moving to slurs.", systemImage: "waveform.path", tint: BTTheme.accent)
-                        BTInsightTile(title: "Release audit", detail: "Check that the final second stays within 5 cents.", systemImage: "checkmark.seal", tint: BTTheme.success)
-                    }
-                }
-            } else {
-                BTEmptyState(title: "Coach needs a take", message: "Record a sample take first so native coaching can use local intonation evidence.", systemImage: "sparkles")
-                Button {
-                    selectedTab = .practice
-                } label: {
-                    Label("Record sample take", systemImage: "record.circle")
-                }
-                .buttonStyle(BTPrimaryButtonStyle())
-            }
-        }
-        .navigationTitle("Coach")
-        .accessibilityIdentifier("screen.coach")
-    }
-}
-
-struct MoreHubView: View {
-    @Binding var onboardingPresented: Bool
-    @Binding var selectedTab: AppTab
-
-    var body: some View {
-        BTScreen {
-            BTPageHeader(
-                eyebrow: "Workspace",
-                title: "More",
-                subtitle: "Saved work, practice tools, ensemble, account settings, and release-critical policy surfaces.",
-                trailing: "Bento"
-            )
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                MoreHubLink(title: "Sessions", detail: "Review saved takes and exports.", systemImage: "music.note.list", tint: BTTheme.accent) {
-                    SessionsView()
-                }
-                MoreHubLink(title: "Metronome", detail: "Tempo, meter, and count-in shell.", systemImage: "metronome", tint: BTTheme.warning) {
-                    NativeToolShell(title: "Metronome", subtitle: "Foreground pulse controls are planned for native parity. Use the web app for full ramp/subdivision controls until this shell is implemented.", systemImage: "metronome")
-                }
-                MoreHubLink(title: "Score Practice", detail: "Score workflow placeholder.", systemImage: "doc.viewfinder", tint: BTTheme.blue) {
-                    NativeToolShell(title: "Score Practice", subtitle: "Native score import remains an honest shell until PDF/image import and physical-device validation are complete.", systemImage: "doc.viewfinder")
-                }
-                MoreHubLink(title: "Progress", detail: "Long-term trend surface.", systemImage: "chart.line.uptrend.xyaxis", tint: BTTheme.success) {
-                    NativeToolShell(title: "Progress", subtitle: "Progress trends currently use web/backend data. Native local trend charts will build on saved sample takes.", systemImage: "chart.line.uptrend.xyaxis")
-                }
-                MoreHubLink(title: "Ensemble", detail: "Director and membership state.", systemImage: "person.3", tint: BTTheme.secondaryAccent) {
-                    EnsembleView(selectedTab: $selectedTab)
-                }
-                MoreHubLink(title: "Settings", detail: "Account, tuner, data, legal.", systemImage: "gearshape", tint: BTTheme.muted) {
-                    SettingsView(onboardingPresented: $onboardingPresented)
-                }
-                MoreHubLink(title: "Audio Lab", detail: "Diagnostics placeholder.", systemImage: "waveform", tint: BTTheme.blue) {
-                    NativeToolShell(title: "Audio Lab", subtitle: "Native audio diagnostics are limited to permission and sample-take evidence in this build. Physical microphone quality still needs device validation.", systemImage: "waveform")
-                }
-                MoreHubLink(title: "Privacy", detail: "Data use and account lifecycle.", systemImage: "hand.raised", tint: BTTheme.accent) {
-                    LegalDetailView(kind: .privacy)
-                }
-                MoreHubLink(title: "Terms", detail: "Use rules and limitations.", systemImage: "doc.text", tint: BTTheme.accent) {
-                    LegalDetailView(kind: .terms)
-                }
-                MoreHubLink(title: "Support", detail: "Issue reporting guidance.", systemImage: "questionmark.circle", tint: BTTheme.secondaryAccent) {
-                    LegalDetailView(kind: .support)
-                }
-            }
-        }
-        .navigationTitle("More")
-        .accessibilityIdentifier("screen.more")
-    }
-}
-
-private struct MoreHubLink<Destination: View>: View {
-    let title: String
-    let detail: String
-    let systemImage: String
-    let tint: Color
-    let destination: Destination
-
-    init(title: String, detail: String, systemImage: String, tint: Color, @ViewBuilder destination: () -> Destination) {
-        self.title = title
-        self.detail = detail
-        self.systemImage = systemImage
-        self.tint = tint
-        self.destination = destination()
-    }
-
-    var body: some View {
-        NavigationLink {
-            destination
-        } label: {
-            BTInsightTile(title: title, detail: detail, systemImage: systemImage, tint: tint)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("more.\(title.replacingOccurrences(of: " ", with: "").lowercased())")
-    }
-}
-
-private struct NativeToolShell: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-
-    var body: some View {
-        BTScreen {
-            BTPageHeader(eyebrow: "Native parity", title: title, subtitle: subtitle, trailing: "Planned")
-            BTCard {
-                BTInsightTile(title: "Current state", detail: "This native surface is intentionally conservative until it matches the web workflow and has simulator plus physical-device evidence.", systemImage: systemImage, tint: BTTheme.warning)
-                BTInsightTile(title: "Guest practice remains available", detail: "Core native tuner, saved sessions, analytics, account settings, and legal surfaces are still usable.", systemImage: "checkmark.circle", tint: BTTheme.success)
-            }
-        }
-        .navigationTitle(title)
-        .accessibilityIdentifier("screen.tool.\(title)")
-    }
-}
-
 struct EnsembleView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var selectedTab: AppTab
@@ -662,7 +510,7 @@ struct EnsembleView: View {
                         EnsembleSummaryCard(ensemble: ensemble)
                     }
                     Button {
-                        selectedTab = .more
+                        selectedTab = .settings
                     } label: {
                         Label("Sign in to load real ensemble data", systemImage: "person.crop.circle.badge.checkmark")
                     }
@@ -674,7 +522,7 @@ struct EnsembleView: View {
                     title: "Account required",
                     message: model.accountUnavailableMessage ?? "Sign in to load ensemble memberships from your teacher or organization.",
                     actionTitle: "Open Settings",
-                    action: { selectedTab = .more }
+                    action: { selectedTab = .settings }
                 )
                 .accessibilityIdentifier("ensemble.accountRequired")
             case .emailConfirmationRequired(let email):
@@ -682,7 +530,7 @@ struct EnsembleView: View {
                     title: "Confirm email",
                     message: "Confirm \(email) before BrassTune can load account-backed ensemble memberships.",
                     actionTitle: "Open Settings",
-                    action: { selectedTab = .more }
+                    action: { selectedTab = .settings }
                 )
                 .accessibilityIdentifier("ensemble.confirmEmail")
             case .signedIn:
