@@ -96,7 +96,18 @@ supabase/migrations/20260625_invitation_fk_indexes.sql
 
 `20260616_brasstune_baseline.sql` is the clean-database schema baseline. `20260617_brasstune_production_readiness.sql` remains additive for existing deployments, `20260618_lock_down_rls_auto_enable.sql` revokes public execution from the drifted helper RPC reported by Supabase advisors, `20260620_account_deletion_and_membership_windows.sql` adds account deletion and membership-window schema, and `20260625_invitation_fk_indexes.sql` adds the missing invitation foreign-key indexes reported by Supabase advisors.
 
-As of the 2026-06-25 web recovery audit, the connected project recorded only the first three migrations. Apply the June 20 and June 25 migrations through an owner-approved production migration gate before deploying this branch.
+As of the 2026-07-04 provider gate, the connected project `uvbcvqupelcrncyhqsrq` records all five migrations. The June 20 and June 25 migrations were applied through Supabase migration history as `20260704022241` and `20260704022304` after a zero-row production safety snapshot.
+
+Post-apply verification showed:
+
+- `public.account_deletion_jobs` exists and has RLS enabled.
+- `account_deletion_jobs.counts_json` is `jsonb not null default '{}'::jsonb`.
+- `public.group_members.active_since` and `public.group_members.removed_at` exist.
+- `idx_group_members_active_window`, `idx_invitations_invited_user_id`, and `idx_invitations_invited_by_user_id` exist.
+- Row counts stayed at zero for `auth.users`, app tables, `account_deletion_jobs`, and `storage.objects`.
+- `session-audio` remains private with the expected audio MIME allowlist.
+- Supabase security advisors still report RLS-enabled/no-policy informational notices because FastAPI mediates app access and no direct browser table policies are intentionally present.
+- Supabase performance advisors no longer report the invitation foreign-key index gaps; remaining unused-index notices are expected on an empty project.
 
 Supabase changed Data API exposure behavior in 2026, so after applying migrations verify exposed schema grants deliberately. Keep RLS enabled on public tables and do not add broad browser grants until direct browser-to-table access is designed.
 

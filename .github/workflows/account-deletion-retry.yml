@@ -30,6 +30,10 @@ jobs:
             echo "BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET is not configured."
             exit 1
           fi
+          if [ "${BRASSTUNE_API_BASE_URL%/}" != "https://brasstune.onrender.com" ]; then
+            echo "BRASSTUNE_API_BASE_URL must be the approved Render production host before sending the maintenance secret."
+            exit 1
+          fi
           curl --fail --show-error --silent --max-time 30 \
             -X POST \
             -H "X-BrassTune-Maintenance-Secret: ${BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET}" \

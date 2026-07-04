@@ -5,6 +5,11 @@ import tls from 'node:tls';
 const DEFAULT_WEB_BASE_URL = 'https://brass-tune.vercel.app';
 const DEFAULT_API_BASE_URL = 'https://brasstune.onrender.com';
 const DEFAULT_WS_BASE_URL = 'wss://brasstune.onrender.com';
+const APPROVED_RENDER_HOST = 'brasstune.onrender.com';
+const APPROVED_VERCEL_HOSTS = new Set([
+  'brass-tune.vercel.app',
+  'brass-tune-aryaswebsites.vercel.app',
+]);
 
 const webBaseURL = cleanBase(process.env.BRASSTUNE_WEB_BASE_URL || DEFAULT_WEB_BASE_URL);
 const webAccessURL = process.env.BRASSTUNE_WEB_ACCESS_URL || urlWithPath(webBaseURL, '/');
@@ -36,6 +41,21 @@ function assertHostedURL(label, value, expectedProtocol) {
   }
 }
 
+function isApprovedVercelHost(hostname) {
+  return APPROVED_VERCEL_HOSTS.has(hostname)
+    || (hostname.startsWith('brass-tune-') && hostname.endsWith('-aryaswebsites.vercel.app'));
+}
+
+function assertApprovedSecretDestination(label, value, type) {
+  const url = new URL(value);
+  if (type === 'vercel' && !isApprovedVercelHost(url.hostname)) {
+    throw new Error(`${label} is not an approved BrassTune Vercel host: ${url.hostname}`);
+  }
+  if (type === 'render' && url.hostname !== APPROVED_RENDER_HOST) {
+    throw new Error(`${label} is not the approved Render backend host: ${url.hostname}`);
+  }
+}
+
 function record(name, status, detail) {
   results.push({ name, status, detail });
   const marker = status === 'pass' ? 'PASS' : status === 'skip' ? 'SKIP' : 'FAIL';
@@ -53,6 +73,9 @@ async function checkHTTP(name, fn) {
 }
 
 async function checkWebRoot() {
+  if (vercelBypassSecret) {
+    assertApprovedSecretDestination('BRASSTUNE_WEB_ACCESS_URL', webAccessURL, 'vercel');
+  }
   const headers = vercelBypassSecret ? { 'x-vercel-protection-bypass': vercelBypassSecret } : {};
   const response = await fetch(webAccessURL, { redirect: 'follow', headers });
   const text = await response.text();
@@ -272,6 +295,8 @@ try {
   assertHostedURL('BRASSTUNE_WEB_ACCESS_URL', webAccessURL, 'https:');
   assertHostedURL('BRASSTUNE_API_BASE_URL', apiBaseURL, 'https:');
   assertHostedURL('BRASSTUNE_WS_BASE_URL', wsBaseURL, 'wss:');
+  assertApprovedSecretDestination('BRASSTUNE_API_BASE_URL', apiBaseURL, 'render');
+  assertApprovedSecretDestination('BRASSTUNE_WS_BASE_URL', wsBaseURL, 'render');
 } catch (error) {
   console.error(`FAIL configuration - ${error.message}`);
   process.exit(1);
