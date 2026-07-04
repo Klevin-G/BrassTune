@@ -26,6 +26,9 @@ enum BTTheme {
     static let warning = Color(red: 0.90, green: 0.77, blue: 0.36)
     static let danger = Color(red: 0.89, green: 0.36, blue: 0.36)
     static let blue = Color(red: 0.46, green: 0.72, blue: 1.0)
+    static let sharp = Color(red: 0.90, green: 0.55, blue: 0.26)
+    static let flat = Color(red: 0.46, green: 0.72, blue: 1.0)
+    static let unstable = Color(red: 0.62, green: 0.67, blue: 0.73)
     static let radius: CGFloat = 18
     static let radiusLarge: CGFloat = 26
 }
@@ -180,6 +183,7 @@ struct BTMetricTile: View {
     let value: String
     var detail: String?
     var tint: Color = BTTheme.accent
+    var interactive: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.xs) {
@@ -200,7 +204,7 @@ struct BTMetricTile: View {
         }
         .padding(BTSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .btGlassPanel(cornerRadius: 14, tint: BTTheme.surfaceAlt, interactive: true)
+        .btGlassPanel(cornerRadius: 14, tint: BTTheme.surfaceAlt, interactive: interactive)
         .accessibilityElement(children: .combine)
     }
 }
@@ -277,6 +281,7 @@ struct BTInsightTile: View {
     let detail: String
     let systemImage: String
     var tint: Color = BTTheme.accent
+    var interactive: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: BTSpacing.md) {
@@ -297,7 +302,7 @@ struct BTInsightTile: View {
         }
         .padding(BTSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: true)
+        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: interactive)
         .accessibilityElement(children: .combine)
     }
 }

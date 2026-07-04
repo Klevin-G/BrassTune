@@ -40,22 +40,47 @@ final class BrassTuneAppUITests: XCTestCase {
             waitForAnyElement([recordingState, app.staticTexts["Recording"]], timeout: 5),
             "Recording state should switch to recording"
         )
-        guard let stopRecordButton = firstAvailableElement(
-            [
-                app.descendants(matching: .any)["practice.recordButton"],
-                app.buttons["Stop sample take"]
-            ],
-            in: app,
-            timeout: 5
-        ) else {
-            XCTFail("Practice stop control should be visible")
-            return
+        let floatingStop = app.descendants(matching: .any)["practice.floating.stop"]
+        XCTAssertTrue(floatingStop.waitForExistence(timeout: 5), "Recording should expose floating stop control")
+        let floatingMetronome = app.descendants(matching: .any)["practice.floating.metronome"]
+        XCTAssertTrue(floatingMetronome.waitForExistence(timeout: 5), "Floating controls should expose metronome control")
+        floatingMetronome.tap()
+        floatingStop.tap()
+        if !waitForAnyElement([recordingState, app.staticTexts["Ready"]], timeout: 5) {
+            guard let stopRecordButton = firstAvailableElement(
+                [
+                    app.descendants(matching: .any)["practice.recordButton"],
+                    app.buttons["Stop sample take"]
+                ],
+                in: app,
+                timeout: 5
+            ) else {
+                XCTFail("Practice stop control should be visible")
+                return
+            }
+            stopRecordButton.tap()
         }
-        stopRecordButton.tap()
+        let floatingMetronomeAgain = app.descendants(matching: .any)["practice.floating.metronome"]
+        if floatingMetronomeAgain.waitForExistence(timeout: 2) {
+            floatingMetronomeAgain.tap()
+        }
         XCTAssertTrue(
             waitForAnyElement([recordingState, app.staticTexts["Ready"]], timeout: 5),
             "Recording state should return to ready"
         )
+
+        guard let metronomeShortcut = firstAvailableElement(
+            [app.descendants(matching: .any)["practice.metronome"], app.buttons["Metronome"]],
+            in: app,
+            timeout: 5
+        ) else {
+            XCTFail("Practice should link to metronome")
+            return
+        }
+        metronomeShortcut.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.metronome"].waitForExistence(timeout: 5), "Metronome screen should be implemented")
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.toggle"].waitForExistence(timeout: 5), "Metronome should expose start/stop")
+        closeNavigationDetailIfPresent(in: app)
 
         guard let viewAnalyticsButton = firstAvailableElement(
             [
@@ -93,12 +118,22 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["screen.sessions"].waitForExistence(timeout: 5), "More should link to saved sessions")
         closeNavigationDetailIfPresent(in: app)
 
+        app.descendants(matching: .any)["more.metronome"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.metronome"].waitForExistence(timeout: 5), "More should link to the native metronome")
+        closeNavigationDetailIfPresent(in: app)
+
         app.descendants(matching: .any)["more.scorepractice"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["screen.tool.Score Practice"].waitForExistence(timeout: 5), "More should link to the native score practice shell")
+        XCTAssertTrue(app.descendants(matching: .any)["screen.scorePractice"].waitForExistence(timeout: 5), "More should link to native Score Practice")
+        let sampleScoreButton = app.buttons["score.import.sample"]
+        XCTAssertTrue(sampleScoreButton.waitForExistence(timeout: 5), "Score Practice should expose a sample import for simulator coverage")
+        sampleScoreButton.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["score.card"].waitForExistence(timeout: 5), "Sample score should create a local score card")
+        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["score.rotate"], in: app), "Score pages should expose rotate")
         closeNavigationDetailIfPresent(in: app)
 
         app.descendants(matching: .any)["more.settings"].tap()
         XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["settings.deleteAccount"], in: app), "More should link to Settings")
+        XCTAssertTrue(app.descendants(matching: .any)["settings.clearLocalData"].waitForExistence(timeout: 5), "Settings should expose local data clearing")
 
         app.terminate()
         app.launchArguments = ["UITEST_SETTINGS", "UITEST_RESET_STATE"]
@@ -145,6 +180,8 @@ final class BrassTuneAppUITests: XCTestCase {
     @MainActor
     private func closeNavigationDetailIfPresent(in app: XCUIApplication) {
         let backButtons = [
+            app.navigationBars.buttons["BackButton"],
+            app.navigationBars.buttons["Practice"],
             app.navigationBars.buttons["More"],
             app.navigationBars.buttons["Back"]
         ]

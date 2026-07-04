@@ -26,6 +26,9 @@ TOKEN_MAP = {
     "warning": ("color", "palette", "amber"),
     "danger": ("color", "palette", "red"),
     "blue": ("color", "palette", "blue"),
+    "sharp": ("tunerColors", "sharp"),
+    "flat": ("tunerColors", "flat"),
+    "unstable": ("statusColors", "unstable"),
     "muted": ("statusColors", "unstable"),
 }
 

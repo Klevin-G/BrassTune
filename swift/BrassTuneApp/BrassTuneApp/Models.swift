@@ -45,9 +45,11 @@ struct PitchFrame: Codable, Equatable, Identifiable {
     let writtenOctave: Int?
     let isValidForRecording: Bool
 
-    static func fixture(index: Int, referencePitchHz: Double = 440.0) -> PitchFrame {
+    static func fixture(index: Int, instrumentId: String = "trumpet", referencePitchHz: Double = 440.0) -> PitchFrame {
         let cents = Double([-7, -3, 0, 2, 8][index % 5])
-        let frequency = BrassTuneCore.midiToFrequency(69, referencePitchHz: referencePitchHz) * pow(2.0, cents / 1200.0)
+        let concertMidi = fixtureConcertMidi(for: instrumentId)
+        let writtenMidi = BrassTuneCore.transposeConcertToWritten(concertMidi, semitones: transpositionSemitones(for: instrumentId))
+        let frequency = BrassTuneCore.midiToFrequency(Double(concertMidi), referencePitchHz: referencePitchHz) * pow(2.0, cents / 1200.0)
         return PitchFrame(
             timestampMs: index * 110,
             frequencyHz: frequency,
@@ -55,10 +57,208 @@ struct PitchFrame: Codable, Equatable, Identifiable {
             rms: 0.08,
             centsDeviation: cents,
             tuningStatus: BrassTuneCore.tuningStatus(cents: cents, confidence: 0.98, rms: 0.08),
-            writtenNoteName: "A",
-            writtenOctave: 4,
+            writtenNoteName: noteName(for: writtenMidi),
+            writtenOctave: (writtenMidi / 12) - 1,
             isValidForRecording: true
         )
+    }
+
+    private static func fixtureConcertMidi(for instrumentId: String) -> Int {
+        switch instrumentId {
+        case "horn": return 55
+        case "trombone", "euphonium": return 58
+        case "tuba": return 46
+        default: return 72
+        }
+    }
+
+    private static func transpositionSemitones(for instrumentId: String) -> Int {
+        switch instrumentId {
+        case "trumpet": return 2
+        case "horn": return 7
+        default: return 0
+        }
+    }
+
+    private static func noteName(for midi: Int) -> String {
+        let names = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+        return names[((midi % 12) + 12) % 12]
+    }
+}
+
+enum MetronomeSubdivision: String, Codable, CaseIterable, Identifiable {
+    case quarter
+    case eighth
+    case triplet
+    case sixteenth
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .quarter: return "Quarter"
+        case .eighth: return "Eighth"
+        case .triplet: return "Triplet"
+        case .sixteenth: return "Sixteenth"
+        }
+    }
+
+    var ticksPerBeat: Int {
+        switch self {
+        case .quarter: return 1
+        case .eighth: return 2
+        case .triplet: return 3
+        case .sixteenth: return 4
+        }
+    }
+}
+
+struct MetronomeSettings: Codable, Equatable {
+    var bpm: Int = 92
+    var beatsPerMeasure: Int = 4
+    var beatUnit: Int = 4
+    var subdivision: MetronomeSubdivision = .quarter
+    var muted: Bool = true
+    var visualOnly: Bool = true
+    var hapticsEnabled: Bool = false
+    var volume: Double = 0.0
+
+    var meterLabel: String {
+        "\(beatsPerMeasure)/\(beatUnit)"
+    }
+
+    var intervalSeconds: TimeInterval {
+        60.0 / Double(max(30, min(240, bpm))) / Double(subdivision.ticksPerBeat)
+    }
+}
+
+enum ScoreSourceKind: String, Codable, CaseIterable, Identifiable {
+    case filesPDF
+    case filesImage
+    case photos
+    case sample
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .filesPDF: return "Files PDF"
+        case .filesImage: return "Files image"
+        case .photos: return "Photos"
+        case .sample: return "Sample"
+        }
+    }
+}
+
+enum ScoreEnhancement: String, Codable, CaseIterable, Identifiable {
+    case original
+    case grayscale
+    case contrast
+    case highContrast
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .original: return "Original"
+        case .grayscale: return "Grayscale"
+        case .contrast: return "Contrast"
+        case .highContrast: return "High contrast"
+        }
+    }
+}
+
+enum ScoreCropPreset: String, Codable, CaseIterable, Identifiable {
+    case fullPage
+    case trimMargins
+    case upperHalf
+    case lowerHalf
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fullPage: return "Full page"
+        case .trimMargins: return "Trim margins"
+        case .upperHalf: return "Upper half"
+        case .lowerHalf: return "Lower half"
+        }
+    }
+}
+
+struct ScoreRegion: Codable, Equatable, Identifiable {
+    let id: UUID
+    var label: String
+    var normalizedX: Double
+    var normalizedY: Double
+    var normalizedWidth: Double
+    var normalizedHeight: Double
+}
+
+struct ScoreAnnotation: Codable, Equatable {
+    var focusMeasures: String = ""
+    var notes: String = ""
+    var tempoTarget: Int = 92
+    var problemPassage: String = ""
+}
+
+struct ScorePage: Codable, Equatable, Identifiable {
+    let id: UUID
+    var pageNumber: Int
+    var titleSuggestion: String?
+    var textSuggestions: [String]
+    var thumbnailPNGData: Data?
+    var rotationDegrees: Int = 0
+    var cropPreset: ScoreCropPreset = .fullPage
+    var enhancement: ScoreEnhancement = .original
+    var suggestedRegions: [ScoreRegion] = []
+}
+
+struct ImportedScore: Codable, Equatable, Identifiable {
+    let id: UUID
+    var title: String
+    var composer: String?
+    var sourceKind: ScoreSourceKind
+    var localFileName: String?
+    var importedAt: Date
+    var pages: [ScorePage]
+    var selectedPageID: ScorePage.ID?
+    var annotation: ScoreAnnotation = ScoreAnnotation()
+    var originalFileSizeBytes: Int64 = 0
+
+    var selectedPage: ScorePage? {
+        guard let selectedPageID else {
+            return pages.first
+        }
+        return pages.first { $0.id == selectedPageID } ?? pages.first
+    }
+
+    var pageCountLabel: String {
+        pages.count == 1 ? "1 page" : "\(pages.count) pages"
+    }
+
+    var exportText: String {
+        var lines = [
+            "BrassTune score metadata export",
+            "Score: \(title)",
+            "Source: \(sourceKind.title)",
+            "Pages: \(pages.count)",
+            "Imported: \(ISO8601DateFormatter().string(from: importedAt))",
+            "Tempo target: \(annotation.tempoTarget) BPM",
+        ]
+        if let composer, !composer.isEmpty {
+            lines.append("Composer/arranger: \(composer)")
+        }
+        if !annotation.focusMeasures.isEmpty {
+            lines.append("Focus measures: \(annotation.focusMeasures)")
+        }
+        if !annotation.problemPassage.isEmpty {
+            lines.append("Problem passage: \(annotation.problemPassage)")
+        }
+        if !annotation.notes.isEmpty {
+            lines.append("Notes: \(annotation.notes)")
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -70,15 +270,17 @@ struct PracticeSession: Codable, Equatable, Identifiable {
     var endedAt: Date?
     var frames: [PitchFrame]
     var retainedRecordingURL: URL?
+    var attachedScoreID: ImportedScore.ID? = nil
+    var practiceNotes: String = ""
 
     var averageAbsCents: Double {
-        let values = frames.compactMap(\.centsDeviation).map { abs($0) }
+        let values = frames.filter(\.isValidForRecording).compactMap(\.centsDeviation).map { abs($0) }
         guard !values.isEmpty else { return 0 }
         return values.reduce(0, +) / Double(values.count)
     }
 
     var inTunePercentage: Double {
-        let values = frames.compactMap(\.centsDeviation)
+        let values = frames.filter(\.isValidForRecording).compactMap(\.centsDeviation)
         guard !values.isEmpty else { return 0 }
         let inTune = values.filter { abs($0) <= 5 }.count
         return Double(inTune) / Double(values.count) * 100
@@ -116,6 +318,12 @@ struct PracticeSession: Codable, Equatable, Identifiable {
             "In-tune percentage: \(String(format: "%.0f", inTunePercentage))%",
             "Pitch coverage: \(pitchCoverageLabel)",
         ]
+        if let attachedScoreID {
+            lines.append("Attached score: \(attachedScoreID.uuidString)")
+        }
+        if !practiceNotes.isEmpty {
+            lines.append("Practice notes: \(practiceNotes)")
+        }
         let centsPreview = frames.compactMap(\.centsDeviation).prefix(12).map { String(format: "%+.1f", $0) }
         if !centsPreview.isEmpty {
             lines.append("Cents preview: \(centsPreview.joined(separator: ", "))")
@@ -139,9 +347,16 @@ struct AnalyticsSnapshot: Equatable {
         sessionCount > 0
     }
 
+    var hasUsableEvidence: Bool {
+        validFrameCount >= 8
+    }
+
     var recommendation: String {
         guard hasSessions else {
             return "Record a guided take to unlock local practice recommendations."
+        }
+        guard hasUsableEvidence else {
+            return "More locked notes are needed before BrassTune suggests a focused plan."
         }
         if averageAbsCents > 8 {
             return "Start with drone matching and slow attacks before extending range."
@@ -158,7 +373,8 @@ struct AnalyticsSnapshot: Equatable {
         validFrameCount = sessions.reduce(0) { $0 + $1.validFrameCount }
         totalPracticeSeconds = sessions.reduce(0) { $0 + $1.durationSeconds }
 
-        let allCents = sessions.flatMap { $0.frames.compactMap(\.centsDeviation) }
+        let validFrames = sessions.flatMap { $0.frames.filter(\.isValidForRecording) }
+        let allCents = validFrames.compactMap(\.centsDeviation)
         if allCents.isEmpty {
             averageAbsCents = 0
             averageInTunePercentage = 0
@@ -168,7 +384,8 @@ struct AnalyticsSnapshot: Equatable {
             averageInTunePercentage = Double(inTuneCount) / Double(allCents.count) * 100
         }
 
-        let bestSession = sessions.min { lhs, rhs in
+        let eligibleSessions = sessions.filter { $0.validFrameCount > 0 }
+        let bestSession = eligibleSessions.min { lhs, rhs in
             lhs.averageAbsCents < rhs.averageAbsCents
         }
         bestSessionName = bestSession?.name

@@ -1,4 +1,7 @@
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 enum AppTab: String, CaseIterable, Identifiable {
     case home
@@ -70,7 +73,7 @@ struct AppRootView: View {
                 }
                 .tint(BTTheme.accent)
                 .sheet(isPresented: $onboardingPresented) {
-                    OnboardingView(isPresented: $onboardingPresented)
+                    OnboardingView(isPresented: $onboardingPresented, selectedTab: $selectedTab)
                 }
             }
         }
@@ -107,6 +110,32 @@ struct HomeView: View {
             }
             .buttonStyle(BTPrimaryButtonStyle())
             .accessibilityIdentifier("home.startPractice")
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
+                NavigationLink {
+                    MetronomeView()
+                } label: {
+                    BTInsightTile(title: "Metronome", detail: "\(model.metronome.bpm) BPM, \(model.metronome.meterLabel)", systemImage: "metronome", tint: BTTheme.warning, interactive: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home.metronome")
+
+                NavigationLink {
+                    ScorePracticeView()
+                } label: {
+                    BTInsightTile(title: "Score Practice", detail: model.activeScore?.title ?? "Import or use sample", systemImage: "doc.viewfinder", tint: BTTheme.blue, interactive: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home.scorePractice")
+
+                NavigationLink {
+                    SettingsView(onboardingPresented: .constant(false))
+                } label: {
+                    BTInsightTile(title: "Settings", detail: "Horn, pitch, data", systemImage: "gearshape", tint: BTTheme.secondaryAccent, interactive: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home.settings")
+            }
 
             BTCard(tint: BTTheme.surfaceWarm) {
                 BTSectionHeader(title: "Today's intonation focus", subtitle: "Center the note before expanding range.")
@@ -148,6 +177,7 @@ struct HomeView: View {
 struct OnboardingView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var isPresented: Bool
+    @Binding var selectedTab: AppTab
 
     var body: some View {
         NavigationStack {
@@ -155,7 +185,7 @@ struct OnboardingView: View {
                 BTCard {
                     BTSectionHeader(
                         title: "Set the horn before the first take",
-                        subtitle: "Choose your instrument and reference pitch. Live microphone mode still requires iOS permission."
+                        subtitle: "Choose your instrument and reference pitch. Sample mode is ready now; live microphone tuning still needs iOS permission and physical-device validation."
                     )
                     Picker("Instrument", selection: $model.selectedInstrumentId) {
                         instrumentPickerOptions()
@@ -166,16 +196,21 @@ struct OnboardingView: View {
                 BTCard {
                     BTSectionHeader(
                         title: "How BrassTune records",
-                        subtitle: "No lock means confidence is too low to save. Unstable pitch means lock exists but cents vary too much."
+                        subtitle: "Sample mode is ready now. Live microphone tuning needs iOS permission and physical-device validation before release claims."
                     )
                     Button {
                         model.enterGuestDemo()
+                        selectedTab = .practice
                         isPresented = false
                     } label: {
-                        Label("Start practice", systemImage: "checkmark.circle.fill")
+                        Label("Continue as guest", systemImage: "checkmark.circle.fill")
                     }
                     .buttonStyle(BTPrimaryButtonStyle())
                     .accessibilityIdentifier("onboarding.startPractice")
+                    Text("No lock means confidence is too low to save. Unstable pitch means lock exists but cents vary too much.")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .navigationTitle("Setup")
@@ -191,6 +226,7 @@ struct PracticeView: View {
     var body: some View {
         BTScreen {
             PracticeTunerSection(model: model, audioEngine: model.audioEngine)
+            PracticeToolsCard(selectedTab: $selectedTab)
             MicrophoneSection(audioEngine: model.audioEngine)
             if !model.sessions.isEmpty {
                 BTCard {
@@ -217,13 +253,180 @@ struct PracticeView: View {
                     }
                 }
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                BTInsightTile(title: "Metronome", detail: "Tempo and count-in controls live in More.", systemImage: "metronome", tint: BTTheme.warning)
-                BTInsightTile(title: "Score practice", detail: "Score import remains a local/demo shell in native until physical-device validation.", systemImage: "doc.viewfinder", tint: BTTheme.blue)
-            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            PracticeRecordingInset(audioEngine: model.audioEngine)
         }
         .navigationTitle("Practice")
         .accessibilityIdentifier("screen.practice")
+    }
+}
+
+private struct PracticeRecordingInset: View {
+    @ObservedObject var audioEngine: NativeAudioEngine
+
+    var body: some View {
+        if audioEngine.recording {
+            FloatingPracticeControlBar()
+                .padding(.horizontal, BTSpacing.lg)
+                .padding(.bottom, BTSpacing.md)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}
+
+private struct PracticeToolsCard: View {
+    @EnvironmentObject private var model: AppModel
+    @Binding var selectedTab: AppTab
+
+    var body: some View {
+        BTCard {
+            BTSectionHeader(title: "Practice tools", subtitle: "Metronome and score notes stay local and can run during sample recording.")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
+                NavigationLink {
+                    MetronomeView()
+                } label: {
+                    BTInsightTile(title: "Metronome", detail: "\(model.metronome.bpm) BPM, \(model.metronome.meterLabel), \(model.metronome.subdivision.title)", systemImage: "metronome", tint: BTTheme.warning, interactive: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("practice.metronome")
+
+                NavigationLink {
+                    ScorePracticeView()
+                } label: {
+                    BTInsightTile(title: "Score Practice", detail: model.selectedScoreForPracticeLabel, systemImage: "doc.viewfinder", tint: BTTheme.blue, interactive: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("practice.scorePractice")
+
+                Button {
+                    selectedTab = .coach
+                } label: {
+                    BTInsightTile(title: "Coach", detail: model.analyticsSnapshot.recommendation, systemImage: "sparkles", tint: BTTheme.secondaryAccent, interactive: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("practice.coachShortcut")
+            }
+        }
+    }
+}
+
+private struct FloatingPracticeControlBar: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(spacing: BTSpacing.sm) {
+            HStack(spacing: BTSpacing.sm) {
+                Button {
+                    model.stopDemoRecording()
+                } label: {
+                    Label("Stop", systemImage: "stop.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Stop recording")
+                .accessibilityIdentifier("practice.floating.stop")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.danger))
+
+                Button {
+                    model.toggleMetronome()
+                } label: {
+                    Label(model.metronomeRunning ? "Stop metronome" : "Start metronome", systemImage: model.metronomeRunning ? "pause.fill" : "play.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel(model.metronomeRunning ? "Stop metronome" : "Start metronome")
+                .accessibilityIdentifier("practice.floating.metronome")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.warning))
+
+                VStack(spacing: 0) {
+                    Text("\(model.metronome.bpm)")
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(BTTheme.accentSoft)
+                    Text(model.metronome.meterLabel)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(BTTheme.muted)
+                }
+                .frame(minWidth: 54)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Metronome \(model.metronome.bpm) beats per minute, meter \(model.metronome.meterLabel)")
+                .accessibilityIdentifier("practice.floating.bpm")
+
+                Button {
+                    model.toggleMetronomeMute()
+                } label: {
+                    Label(model.metronome.muted ? "Unmute metronome" : "Mute metronome", systemImage: model.metronome.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel(model.metronome.muted ? "Unmute metronome" : "Mute metronome")
+                .accessibilityIdentifier("practice.floating.mute")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.blue))
+            }
+            .frame(maxWidth: .infinity)
+
+            HStack(spacing: BTSpacing.sm) {
+                Button {
+                    model.adjustTempo(by: -2)
+                } label: {
+                    Label("Tempo down", systemImage: "minus")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Decrease tempo")
+                .accessibilityIdentifier("practice.floating.tempoDown")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
+
+                Button {
+                    model.adjustTempo(by: 2)
+                } label: {
+                    Label("Tempo up", systemImage: "plus")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Increase tempo")
+                .accessibilityIdentifier("practice.floating.tempoUp")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
+
+                Button {
+                    model.tapTempo()
+                } label: {
+                    Label("Tap tempo", systemImage: "hand.tap")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Tap tempo")
+                .accessibilityIdentifier("practice.floating.tapTempo")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.secondaryAccent))
+            }
+            .frame(maxWidth: .infinity)
+
+            HStack(spacing: BTSpacing.sm) {
+                Text(model.metronomeRunning ? "Beat \(model.metronomeTick + 1)" : "Metronome ready")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(model.metronomeRunning ? BTTheme.warning : BTTheme.muted)
+                    .scaleEffect(model.metronomeRunning && !reduceMotion ? 1.03 : 1)
+                Spacer()
+                Text(model.activeScore?.title ?? "No score")
+                    .font(.caption)
+                    .foregroundStyle(BTTheme.muted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(BTSpacing.md)
+        .btGlassPanel(cornerRadius: BTTheme.radiusLarge, tint: BTTheme.surfaceWarm, interactive: true)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("practice.floatingBar")
+    }
+}
+
+private struct FloatingIconButtonStyle: ButtonStyle {
+    var tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.bold))
+            .foregroundStyle(tint)
+            .frame(width: 42, height: 42)
+            .background(tint.opacity(configuration.isPressed ? 0.24 : 0.14), in: Circle())
+            .overlay {
+                Circle().stroke(tint.opacity(0.30), lineWidth: 1)
+            }
     }
 }
 
@@ -307,7 +510,7 @@ private struct MicrophoneSection: View {
         BTCard {
             BTSectionHeader(
                 title: "Microphone",
-                subtitle: "This repository build uses permission checks plus deterministic sample takes; physical microphone tuning still requires the native audio path."
+                subtitle: "This native beta can request permission and run deterministic sample takes. Real acoustic tuning still needs physical-device validation."
             )
             Button {
                 Task { _ = await audioEngine.requestMicrophonePermission() }
@@ -317,10 +520,19 @@ private struct MicrophoneSection: View {
             .buttonStyle(BTSecondaryButtonStyle())
             .accessibilityIdentifier("practice.microphonePermission")
             if audioEngine.permissionDenied {
-                Text("Microphone denied. Open Settings to allow access.")
+                Text("Microphone denied. You can still use sample mode, metronome, and score practice, or reopen iOS Settings to allow access.")
                     .font(.footnote)
                     .foregroundStyle(BTTheme.danger)
                     .accessibilityIdentifier("practice.microphoneDenied")
+                Button {
+                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsURL)
+                    }
+                } label: {
+                    Label("Open iOS Settings", systemImage: "gearshape")
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("practice.openIOSSettings")
             }
         }
     }
@@ -517,10 +729,10 @@ struct CoachNativeView: View {
             BTPageHeader(
                 eyebrow: "Coach",
                 title: "Practice plan",
-                subtitle: "Native guidance mirrors the web cockpit with local, honest recommendations until live account coaching is validated.",
+                subtitle: "Local native guidance uses saved sample evidence and stays conservative until account-backed coaching is validated.",
                 trailing: model.authState.usesRemoteAccount ? "Account" : "Local"
             )
-            if model.analyticsSnapshot.hasSessions {
+            if model.analyticsSnapshot.hasUsableEvidence {
                 BTCard(tint: BTTheme.surfaceWarm) {
                     BTSectionHeader(title: "Next best drill", subtitle: model.analyticsSnapshot.recommendation)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
@@ -529,6 +741,15 @@ struct CoachNativeView: View {
                         BTInsightTile(title: "Release audit", detail: "Check that the final second stays within 5 cents.", systemImage: "checkmark.seal", tint: BTTheme.success)
                     }
                 }
+            } else if model.analyticsSnapshot.hasSessions {
+                BTEmptyState(title: "More locked notes needed", message: model.analyticsSnapshot.recommendation, systemImage: "sparkles")
+                Button {
+                    selectedTab = .practice
+                } label: {
+                    Label("Record another take", systemImage: "record.circle")
+                }
+                .buttonStyle(BTPrimaryButtonStyle())
+                .accessibilityIdentifier("coach.recordMore")
             } else {
                 BTEmptyState(title: "Coach needs a take", message: "Record a sample take first so native coaching can use local intonation evidence.", systemImage: "sparkles")
                 Button {
@@ -561,14 +782,14 @@ struct MoreHubView: View {
                 MoreHubLink(title: "Sessions", detail: "Review saved takes and exports.", systemImage: "music.note.list", tint: BTTheme.accent) {
                     SessionsView()
                 }
-                MoreHubLink(title: "Metronome", detail: "Tempo, meter, and count-in shell.", systemImage: "metronome", tint: BTTheme.warning) {
-                    NativeToolShell(title: "Metronome", subtitle: "Foreground pulse controls are planned for native parity. Use the web app for full ramp/subdivision controls until this shell is implemented.", systemImage: "metronome")
+                MoreHubLink(title: "Metronome", detail: "Tempo, tap, meter, mute, visual pulse.", systemImage: "metronome", tint: BTTheme.warning) {
+                    MetronomeView()
                 }
-                MoreHubLink(title: "Score Practice", detail: "Score workflow placeholder.", systemImage: "doc.viewfinder", tint: BTTheme.blue) {
-                    NativeToolShell(title: "Score Practice", subtitle: "Native score import remains an honest shell until PDF/image import and physical-device validation are complete.", systemImage: "doc.viewfinder")
+                MoreHubLink(title: "Score Practice", detail: "Files, Photos, pages, notes.", systemImage: "doc.viewfinder", tint: BTTheme.blue) {
+                    ScorePracticeView()
                 }
-                MoreHubLink(title: "Progress", detail: "Long-term trend surface.", systemImage: "chart.line.uptrend.xyaxis", tint: BTTheme.success) {
-                    NativeToolShell(title: "Progress", subtitle: "Progress trends currently use web/backend data. Native local trend charts will build on saved sample takes.", systemImage: "chart.line.uptrend.xyaxis")
+                MoreHubLink(title: "Progress", detail: "Local trend and heatmap.", systemImage: "chart.line.uptrend.xyaxis", tint: BTTheme.success) {
+                    ProgressNativeView()
                 }
                 MoreHubLink(title: "Ensemble", detail: "Director and membership state.", systemImage: "person.3", tint: BTTheme.secondaryAccent) {
                     EnsembleView(selectedTab: $selectedTab)
@@ -576,8 +797,8 @@ struct MoreHubView: View {
                 MoreHubLink(title: "Settings", detail: "Account, tuner, data, legal.", systemImage: "gearshape", tint: BTTheme.muted) {
                     SettingsView(onboardingPresented: $onboardingPresented)
                 }
-                MoreHubLink(title: "Audio Lab", detail: "Diagnostics placeholder.", systemImage: "waveform", tint: BTTheme.blue) {
-                    NativeToolShell(title: "Audio Lab", subtitle: "Native audio diagnostics are limited to permission and sample-take evidence in this build. Physical microphone quality still needs device validation.", systemImage: "waveform")
+                MoreHubLink(title: "Audio Lab", detail: "Permission and detector state.", systemImage: "waveform", tint: BTTheme.blue) {
+                    AudioLabView()
                 }
                 MoreHubLink(title: "Privacy", detail: "Data use and account lifecycle.", systemImage: "hand.raised", tint: BTTheme.accent) {
                     LegalDetailView(kind: .privacy)
@@ -614,10 +835,528 @@ private struct MoreHubLink<Destination: View>: View {
         NavigationLink {
             destination
         } label: {
-            BTInsightTile(title: title, detail: detail, systemImage: systemImage, tint: tint)
+            BTInsightTile(title: title, detail: detail, systemImage: systemImage, tint: tint, interactive: true)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("more.\(title.replacingOccurrences(of: " ", with: "").lowercased())")
+    }
+}
+
+struct MetronomeView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        BTScreen {
+            BTPageHeader(
+                eyebrow: "Practice tool",
+                title: "Metronome",
+                subtitle: "Visual-first native metronome controls that can stay running while a sample take records.",
+                trailing: model.metronomeRunning ? "Running" : "Ready"
+            )
+
+            BTCard(tint: BTTheme.surfaceWarm) {
+                HStack(alignment: .center, spacing: BTSpacing.lg) {
+                    VStack(alignment: .leading, spacing: BTSpacing.sm) {
+                        Text("\(model.metronome.bpm)")
+                            .font(.system(size: 72, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(BTTheme.accentSoft)
+                            .accessibilityIdentifier("metronome.bpm")
+                        Text("\(model.metronome.meterLabel) • \(model.metronome.subdivision.title)")
+                            .font(.headline)
+                            .foregroundStyle(BTTheme.muted)
+                            .accessibilityIdentifier("metronome.meter")
+                    }
+                    Spacer()
+                    Circle()
+                        .fill(model.metronomeRunning ? BTTheme.warning.opacity(0.90) : BTTheme.surfaceAlt)
+                        .frame(width: 74, height: 74)
+                        .scaleEffect(model.metronomeRunning && !reduceMotion ? 1.0 + CGFloat(model.metronomeTick == 0 ? 0.18 : 0.06) : 1)
+                        .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72), value: model.metronomeTick)
+                        .accessibilityHidden(true)
+                }
+
+                Button {
+                    model.toggleMetronome()
+                } label: {
+                    Label(model.metronomeRunning ? "Stop metronome" : "Start metronome", systemImage: model.metronomeRunning ? "pause.fill" : "play.fill")
+                }
+                .buttonStyle(BTPrimaryButtonStyle())
+                .accessibilityIdentifier("metronome.toggle")
+            }
+
+            BTCard {
+                BTSectionHeader(title: "Tempo", subtitle: "Tap or step tempo. The floating recording bar uses the same settings.")
+                HStack(spacing: BTSpacing.md) {
+                    Button {
+                        model.adjustTempo(by: -5)
+                    } label: {
+                        Label("Down", systemImage: "minus")
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("metronome.tempoDown")
+
+                    Button {
+                        model.tapTempo()
+                    } label: {
+                        Label("Tap tempo", systemImage: "hand.tap")
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("metronome.tapTempo")
+
+                    Button {
+                        model.adjustTempo(by: 5)
+                    } label: {
+                        Label("Up", systemImage: "plus")
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("metronome.tempoUp")
+                }
+                Stepper("BPM \(model.metronome.bpm)", value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 30...240, step: 1)
+                    .accessibilityIdentifier("metronome.stepper")
+            }
+
+            BTCard {
+                BTSectionHeader(title: "Meter and feel", subtitle: "Speaker click is muted by default to avoid bleeding into microphone recordings.")
+                Picker("Meter", selection: Binding(get: { model.metronome.beatsPerMeasure }, set: { model.setMeter(beats: $0) })) {
+                    ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
+                        Text("\(beats)/4").tag(beats)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("metronome.meterPicker")
+
+                Picker("Subdivision", selection: Binding(get: { model.metronome.subdivision }, set: { model.metronome.subdivision = $0 })) {
+                    ForEach(MetronomeSubdivision.allCases) { subdivision in
+                        Text(subdivision.title).tag(subdivision)
+                    }
+                }
+                .accessibilityIdentifier("metronome.subdivisionPicker")
+
+                Toggle("Mute speaker click", isOn: Binding(get: { model.metronome.muted }, set: { newValue in
+                    if model.metronome.muted != newValue {
+                        model.toggleMetronomeMute()
+                    }
+                }))
+                .accessibilityIdentifier("metronome.mute")
+
+                Toggle("Visual-only practice", isOn: Binding(get: { model.metronome.visualOnly }, set: { model.setMetronomeVisualOnly($0) }))
+                    .accessibilityIdentifier("metronome.visualOnly")
+
+                Slider(value: Binding(get: { model.metronome.volume }, set: { model.setMetronomeVolume($0) }), in: 0...1)
+                    .disabled(model.metronome.visualOnly)
+                    .accessibilityLabel("Metronome volume")
+                    .accessibilityIdentifier("metronome.volume")
+
+                Toggle("Haptic pulse", isOn: Binding(get: { model.metronome.hapticsEnabled }, set: { model.metronome.hapticsEnabled = $0 }))
+                    .accessibilityIdentifier("metronome.haptics")
+
+                Text("For real microphone recording, use headphones or visual-only mode until click-bleed is validated on a physical device.")
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .navigationTitle("Metronome")
+        .accessibilityIdentifier("screen.metronome")
+    }
+}
+
+struct ScorePracticeView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var showFileImporter = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var importError: String?
+
+    var body: some View {
+        BTScreen {
+            BTPageHeader(
+                eyebrow: "Score assist",
+                title: "Score Practice",
+                subtitle: "Import local PDF or image scores, mark problem passages, and keep metadata on device.",
+                trailing: "\(model.scores.count)"
+            )
+
+            BTCard {
+                BTSectionHeader(title: "Import", subtitle: "Files and Photos stay local by default. Camera capture is hidden until it has a real native flow and device validation.")
+                HStack(spacing: BTSpacing.md) {
+                    Button {
+                        showFileImporter = true
+                    } label: {
+                        Label("Files", systemImage: "folder")
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("score.import.files")
+
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Label("Photos", systemImage: "photo")
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("score.import.photos")
+
+                    Button {
+                        model.importSampleScore()
+                    } label: {
+                        Label("Sample", systemImage: "music.note")
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("score.import.sample")
+                }
+
+                Text("Score intelligence here means local page previews, cleanup controls, OCR-style text suggestions when PDF text is available, and manual annotations. BrassTune does not upload copyrighted scores or claim optical music recognition.")
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let importError {
+                    Text(importError)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(BTTheme.danger)
+                        .accessibilityIdentifier("score.import.error")
+                }
+            }
+
+            if model.scores.isEmpty {
+                BTEmptyState(title: "No score imported", message: "Import a local PDF/image or add the synthetic sample score to rehearse the workflow.", systemImage: "doc.viewfinder")
+                    .accessibilityIdentifier("score.empty")
+            } else {
+                ForEach(model.scores) { score in
+                    ScoreDocumentCard(score: score)
+                }
+            }
+        }
+        .navigationTitle("Score Practice")
+        .accessibilityIdentifier("screen.scorePractice")
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.pdf, .png, .jpeg, .heic], allowsMultipleSelection: false) { result in
+            do {
+                guard let url = try result.get().first else { return }
+                try model.importScore(from: url)
+                importError = nil
+            } catch {
+                importError = error.localizedDescription
+            }
+        }
+        .onChange(of: selectedPhoto) { _, newValue in
+            guard let newValue else { return }
+            Task {
+                do {
+                    guard let data = try await newValue.loadTransferable(type: Data.self) else { return }
+                    try model.importPhotoScore(data: data)
+                    importError = nil
+                } catch {
+                    importError = error.localizedDescription
+                }
+            }
+        }
+    }
+}
+
+private struct ScoreDocumentCard: View {
+    @EnvironmentObject private var model: AppModel
+    let score: ImportedScore
+
+    var body: some View {
+        BTCard(tint: score.id == model.activeScoreID ? BTTheme.surfaceWarm : BTTheme.surface) {
+            HStack(alignment: .top, spacing: BTSpacing.md) {
+                ScoreThumbnailView(page: score.selectedPage)
+                    .frame(width: 98, height: 132)
+                VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                    Text(score.title)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(BTTheme.text)
+                    Text("\(score.sourceKind.title) • \(score.pageCountLabel)")
+                        .font(.subheadline)
+                        .foregroundStyle(BTTheme.muted)
+                    if let composer = score.composer {
+                        Text(composer)
+                            .font(.caption)
+                            .foregroundStyle(BTTheme.muted)
+                    }
+                }
+                Spacer()
+                BTStatusPill(text: score.id == model.activeScoreID ? "Active" : "Local", tint: score.id == model.activeScoreID ? BTTheme.success : BTTheme.blue)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: BTSpacing.sm) {
+                    ForEach(score.pages) { page in
+                        Button {
+                            model.selectScorePage(scoreID: score.id, pageID: page.id)
+                        } label: {
+                            Text("Page \(page.pageNumber)")
+                                .font(.caption.weight(.bold))
+                                .padding(.horizontal, BTSpacing.sm)
+                                .padding(.vertical, BTSpacing.xs)
+                                .background(page.id == score.selectedPage?.id ? BTTheme.accent.opacity(0.22) : BTTheme.surfaceAlt, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("score.page.\(page.pageNumber)")
+                    }
+                }
+            }
+
+            if let page = score.selectedPage {
+                ScorePageControls(scoreID: score.id, page: page)
+            }
+
+            ScoreAnnotationEditor(score: score)
+
+            HStack(spacing: BTSpacing.md) {
+                Button {
+                    model.activeScoreID = score.id
+                } label: {
+                    Label("Use in practice", systemImage: "pin")
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("score.useInPractice")
+
+                Button {
+                    model.attachScoreToLatestSession(scoreID: score.id)
+                } label: {
+                    Label("Attach to latest", systemImage: "paperclip")
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .disabled(model.sessions.isEmpty)
+                .accessibilityIdentifier("score.attachLatest")
+            }
+
+            HStack(spacing: BTSpacing.md) {
+                ShareLink(item: score.exportText) {
+                    Label("Export metadata", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("score.export")
+
+                Button(role: .destructive) {
+                    model.deleteScore(id: score.id)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("score.delete")
+            }
+        }
+        .accessibilityIdentifier("score.card")
+    }
+}
+
+private struct ScoreThumbnailView: View {
+    let page: ScorePage?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(BTTheme.surfaceAlt)
+            if let data = page?.thumbnailPNGData, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .scoreEnhancement(page?.enhancement ?? .original)
+                    .scaleEffect(cropScale)
+                    .offset(y: cropOffsetY)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .rotationEffect(.degrees(Double(page?.rotationDegrees ?? 0)))
+            } else {
+                Image(systemName: "doc.text.image")
+                    .font(.title)
+                    .foregroundStyle(BTTheme.blue)
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BTTheme.panelLine, lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityLabel(page.map { "Score page \($0.pageNumber) preview" } ?? "Score page preview")
+    }
+
+    private var cropScale: CGFloat {
+        switch page?.cropPreset ?? .fullPage {
+        case .fullPage: return 1
+        case .trimMargins: return 1.16
+        case .upperHalf, .lowerHalf: return 1.82
+        }
+    }
+
+    private var cropOffsetY: CGFloat {
+        switch page?.cropPreset ?? .fullPage {
+        case .fullPage, .trimMargins: return 0
+        case .upperHalf: return 56
+        case .lowerHalf: return -56
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func scoreEnhancement(_ enhancement: ScoreEnhancement) -> some View {
+        switch enhancement {
+        case .original:
+            self
+        case .grayscale:
+            self.saturation(0)
+        case .contrast:
+            self.contrast(1.28).brightness(0.03)
+        case .highContrast:
+            self.saturation(0).contrast(1.85).brightness(0.05)
+        }
+    }
+}
+
+private struct ScorePageControls: View {
+    @EnvironmentObject private var model: AppModel
+    let scoreID: ImportedScore.ID
+    let page: ScorePage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BTSpacing.md) {
+            BTSectionHeader(title: "Page cleanup", subtitle: "Rotate, crop, and enhance the practice preview. Original file remains local.")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 126), spacing: BTSpacing.sm)], spacing: BTSpacing.sm) {
+                Button {
+                    model.rotateSelectedScorePage(scoreID: scoreID)
+                } label: {
+                    Label("Rotate", systemImage: "rotate.right")
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("score.rotate")
+
+                Picker("Crop", selection: Binding(get: { page.cropPreset }, set: { model.setSelectedScorePageCrop(scoreID: scoreID, crop: $0) })) {
+                    ForEach(ScoreCropPreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
+                    }
+                }
+                .accessibilityIdentifier("score.crop")
+            }
+
+            Picker("Enhance", selection: Binding(get: { page.enhancement }, set: { model.setSelectedScorePageEnhancement(scoreID: scoreID, enhancement: $0) })) {
+                ForEach(ScoreEnhancement.allCases) { enhancement in
+                    Text(enhancement.title).tag(enhancement)
+                }
+            }
+            .accessibilityIdentifier("score.enhance")
+
+            if !page.textSuggestions.isEmpty {
+                Text("Text suggestions: \(page.textSuggestions.joined(separator: ", "))")
+                    .font(.caption)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("score.textSuggestions")
+            }
+
+            if !page.suggestedRegions.isEmpty {
+                Text("Suggested regions: \(page.suggestedRegions.map(\.label).joined(separator: ", "))")
+                    .font(.caption)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("score.regions")
+            }
+        }
+        .padding(BTSpacing.md)
+        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt)
+    }
+}
+
+private struct ScoreAnnotationEditor: View {
+    @EnvironmentObject private var model: AppModel
+    let score: ImportedScore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BTSpacing.md) {
+            BTSectionHeader(title: "Practice annotation", subtitle: "Manual notes are the reliable fallback when OMR is not available.")
+            TextField("Focus measures", text: Binding(get: { score.annotation.focusMeasures }, set: { model.updateScoreAnnotation(scoreID: score.id, focusMeasures: $0) }))
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("score.focusMeasures")
+            TextField("Problem passage", text: Binding(get: { score.annotation.problemPassage }, set: { model.updateScoreAnnotation(scoreID: score.id, problemPassage: $0) }))
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("score.problemPassage")
+            Stepper("Tempo target \(score.annotation.tempoTarget) BPM", value: Binding(get: { score.annotation.tempoTarget }, set: { model.updateScoreAnnotation(scoreID: score.id, tempoTarget: $0) }), in: 30...240, step: 2)
+                .accessibilityIdentifier("score.tempoTarget")
+            TextField("Notes", text: Binding(get: { score.annotation.notes }, set: { model.updateScoreAnnotation(scoreID: score.id, notes: $0) }), axis: .vertical)
+                .lineLimit(2...4)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("score.notes")
+        }
+        .padding(BTSpacing.md)
+        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt)
+    }
+}
+
+struct ProgressNativeView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let snapshot = model.analyticsSnapshot
+        BTScreen {
+            BTPageHeader(
+                eyebrow: "Local progress",
+                title: "Progress",
+                subtitle: snapshot.hasUsableEvidence ? "Local trend summaries from valid sample frames." : "Progress appears after a saved take has valid pitch evidence.",
+                trailing: "\(snapshot.sessionCount)"
+            )
+
+            if snapshot.hasUsableEvidence {
+                BTCard {
+                    BTSectionHeader(title: "Trend", subtitle: snapshot.recommendation)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
+                        BTMetricTile(title: "Sessions", value: "\(snapshot.sessionCount)", detail: "local")
+                        BTMetricTile(title: "Valid frames", value: "\(snapshot.validFrameCount)", detail: "saved")
+                        BTMetricTile(title: "In tune", value: "\(String(format: "%.0f", snapshot.averageInTunePercentage))%", detail: "within 5 cents", tint: BTTheme.success)
+                    }
+                }
+                BTCard {
+                    BTSectionHeader(title: "Practice heatmap", subtitle: "Each block represents one saved local session.")
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: BTSpacing.xs), count: min(7, max(1, model.sessions.count))), spacing: BTSpacing.xs) {
+                        ForEach(model.sessions.prefix(28)) { session in
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(session.inTunePercentage >= 70 ? BTTheme.success : (session.averageAbsCents > 8 ? BTTheme.warning : BTTheme.blue))
+                                .frame(height: 34)
+                                .accessibilityLabel("\(session.name), \(String(format: "%.0f", session.inTunePercentage)) percent in tune")
+                        }
+                    }
+                    .accessibilityIdentifier("progress.heatmap")
+                }
+            } else {
+                BTEmptyState(title: "More data needed", message: "Record a guided sample take with locked notes before BrassTune summarizes progress.", systemImage: "chart.line.uptrend.xyaxis")
+                    .accessibilityIdentifier("progress.empty")
+            }
+        }
+        .navigationTitle("Progress")
+        .accessibilityIdentifier("screen.progress")
+    }
+}
+
+struct AudioLabView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        BTScreen {
+            BTPageHeader(
+                eyebrow: "Diagnostics",
+                title: "Audio Lab",
+                subtitle: "Native beta diagnostics are local and conservative until physical microphone validation is complete.",
+                trailing: model.audioEngine.permissionDenied ? "Denied" : "Ready"
+            )
+
+            BTCard {
+                BTSectionHeader(title: "Current detector state", subtitle: "Sample mode uses deterministic frames; live acoustic capture is not claimed release-ready.")
+                let frame = model.audioEngine.currentFrame
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
+                    BTMetricTile(title: "Frequency", value: frame?.frequencyHz.map { String(format: "%.1f", $0) } ?? "--", detail: "Hz")
+                    BTMetricTile(title: "Confidence", value: frame.map { String(format: "%.2f", $0.confidence) } ?? "--", detail: "sample")
+                    BTMetricTile(title: "RMS", value: frame.map { String(format: "%.2f", $0.rms) } ?? "--", detail: "level")
+                    BTMetricTile(title: "Frames", value: "\(model.audioEngine.frames.count)", detail: "buffered")
+                }
+                Button {
+                    Task { _ = await model.audioEngine.requestMicrophonePermission() }
+                } label: {
+                    Label("Check microphone permission", systemImage: "mic")
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("audioLab.permission")
+            }
+        }
+        .navigationTitle("Audio Lab")
+        .accessibilityIdentifier("screen.audioLab")
     }
 }
 
@@ -816,9 +1555,10 @@ private func displayStatus(_ rawValue: String) -> String {
 private func statusTint(_ rawValue: String?) -> Color {
     switch rawValue {
     case "in_tune": return BTTheme.success
-    case "sharp", "flat": return BTTheme.secondaryAccent
+    case "sharp": return BTTheme.sharp
+    case "flat": return BTTheme.flat
     case "unstable": return BTTheme.warning
-    case "silence": return .secondary
+    case "silence": return BTTheme.unstable
     default: return BTTheme.accent
     }
 }

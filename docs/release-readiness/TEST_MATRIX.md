@@ -1,8 +1,24 @@
 # Release Test Matrix
 
-Updated: 2026-06-21T05:51:09Z
+Updated: 2026-07-04T03:23:06-05:00
+
+## Native Swift Local Gates
+
+| Gate | Command | Result | Notes |
+|---|---|---|---|
+| BrassTuneCore Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3` Swift Testing tests | Pitch math, transposition, and confidence semantics. |
+| Native design tokens | `python3 swift/BrassTuneApp/scripts/verify_design_tokens.py` | Passed | Verified `15` Swift theme colors against `design/brasstune-tokens.json`. |
+| Native app unit tests | `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination id=D0C0647A-4B09-41B2-A434-ABB37D8095A5 CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppTests` | Passed: `14` tests | Covers local persistence, metronome state, score deletion/privacy cleanup, session export, analytics, and transposition fixtures. |
+| Native UI smoke | `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneAppUISmoke -destination id=D0C0647A-4B09-41B2-A434-ABB37D8095A5 -destination-timeout 60 CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces -resultBundlePath /tmp/BrassTuneAppUISmoke-current.xcresult` | Passed: `1` UI test | Onboarding/guest entry, practice recording, floating metronome bar, metronome screen, sessions, Coach, More, Score Practice sample import/rotate, and Settings. |
+| iPhone Debug simulator build | `xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Debug -destination id=D0C0647A-4B09-41B2-A434-ABB37D8095A5 CODE_SIGNING_ALLOWED=NO build` | Passed | Simulator build only, unsigned. |
+| iPhone Release simulator build | `xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Release -destination id=D0C0647A-4B09-41B2-A434-ABB37D8095A5 CODE_SIGNING_ALLOWED=NO build` | Passed | Simulator build only, unsigned. |
+| iPad Debug simulator build | `xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Debug -destination id=C86B38C3-D50B-48F3-8E21-1FD7A44FCC81 CODE_SIGNING_ALLOWED=NO build` | Passed | iPad Pro 13-inch (M5) simulator discovered dynamically. |
+| Native launch screenshot | `xcrun simctl io D0C0647A-4B09-41B2-A434-ABB37D8095A5 screenshot /tmp/brasstune-native-launch.png` | Captured | Simulator launch evidence only. |
+| Diff hygiene | `git diff --check` | Passed | No whitespace errors. |
 
 ## Web Production Gates
+
+Web production work is paused by owner direction as of 2026-07-04. The following rows are retained as historical web evidence only and were not rerun during the native-only pass.
 
 | Gate | Command | Result | Notes |
 |---|---|---|---|
@@ -30,6 +46,6 @@ Updated: 2026-06-21T05:51:09Z
 |---|---|---|
 | Live Supabase account lifecycle | Owner-gated | Requires disposable provider credentials/users. |
 | Google/Apple provider lifecycle | Owner-gated | Provider configuration and disposable users are external. |
-| Native Swift phase | Allowed to start | Web production gate passed; native completion is still separate. |
+| Native Swift physical-device validation | Blocked | Requires real iPhone/iPad for microphone, brass-room acoustics, Photos/Files import, haptics, speaker/headphone click-bleed, and route changes. |
 | App Store/TestFlight | External | Requires Apple signing, App Store Connect, approved wording, and submission access. |
-| Physical-device microphone/brass validation | External | Simulator and browser checks do not prove physical brass input quality. |
+| Camera score capture | External/future native feature | Camera import is hidden and no camera permission string is declared until a real native flow is implemented and device-tested. |
