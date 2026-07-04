@@ -11,6 +11,7 @@ This native branch carries SwiftUI surface parity work only. It does not certify
 Included native scope:
 
 - Dark BrassTune visual system aligned with the web app.
+- Native theme colors checked against `design/brasstune-tokens.json` by `swift/BrassTuneApp/scripts/verify_design_tokens.py`.
 - Liquid Glass-gated panel styling where the active SDK supports it.
 - Bento-style dashboard, practice, analytics, coach, and More hub surfaces.
 - Native navigation separation for Home, Practice, Analytics, Coach, and More.
@@ -22,7 +23,9 @@ Included native scope:
 Required evidence before calling native parity complete:
 
 - `cd swift/BrassTuneCore && swift test`
+- `python3 swift/BrassTuneApp/scripts/verify_design_tokens.py`
 - `xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Debug -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO build`
+- `xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Release -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO build`
 - `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppTests`
 - `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneAppUISmoke -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces`
 

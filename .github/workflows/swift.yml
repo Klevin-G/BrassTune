@@ -27,6 +27,8 @@ jobs:
       - name: Swift package tests
         working-directory: swift/BrassTuneCore
         run: swift test
+      - name: Verify native design tokens
+        run: python3 swift/BrassTuneApp/scripts/verify_design_tokens.py
       - name: Select available iPhone simulator
         id: simulator
         run: |
