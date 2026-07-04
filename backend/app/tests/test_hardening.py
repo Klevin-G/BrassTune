@@ -159,7 +159,8 @@ def test_rate_limit_prunes_expired_buckets_before_cardinality_cap(monkeypatch):
     monkeypatch.setenv("BRASSTUNE_RATE_LIMIT_PER_MINUTE", "5")
     monkeypatch.setenv("BRASSTUNE_RATE_LIMIT_MAX_BUCKETS", "1")
     main_module._RATE_LIMIT_BUCKETS.clear()
-    main_module._RATE_LIMIT_BUCKETS[("old-client", "/api/instruments")].append(0.0)
+    expired_timestamp = main_module.time.monotonic() - main_module._RATE_LIMIT_WINDOW_SECONDS - 1
+    main_module._RATE_LIMIT_BUCKETS[("old-client", "/api/instruments")].append(expired_timestamp)
     with TestClient(app) as client:
         response = client.get("/api/instruments")
     assert response.status_code == 200

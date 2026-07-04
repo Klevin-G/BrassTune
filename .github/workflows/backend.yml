@@ -59,7 +59,7 @@ jobs:
       BRASSTUNE_AUTH_MODE: disabled
       BRASSTUNE_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
-      BRASSTUNE_SEED_DEMO_DATA: "0"
+      BRASSTUNE_SEED_DEMO_DATA: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
