@@ -1,11 +1,40 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "generated_at": "2026-06-21T05:51:09Z",
-  "repo": "aryasalem09/BrassTune",
-  "phase": "phase_1_web_production_completion",
-  "production_auth_mode": "disabled",
+  "repo": "Klevin-G/BrassTune",
+  "phase": "historical_phase_1_web_production_completion",
+  "current_audit_2026_07_08": {
+    "status": "historical_only_not_current_release_decision",
+    "web_release_decision": "blocked",
+    "native_release_decision": "blocked",
+    "current_main_sha": "1c998d5480f52b5fcf0e2c143f5078893caead66",
+    "web_pr_7_head_sha": "b37ed6ce6c8bb33089e14ce950c3de768a295602",
+    "native_pr_8_head_sha": "989abb1684cc8a2076e061607678a70f31e25969",
+    "local_native_validation": {
+      "status": "partially_passed_locally_not_committed_or_ci_green",
+      "brass_tune_core_swift_test": "3 passed",
+      "design_token_verification": "15 colors verified",
+      "native_app_unit_tests": "18 passed",
+      "iphone_debug_simulator_build": "passed",
+      "iphone_release_simulator_build": "passed",
+      "ipad_debug_simulator_build": "passed",
+      "ui_smoke_execution": "blocked by CoreSimulator SBMainWorkspace/preflight Busy before app launch",
+      "diff_check": "passed",
+      "secret_and_large_file_dirty_diff_scan": "no high-confidence secrets or dirty files over 1MiB observed"
+    },
+    "web_blockers": [
+      "Current PR #7 web/backend recovery lives in the separate web recovery worktree and remains blocked on stale Render readiness/version routes, protected Vercel preview access, disabled deploy/smoke workflows, and live Supabase acceptance."
+    ],
+    "native_blockers": [
+      "Real AVAudioEngine microphone pitch capture is implemented locally, but the live microphone path has not been validated on physical iPhone/iPad hardware.",
+      "Current UI smoke execution is blocked by CoreSimulator SBMainWorkspace/preflight Busy before the test body runs.",
+      "No physical iPhone/iPad validation was available.",
+      "Apple signing, archive validation, TestFlight, and App Store Connect gates are unavailable."
+    ]
+  },
+  "production_auth_mode": "historical_disabled_guest_first_beta",
   "web_version": "0.1.0-beta.1",
-  "web_production_completion_gate": "passed",
+  "web_production_completion_gate": "historical_passed_june_2026_not_current_release_decision",
   "native_phase_allowed": true,
   "web_completion_branch_sha": "a642508ab638233e1fe297653147b8ccd3ceaf54",
   "web_completion_merge_sha": "b956cf5bc6914fcb07fc6a18c83eac75c1d70446",
@@ -129,5 +158,5 @@
     "Apple signing/TestFlight/App Store submission remains external",
     "Physical-device microphone/brass validation remains hardware-gated"
   ],
-  "gate_line": "WEB PRODUCTION COMPLETION GATE: PASSED"
+  "gate_line": "HISTORICAL WEB PRODUCTION COMPLETION GATE: PASSED"
 }

@@ -27,6 +27,7 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 - Simulator Debug/Release builds pass with Xcode 26.2 / iOS 26.2 SDK.
 - Native metronome simulator scope exists: visual pulse, audible click output, haptic option, mute, volume, meter, subdivision, and tap tempo.
 - Native score assist simulator scope exists: PDF/image/Photos/sample import, thumbnails, page selection, rotate/crop/enhance preview, annotations, metadata export, and local delete.
+- Local AVAudioEngine live microphone capture code exists with permission handling, PCM input tap, pitch/confidence/RMS/no-lock detection, route/interruption notices, and sample-mode fallback.
 
 ## Owner Decisions Required
 
@@ -60,6 +61,7 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 - Third-party SDK privacy signature/manifest audit after final dependencies are pinned.
 - Required-reason API final audit after adding production Supabase Swift client.
 - Physical-device microphone validation.
+- Physical-device validation of the local live microphone path with real brass input.
 - Physical-device metronome click-bleed, haptic, route, speaker, headphone, and timing validation.
 - Physical-device Files/Photos score import validation.
 - Native camera score scanner/VisionKit flow.

@@ -100,6 +100,46 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testRecordingSourceCreatesDistinctLiveAndSampleSessions() async {
+        let model = makeModel()
+
+        model.startDemoRecording()
+        model.stopDemoRecording()
+        let liveFrames = (0..<16).map { index in
+            PitchFrame.detected(
+                timestampMs: index * 100,
+                frequencyHz: 440,
+                confidence: 0.99,
+                rms: 0.08,
+                instrumentId: "trombone",
+                referencePitchHz: 440
+            )
+        }
+        model.selectedInstrumentId = "trombone"
+        model.recordingSource = .live
+        model.audioEngine.startFixtureRecording(instrumentId: "trombone", referencePitchHz: 440)
+        model.audioEngine.stopAndResetAudioEngine()
+        model.sessions.insert(
+            PracticeSession(
+                id: UUID(),
+                name: PracticeSessionSource.live.sessionTitle,
+                instrumentId: "trombone",
+                startedAt: Date(),
+                endedAt: Date().addingTimeInterval(1.6),
+                frames: liveFrames,
+                retainedRecordingURL: nil,
+                source: .live
+            ),
+            at: 0
+        )
+
+        XCTAssertEqual(model.sessions[0].source, .live)
+        XCTAssertEqual(model.sessions[1].source, .sample)
+        XCTAssertTrue(model.sessions[0].exportText.contains("Source: live microphone"))
+        XCTAssertTrue(model.sessions[1].exportText.contains("Source: deterministic sample"))
+    }
+
+    @MainActor
     func testTapTempoClampsAndUpdatesBPM() {
         let model = makeModel()
         let start = Date(timeIntervalSince1970: 10)
@@ -157,6 +197,19 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testFailedPhotoImportRemovesCopiedScoreFile() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+
+        XCTAssertThrowsError(try model.importPhotoScore(data: Data("not an image".utf8), preferredName: "Broken score"))
+
+        XCTAssertTrue(model.scores.isEmpty)
+        let storedFiles = (try? FileManager.default.contentsOfDirectory(at: scoreDirectory, includingPropertiesForKeys: nil)) ?? []
+        XCTAssertTrue(storedFiles.isEmpty)
+    }
+
+    @MainActor
     func testAccountDeletionRemovesImportedScoreFiles() async throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
@@ -210,6 +263,58 @@ final class BrassTuneAppTests: XCTestCase {
 
     func testCoreTuningStatusIsAvailableToApp() {
         XCTAssertEqual(BrassTuneCore.tuningStatus(cents: 7, confidence: 0.98, rms: 0.1), .sharp)
+        XCTAssertEqual(BrassTuneCore.tuningStatus(cents: nil, confidence: 0.99, rms: 0.1), .noLock)
+    }
+
+    func testNativePitchDetectorLocksSyntheticSineAndAppliesReferencePitch() {
+        let sampleRate = 44_100.0
+        let frequency = 442.0
+        let samples = (0..<4096).map { index in
+            Float(sin(2 * Double.pi * frequency * Double(index) / sampleRate) * 0.2)
+        }
+
+        let frame = NativePitchDetector.frame(
+            samples: samples,
+            sampleRate: sampleRate,
+            timestampMs: 120,
+            instrumentId: "trumpet",
+            referencePitchHz: 442.0
+        )
+
+        XCTAssertEqual(frame.tuningStatus, .inTune)
+        XCTAssertEqual(frame.writtenNoteName, "B")
+        XCTAssertEqual(frame.writtenOctave, 4)
+        XCTAssertTrue(frame.isValidForRecording)
+        XCTAssertEqual(frame.frequencyHz ?? 0, 442.0, accuracy: 3.0)
+        XCTAssertGreaterThan(frame.confidence, 0.95)
+    }
+
+    func testNativePitchDetectorReportsSilenceAndNoLock() {
+        let silent = NativePitchDetector.frame(
+            samples: Array(repeating: Float(0), count: 4096),
+            sampleRate: 44_100,
+            timestampMs: 1,
+            instrumentId: "trumpet",
+            referencePitchHz: 440
+        )
+        XCTAssertEqual(silent.tuningStatus, .silence)
+        XCTAssertFalse(silent.isValidForRecording)
+
+        var seed: UInt64 = 0xBADC0DE
+        let noise = (0..<4096).map { _ -> Float in
+            seed = seed &* 6364136223846793005 &+ 1
+            let unit = Double((seed >> 33) & 0xFFFF) / 65_535.0
+            return Float((unit * 2.0 - 1.0) * 0.025)
+        }
+        let noLock = NativePitchDetector.frame(
+            samples: noise,
+            sampleRate: 44_100,
+            timestampMs: 2,
+            instrumentId: "trumpet",
+            referencePitchHz: 440
+        )
+        XCTAssertEqual(noLock.tuningStatus, .noLock)
+        XCTAssertFalse(noLock.isValidForRecording)
     }
 
     @MainActor

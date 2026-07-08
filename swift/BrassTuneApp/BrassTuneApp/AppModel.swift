@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
     @Published var sessions: [PracticeSession] = [] { didSet { persistLocalData() } }
     @Published var scores: [ImportedScore] = [] { didSet { persistLocalData() } }
     @Published var activeScoreID: ImportedScore.ID? { didSet { persistLocalData() } }
+    @Published var recordingSource: PracticeSessionSource = NativeAudioEngine.defaultRecordingSource
     @Published var metronome = MetronomeSettings() { didSet { persistLocalData(); restartMetronomeIfNeeded() } }
     @Published private(set) var metronomeRunning = false
     @Published private(set) var metronomeTick = 0
@@ -122,7 +123,7 @@ final class AppModel: ObservableObject {
         do {
             let session = try await authService.signUp(email: email, password: password, config: config)
             authState = .signedIn(email: session.email)
-        } catch UserVisibleError.authenticationFailed {
+        } catch UserVisibleError.emailConfirmationRequired {
             authState = .emailConfirmationRequired(email: email)
         } catch {
             lastError = (error as? UserVisibleError) ?? .authenticationFailed
@@ -210,26 +211,40 @@ final class AppModel: ObservableObject {
     }
 
     func startDemoRecording() {
+        recordingSource = .sample
         audioEngine.startFixtureRecording(instrumentId: selectedInstrumentId, referencePitchHz: referencePitchHz)
     }
 
     func stopDemoRecording() {
         let frames = audioEngine.stopFixtureRecording()
-        let endedAt = Date()
-        let startedAt = endedAt.addingTimeInterval(-Double(frames.count) * 0.11)
-        let demoIndex = sessions.count + 1
-        let session = PracticeSession(
-            id: UUID(),
-            name: demoIndex == 1 ? "Guided take" : "Guided take \(demoIndex)",
-            instrumentId: selectedInstrumentId,
-            startedAt: startedAt,
-            endedAt: endedAt,
-            frames: frames,
-            retainedRecordingURL: nil,
-            attachedScoreID: activeScore?.id,
-            practiceNotes: activeScore.map { "Practiced with \($0.title)." } ?? ""
-        )
-        sessions.insert(session, at: 0)
+        saveRecordedSession(frames: frames, source: .sample)
+    }
+
+    func startRecording() async {
+        lastError = nil
+        switch recordingSource {
+        case .sample:
+            startDemoRecording()
+        case .live:
+            do {
+                let started = try await audioEngine.startLiveRecording(instrumentId: selectedInstrumentId, referencePitchHz: referencePitchHz)
+                if !started {
+                    lastError = .microphoneDenied
+                }
+            } catch {
+                lastError = .microphoneUnavailable
+            }
+        }
+    }
+
+    func stopRecording() {
+        switch audioEngine.activeSource {
+        case .live:
+            let frames = audioEngine.stopLiveRecording()
+            saveRecordedSession(frames: frames, source: .live)
+        case .sample:
+            stopDemoRecording()
+        }
     }
 
     func clearLocalPracticeData() {
@@ -281,14 +296,7 @@ final class AppModel: ObservableObject {
     }
 
     func toggleMetronomeMute() {
-        metronome.muted.toggle()
-        if metronome.muted {
-            metronome.volume = 0
-            metronome.visualOnly = true
-        } else {
-            metronome.volume = max(0.35, metronome.volume)
-            metronome.visualOnly = false
-        }
+        setMetronomeVisualOnly(!metronome.visualOnly)
     }
 
     func setMetronomeVisualOnly(_ visualOnly: Bool) {
@@ -426,6 +434,30 @@ final class AppModel: ObservableObject {
     private func restartMetronomeIfNeeded() {
         guard metronomeRunning else { return }
         scheduleMetronomeTimer()
+    }
+
+    private func saveRecordedSession(frames: [PitchFrame], source: PracticeSessionSource) {
+        guard !frames.isEmpty else {
+            lastError = .microphoneUnavailable
+            return
+        }
+        let endedAt = Date()
+        let duration = source == .live ? Double(max(1, (frames.last?.timestampMs ?? 0) - (frames.first?.timestampMs ?? 0))) / 1000.0 : Double(frames.count) * 0.11
+        let startedAt = endedAt.addingTimeInterval(-duration)
+        let matchingSourceCount = sessions.filter { $0.source == source }.count + 1
+        let session = PracticeSession(
+            id: UUID(),
+            name: matchingSourceCount == 1 ? source.sessionTitle : "\(source.sessionTitle) \(matchingSourceCount)",
+            instrumentId: selectedInstrumentId,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            frames: frames,
+            retainedRecordingURL: nil,
+            attachedScoreID: activeScore?.id,
+            practiceNotes: activeScore.map { "Practiced with \($0.title)." } ?? "",
+            source: source
+        )
+        sessions.insert(session, at: 0)
     }
 
     private func clearLocalPracticeArtifacts() {
@@ -567,13 +599,18 @@ struct NativeScoreImportService {
         }
         try FileManager.default.copyItem(at: url, to: storedURL)
 
-        switch sourceKind {
-        case .filesPDF:
-            return try makePDFScore(from: storedURL, localFileName: fileName, fileSize: fileSize)
-        case .filesImage:
-            return try makeImageScore(from: storedURL, localFileName: fileName, fileSize: fileSize, sourceKind: .filesImage)
-        case .photos, .sample:
-            throw ImportError.unsupportedType
+        do {
+            switch sourceKind {
+            case .filesPDF:
+                return try makePDFScore(from: storedURL, localFileName: fileName, fileSize: fileSize)
+            case .filesImage:
+                return try makeImageScore(from: storedURL, localFileName: fileName, fileSize: fileSize, sourceKind: .filesImage)
+            case .photos, .sample:
+                throw ImportError.unsupportedType
+            }
+        } catch {
+            deleteStoredFile(named: fileName)
+            throw error
         }
     }
 
@@ -583,9 +620,14 @@ struct NativeScoreImportService {
         let fileName = "\(UUID().uuidString).png"
         let storedURL = storageDirectory.appendingPathComponent(fileName)
         try data.write(to: storedURL, options: [.atomic])
-        var score = try makeImageScore(from: storedURL, localFileName: fileName, fileSize: Int64(data.count), sourceKind: sourceKind)
-        score.title = preferredName
-        return score
+        do {
+            var score = try makeImageScore(from: storedURL, localFileName: fileName, fileSize: Int64(data.count), sourceKind: sourceKind)
+            score.title = preferredName
+            return score
+        } catch {
+            deleteStoredFile(named: fileName)
+            throw error
+        }
     }
 
     func makeSampleScore() -> ImportedScore {

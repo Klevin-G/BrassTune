@@ -63,6 +63,37 @@ struct PitchFrame: Codable, Equatable, Identifiable {
         )
     }
 
+    static func detected(
+        timestampMs: Int,
+        frequencyHz: Double?,
+        confidence: Double,
+        rms: Double,
+        instrumentId: String,
+        referencePitchHz: Double
+    ) -> PitchFrame {
+        let concertMidiFloat = frequencyHz.map { BrassTuneCore.frequencyToMidi($0, referencePitchHz: referencePitchHz) }
+        let concertMidi = concertMidiFloat.map { Int($0.rounded()) }
+        let cents = frequencyHz.flatMap { frequency -> Double? in
+            guard let concertMidi else { return nil }
+            return BrassTuneCore.centsDeviation(frequencyHz: frequency, nearestMidi: concertMidi, referencePitchHz: referencePitchHz)
+        }
+        let writtenMidi = concertMidi.map {
+            BrassTuneCore.transposeConcertToWritten($0, semitones: transpositionSemitones(for: instrumentId))
+        }
+        let status = BrassTuneCore.tuningStatus(cents: cents, confidence: confidence, rms: rms)
+        return PitchFrame(
+            timestampMs: timestampMs,
+            frequencyHz: frequencyHz,
+            confidence: confidence,
+            rms: rms,
+            centsDeviation: cents,
+            tuningStatus: status,
+            writtenNoteName: writtenMidi.map(noteName(for:)),
+            writtenOctave: writtenMidi.map { ($0 / 12) - 1 },
+            isValidForRecording: [.flat, .inTune, .sharp].contains(status)
+        )
+    }
+
     private static func fixtureConcertMidi(for instrumentId: String) -> Int {
         switch instrumentId {
         case "horn": return 55
@@ -146,6 +177,34 @@ enum ScoreSourceKind: String, Codable, CaseIterable, Identifiable {
         case .filesImage: return "Files image"
         case .photos: return "Photos"
         case .sample: return "Sample"
+        }
+    }
+}
+
+enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
+    case live
+    case sample
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .live: return "Live mic"
+        case .sample: return "Sample"
+        }
+    }
+
+    var sessionTitle: String {
+        switch self {
+        case .live: return "Live take"
+        case .sample: return "Sample take"
+        }
+    }
+
+    var exportLabel: String {
+        switch self {
+        case .live: return "live microphone"
+        case .sample: return "deterministic sample"
         }
     }
 }
@@ -272,6 +331,58 @@ struct PracticeSession: Codable, Equatable, Identifiable {
     var retainedRecordingURL: URL?
     var attachedScoreID: ImportedScore.ID? = nil
     var practiceNotes: String = ""
+    var source: PracticeSessionSource = .sample
+
+    init(
+        id: UUID,
+        name: String,
+        instrumentId: String,
+        startedAt: Date,
+        endedAt: Date?,
+        frames: [PitchFrame],
+        retainedRecordingURL: URL?,
+        attachedScoreID: ImportedScore.ID? = nil,
+        practiceNotes: String = "",
+        source: PracticeSessionSource = .sample
+    ) {
+        self.id = id
+        self.name = name
+        self.instrumentId = instrumentId
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.frames = frames
+        self.retainedRecordingURL = retainedRecordingURL
+        self.attachedScoreID = attachedScoreID
+        self.practiceNotes = practiceNotes
+        self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case instrumentId
+        case startedAt
+        case endedAt
+        case frames
+        case retainedRecordingURL
+        case attachedScoreID
+        case practiceNotes
+        case source
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        instrumentId = try container.decode(String.self, forKey: .instrumentId)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        frames = try container.decode([PitchFrame].self, forKey: .frames)
+        retainedRecordingURL = try container.decodeIfPresent(URL.self, forKey: .retainedRecordingURL)
+        attachedScoreID = try container.decodeIfPresent(ImportedScore.ID.self, forKey: .attachedScoreID)
+        practiceNotes = try container.decodeIfPresent(String.self, forKey: .practiceNotes) ?? ""
+        source = try container.decodeIfPresent(PracticeSessionSource.self, forKey: .source) ?? .sample
+    }
 
     var averageAbsCents: Double {
         let values = frames.filter(\.isValidForRecording).compactMap(\.centsDeviation).map { abs($0) }
@@ -309,6 +420,7 @@ struct PracticeSession: Codable, Equatable, Identifiable {
             "BrassTune session export",
             "Session: \(name)",
             "Instrument: \(instrumentId)",
+            "Source: \(source.exportLabel)",
             "Started: \(formatter.string(from: startedAt))",
             "Ended: \(endedAt.map { formatter.string(from: $0) } ?? "Not ended")",
             "Duration: \(String(format: "%.0f", durationSeconds)) seconds",
@@ -436,17 +548,21 @@ enum UserVisibleError: LocalizedError, Equatable {
     case accountDeletionRequiresConfirmation
     case missingAuthConfiguration
     case authenticationFailed
+    case emailConfirmationRequired
+    case microphoneUnavailable
 
     var errorDescription: String? {
         switch self {
-        case .microphoneDenied: return "Microphone access is required for live tuning."
-        case .networkUnavailable: return "Cloud sync is unavailable right now."
-        case .malformedResponse: return "Cloud sync returned an unreadable response."
+        case .microphoneDenied: return "Microphone access was denied. Sample mode, metronome, and score practice still work on this device."
+        case .networkUnavailable: return "The account service is unavailable right now."
+        case .malformedResponse: return "The account service returned an unreadable response."
         case .timeout: return "The request timed out."
         case .appleSignInCancelled: return "Apple sign-in was cancelled."
         case .accountDeletionRequiresConfirmation: return "Type delete my account to confirm deletion."
         case .missingAuthConfiguration: return "Accounts are not enabled in this beta build yet. Guest practice still works on this device."
         case .authenticationFailed: return "BrassTune could not complete authentication."
+        case .emailConfirmationRequired: return "Check your email to confirm this BrassTune account before signing in."
+        case .microphoneUnavailable: return "Live microphone capture is unavailable on this device right now. Sample mode remains available."
         }
     }
 }

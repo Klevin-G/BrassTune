@@ -33,7 +33,7 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Tuner", subtitle: "Instrument and reference pitch affect local sample takes.")
+                BTSectionHeader(title: "Tuner", subtitle: "Instrument and reference pitch affect local live and sample takes.")
                 Picker("Instrument", selection: $model.selectedInstrumentId) {
                     instrumentPickerOptions()
                 }
@@ -50,7 +50,7 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Metronome defaults", subtitle: "These settings also drive the floating recording controls.")
+                BTSectionHeader(title: "Metronome defaults", subtitle: "These settings also drive the floating live/sample controls.")
                 Stepper("BPM \(model.metronome.bpm)", value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 30...240, step: 1)
                     .accessibilityIdentifier("settings.metronomeBPM")
                 Picker("Subdivision", selection: Binding(get: { model.metronome.subdivision }, set: { model.metronome.subdivision = $0 })) {
@@ -215,7 +215,7 @@ struct SettingsView: View {
 
     private var deletionHelpText: String {
         if model.authState.usesRemoteAccount {
-            return "Deletion sends the account request to cloud sync when an account session is available, then clears local sessions and credentials."
+            return "Deletion sends the account request to the account service when a session is available, then clears local sessions and credentials."
         }
         return "No remote account is active. The confirmation clears local sessions, demo ensemble state, and stored credentials on this device."
     }
@@ -299,7 +299,7 @@ struct LegalDetailView: View {
                     title: "Support",
                     messages: [
                         "Contact the teacher, director, or organization that provided BrassTune access.",
-                        "Include the affected screen, approximate time of the issue, account state, and whether the take was a sample or microphone session.",
+                        "Include the affected screen, approximate time of the issue, account state, and whether the issue happened during a live microphone or sample take.",
                     ]
                 )
             }

@@ -4,6 +4,7 @@ public enum TuningStatus: String, Codable {
     case flat
     case inTune = "in_tune"
     case sharp
+    case noLock = "no_lock"
     case unstable
     case silence
 }
@@ -40,7 +41,8 @@ public enum BrassTuneCore {
 
     public static func tuningStatus(cents: Double?, confidence: Double, rms: Double) -> TuningStatus {
         guard rms >= silenceRMSThreshold else { return .silence }
-        guard confidence >= minimumRecordingConfidence, let cents else { return .unstable }
+        guard let cents else { return .noLock }
+        guard confidence >= minimumRecordingConfidence else { return .unstable }
         if cents < -5 { return .flat }
         if cents > 5 { return .sharp }
         return .inTune

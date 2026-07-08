@@ -161,7 +161,7 @@ struct HomeView: View {
             } else {
                 BTEmptyState(
                     title: "No local takes yet",
-                    message: "Record a sample take to make analytics, export, and review screens show real local data.",
+                    message: "Record a live or sample take to make analytics, export, and review screens show real local data.",
                     systemImage: "waveform"
                 )
                 .accessibilityIdentifier("home.noSessions")
@@ -185,7 +185,7 @@ struct OnboardingView: View {
                 BTCard {
                     BTSectionHeader(
                         title: "Set the horn before the first take",
-                        subtitle: "Choose your instrument and reference pitch. Sample mode is ready now; live microphone tuning still needs iOS permission and physical-device validation."
+                        subtitle: "Choose your instrument and reference pitch. Simulator sample mode is ready; live microphone tuning runs on device and still needs physical-device validation."
                     )
                     Picker("Instrument", selection: $model.selectedInstrumentId) {
                         instrumentPickerOptions()
@@ -196,7 +196,7 @@ struct OnboardingView: View {
                 BTCard {
                     BTSectionHeader(
                         title: "How BrassTune records",
-                        subtitle: "Sample mode is ready now. Live microphone tuning needs iOS permission and physical-device validation before release claims."
+                        subtitle: "Live microphone mode uses iOS permission and on-device pitch detection. Simulator sample mode stays clearly labeled for repeatable testing."
                     )
                     Button {
                         model.enterGuestDemo()
@@ -281,7 +281,7 @@ private struct PracticeToolsCard: View {
 
     var body: some View {
         BTCard {
-            BTSectionHeader(title: "Practice tools", subtitle: "Metronome and score notes stay local and can run during sample recording.")
+            BTSectionHeader(title: "Practice tools", subtitle: "Metronome and score notes stay local and can run during live or sample takes.")
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
                 NavigationLink {
                     MetronomeView()
@@ -314,104 +314,122 @@ private struct PracticeToolsCard: View {
 private struct FloatingPracticeControlBar: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: BTSpacing.sm) {
-            HStack(spacing: BTSpacing.sm) {
-                Button {
-                    model.stopDemoRecording()
-                } label: {
-                    Label("Stop", systemImage: "stop.fill")
-                        .labelStyle(.iconOnly)
-                }
-                .accessibilityLabel("Stop recording")
-                .accessibilityIdentifier("practice.floating.stop")
-                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.danger))
-
-                Button {
-                    model.toggleMetronome()
-                } label: {
-                    Label(model.metronomeRunning ? "Stop metronome" : "Start metronome", systemImage: model.metronomeRunning ? "pause.fill" : "play.fill")
-                        .labelStyle(.iconOnly)
-                }
-                .accessibilityLabel(model.metronomeRunning ? "Stop metronome" : "Start metronome")
-                .accessibilityIdentifier("practice.floating.metronome")
-                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.warning))
-
-                VStack(spacing: 0) {
-                    Text("\(model.metronome.bpm)")
-                        .font(.headline.monospacedDigit())
-                        .foregroundStyle(BTTheme.accentSoft)
-                    Text(model.metronome.meterLabel)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(BTTheme.muted)
-                }
-                .frame(minWidth: 54)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Metronome \(model.metronome.bpm) beats per minute, meter \(model.metronome.meterLabel)")
-                .accessibilityIdentifier("practice.floating.bpm")
-
-                Button {
-                    model.toggleMetronomeMute()
-                } label: {
-                    Label(model.metronome.muted ? "Unmute metronome" : "Mute metronome", systemImage: model.metronome.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .labelStyle(.iconOnly)
-                }
-                .accessibilityLabel(model.metronome.muted ? "Unmute metronome" : "Mute metronome")
-                .accessibilityIdentifier("practice.floating.mute")
-                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.blue))
+            if dynamicTypeSize.isAccessibilitySize {
+                primaryControls
+                secondaryControls
+            } else {
+                primaryControls
+                secondaryControls
             }
-            .frame(maxWidth: .infinity)
-
-            HStack(spacing: BTSpacing.sm) {
-                Button {
-                    model.adjustTempo(by: -2)
-                } label: {
-                    Label("Tempo down", systemImage: "minus")
-                        .labelStyle(.iconOnly)
-                }
-                .accessibilityLabel("Decrease tempo")
-                .accessibilityIdentifier("practice.floating.tempoDown")
-                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
-
-                Button {
-                    model.adjustTempo(by: 2)
-                } label: {
-                    Label("Tempo up", systemImage: "plus")
-                        .labelStyle(.iconOnly)
-                }
-                .accessibilityLabel("Increase tempo")
-                .accessibilityIdentifier("practice.floating.tempoUp")
-                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
-
-                Button {
-                    model.tapTempo()
-                } label: {
-                    Label("Tap tempo", systemImage: "hand.tap")
-                        .labelStyle(.iconOnly)
-                }
-                .accessibilityLabel("Tap tempo")
-                .accessibilityIdentifier("practice.floating.tapTempo")
-                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.secondaryAccent))
-            }
-            .frame(maxWidth: .infinity)
-
-            HStack(spacing: BTSpacing.sm) {
-                Text(model.metronomeRunning ? "Beat \(model.metronomeTick + 1)" : "Metronome ready")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(model.metronomeRunning ? BTTheme.warning : BTTheme.muted)
-                    .scaleEffect(model.metronomeRunning && !reduceMotion ? 1.03 : 1)
-                Spacer()
-                Text(model.activeScore?.title ?? "No score")
-                    .font(.caption)
-                    .foregroundStyle(BTTheme.muted)
-                    .lineLimit(1)
-            }
+            statusRow
         }
         .padding(BTSpacing.md)
         .btGlassPanel(cornerRadius: BTTheme.radiusLarge, tint: BTTheme.surfaceWarm, interactive: true)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("practice.floatingBar")
+    }
+
+    private var primaryControls: some View {
+        HStack(spacing: BTSpacing.sm) {
+            Button {
+                model.stopRecording()
+            } label: {
+                Label("Stop", systemImage: "stop.fill")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Stop recording")
+            .accessibilityIdentifier("practice.floating.stop")
+            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.danger))
+
+            Button {
+                model.toggleMetronome()
+            } label: {
+                Label(model.metronomeRunning ? "Stop metronome" : "Start metronome", systemImage: model.metronomeRunning ? "pause.fill" : "play.fill")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel(model.metronomeRunning ? "Stop metronome" : "Start metronome")
+            .accessibilityIdentifier("practice.floating.metronome")
+            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.warning))
+
+            VStack(spacing: 0) {
+                Text("\(model.metronome.bpm)")
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(BTTheme.accentSoft)
+                Text(model.metronome.meterLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(BTTheme.muted)
+            }
+            .frame(minWidth: 54)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Metronome \(model.metronome.bpm) beats per minute, meter \(model.metronome.meterLabel)")
+            .accessibilityIdentifier("practice.floating.bpm")
+
+            Button {
+                model.toggleMetronomeMute()
+            } label: {
+                Label(model.metronome.visualOnly ? "Enable speaker click" : "Use visual-only click", systemImage: model.metronome.visualOnly ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel(model.metronome.visualOnly ? "Enable speaker click" : "Use visual-only metronome")
+            .accessibilityHint("Visual-only mode mutes the speaker click to reduce microphone bleed.")
+            .accessibilityIdentifier("practice.floating.mute")
+            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.blue))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var secondaryControls: some View {
+        HStack(spacing: BTSpacing.sm) {
+            Button {
+                model.adjustTempo(by: -2)
+            } label: {
+                Label("Tempo down", systemImage: "minus")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Decrease tempo")
+            .accessibilityIdentifier("practice.floating.tempoDown")
+            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
+
+            Button {
+                model.adjustTempo(by: 2)
+            } label: {
+                Label("Tempo up", systemImage: "plus")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Increase tempo")
+            .accessibilityIdentifier("practice.floating.tempoUp")
+            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
+
+            Button {
+                model.tapTempo()
+            } label: {
+                Label("Tap tempo", systemImage: "hand.tap")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Tap tempo")
+            .accessibilityIdentifier("practice.floating.tapTempo")
+            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.secondaryAccent))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var statusRow: some View {
+        HStack(spacing: BTSpacing.sm) {
+            Text(model.metronomeRunning ? "Beat \(model.metronomeTick + 1)" : "Metronome ready")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(model.metronomeRunning ? BTTheme.warning : BTTheme.muted)
+                .scaleEffect(model.metronomeRunning && !reduceMotion ? 1.03 : 1)
+                .accessibilityLabel(model.metronomeRunning ? "Metronome pulse" : "Metronome ready")
+            Spacer()
+            Text(model.activeScore?.title ?? "No score")
+                .font(.caption)
+                .foregroundStyle(BTTheme.muted)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+        }
     }
 }
 
@@ -422,7 +440,7 @@ private struct FloatingIconButtonStyle: ButtonStyle {
         configuration.label
             .font(.headline.weight(.bold))
             .foregroundStyle(tint)
-            .frame(width: 42, height: 42)
+            .frame(width: 44, height: 44)
             .background(tint.opacity(configuration.isPressed ? 0.24 : 0.14), in: Circle())
             .overlay {
                 Circle().stroke(tint.opacity(0.30), lineWidth: 1)
@@ -439,35 +457,52 @@ private struct PracticeTunerSection: View {
         let noteLabel = frame?.writtenNoteName.map { "\($0)\(frame?.writtenOctave ?? 0)" } ?? "No lock"
         let centsLabel = frame?.centsDeviation.map { String(format: "%+.1f cents", $0) } ?? "Silence or no lock"
         let statusLabel = displayStatus(frame?.tuningStatus.rawValue ?? "ready")
+        let sourceTitle = audioEngine.recording ? audioEngine.activeSource.title : model.recordingSource.title
 
         VStack(spacing: BTSpacing.md) {
             Button {
                 if audioEngine.recording {
-                    model.stopDemoRecording()
+                    model.stopRecording()
                 } else {
-                    model.startDemoRecording()
+                    Task { await model.startRecording() }
                 }
             } label: {
-                Label(audioEngine.recording ? "Stop sample take" : "Start sample take", systemImage: audioEngine.recording ? "stop.fill" : "record.circle")
+                Label(audioEngine.recording ? "Stop \(sourceTitle.lowercased()) take" : "Start \(sourceTitle.lowercased()) take", systemImage: audioEngine.recording ? "stop.fill" : "record.circle")
             }
             .buttonStyle(BTPrimaryButtonStyle())
             .accessibilityIdentifier("practice.recordButton")
 
             BTCard(tint: BTTheme.surfaceWarm) {
                 HStack {
-                    BTSectionHeader(title: "Practice tuner", subtitle: "Local sample take")
+                    BTSectionHeader(title: "Practice tuner", subtitle: "\(sourceTitle) source, local-only review")
                     Spacer()
                     BTStatusPill(text: statusLabel, tint: statusTint(frame?.tuningStatus.rawValue))
                         .accessibilityIdentifier("practice.tuningStatus")
                 }
-                Text(audioEngine.recording ? "Recording" : "Ready")
+                Picker("Recording source", selection: Binding(get: { model.recordingSource }, set: { model.recordingSource = $0 })) {
+                    ForEach(PracticeSessionSource.allCases) { source in
+                        Text(source.title).tag(source)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(audioEngine.recording)
+                .accessibilityIdentifier("practice.recordingSource")
+
+                Text(audioEngine.recording ? "\(sourceTitle) running" : "\(sourceTitle) ready")
                     .font(.footnote.weight(.bold))
                     .foregroundStyle(audioEngine.recording ? BTTheme.secondaryAccent : BTTheme.muted)
                     .padding(.horizontal, BTSpacing.sm)
                     .padding(.vertical, BTSpacing.xs)
                     .background((audioEngine.recording ? BTTheme.secondaryAccent : BTTheme.surfaceAlt).opacity(0.14), in: Capsule())
                     .accessibilityIdentifier("practice.recordingState")
-                    .accessibilityLabel(audioEngine.recording ? "Recording" : "Ready")
+                    .accessibilityLabel(audioEngine.recording ? "\(sourceTitle) take running" : "\(sourceTitle) take ready")
+                if let notice = audioEngine.audioNotice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("practice.audioNotice")
+                }
                 Text(noteLabel)
                     .font(.system(size: 82, weight: .bold, design: .rounded))
                     .foregroundStyle(BTTheme.accentSoft)
@@ -510,7 +545,7 @@ private struct MicrophoneSection: View {
         BTCard {
             BTSectionHeader(
                 title: "Microphone",
-                subtitle: "This native beta can request permission and run deterministic sample takes. Real acoustic tuning still needs physical-device validation."
+                subtitle: "Live acoustic capture uses AVAudioEngine on device. Use headphones or visual-only metronome while validating click bleed."
             )
             Button {
                 Task { _ = await audioEngine.requestMicrophonePermission() }
@@ -545,10 +580,10 @@ struct SessionsView: View {
         BTScreen {
             BTSectionHeader(
                 title: "Saved sessions",
-                subtitle: "Local sample takes are available for review, export, and deletion."
+                subtitle: "Local live and sample takes are available for review, export, and deletion."
             )
             if model.sessions.isEmpty {
-                BTEmptyState(title: "No saved sessions", message: "Stop a sample take from Practice to create a local review session.", systemImage: "tray")
+                BTEmptyState(title: "No saved sessions", message: "Stop a live or sample take from Practice to create a local review session.", systemImage: "tray")
                     .accessibilityIdentifier("sessions.empty")
             } else {
                 ForEach(model.sessions) { session in
@@ -578,7 +613,7 @@ private struct SessionRow: View {
                         .font(.headline)
                         .foregroundStyle(.primary)
                         .accessibilityIdentifier("sessions.sessionName")
-                    Text("\(instrumentName(session.instrumentId)) - \(session.validFrameCount) valid frames")
+                    Text("\(instrumentName(session.instrumentId)) - \(session.source.title) - \(session.validFrameCount) valid frames")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -598,6 +633,7 @@ private struct SessionRow: View {
 struct SessionDetailView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmDelete = false
     let sessionID: PracticeSession.ID
 
     private var session: PracticeSession? {
@@ -609,6 +645,8 @@ struct SessionDetailView: View {
             if let session {
                 BTCard {
                     BTSectionHeader(title: session.name, subtitle: "Review and export")
+                    BTStatusPill(text: session.source.title, tint: session.source == .live ? BTTheme.success : BTTheme.warning)
+                        .accessibilityIdentifier("session.source")
                     HStack(spacing: BTSpacing.md) {
                         BTMetricTile(title: "Avg abs", value: String(format: "%.1f", session.averageAbsCents), detail: "cents")
                         BTMetricTile(title: "In tune", value: "\(String(format: "%.0f", session.inTunePercentage))%", detail: "within 5 cents", tint: BTTheme.success)
@@ -635,8 +673,7 @@ struct SessionDetailView: View {
                 BTCard {
                     BTSectionHeader(title: "Delete", subtitle: "Removes this local session from the native app.")
                     Button(role: .destructive) {
-                        model.deleteSession(id: session.id)
-                        dismiss()
+                        confirmDelete = true
                     } label: {
                         Label("Delete session", systemImage: "trash")
                     }
@@ -650,6 +687,17 @@ struct SessionDetailView: View {
         }
         .navigationTitle("Session review")
         .accessibilityIdentifier("screen.sessionDetail")
+        .confirmationDialog("Delete this local session?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete local session", role: .destructive) {
+                if let session {
+                    model.deleteSession(id: session.id)
+                }
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the saved take and its local metrics from this device.")
+        }
     }
 }
 
@@ -662,7 +710,7 @@ struct AnalyticsView: View {
         BTScreen {
             BTSectionHeader(
                 title: "Local analytics",
-                subtitle: "Derived from sample takes saved on this device."
+                subtitle: "Derived from live and sample takes saved on this device."
             )
             if snapshot.hasSessions {
                 BTCard {
@@ -673,7 +721,7 @@ struct AnalyticsView: View {
                     }
                     HStack(spacing: BTSpacing.md) {
                         BTMetricTile(title: "In tune", value: "\(String(format: "%.0f", snapshot.averageInTunePercentage))%", detail: "all local frames", tint: BTTheme.success)
-                        BTMetricTile(title: "Practice", value: "\(String(format: "%.0f", snapshot.totalPracticeSeconds))s", detail: "sample duration")
+                        BTMetricTile(title: "Practice", value: "\(String(format: "%.0f", snapshot.totalPracticeSeconds))s", detail: "saved duration")
                     }
                 }
 
@@ -702,14 +750,14 @@ struct AnalyticsView: View {
             } else {
                 BTEmptyState(
                     title: "Analytics need local sessions",
-                    message: "Record a sample take to calculate in-tune percentage, average cents, and practice recommendations on device.",
+                    message: "Record a live or sample take to calculate in-tune percentage, average cents, and practice recommendations on device.",
                     systemImage: "chart.line.uptrend.xyaxis"
                 )
                 .accessibilityIdentifier("analytics.empty")
                 Button {
                     selectedTab = .practice
                 } label: {
-                    Label("Record sample take", systemImage: "record.circle")
+                    Label("Record a take", systemImage: "record.circle")
                 }
                 .buttonStyle(BTPrimaryButtonStyle())
                 .accessibilityIdentifier("analytics.recordSample")
@@ -729,7 +777,7 @@ struct CoachNativeView: View {
             BTPageHeader(
                 eyebrow: "Coach",
                 title: "Practice plan",
-                subtitle: "Local native guidance uses saved sample evidence and stays conservative until account-backed coaching is validated.",
+                subtitle: "Local native guidance uses saved live/sample evidence and stays conservative until account-backed coaching is validated.",
                 trailing: model.authState.usesRemoteAccount ? "Account" : "Local"
             )
             if model.analyticsSnapshot.hasUsableEvidence {
@@ -751,11 +799,11 @@ struct CoachNativeView: View {
                 .buttonStyle(BTPrimaryButtonStyle())
                 .accessibilityIdentifier("coach.recordMore")
             } else {
-                BTEmptyState(title: "Coach needs a take", message: "Record a sample take first so native coaching can use local intonation evidence.", systemImage: "sparkles")
+                BTEmptyState(title: "Coach needs a take", message: "Record a live or sample take first so native coaching can use local intonation evidence.", systemImage: "sparkles")
                 Button {
                     selectedTab = .practice
                 } label: {
-                    Label("Record sample take", systemImage: "record.circle")
+                    Label("Record a take", systemImage: "record.circle")
                 }
                 .buttonStyle(BTPrimaryButtonStyle())
             }
@@ -791,7 +839,7 @@ struct MoreHubView: View {
                 MoreHubLink(title: "Progress", detail: "Local trend and heatmap.", systemImage: "chart.line.uptrend.xyaxis", tint: BTTheme.success) {
                     ProgressNativeView()
                 }
-                MoreHubLink(title: "Ensemble", detail: "Director and membership state.", systemImage: "person.3", tint: BTTheme.secondaryAccent) {
+                MoreHubLink(title: "Ensemble", detail: "Demo roster until account services are configured.", systemImage: "person.3", tint: BTTheme.secondaryAccent) {
                     EnsembleView(selectedTab: $selectedTab)
                 }
                 MoreHubLink(title: "Settings", detail: "Account, tuner, data, legal.", systemImage: "gearshape", tint: BTTheme.muted) {
@@ -851,7 +899,7 @@ struct MetronomeView: View {
             BTPageHeader(
                 eyebrow: "Practice tool",
                 title: "Metronome",
-                subtitle: "Visual-first native metronome controls that can stay running while a sample take records.",
+                subtitle: "Visual-first native metronome controls that can stay running while a live or sample take records.",
                 trailing: model.metronomeRunning ? "Running" : "Ready"
             )
 
@@ -886,7 +934,7 @@ struct MetronomeView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Tempo", subtitle: "Tap or step tempo. The floating recording bar uses the same settings.")
+                BTSectionHeader(title: "Tempo", subtitle: "Tap or step tempo. The floating recording controls use the same settings.")
                 HStack(spacing: BTSpacing.md) {
                     Button {
                         model.adjustTempo(by: -5)
@@ -917,7 +965,7 @@ struct MetronomeView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Meter and feel", subtitle: "Speaker click is muted by default to avoid bleeding into microphone recordings.")
+                BTSectionHeader(title: "Meter and feel", subtitle: "Speaker click is muted by default to reduce microphone bleed during live capture.")
                 Picker("Meter", selection: Binding(get: { model.metronome.beatsPerMeasure }, set: { model.setMeter(beats: $0) })) {
                     ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
                         Text("\(beats)/4").tag(beats)
@@ -933,25 +981,19 @@ struct MetronomeView: View {
                 }
                 .accessibilityIdentifier("metronome.subdivisionPicker")
 
-                Toggle("Mute speaker click", isOn: Binding(get: { model.metronome.muted }, set: { newValue in
-                    if model.metronome.muted != newValue {
-                        model.toggleMetronomeMute()
-                    }
-                }))
-                .accessibilityIdentifier("metronome.mute")
+                Toggle("Visual-only metronome", isOn: Binding(get: { model.metronome.visualOnly }, set: { model.setMetronomeVisualOnly($0) }))
+                .accessibilityIdentifier("metronome.visualOnly")
+                .accessibilityHint("Visual-only mode mutes the speaker click to reduce microphone bleed.")
 
-                Toggle("Visual-only practice", isOn: Binding(get: { model.metronome.visualOnly }, set: { model.setMetronomeVisualOnly($0) }))
-                    .accessibilityIdentifier("metronome.visualOnly")
+                Toggle("Haptic pulse", isOn: Binding(get: { model.metronome.hapticsEnabled }, set: { model.metronome.hapticsEnabled = $0 }))
+                    .accessibilityIdentifier("metronome.haptics")
 
                 Slider(value: Binding(get: { model.metronome.volume }, set: { model.setMetronomeVolume($0) }), in: 0...1)
                     .disabled(model.metronome.visualOnly)
                     .accessibilityLabel("Metronome volume")
                     .accessibilityIdentifier("metronome.volume")
 
-                Toggle("Haptic pulse", isOn: Binding(get: { model.metronome.hapticsEnabled }, set: { model.metronome.hapticsEnabled = $0 }))
-                    .accessibilityIdentifier("metronome.haptics")
-
-                Text("For real microphone recording, use headphones or visual-only mode until click-bleed is validated on a physical device.")
+                Text("For live microphone recording, validate headphones, visual-only mode, route changes, and click bleed on a physical device.")
                     .font(.footnote)
                     .foregroundStyle(BTTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1053,6 +1095,7 @@ struct ScorePracticeView: View {
 
 private struct ScoreDocumentCard: View {
     @EnvironmentObject private var model: AppModel
+    @State private var confirmDelete = false
     let score: ImportedScore
 
     var body: some View {
@@ -1128,7 +1171,7 @@ private struct ScoreDocumentCard: View {
                 .accessibilityIdentifier("score.export")
 
                 Button(role: .destructive) {
-                    model.deleteScore(id: score.id)
+                    confirmDelete = true
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
@@ -1137,17 +1180,26 @@ private struct ScoreDocumentCard: View {
             }
         }
         .accessibilityIdentifier("score.card")
+        .confirmationDialog("Delete this local score?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete local score", role: .destructive) {
+                model.deleteScore(id: score.id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the imported file and clears score references from local sessions.")
+        }
     }
 }
 
 private struct ScoreThumbnailView: View {
+    @State private var thumbnailImage: UIImage?
     let page: ScorePage?
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(BTTheme.surfaceAlt)
-            if let data = page?.thumbnailPNGData, let image = UIImage(data: data) {
+            if let image = thumbnailImage {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
@@ -1168,6 +1220,9 @@ private struct ScoreThumbnailView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityLabel(page.map { "Score page \($0.pageNumber) preview" } ?? "Score page preview")
+        .task(id: page?.id) {
+            thumbnailImage = page?.thumbnailPNGData.flatMap(UIImage.init(data:))
+        }
     }
 
     private var cropScale: CGFloat {
@@ -1290,7 +1345,7 @@ struct ProgressNativeView: View {
             BTPageHeader(
                 eyebrow: "Local progress",
                 title: "Progress",
-                subtitle: snapshot.hasUsableEvidence ? "Local trend summaries from valid sample frames." : "Progress appears after a saved take has valid pitch evidence.",
+                subtitle: snapshot.hasUsableEvidence ? "Local trend summaries from valid live/sample frames." : "Progress appears after a saved take has valid pitch evidence.",
                 trailing: "\(snapshot.sessionCount)"
             )
 
@@ -1316,7 +1371,7 @@ struct ProgressNativeView: View {
                     .accessibilityIdentifier("progress.heatmap")
                 }
             } else {
-                BTEmptyState(title: "More data needed", message: "Record a guided sample take with locked notes before BrassTune summarizes progress.", systemImage: "chart.line.uptrend.xyaxis")
+                BTEmptyState(title: "More data needed", message: "Record a guided live or sample take with locked notes before BrassTune summarizes progress.", systemImage: "chart.line.uptrend.xyaxis")
                     .accessibilityIdentifier("progress.empty")
             }
         }
@@ -1333,16 +1388,16 @@ struct AudioLabView: View {
             BTPageHeader(
                 eyebrow: "Diagnostics",
                 title: "Audio Lab",
-                subtitle: "Native beta diagnostics are local and conservative until physical microphone validation is complete.",
+                subtitle: "Native beta diagnostics are local. Live microphone behavior still needs physical-device validation.",
                 trailing: model.audioEngine.permissionDenied ? "Denied" : "Ready"
             )
 
             BTCard {
-                BTSectionHeader(title: "Current detector state", subtitle: "Sample mode uses deterministic frames; live acoustic capture is not claimed release-ready.")
+                BTSectionHeader(title: "Current detector state", subtitle: "Live mode uses AVAudioEngine; sample mode uses deterministic frames for simulator coverage.")
                 let frame = model.audioEngine.currentFrame
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
                     BTMetricTile(title: "Frequency", value: frame?.frequencyHz.map { String(format: "%.1f", $0) } ?? "--", detail: "Hz")
-                    BTMetricTile(title: "Confidence", value: frame.map { String(format: "%.2f", $0.confidence) } ?? "--", detail: "sample")
+                    BTMetricTile(title: "Confidence", value: frame.map { String(format: "%.2f", $0.confidence) } ?? "--", detail: model.audioEngine.activeSource.title)
                     BTMetricTile(title: "RMS", value: frame.map { String(format: "%.2f", $0.rms) } ?? "--", detail: "level")
                     BTMetricTile(title: "Frames", value: "\(model.audioEngine.frames.count)", detail: "buffered")
                 }
@@ -1500,7 +1555,7 @@ private struct AccountStateCard: View {
     private var accountMessage: String {
         switch model.authState {
         case .guest:
-            return model.accountUnavailableMessage ?? "Guest practice is active. Sign in to sync account-backed data."
+            return model.accountUnavailableMessage ?? "Guest practice is active. Sign in to use account services."
         case .signedOut:
             return model.accountUnavailableMessage ?? "Signed out. Local practice data stays on this device."
         case .signedIn(let email):
@@ -1557,7 +1612,7 @@ private func statusTint(_ rawValue: String?) -> Color {
     case "in_tune": return BTTheme.success
     case "sharp": return BTTheme.sharp
     case "flat": return BTTheme.flat
-    case "unstable": return BTTheme.warning
+    case "no_lock", "unstable": return BTTheme.warning
     case "silence": return BTTheme.unstable
     default: return BTTheme.accent
     }

@@ -1,8 +1,10 @@
 # Current Branch Notice
 
+2026-07-08 notice: this file is historical June web-beta evidence, not the current PR #7/PR #8 release decision. Current PR #8 native status is tracked in `TEST_MATRIX.md` and `NATIVE_PARITY_SURFACES.md`: simulator/sample-mode support and local AVAudioEngine live-capture code exist, but current app test execution is CoreSimulator-blocked and physical-device validation, signing/archive, and TestFlight/App Store remain blocked. Current PR #7 web/backend recovery status lives in the separate web recovery worktree and remains blocked on stale Render readiness/version routes, protected Vercel preview access, disabled deploy/smoke workflows, and live Supabase acceptance.
+
 Updated: 2026-06-21T05:24:54Z for `arya/final-web-completion` at base SHA `a8ce933a8ccfdac75b4244fe1c1bb2630655d14b`.
 
-Current evidence is maintained in `FINAL_REPORT.md`, `TEST_MATRIX.md`, `release-evidence.json`, `FINAL_WEB_SCOPE.md`, `WEB_CONTROL_MANIFEST.md`, and `WEB_PRODUCTION_COMPLETION_GATE.md`.
+Historical June evidence is maintained in `FINAL_REPORT.md`, `TEST_MATRIX.md`, `release-evidence.json`, `FINAL_WEB_SCOPE.md`, `WEB_CONTROL_MANIFEST.md`, and `WEB_PRODUCTION_COMPLETION_GATE.md`.
 
 Older entries below are historical unless they are repeated in the current evidence files. Do not use older merged PR SHAs or deployment IDs below as evidence that this branch has been merged, deployed, or production-certified.
 
@@ -15,7 +17,7 @@ Merged main SHA: `4bda5691a05988471e412519bbfdcf4078430ee0`
 
 ## Source Of Truth
 
-Use this file, `LOCKED_RELEASE_SCOPE.md`, `release-evidence.json`, and `FAILURE_LOG.md` for the current state. Older reports are historical unless they name the current pass and validation commands below.
+This historical section is not the current release source of truth. Use `TEST_MATRIX.md`, `NATIVE_PARITY_SURFACES.md`, and the PR #7 web recovery ledger for the current 2026-07-08 decision; older reports are historical unless they name the latest pass and validation commands.
 
 ## Current Findings
 
@@ -30,7 +32,7 @@ Use this file, `LOCKED_RELEASE_SCOPE.md`, `release-evidence.json`, and `FAILURE_
 | MF-007 | Microphone lifecycle | P1 | Fixed locally | Failed signed-in recording start stops an opened mic stream. | Physical microphone quality not claimed. |
 | MF-008 | Score Practice PDF reader | P1 | Fixed locally | Iframe-only PDF preview replaced with lazy PDF.js canvas rendering, page navigation, zoom, and rotation. | Manual score practice only; printed-note comparison remains disabled until OMR/alignment is proven. |
 | MF-009 | Metronome wording/live settings | P1 | Fixed locally | Running accent/ramp settings use refs; UI now labels queue stats instead of acoustic measurements. | Acoustic timing/bleed validation remains unproven. |
-| MF-010 | Native parity | P1 | Red gate | Native audit found fixture-backed mic/practice and missing native metronome/score/auth parity. Swift package tests passed only for existing core fixtures. | Do not claim native production parity or App Store readiness. |
+| MF-010 | Native parity | P1 | Red gate | Current PR #8 has sample-mode practice, native metronome/score surfaces, and local AVAudioEngine live-capture code, but physical microphone validation, account-provider lifecycle, current-head CI, signing, and App Store gates remain blocked. | Do not claim native production parity or App Store readiness. |
 | MF-011 | Hosted production | P0 | Passed | `npm run smoke:hosted` against production passed root, health, CORS, browser-origin WS app response, query-token rejection, and bad-Origin rejection after Vercel/Render deployment. | Web/backend closed-beta production gate is green. |
 | MF-012 | Exact-SHA CI/deploy | P0 | Passed for merge commit | GitHub connector verified Backend, Frontend, Security, Swift, and Vercel green for `ede7960`; PR #2 merged to `main` as `4bda5691`; Vercel and Render deployed the merge commit. | Re-check exact-SHA gates for future hotfix commits. |
 | MF-013 | Artifact/secret hygiene | P1 | Clean tracked scope | `git diff --check` passed; tracked secret-pattern scan returned no matches; only expected ignored local env/data/test artifacts are present. | Stage explicit files only. |

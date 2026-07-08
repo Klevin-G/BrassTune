@@ -1,14 +1,16 @@
 # Release Readiness Docs Index
 
-Date: 2026-06-20
-Branch: `arya/release-readiness-hardening`
+Date: 2026-07-08
+Branch: `arya/native-swift-parity-surfaces-20260628`
+
+Current audit status: this native worktree has simulator/sample-mode validation plus local AVAudioEngine live-capture implementation. PR #8 is not Apple-release-ready because the live microphone path has not been validated on a physical iPhone/iPad, current app test execution is blocked by CoreSimulator runner preflight failures, and signing/archive/TestFlight/App Store gates remain blocked. Web production evidence in this workspace is historical June evidence only; the current PR #7 web/backend recovery gate lives in the separate web recovery branch/worktree and remains blocked on stale Render readiness/version routes, protected Vercel preview access, disabled deploy/smoke workflows, and live Supabase acceptance.
 
 ## Canonical Current Files
 
 | Topic | Canonical File | Notes |
 |---|---|---|
-| Current status and release decision | `MASTER_FINDINGS.md` | Source of truth until final pushed SHA is verified. |
-| Machine-readable evidence | `release-evidence.json` | Current command/source evidence for this local pass. |
+| Current native simulator/live-capture evidence | `TEST_MATRIX.md`, `NATIVE_PARITY_SURFACES.md` | Current source of truth for PR #8 simulator/sample-mode status, local live-capture implementation, and native blockers. |
+| Historical June web beta evidence | `MASTER_FINDINGS.md`, `FINAL_REPORT.md`, `WEB_PRODUCTION_COMPLETION_GATE.md`, `release-evidence.json` | Historical only; not current PR #7 production evidence. |
 | Local recovery inventory | `LOCAL_IMPLEMENTATION_INVENTORY.md` | Lists dirty/untracked implementation files and known gaps. |
 | Workstream ownership | `WORKSTREAM_OWNERSHIP.md` | Maps multi-agent audits, evidence, and remaining blockers. |
 | Test evidence matrix | `TEST_MATRIX.md` | Must be refreshed after final commit and CI. Treat older counts as historical. |
@@ -30,11 +32,10 @@ Branch: `arya/release-readiness-hardening`
 
 ## Duplicate Handling
 
-- `MASTER_FINDINGS.md` owns the current release decision.
-- `release-evidence.json` owns machine-readable current evidence.
+- `TEST_MATRIX.md` and `NATIVE_PARITY_SURFACES.md` own the current PR #8 native simulator/sample/live-capture decision.
+- `MASTER_FINDINGS.md`, `FINAL_REPORT.md`, and `release-evidence.json` are historical June web evidence unless refreshed for the current PR #7/PR #8 gate.
 - `FAILURE_LOG.md` owns historical failure narratives.
-- `TEST_MATRIX.md` owns command/result evidence after final validation.
-- `FINAL_REPORT.md` should summarize, not duplicate, the full evidence matrix.
+- `FINAL_REPORT.md` should summarize, not duplicate, the full evidence matrix after it is refreshed.
 - `BETA_LOAD_ABUSE_SMOKE.md` and `LOAD_ABUSE_SMOKE.md` overlap; keep one canonical load/abuse procedure in the next docs cleanup.
 - `BETA_QA_GUIDE.md` and `FRIEND_QA_SCRIPT.md` overlap; keep the beta guide canonical and make friend scripts persona-specific.
 
