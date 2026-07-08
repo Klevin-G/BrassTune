@@ -51,7 +51,7 @@ def generate_rehearsal_report(group_id: int, group_sessions: Iterable[object], d
     plan = generate_practice_plan(top, profile)
     return {
         "group_id": group_id,
-        "date_range": date_range or "seeded local MVP data",
+        "date_range": date_range or "all available ensemble sessions",
         "instrument_section": "all brass",
         "top_problem_notes": top,
         "average_tuning_error": summary["overall"]["average_abs_cents"],
@@ -59,4 +59,3 @@ def generate_rehearsal_report(group_id: int, group_sessions: Iterable[object], d
         "suggested_long_tone_sequence": [step["detail"] for step in plan["steps"]],
         "sections": summary["sections"],
     }
-

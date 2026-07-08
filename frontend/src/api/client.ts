@@ -1,6 +1,7 @@
 import type { InstrumentProfile, NoteEvent, NoteStats, PitchFrame, PracticePlan, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
 import { apiBase, wsBase } from './runtimeConfig';
 let authTokenProvider: (() => Promise<string | null>) | null = null;
+export const MAX_PITCH_FRAMES_PER_BATCH = 1000;
 
 export interface DateRangeParams {
   date_from?: string;
@@ -36,6 +37,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export function friendlyUserFacingError(error: unknown, fallback = 'That action could not complete. Try again after reconnecting.') {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  if (/quota|storage/i.test(raw)) return 'This browser could not save the latest local practice data. Export or delete old local sessions and try again.';
+  if (/permission|denied|notallowed/i.test(raw)) return 'Permission was blocked. Check browser permissions and try again.';
+  if (/network|failed to fetch|load failed|offline/i.test(raw)) return 'Network access is unavailable right now. Guest practice still works on this device.';
+  if (/authentication required|sign in|unauthorized|forbidden|access/i.test(raw)) return 'Sign in with the right account to use that cloud feature.';
+  if (/too many|413|payload/i.test(raw)) return 'That request is too large. Try a shorter recording or smaller file.';
+  if (/fastapi|traceback|stack|sql|relation|supabase|env var|vite|render|vercel|http:|https:/i.test(raw) || raw.length > 180) return fallback;
+  return raw || fallback;
+}
+
 function friendlyRequestError(message: string, status: number) {
   let raw = message;
   try {
@@ -50,7 +62,12 @@ function friendlyRequestError(message: string, status: number) {
   if (/fastapi|backend|env var|SUPABASE_|VITE_/i.test(raw)) {
     return 'Cloud practice is unavailable right now. Guest practice still works on this device.';
   }
-  return raw || `Request failed: ${status}`;
+  if (status === 403) return 'You do not have access to that BrassTune resource.';
+  if (status === 404) return 'That BrassTune item is not available for this account.';
+  if (status === 409) return 'That change conflicts with existing account or ensemble data.';
+  if (status === 413) return 'That request is too large. Try a shorter recording or smaller file.';
+  if (status >= 500) return 'Cloud practice is unavailable right now. Guest practice still works on this device.';
+  return friendlyUserFacingError(raw, `Request failed with status ${status}.`);
 }
 
 export const exportUrl = (path: string) => `${apiBase()}${path}`;
@@ -116,11 +133,46 @@ export function recordPitchFrame(sessionId: number, frame: PitchFrame) {
   });
 }
 
-export function recordPitchFrames(sessionId: number, frames: PitchFrame[]) {
+export function recordPitchFrames(sessionId: number, frames: PitchFrame[], options: { signal?: AbortSignal } = {}) {
   return request<{ saved: number; rejected: number }>(`/api/sessions/${sessionId}/samples/batch`, {
     method: 'POST',
     body: JSON.stringify(frames),
+    signal: options.signal,
   });
+}
+
+export async function recordPitchFramesInBatches(
+  sessionId: number,
+  frames: PitchFrame[],
+  options: {
+    batchSize?: number;
+    signal?: AbortSignal;
+    onProgress?: (saved: number, attempted: number) => void;
+  } = {},
+) {
+  const batchSize = Math.max(1, Math.min(options.batchSize ?? MAX_PITCH_FRAMES_PER_BATCH, MAX_PITCH_FRAMES_PER_BATCH));
+  let saved = 0;
+  let rejected = 0;
+  let attempted = 0;
+  for (let index = 0; index < frames.length; index += batchSize) {
+    if (options.signal?.aborted) {
+      throw new DOMException('Pitch frame save was canceled.', 'AbortError');
+    }
+    const batch = frames.slice(index, index + batchSize);
+    let result: { saved: number; rejected: number };
+    try {
+      result = await recordPitchFrames(sessionId, batch, { signal: options.signal });
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error('Pitch frame save failed.');
+      Object.assign(failure, { saved, rejected, attempted, failedFrames: frames.slice(attempted) });
+      throw failure;
+    }
+    saved += result.saved;
+    rejected += result.rejected;
+    attempted += batch.length;
+    options.onProgress?.(saved, attempted);
+  }
+  return { saved, rejected, attempted };
 }
 
 export function stopSession(sessionId: number) {
@@ -152,7 +204,7 @@ export function sessionAudioUrl(sessionId: number | string) {
 export async function downloadExport(path: string, filename: string) {
   const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(friendlyRequestError(await response.text(), response.status));
   }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);

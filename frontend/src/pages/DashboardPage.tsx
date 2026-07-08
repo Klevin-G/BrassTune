@@ -73,7 +73,7 @@ export function DashboardPage() {
         }
         meta={<StatusBadge tone="gold">{instrumentId}</StatusBadge>}
       />
-      {error && <div className="alert">{error}</div>}
+      {error && <div className="alert" role="status" aria-live="polite">{error}</div>}
       <SectionCard className="today-focus-card">
         <div>
           <p className="eyebrow">Next best rep</p>

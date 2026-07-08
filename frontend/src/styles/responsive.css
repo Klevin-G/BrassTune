@@ -611,7 +611,7 @@
   }
 
   .topbar .toggle {
-    min-height: 36px;
+    min-height: var(--tap);
     padding: 0 8px;
   }
 
@@ -727,7 +727,7 @@
 
   .floating-tabbar a {
     gap: 2px;
-    min-height: 42px;
+    min-height: var(--tap);
     font-size: 0.56rem;
   }
 
@@ -737,8 +737,10 @@
   }
 
   .tuner-surface .session-controls {
-    position: static;
-    bottom: auto;
+    position: sticky;
+    bottom: calc(74px + env(safe-area-inset-bottom));
+    z-index: 21;
+    margin-bottom: 4px;
   }
 
   .tuner-header {
@@ -750,7 +752,7 @@
     font-size: 1.55rem;
   }
 
-  .tuner-header p:not(.eyebrow) {
+  .tuner-header p.muted-copy {
     display: none;
   }
 

@@ -89,18 +89,17 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
         raise HTTPException(status_code=401, detail="Supabase token did not include a user id.")
     email = payload.get("email")
     metadata = payload.get("user_metadata") or {}
+    deletion_job = (
+        db.query(AccountDeletionJob)
+        .filter(AccountDeletionJob.supabase_user_id == supabase_id)
+        .order_by(AccountDeletionJob.updated_at.desc())
+        .first()
+    )
+    if deletion_job is not None:
+        if deletion_job.status == "completed":
+            raise HTTPException(status_code=410, detail="This account has been deleted.")
+        raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
-    if user is None:
-        deletion_job = (
-            db.query(AccountDeletionJob)
-            .filter(AccountDeletionJob.supabase_user_id == supabase_id)
-            .order_by(AccountDeletionJob.updated_at.desc())
-            .first()
-        )
-        if deletion_job is not None:
-            if deletion_job.status == "completed":
-                raise HTTPException(status_code=410, detail="This account has been deleted.")
-            raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
     if user is None:
         preferred_username = metadata.get("username") or (email.split("@")[0] if email else "player")
         user = User(
@@ -162,7 +161,7 @@ def _fetch_supabase_user(token: str) -> dict:
 def _supabase_service_key() -> str:
     key = os.getenv("SUPABASE_SECRET_KEY")
     if not key:
-        raise HTTPException(status_code=503, detail="SUPABASE_SECRET_KEY is required for account deletion.")
+        raise HTTPException(status_code=503, detail="Account deletion is unavailable.")
     return key
 
 
@@ -199,6 +198,8 @@ def delete_supabase_identity(supabase_user_id: Optional[str]) -> bool:
         with urllib.request.urlopen(request, timeout=10):  # nosec B310
             return True
     except urllib.error.HTTPError as exc:
+        if exc.code in {404, 410}:
+            return True
         raise HTTPException(status_code=502, detail="Supabase identity deletion failed.") from exc
     except OSError as exc:
         raise HTTPException(status_code=503, detail="Could not reach Supabase to delete the identity.") from exc

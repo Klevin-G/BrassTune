@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { PitchFrame } from '../domain/types';
 
 async function loadClient(wsBase = '', apiBase = '') {
   vi.resetModules();
@@ -101,5 +102,101 @@ describe('API client runtime URLs', () => {
     expect(headers.get('authorization')).toBe('Bearer signed-in-token');
     expect(headers.get('content-type')).toBe('audio/webm');
     expect(headers.get('x-audio-duration-seconds')).toBe('1.5');
+  });
+
+  it('splits pitch frame saves into backend-safe batches', async () => {
+    const { recordPitchFramesInBatches } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockImplementation(async (_url, init) => ({
+      ok: true,
+      json: async () => ({ saved: JSON.parse(String(init.body)).length, rejected: 0 }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const frames: PitchFrame[] = Array.from({ length: 2500 }, (_, index) => ({
+      timestamp_ms: index,
+      frequency_hz: 440,
+      instrument_id: 'trumpet',
+      reference_pitch_hz: 440,
+      is_valid_for_recording: true,
+      confidence: 0.9,
+      rms: 0.2,
+      midi_note_float: 69,
+      nearest_midi: 69,
+      concert_note_name: 'A',
+      concert_octave: 4,
+      written_note_name: 'B',
+      written_octave: 4,
+      cents_deviation: 0,
+      tuning_status: 'in_tune',
+      detector_source: 'browser_local_pitch',
+    }));
+
+    const result = await recordPitchFramesInBatches(42, frames);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result).toEqual({ saved: 2500, rejected: 0, attempted: 2500 });
+    const payloadSizes = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init.body)).length);
+    expect(payloadSizes).toEqual([1000, 1000, 500]);
+  });
+
+  it('reports rejected pitch frames from successful batch responses', async () => {
+    const { recordPitchFramesInBatches } = await loadClient('', 'https://api.example.test');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ saved: 3, rejected: 1 }),
+    }));
+    const frames = Array.from({ length: 4 }, (_, index) => ({
+      timestamp_ms: index,
+      frequency_hz: 440,
+      instrument_id: 'trumpet',
+      reference_pitch_hz: 440,
+      is_valid_for_recording: true,
+      confidence: 0.9,
+      rms: 0.2,
+      midi_note_float: 69,
+      nearest_midi: 69,
+      concert_note_name: 'A',
+      concert_octave: 4,
+      written_note_name: 'B',
+      written_octave: 4,
+      cents_deviation: 0,
+      tuning_status: 'in_tune',
+      detector_source: 'browser_local_pitch',
+    })) as PitchFrame[];
+
+    await expect(recordPitchFramesInBatches(42, frames, { batchSize: 4 })).resolves.toEqual({ saved: 3, rejected: 1, attempted: 4 });
+  });
+
+  it('attaches partial batch progress when a later pitch-frame batch fails', async () => {
+    const { recordPitchFramesInBatches } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ saved: 2, rejected: 0 }) })
+      .mockResolvedValueOnce({ ok: false, text: async () => JSON.stringify({ detail: 'temporary outage' }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const frames = Array.from({ length: 4 }, (_, index) => ({
+      timestamp_ms: index,
+      frequency_hz: 440,
+      instrument_id: 'trumpet',
+      reference_pitch_hz: 440,
+      is_valid_for_recording: true,
+      confidence: 0.9,
+      rms: 0.2,
+      midi_note_float: 69,
+      nearest_midi: 69,
+      concert_note_name: 'A',
+      concert_octave: 4,
+      written_note_name: 'B',
+      written_octave: 4,
+      cents_deviation: 0,
+      tuning_status: 'in_tune',
+      detector_source: 'browser_local_pitch',
+    })) as PitchFrame[];
+
+    await expect(recordPitchFramesInBatches(42, frames, { batchSize: 2 })).rejects.toMatchObject({
+      saved: 2,
+      rejected: 0,
+      attempted: 2,
+      failedFrames: frames.slice(2),
+    });
   });
 });

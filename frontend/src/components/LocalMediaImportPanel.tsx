@@ -1,7 +1,7 @@
 import { CheckCircle2, File as FileIcon, Square, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { recordPitchFrames, startSession, stopSession } from '../api/client';
+import { friendlyUserFacingError, recordPitchFramesInBatches, startSession, stopSession } from '../api/client';
 import { createGuestSession, saveGuestSessionFromFrames } from '../domain/guestSessions';
 import { analyzeLocalMediaFile } from '../domain/localMediaAnalysis';
 import type { PracticeSession } from '../domain/types';
@@ -43,10 +43,16 @@ export function LocalMediaImportPanel({
       }
       let stopped: PracticeSession;
       if (auth.isSignedIn) {
-        const session = await startSession(instrumentId, referencePitch, `Imported ${file.name}`);
+        const session = await startSession(instrumentId, referencePitch, 'Imported recording');
         startedSession = session;
         setStatus(`Saving ${validFrames.length} analyzed pitch frames. Source recording remains on this device.`);
-        await recordPitchFrames(session.id, validFrames);
+        const result = await recordPitchFramesInBatches(session.id, validFrames, {
+          signal: controller.signal,
+          onProgress: (saved, attempted) => {
+            setStatus(`Saving analyzed pitch frames: ${attempted}/${validFrames.length} sent, ${saved} saved.`);
+          },
+        });
+        if (result.rejected > 0) setStatus(`${result.saved} analyzed frames saved; ${result.rejected} frames were outside recording criteria.`);
         stopped = await stopSession(session.id);
       } else {
         const draft = createGuestSession(instrumentId, referencePitch, `Imported ${file.name}`);
@@ -62,7 +68,7 @@ export function LocalMediaImportPanel({
       if (startedSession) {
         stopSession(startedSession.id).catch(() => undefined);
       }
-      setStatus(error instanceof Error ? error.message : 'Local media analysis failed.');
+      setStatus(friendlyUserFacingError(error, 'Local media analysis failed. Try a shorter audio or image file.'));
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
@@ -104,7 +110,14 @@ export function LocalMediaImportPanel({
         )}
       </div>
       {busy && (
-        <div className="import-progress" aria-label="Local media analysis progress">
+        <div
+          className="import-progress"
+          role="progressbar"
+          aria-label="Local media analysis progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+        >
           <span style={{ width: `${Math.round(progress * 100)}%` }} />
         </div>
       )}

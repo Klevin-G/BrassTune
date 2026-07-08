@@ -45,8 +45,7 @@ async def pitch_socket(websocket: WebSocket):
     db = SessionLocal()
     auth: Optional[AuthContext] = None
     try:
-        query_token = websocket.query_params.get("token")
-        if query_token:
+        if websocket.query_params:
             await websocket.send_json({"type": "error", "message": "WebSocket query-token auth is disabled."})
             await websocket.close(code=1008)
             db.close()

@@ -35,6 +35,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const [busy, setBusy] = useState(false);
 
   const isSignup = mode === 'sign-up';
+  const isPasswordRecovery = mode === 'reset' && auth.hasAuthSession;
 
   useEffect(() => {
     if (mode !== 'callback') return;
@@ -54,7 +55,11 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
       } else if (mode === 'sign-up') {
         await auth.signUp({ email, password, username, displayName, primaryInstrumentId: instrumentId });
         setMessage('Account created. If email confirmation is enabled, confirm your email before signing in.');
-      } else if (auth.hasAuthSession && newPassword) {
+      } else if (isPasswordRecovery) {
+        if (newPassword.length < 8) {
+          setMessage('Enter a new password with at least 8 characters.');
+          return;
+        }
         await auth.updatePassword(newPassword);
         setMessage('Password updated. Use the new password the next time you sign in.');
         setNewPassword('');
@@ -70,14 +75,27 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   }
 
   if (mode === 'callback') {
+    const callbackMessage = auth.profileError ?? message ?? (auth.isSignedIn ? 'Account session is ready.' : 'Finishing sign-in. Continue when your account session is ready.');
     return (
       <ScreenContainer>
         <SectionCard title="Finishing sign in" eyebrow="Account access">
-          <p className="muted-copy" role="status">{auth.configured ? message ?? 'Finishing sign-in. Continue when your account session is ready.' : 'Accounts are not enabled in this build yet. You can still use guest practice.'}</p>
-          <Link className="primary-button" to={auth.configured ? next : next} onClick={!auth.configured ? auth.continueAsGuest : undefined}>
-            {auth.configured ? 'Continue' : 'Continue as guest'}
-            <ArrowRight size={18} />
-          </Link>
+          <p className="muted-copy" role="status">{auth.configured ? callbackMessage : 'Accounts are not enabled in this build yet. You can still use guest practice.'}</p>
+          {auth.configured && !auth.isSignedIn ? (
+            <button className="primary-button" type="button" disabled aria-disabled="true">
+              Continue
+              <ArrowRight size={18} />
+            </button>
+          ) : (
+            <Link className="primary-button" to={auth.configured ? next : next} onClick={!auth.configured ? auth.continueAsGuest : undefined}>
+              {auth.configured ? 'Continue' : 'Continue as guest'}
+              <ArrowRight size={18} />
+            </Link>
+          )}
+          {auth.configured && !auth.isSignedIn && (
+            <Link className="ghost-button" to="/home" onClick={auth.continueAsGuest}>
+              Continue as guest
+            </Link>
+          )}
         </SectionCard>
       </ScreenContainer>
     );
@@ -117,10 +135,12 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
           )}
           {auth.configured && (
             <form className="auth-form" onSubmit={onSubmit}>
-              <label>
-                Email
-                <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required={!auth.hasAuthSession || mode !== 'reset'} placeholder="you@example.com" />
-              </label>
+              {!isPasswordRecovery && (
+                <label>
+                  Email
+                  <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="you@example.com" />
+                </label>
+              )}
               {mode !== 'reset' && (
                 <label>
                   Password
@@ -143,12 +163,12 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
               {mode === 'reset' && auth.hasAuthSession && (
                 <label>
                   New password
-                  <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" minLength={8} placeholder="Minimum 8 characters" />
+                  <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" required minLength={8} placeholder="Minimum 8 characters" />
                 </label>
               )}
-              <button className="primary-button" disabled={busy} type="submit">
+              <button className="primary-button" disabled={busy || (isPasswordRecovery && newPassword.length < 8)} type="submit">
                 {isSignup ? <UserPlus size={18} /> : mode === 'reset' ? <KeyRound size={18} /> : <LogIn size={18} />}
-                {busy ? 'Working...' : isSignup ? 'Create account' : mode === 'reset' && auth.hasAuthSession && newPassword ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
+                {busy ? 'Working...' : isSignup ? 'Create account' : isPasswordRecovery ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
               </button>
             </form>
           )}

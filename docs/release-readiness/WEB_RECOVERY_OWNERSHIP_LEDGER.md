@@ -167,7 +167,7 @@ All 12 first-level agents completed read-only first pass work. Consolidated P0/P
 
 Confirmed corrections to the pasted baseline:
 - Supabase project `uvbcvqupelcrncyhqsrq` is currently `ACTIVE_HEALTHY`, not `INACTIVE`.
-- The live Supabase schema is still behind the repository; `20260620_account_deletion_and_membership_windows` is not recorded live.
+- The live Supabase schema includes `20260620_account_deletion_and_membership_windows` and `20260625_invitation_fk_indexes`; remaining Supabase work is live auth/storage/account-lifecycle acceptance.
 - Render management access is still unavailable from local CLI/MCP in this environment; public `/api/health` is reachable but not sufficient release evidence.
 - Vercel production deployment `dpl_CWTdt7Fhs9P69H5tayyKWW3zDQm7` is ready on SHA `1c998d5480f52b5fcf0e2c143f5078893caead66`; newer Swift-branch previews still proved web deployment isolation was incomplete.
 

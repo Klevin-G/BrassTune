@@ -79,7 +79,14 @@ async function checkWebRoot() {
   const headers = vercelBypassSecret ? { 'x-vercel-protection-bypass': vercelBypassSecret } : {};
   const response = await fetch(webAccessURL, { redirect: 'follow', headers });
   const text = await response.text();
-  if (response.status === 401 || response.status === 403 || /vercel authentication|single sign-on/i.test(text)) {
+  const finalURL = new URL(response.url);
+  if (
+    response.status === 401
+    || response.status === 403
+    || finalURL.hostname === 'vercel.com'
+    || finalURL.hostname.endsWith('.vercel.com')
+    || /vercel authentication|single sign-on|log in to vercel|continue with sso/i.test(text)
+  ) {
     throw new Error(`web app is protected by Vercel auth/SSO: HTTP ${response.status}`);
   }
   if (!response.ok) {

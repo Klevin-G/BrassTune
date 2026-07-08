@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { getProgress } from '../api/client';
 import { AccuracyLineChart, PracticeBarChart } from '../components/ProgressChart';
 import { InsightCard, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { buildGuestNoteStats, buildGuestProgress } from '../domain/guestInsights';
 import type { ProgressMetrics } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
@@ -15,8 +16,14 @@ export function ProgressPage() {
 
   useEffect(() => {
     if (!auth.isSignedIn) {
-      setProgress(null);
-      setError('Progress sync is available after sign-in. Record or review guest sessions locally.');
+      const guestStats = buildGuestNoteStats(instrumentId);
+      const guestProgress = buildGuestProgress(instrumentId, guestStats);
+      setProgress(guestProgress);
+      setError(
+        guestProgress.session_count
+          ? 'Using guest sessions saved in this browser. Sign in to sync progress across devices.'
+          : 'Record a guest take to start local progress on this device.',
+      );
       return;
     }
     getProgress(instrumentId)
@@ -42,7 +49,7 @@ export function ProgressPage() {
         description="Track whether the tuning work is getting steadier, not just whether one note looked good for a moment."
         meta={<StatusBadge tone="gold">{progress?.period?.current ?? 'Current period'}</StatusBadge>}
       />
-      {error && <div className="alert">{error}</div>}
+      {error && <div className="alert" role="status" aria-live="polite">{error}</div>}
       <div className="stats-grid">
         <MetricTile label="Current error" value={`${latestPoint?.avg_abs_cents.toFixed(1) ?? '0.0'}c`} detail="average deviation" icon={TrendingDown} tone="gold" />
         <MetricTile label="In tune" value={`${Math.round(latestPoint?.in_tune_percentage ?? 0)}%`} detail="recent period" icon={Award} tone="green" />
@@ -73,7 +80,7 @@ export function ProgressPage() {
         <InsightCard
           title={issue?.note_label ?? 'Biggest current issue'}
           detail={issue ? `${issue.avg_abs_cents.toFixed(1)} cents avg abs` : 'No issue detected'}
-          body={issue?.recommendation_summary ?? 'The next coach plan will use the highest severity note with enough data.'}
+          body={issue?.recommendation_summary ?? 'Record a guest take to build a local progress baseline on this device.'}
           icon={TrendingDown}
           tone="red"
         />

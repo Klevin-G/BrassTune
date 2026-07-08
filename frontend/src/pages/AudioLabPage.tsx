@@ -69,7 +69,14 @@ export function AudioLabPage() {
       recorder.setError(String(error));
     }
   };
-  const stop = () => recorder.stop().catch((error) => recorder.setError(String(error)));
+  const stop = async () => {
+    try {
+      await stream.finishPersistingFrames();
+      await recorder.stop();
+    } catch (error) {
+      recorder.setError(String(error));
+    }
+  };
   const copyDiagnostics = () => {
     const payload = {
       apiBase,
@@ -251,7 +258,7 @@ export function AudioLabPage() {
                 <p>{recorder.lastSummary.notes_count} note events, {recorder.lastSummary.average_abs_cents.toFixed(1)} cents average absolute error.</p>
               </div>
             )}
-            {recorder.error && <div className="alert">{recorder.error}</div>}
+            {recorder.error && <div className="alert" role="alert">{recorder.error}</div>}
           </div>
         </SectionCard>
       </div>

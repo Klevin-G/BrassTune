@@ -1,10 +1,16 @@
 # Current Branch Notice
 
-Updated: 2026-06-21T05:24:54Z for `arya/final-web-completion`.
+Updated: 2026-07-08 for `arya-s/web-production-recovery-20260625`.
 
-Current local E2E result for this branch: `cd frontend && CI=true npm run e2e:local` passed `80` tests across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. Exact-SHA preview and production smoke remain pending for this branch until it is pushed, merged, and deployed.
+Current PR #7 local evidence: `cd frontend && npm test` passed `50` tests, `cd frontend && npm run build` passed, and `cd frontend && CI=true npm run e2e:local` passed `95` tests across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. Current hosted evidence is blocked by provider state: production Render still returns `404` for `/api/live`, `/api/ready`, and `/api/version`; the PR #7 Vercel preview is Ready but SSO-protected without an automation bypass/share path; production Vercel still serves the older `main` deployment.
 
-Older entries below are retained as historical evidence from previous PRs/deployments.
+Older entries below are retained as historical evidence from previous PRs/deployments and must not be used as the current release decision.
+
+## 2026-07-08 Current Hosted Result
+
+- `npm run smoke:hosted` against production currently passes web root, CORS, WebSocket app-level response, query-token rejection, and bad-Origin rejection, but fails the release gate because Render `/api/ready` and `/api/version` return `404`.
+- Strict hosted browser smoke against production passed 6 of 7 checks and failed only the backend readiness/version route group for the same stale Render reason.
+- PR #7 preview `dpl_J6mJ8Qyk2NA4Z9FUdGwBmpG2udP6` is Ready at `b37ed6ce6c8bb33089e14ce950c3de768a295602`, but public access redirects to Vercel SSO, so page-level preview smoke is not accepted without an approved bypass/share URL.
 
 # Web E2E Report
 

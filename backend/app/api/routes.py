@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
@@ -26,6 +27,13 @@ from app.services.serializers import event_to_dict, group_member_to_dict, group_
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 
 router = APIRouter(prefix="/api")
+
+DEFAULT_EXPORT_MAX_SESSIONS = 200
+DEFAULT_EXPORT_MAX_ROWS_PER_SESSION = 50_000
+DEFAULT_EXPORT_MAX_TOTAL_ROWS = 250_000
+DEFAULT_EXPORT_MAX_AUDIO_BYTES = 200 * 1024 * 1024
+DEFAULT_EXPORT_MAX_ARCHIVE_BYTES = 250 * 1024 * 1024
+STALE_DELETION_JOB_SECONDS = 15 * 60
 
 
 def _bad_instrument(instrument_id: str) -> HTTPException:
@@ -126,14 +134,6 @@ def _require_local_demo_or_admin(auth: AuthContext) -> None:
     raise HTTPException(status_code=403, detail="This maintenance action is limited to local demo or admin users.")
 
 
-def _session_json_payload(db: Session, session: PracticeSession):
-    return {
-        "session": session_to_dict(session),
-        "samples": [sample_to_dict(sample) for sample in db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()],
-        "note_events": [event_to_dict(event) for event in db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()],
-    }
-
-
 def _samples_csv_text(samples) -> str:
     output = io.StringIO()
     writer = csv.DictWriter(
@@ -190,13 +190,82 @@ def _schema_dict(model):
     return model.dict()
 
 
-def _write_session_audio_to_archive(archive: zipfile.ZipFile, session: PracticeSession, folder: str) -> None:
+def _positive_int_config(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+class ExportBudget:
+    def __init__(self):
+        self.max_sessions = _positive_int_config("BRASSTUNE_EXPORT_MAX_SESSIONS", DEFAULT_EXPORT_MAX_SESSIONS)
+        self.max_rows_per_session = _positive_int_config("BRASSTUNE_EXPORT_MAX_ROWS_PER_SESSION", DEFAULT_EXPORT_MAX_ROWS_PER_SESSION)
+        self.max_total_rows = _positive_int_config("BRASSTUNE_EXPORT_MAX_TOTAL_ROWS", DEFAULT_EXPORT_MAX_TOTAL_ROWS)
+        self.max_audio_bytes = _positive_int_config("BRASSTUNE_EXPORT_MAX_AUDIO_BYTES", DEFAULT_EXPORT_MAX_AUDIO_BYTES)
+        self.max_archive_bytes = _positive_int_config("BRASSTUNE_EXPORT_MAX_ARCHIVE_BYTES", DEFAULT_EXPORT_MAX_ARCHIVE_BYTES)
+        self.audio_bytes = 0
+        self.archive_bytes = 0
+
+    def require_session_count(self, count: int) -> None:
+        if self.max_sessions and count > self.max_sessions:
+            raise HTTPException(status_code=413, detail="Export contains too many sessions. Narrow the export scope.")
+
+    def require_session_rows(self, db: Session, session_id: int) -> None:
+        samples = db.query(PitchSample.id).filter(PitchSample.session_id == session_id).count()
+        events = db.query(NoteEvent.id).filter(NoteEvent.session_id == session_id).count()
+        if self.max_rows_per_session and max(samples, events) > self.max_rows_per_session:
+            raise HTTPException(status_code=413, detail="Export contains too many pitch rows. Narrow the export scope.")
+
+    def require_total_rows(self, db: Session, session_ids: list[int] | None = None) -> None:
+        samples = db.query(PitchSample.id)
+        events = db.query(NoteEvent.id)
+        if session_ids is not None:
+            if not session_ids:
+                return
+            samples = samples.filter(PitchSample.session_id.in_(session_ids))
+            events = events.filter(NoteEvent.session_id.in_(session_ids))
+        total_rows = samples.count() + events.count()
+        if self.max_total_rows and total_rows > self.max_total_rows:
+            raise HTTPException(status_code=413, detail="Export contains too many rows. Narrow the export scope.")
+
+    def require_response_text(self, text: str) -> None:
+        if self.max_archive_bytes and len(text.encode("utf-8")) > self.max_archive_bytes:
+            raise HTTPException(status_code=413, detail="Export response is too large. Narrow the export scope.")
+
+    def write_text(self, archive: zipfile.ZipFile, path: str, text: str) -> None:
+        self.write_bytes(archive, path, text.encode("utf-8"))
+
+    def write_bytes(self, archive: zipfile.ZipFile, path: str, data: bytes, *, audio: bool = False) -> None:
+        if audio:
+            self.audio_bytes += len(data)
+            if self.max_audio_bytes and self.audio_bytes > self.max_audio_bytes:
+                raise HTTPException(status_code=413, detail="Export audio is too large. Export sessions individually or reduce recordings.")
+        self.archive_bytes += len(data)
+        if self.max_archive_bytes and self.archive_bytes > self.max_archive_bytes:
+            raise HTTPException(status_code=413, detail="Export archive is too large. Export sessions individually or narrow the scope.")
+        archive.writestr(path, data)
+
+
+def _session_json_payload(db: Session, session: PracticeSession, budget: ExportBudget | None = None):
+    if budget:
+        budget.require_session_rows(db, session.id)
+    return {
+        "session": session_to_dict(session),
+        "samples": [sample_to_dict(sample) for sample in db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()],
+        "note_events": [event_to_dict(event) for event in db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()],
+    }
+
+
+def _write_session_audio_to_archive(archive: zipfile.ZipFile, session: PracticeSession, folder: str, budget: ExportBudget) -> None:
+    if session.audio_size_bytes and budget.max_audio_bytes and budget.audio_bytes + session.audio_size_bytes > budget.max_audio_bytes:
+        raise HTTPException(status_code=413, detail="Export audio is too large. Export sessions individually or reduce recordings.")
     audio = audio_bytes_for_export(session)
     if audio is None:
         return
     filename, data = audio
     archive_path = "audio/%s" % filename if folder in {"", "."} else "%s/audio/%s" % (folder, filename)
-    archive.writestr(archive_path, data)
+    budget.write_bytes(archive, archive_path, data, audio=True)
 
 
 async def _read_limited_body(request: Request, max_bytes: int = MAX_AUDIO_UPLOAD_BYTES) -> bytes:
@@ -515,6 +584,8 @@ def practice_plan(user_id: Optional[int] = 1, instrument_id: str = "trumpet", db
 @router.get("/export/session/{session_id}.csv")
 def export_session_csv(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_session_access(db, session_id, auth)
+    budget = ExportBudget()
+    budget.require_session_rows(db, session_id)
     samples = db.query(PitchSample).filter(PitchSample.session_id == session_id).order_by(PitchSample.timestamp_ms.asc()).all()
     return Response(_samples_csv_text(samples), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-samples.csv" % session_id})
 
@@ -522,13 +593,15 @@ def export_session_csv(session_id: int, db: Session = Depends(get_db), auth: Aut
 @router.get("/export/session/{session_id}.json")
 def export_session_json(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     session = _require_session_access(db, session_id, auth)
-    payload = _session_json_payload(db, session)
+    payload = _session_json_payload(db, session, ExportBudget())
     return Response(json.dumps(payload, indent=2), media_type="application/json", headers={"Content-Disposition": "attachment; filename=session-%s.json" % session_id})
 
 
 @router.get("/export/note-events/{session_id}.csv")
 def export_note_events_csv(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_session_access(db, session_id, auth)
+    budget = ExportBudget()
+    budget.require_session_rows(db, session_id)
     events = db.query(NoteEvent).filter(NoteEvent.session_id == session_id).order_by(NoteEvent.started_at_ms.asc()).all()
     return Response(_note_events_csv_text(events), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-note-events.csv" % session_id})
 
@@ -541,19 +614,21 @@ def export_session_audio(session_id: int, db: Session = Depends(get_db), auth: A
 @router.get("/export/session/{session_id}.zip")
 def export_session_zip(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     session = _require_session_access(db, session_id, auth)
-    payload = _session_json_payload(db, session)
+    budget = ExportBudget()
+    payload = _session_json_payload(db, session, budget)
     recommendations = generate_session_recommendations(session_to_dict(session), calculate_note_stats(payload["note_events"]))
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("session.json", json.dumps(payload, indent=2))
-        archive.writestr("pitch_samples.csv", _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session_id).order_by(PitchSample.timestamp_ms.asc()).all()))
-        archive.writestr("note_events.csv", _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session_id).order_by(NoteEvent.started_at_ms.asc()).all()))
-        archive.writestr("recommendations.json", json.dumps(recommendations, indent=2))
-        archive.writestr(
+        budget.write_text(archive, "session.json", json.dumps(payload, indent=2))
+        budget.write_text(archive, "pitch_samples.csv", _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session_id).order_by(PitchSample.timestamp_ms.asc()).all()))
+        budget.write_text(archive, "note_events.csv", _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session_id).order_by(NoteEvent.started_at_ms.asc()).all()))
+        budget.write_text(archive, "recommendations.json", json.dumps(recommendations, indent=2))
+        budget.write_text(
+            archive,
             "README.txt",
             "BrassTune session export. pitch_samples.csv contains detector frames; note_events.csv contains segmented note statistics; recommendations.json contains generated practice guidance.",
         )
-        _write_session_audio_to_archive(archive, session, ".")
+        _write_session_audio_to_archive(archive, session, ".", budget)
     buffer.seek(0)
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=session-%s-export.zip" % session_id})
 
@@ -562,7 +637,12 @@ def export_session_zip(session_id: int, db: Session = Depends(get_db), auth: Aut
 def export_all_json(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     if auth.user.role != "admin" and not auth.is_guest:
         raise HTTPException(status_code=403, detail="Full local export is limited to local demo/admin users.")
-    return Response(export_all_data(db), media_type="application/json", headers={"Content-Disposition": "attachment; filename=brasstune-local-data.json"})
+    budget = ExportBudget()
+    budget.require_session_count(db.query(PracticeSession.id).count())
+    budget.require_total_rows(db)
+    payload = export_all_data(db)
+    budget.require_response_text(payload)
+    return Response(payload, media_type="application/json", headers={"Content-Disposition": "attachment; filename=brasstune-local-data.json"})
 
 
 @router.get("/export/all.zip")
@@ -571,17 +651,20 @@ def export_all_zip(db: Session = Depends(get_db), auth: AuthContext = Depends(ge
     if auth.user.role != "admin":
         query = query.filter(PracticeSession.user_id == auth.user.id)
     sessions = query.order_by(PracticeSession.started_at.asc()).all()
+    budget = ExportBudget()
+    budget.require_session_count(len(sessions))
+    budget.require_total_rows(db, [session.id for session in sessions])
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("README.txt", "BrassTune all-data export for the authenticated user/admin scope.")
-        archive.writestr("sessions.json", json.dumps([session_to_dict(session) for session in sessions], indent=2))
+        budget.write_text(archive, "README.txt", "BrassTune all-data export for the authenticated user/admin scope.")
+        budget.write_text(archive, "sessions.json", json.dumps([session_to_dict(session) for session in sessions], indent=2))
         for session in sessions:
             folder = "sessions/%s" % session.id
-            payload = _session_json_payload(db, session)
-            archive.writestr("%s/session.json" % folder, json.dumps(payload, indent=2))
-            archive.writestr("%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
-            archive.writestr("%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
-            _write_session_audio_to_archive(archive, session, folder)
+            payload = _session_json_payload(db, session, budget)
+            budget.write_text(archive, "%s/session.json" % folder, json.dumps(payload, indent=2))
+            budget.write_text(archive, "%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
+            budget.write_text(archive, "%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
+            _write_session_audio_to_archive(archive, session, folder, budget)
     buffer.seek(0)
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=brasstune-export.zip"})
 
@@ -635,22 +718,25 @@ def _account_export_zip(db: Session, auth: AuthContext):
     account["supabase_user_id"] = user.supabase_user_id
     account["created_at"] = _iso(user.created_at)
     account["updated_at"] = _iso(user.updated_at)
+    budget = ExportBudget()
+    budget.require_session_count(len(sessions))
+    budget.require_total_rows(db, [session.id for session in sessions])
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("README.txt", "BrassTune account export for the authenticated user. Source recordings are included only for this user's sessions when available.")
-        archive.writestr("account.json", json.dumps(account, indent=2))
-        archive.writestr("sessions.json", json.dumps([session_to_dict(session) for session in sessions], indent=2))
-        archive.writestr("memberships.json", json.dumps([group_member_to_dict(member) for member in memberships], indent=2))
-        archive.writestr("owned_groups.json", json.dumps([group_to_dict(group) for group in owned_groups], indent=2))
-        archive.writestr("invitations.json", json.dumps([_invitation_to_dict(row) for row in invitations], indent=2))
-        archive.writestr("recommendations.json", json.dumps([_recommendation_to_dict(row) for row in recommendations], indent=2))
+        budget.write_text(archive, "README.txt", "BrassTune account export for the authenticated user. Source recordings are included only for this user's sessions when available.")
+        budget.write_text(archive, "account.json", json.dumps(account, indent=2))
+        budget.write_text(archive, "sessions.json", json.dumps([session_to_dict(session) for session in sessions], indent=2))
+        budget.write_text(archive, "memberships.json", json.dumps([group_member_to_dict(member) for member in memberships], indent=2))
+        budget.write_text(archive, "owned_groups.json", json.dumps([group_to_dict(group) for group in owned_groups], indent=2))
+        budget.write_text(archive, "invitations.json", json.dumps([_invitation_to_dict(row) for row in invitations], indent=2))
+        budget.write_text(archive, "recommendations.json", json.dumps([_recommendation_to_dict(row) for row in recommendations], indent=2))
         for session in sessions:
             folder = "sessions/%s" % session.id
-            payload = _session_json_payload(db, session)
-            archive.writestr("%s/session.json" % folder, json.dumps(payload, indent=2))
-            archive.writestr("%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
-            archive.writestr("%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
-            _write_session_audio_to_archive(archive, session, folder)
+            payload = _session_json_payload(db, session, budget)
+            budget.write_text(archive, "%s/session.json" % folder, json.dumps(payload, indent=2))
+            budget.write_text(archive, "%s/pitch_samples.csv" % folder, _samples_csv_text(db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()))
+            budget.write_text(archive, "%s/note_events.csv" % folder, _note_events_csv_text(db.query(NoteEvent).filter(NoteEvent.session_id == session.id).order_by(NoteEvent.started_at_ms.asc()).all()))
+            _write_session_audio_to_archive(archive, session, folder, budget)
     buffer.seek(0)
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=brasstune-account-export.zip"})
 
@@ -718,9 +804,17 @@ def _deletion_job_payload(job: AccountDeletionJob):
             counts = {}
     else:
         counts = {}
+    if job.status == "completed":
+        deletion_status = "completed"
+    elif job.stage == "external_cleanup_failed":
+        deletion_status = "external_cleanup_queued"
+    elif job.stage == "local_cleanup_failed":
+        deletion_status = "local_cleanup_queued"
+    else:
+        deletion_status = job.status
     return {
         "deleted": job.status == "completed",
-        "deletion_status": job.status,
+        "deletion_status": deletion_status,
         "deletion_stage": job.stage,
         "counts": counts,
         "supabase_sessions_revoked": job.status == "completed",
@@ -731,17 +825,33 @@ def _deletion_job_payload(job: AccountDeletionJob):
 
 def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
     now = dt.datetime.utcnow()
+    stale_cutoff = now - dt.timedelta(seconds=STALE_DELETION_JOB_SECONDS)
     jobs = (
         db.query(AccountDeletionJob)
-        .filter(AccountDeletionJob.status == "retryable_failure")
-        .filter((AccountDeletionJob.next_retry_at.is_(None)) | (AccountDeletionJob.next_retry_at <= now))
+        .filter(
+            or_(
+                AccountDeletionJob.status == "retryable_failure",
+                and_(
+                    AccountDeletionJob.status == "in_progress",
+                    AccountDeletionJob.stage.in_(["local_cleanup_started", "local_cleanup_completed", "external_cleanup_started"]),
+                    AccountDeletionJob.updated_at <= stale_cutoff,
+                ),
+            )
+        )
+        .filter(
+            or_(
+                AccountDeletionJob.status == "in_progress",
+                AccountDeletionJob.next_retry_at.is_(None),
+                AccountDeletionJob.next_retry_at <= now,
+            )
+        )
         .order_by(AccountDeletionJob.updated_at.asc())
         .limit(max(1, min(limit, 50)))
         .all()
     )
     results = []
     for job in jobs:
-        if job.stage == "local_cleanup_failed":
+        if job.stage in {"local_cleanup_started", "local_cleanup_failed"}:
             user = db.query(User).filter(User.id == job.user_id).first()
             if user is not None:
                 try:
@@ -807,7 +917,7 @@ def retry_account_deletions(
 @router.delete("/users/me")
 def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     confirmation = payload.confirmation.strip().lower()
-    if confirmation not in {"delete", "delete my account"}:
+    if confirmation != "delete my account":
         raise HTTPException(status_code=400, detail='Type "delete my account" to confirm account deletion.')
     user = auth.user
     user_id = user.id
@@ -879,25 +989,11 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
             _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "external_identity_cleanup_failed")
             db.add(job)
             db.commit()
-            return {
-                "deleted": True,
-                "deletion_status": "external_cleanup_queued",
-                "counts": deleted_counts,
-                "supabase_sessions_revoked": supabase_sessions_revoked,
-                "supabase_identity_deleted": False,
-                "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
-            }
+            return _deletion_job_payload(job)
     _mark_deletion_job(job, "completed", "completed")
     db.add(job)
     db.commit()
-    return {
-        "deleted": True,
-        "deletion_status": "completed",
-        "counts": deleted_counts,
-        "supabase_sessions_revoked": supabase_sessions_revoked,
-        "supabase_identity_deleted": supabase_identity_deleted,
-        "teacher_owned_group_policy": "Teacher-owned groups are deleted with their memberships and invitations. Students retain their own practice data.",
-    }
+    return _deletion_job_payload(job)
 
 
 def _group_member_ids(db: Session, group_id: int):
@@ -1001,7 +1097,7 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     if existing:
         previous_status = existing.status
         if previous_status == "active":
-            raise HTTPException(status_code=409, detail="This user is already an active ensemble member. Use the member edit controls to change role or instrument.")
+            raise HTTPException(status_code=409, detail="This user is already an active ensemble member.")
         existing.instrument_id = payload.instrument_id
         existing.role_in_group = payload.role_in_group
         existing.status = "active"

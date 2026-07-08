@@ -1,5 +1,6 @@
 import os
 from typing import List
+from urllib.parse import urlparse
 
 
 LOCAL_FRONTEND_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -30,10 +31,34 @@ def auth_mode() -> str:
 
 def allowed_origins() -> List[str]:
     configured = os.getenv("CORS_ALLOWED_ORIGINS") or os.getenv("FRONTEND_ORIGIN")
-    origins = [] if app_environment() in DEPLOYED_ENVIRONMENTS else list(LOCAL_FRONTEND_ORIGINS)
+    environment = app_environment()
+    if environment in DEPLOYED_ENVIRONMENTS and not configured:
+        raise RuntimeError("CORS_ALLOWED_ORIGINS or FRONTEND_ORIGIN must be set to exact HTTPS origins in deployed environments.")
+    origins = [] if environment in DEPLOYED_ENVIRONMENTS else list(LOCAL_FRONTEND_ORIGINS)
     if configured:
-        origins.extend([item.strip() for item in configured.split(",") if item.strip()])
+        origins.extend([_normalize_origin(item) for item in configured.split(",") if item.strip()])
     return sorted(set(origins))
+
+
+def _normalize_origin(raw_origin: str) -> str:
+    origin = raw_origin.strip().rstrip("/")
+    if app_environment() in DEPLOYED_ENVIRONMENTS:
+        _validate_deployed_origin(origin)
+    return origin
+
+
+def _validate_deployed_origin(origin: str) -> None:
+    if origin == "*" or "*" in origin:
+        raise RuntimeError("Deployed CORS origins must be exact HTTPS origins; wildcards are not allowed.")
+    parsed = urlparse(origin)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError("Deployed CORS origins must use https:// and include a host.")
+    if parsed.path or parsed.params or parsed.query or parsed.fragment:
+        raise RuntimeError("Deployed CORS origins must not include paths, query strings, or fragments.")
+    if parsed.username or parsed.password:
+        raise RuntimeError("Deployed CORS origins must not include credentials.")
+    if parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
+        raise RuntimeError("Deployed CORS origins must not point to localhost.")
 
 
 def cors_allowed_origin_regex() -> str | None:

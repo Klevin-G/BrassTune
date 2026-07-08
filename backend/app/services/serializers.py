@@ -22,8 +22,6 @@ def session_to_dict(session) -> Dict[str, Any]:
         "average_signed_cents": session.average_signed_cents,
         "average_abs_cents": session.average_abs_cents,
         "in_tune_percentage": session.in_tune_percentage,
-        "audio_storage_provider": session.audio_storage_provider,
-        "audio_object_key": session.audio_object_key,
         "audio_mime_type": session.audio_mime_type,
         "audio_duration_seconds": session.audio_duration_seconds,
         "audio_size_bytes": session.audio_size_bytes,

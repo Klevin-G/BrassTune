@@ -1,6 +1,7 @@
 import { FileText, Music2, Plus, Printer, Target, UserPlus, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { addEnsembleMemberByUsername, createEnsembleGroup, getEnsembleGroup, getEnsembleGroups, getEnsembleReport, getEnsembleSummary } from '../api/client';
+import { Link } from 'react-router-dom';
+import { addEnsembleMemberByUsername, createEnsembleGroup, friendlyUserFacingError, getEnsembleGroup, getEnsembleGroups, getEnsembleReport, getEnsembleSummary } from '../api/client';
 import { NoteStatsTable } from '../components/NoteStatsTable';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAppSettings } from '../state/AppSettingsContext';
@@ -18,6 +19,7 @@ export function EnsemblePage() {
   const { instrumentId } = useAppSettings();
   const auth = useAuth();
   const canManage = auth.profile?.role === 'director' || auth.profile?.role === 'admin';
+  const hasDirectorReport = Boolean(canManage && selectedGroup && report);
 
   const memberLabel = (member: any) => {
     if (member.is_current_user) return 'You';
@@ -40,7 +42,7 @@ export function EnsemblePage() {
       }
       setEnsembleStatus('');
     } catch (error) {
-      setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensemble data.');
+      setEnsembleStatus(friendlyUserFacingError(error, 'Could not load ensemble data.'));
     } finally {
       setLoading(false);
     }
@@ -66,7 +68,7 @@ export function EnsemblePage() {
         setReport(null);
         return undefined;
       })
-      .catch((error) => setEnsembleStatus(error instanceof Error ? error.message : 'Could not load ensembles.'))
+      .catch((error) => setEnsembleStatus(friendlyUserFacingError(error, 'Could not load ensemble data.')))
       .finally(() => setLoading(false));
   }, [auth.isSignedIn, canManage]);
 
@@ -82,7 +84,7 @@ export function EnsemblePage() {
       setNewGroupName('');
       setEnsembleStatus('Group created.');
     } catch (error) {
-      setEnsembleStatus(error instanceof Error ? error.message : 'Could not create group.');
+      setEnsembleStatus(friendlyUserFacingError(error, 'Could not create group.'));
     }
   };
 
@@ -101,24 +103,47 @@ export function EnsemblePage() {
       setMemberUsername('');
       setEnsembleStatus('Member added.');
     } catch (error) {
-      setEnsembleStatus(error instanceof Error ? error.message : 'Could not add member.');
+      setEnsembleStatus(friendlyUserFacingError(error, 'Could not add member.'));
     }
   };
+
+  if (!auth.isSignedIn) {
+    return (
+      <ScreenContainer>
+        <PageHeader
+          eyebrow="Ensemble"
+          title="Ensemble access"
+          description="Sign in with an ensemble account to view roster membership and director reports."
+        />
+        <SectionCard title="Membership required" eyebrow="Cloud ensemble">
+          <div className="inline-panel">
+            <h3>Use a signed-in ensemble account</h3>
+            <p className="muted-copy">Guest practice stays available, but ensemble rosters and reports require a cloud account so membership and privacy rules can be enforced.</p>
+            {auth.configured ? (
+              <Link to="/?next=/ensemble" className="primary-button">Sign in</Link>
+            ) : (
+              <p className="settings-status" role="status">Cloud sign-in is not configured in this local environment.</p>
+            )}
+          </div>
+        </SectionCard>
+      </ScreenContainer>
+    );
+  }
 
   return (
     <ScreenContainer>
       <PageHeader
         eyebrow="Ensemble"
-        title="Director briefing"
-        description="A report view for seeing section-level intonation tendencies and turning them into a rehearsal focus."
-        action={
+        title={canManage ? 'Director briefing' : 'Ensemble membership'}
+        description={canManage ? 'See section-level intonation tendencies and turn them into a rehearsal focus.' : 'Review your visible ensemble roster membership.'}
+        action={hasDirectorReport ? (
           <button className="primary-button" onClick={() => window.print()} type="button">
             <Printer size={18} />
             Print report
           </button>
-        }
+        ) : undefined}
       />
-      <SectionCard title="Roster admin" eyebrow={canManage ? 'Director tools' : 'Student view'}>
+      <SectionCard title={canManage ? 'Roster admin' : 'Roster'} eyebrow={canManage ? 'Director tools' : 'Student view'}>
         <div className="ensemble-admin-grid">
           <div className="mini-stat-list">
             {groups.map((group) => (
@@ -160,59 +185,63 @@ export function EnsemblePage() {
                 </button>
               </div>
             )}
-            {ensembleStatus && <p className="settings-status" aria-live="polite">{ensembleStatus}</p>}
+            {ensembleStatus && <p className="settings-status" role="status" aria-live="polite">{ensembleStatus}</p>}
           </div>
         </div>
       </SectionCard>
-      <SectionCard title="Section trends" eyebrow="Brass sections">
-        <div className="section-trend-grid">
-          {summary?.sections?.map((section: any) => (
-            <article key={section.instrument_id}>
-              <span>{section.instrument_id}</span>
-              <strong>{section.average_abs_cents.toFixed(1)}c</strong>
-              <p>{section.session_count} sessions, {section.practice_minutes} minutes</p>
-            </article>
-          ))}
-        </div>
-      </SectionCard>
-      <div className="insight-grid">
-        <InsightCard
-          title="Briefing summary"
-          detail="Director handoff"
-          body={report?.recommended_rehearsal_focus ?? 'Ensemble data will populate the rehearsal focus when enough active member sessions are available.'}
-          icon={FileText}
-          tone="gold"
-        />
-        <InsightCard
-          title="Long-tone sequence"
-          detail={`${report?.suggested_long_tone_sequence?.length ?? 0} steps`}
-          body="Use the sequence as a section warmup before repertoire excerpts."
-          icon={Music2}
-          tone="green"
-        />
-        <InsightCard
-          title="Priority lens"
-          detail="Top problem notes"
-          body="The table below ranks note issues by severity across active ensemble sessions."
-          icon={Target}
-          tone="amber"
-        />
-      </div>
-      <SectionCard title="Rehearsal focus" eyebrow="Suggested sequence">
-        <div className="plan-steps">
-          {report?.suggested_long_tone_sequence?.map((item: string, index: number) => (
-            <article key={item}>
-              <span>
-                <Users size={15} /> {index + 1}
-              </span>
-              <p>{item}</p>
-            </article>
-          ))}
-        </div>
-      </SectionCard>
-      <SectionCard title="Top problem notes" eyebrow="Ensemble data">
-        <NoteStatsTable rows={report?.top_problem_notes ?? []} />
-      </SectionCard>
+      {hasDirectorReport && (
+        <>
+          <SectionCard title="Section trends" eyebrow="Brass sections">
+            <div className="section-trend-grid">
+              {summary?.sections?.map((section: any) => (
+                <article key={section.instrument_id}>
+                  <span>{section.instrument_id}</span>
+                  <strong>{section.average_abs_cents.toFixed(1)}c</strong>
+                  <p>{section.session_count} sessions, {section.practice_minutes} minutes</p>
+                </article>
+              ))}
+            </div>
+          </SectionCard>
+          <div className="insight-grid">
+            <InsightCard
+              title="Briefing summary"
+              detail="Director handoff"
+              body={report.recommended_rehearsal_focus}
+              icon={FileText}
+              tone="gold"
+            />
+            <InsightCard
+              title="Long-tone sequence"
+              detail={`${report.suggested_long_tone_sequence?.length ?? 0} steps`}
+              body="Use the sequence as a section warmup before repertoire excerpts."
+              icon={Music2}
+              tone="green"
+            />
+            <InsightCard
+              title="Priority lens"
+              detail="Top problem notes"
+              body="The table below ranks note issues by severity across active ensemble sessions."
+              icon={Target}
+              tone="amber"
+            />
+          </div>
+          <SectionCard title="Rehearsal focus" eyebrow="Suggested sequence">
+            <div className="plan-steps">
+              {report.suggested_long_tone_sequence?.map((item: string, index: number) => (
+                <article key={item}>
+                  <span>
+                    <Users size={15} /> {index + 1}
+                  </span>
+                  <p>{item}</p>
+                </article>
+              ))}
+            </div>
+          </SectionCard>
+          <SectionCard title="Top problem notes" eyebrow="Ensemble data">
+            <NoteStatsTable rows={report.top_problem_notes ?? []} />
+          </SectionCard>
+        </>
+      )}
     </ScreenContainer>
   );
 }

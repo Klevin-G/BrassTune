@@ -85,6 +85,8 @@ def database_readiness_issues() -> list[str]:
         assert_database_configured()
     except RuntimeError as exc:
         issues.append(str(exc))
+        if app_environment() in DEPLOYED_ENVIRONMENTS:
+            return issues
 
     built_engine = None
     dispose_engine = False

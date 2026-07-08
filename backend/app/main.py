@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
+import logging
 import os
 import time
 
@@ -17,6 +18,7 @@ from app.db.seed import seed_demo_data
 
 _RATE_LIMIT_BUCKETS = defaultdict(deque)
 _RATE_LIMIT_WINDOW_SECONDS = 60
+logger = logging.getLogger("brasstune.api")
 
 
 def should_seed_demo_data() -> bool:
@@ -159,7 +161,11 @@ async def request_abuse_limits(request: Request, call_next):
             return harden_response(JSONResponse({"detail": "Too many requests. Try again soon."}, status_code=429))
         bucket.append(now)
 
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.error("Unhandled backend request failure")
+        response = JSONResponse({"detail": "The server could not complete this request."}, status_code=500)
     return harden_response(response)
 
 
