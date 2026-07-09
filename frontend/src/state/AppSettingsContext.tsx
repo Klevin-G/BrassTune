@@ -39,7 +39,13 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
     localStorage.setItem('brasstune.demoMode', String(value));
   };
   const openOnboarding = () => setOnboardingOpen(true);
-  const closeOnboarding = () => setOnboardingOpen(false);
+  const closeOnboarding = () => {
+    // Dismissing the tour (X / Escape) counts as done for this device, so it
+    // does not re-open on every reload.
+    setOnboardingOpen(false);
+    setOnboardingComplete(true);
+    localStorage.setItem('brasstune.onboardingComplete', 'true');
+  };
   const completeOnboarding = () => {
     setOnboardingComplete(true);
     setOnboardingOpen(false);

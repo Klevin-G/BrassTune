@@ -127,7 +127,7 @@ export function AnalyticsPage() {
           <div className="analytics-summary-strip">
             <MetricTile label="Measured" value={`${measuredStats.length}`} detail={`${unmeasuredCount} unmeasured`} tone="gold" />
             <MetricTile label="Avg abs" value={`${diagnosis.averageAbs.toFixed(1)}c`} detail="measured notes" />
-            <MetricTile label="In tune" value={`${Math.round(diagnosis.averageInTune)}%`} detail="weighted by note rows" tone="green" />
+            <MetricTile label="Notes in tune" value={`${Math.round(diagnosis.averageInTune)}%`} detail="weighted by note rows" tone="green" />
           </div>
         </div>
       </SectionCard>
@@ -213,8 +213,7 @@ export function AnalyticsPage() {
           ))}
         </div>
       </SectionCard>
-      <div className="analytics-chart-grid">
-        <SectionCard title="Signed error and spread" eyebrow="Pitch center">
+      <SectionCard title="Signed error and spread" eyebrow="Pitch center">
           <div className="chart-frame">
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={worst}>
@@ -228,21 +227,6 @@ export function AnalyticsPage() {
             </ResponsiveContainer>
           </div>
         </SectionCard>
-        <SectionCard title="Severity ranking" eyebrow="Priority">
-          <div className="chart-frame">
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={worst}>
-                <CartesianGrid stroke="rgba(164, 183, 202, 0.16)" vertical={false} />
-                <XAxis dataKey="note_label" stroke="#9dabbb" />
-                <YAxis stroke="#9dabbb" />
-                <Tooltip contentStyle={{ background: '#111923', border: '1px solid rgba(214, 190, 133, 0.28)', borderRadius: 14 }} />
-                <Bar dataKey="problem_severity" fill="#e58b43" name="Problem severity" radius={[7, 7, 0, 0]} />
-                <Bar dataKey="in_tune_percentage" fill="#6bd287" name="In-tune %" radius={[7, 7, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </SectionCard>
-      </div>
       <SectionCard title="Full note table" eyebrow="Audit trail">
         <NoteStatsTable rows={stats} />
       </SectionCard>

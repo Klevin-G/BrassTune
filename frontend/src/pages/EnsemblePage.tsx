@@ -259,7 +259,7 @@ export function EnsemblePage() {
                 </button>
               </div>
               {roster && roster.length > 0 ? (
-                <div className="compact-table-wrap">
+                <div className="table-wrap">
                   <table className="roster-table">
                     <thead>
                       <tr>

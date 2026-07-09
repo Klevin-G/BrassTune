@@ -143,13 +143,15 @@ export function DashboardPage() {
           </div>
         </SectionCard>
       </div>
-      <SectionCard title="Coach recommendations" eyebrow="Today">
-        <div className="recommendation-grid">
-          {recommendations.map((recommendation) => (
-            <RecommendationCard key={`${recommendation.related_note}-${recommendation.category}`} recommendation={recommendation} />
-          ))}
-        </div>
-      </SectionCard>
+      {recommendations.length > 1 && (
+        <SectionCard title="More coach recommendations" eyebrow="Today">
+          <div className="recommendation-grid">
+            {recommendations.slice(1, 4).map((recommendation) => (
+              <RecommendationCard key={`${recommendation.related_note}-${recommendation.category}`} recommendation={recommendation} />
+            ))}
+          </div>
+        </SectionCard>
+      )}
     </ScreenContainer>
   );
 }

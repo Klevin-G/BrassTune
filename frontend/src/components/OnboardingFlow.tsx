@@ -171,10 +171,10 @@ export function OnboardingFlow() {
 
         {step === 3 && (
           <div className="onboarding-step">
-            <p>Guided mode plays repeatable practice tones. Microphone mode listens to you live as you play.</p>
+            <p>Guided audio plays repeatable practice tones. Microphone listens to you live as you play.</p>
             <div className="chip-row">
-              <SelectionChip active={demoMode} onClick={() => setDemoMode(true)} tone="gold">Guided mode</SelectionChip>
-              <SelectionChip active={!demoMode} onClick={() => setDemoMode(false)} tone="green">Microphone mode</SelectionChip>
+              <SelectionChip active={demoMode} onClick={() => setDemoMode(true)} tone="gold">Guided audio</SelectionChip>
+              <SelectionChip active={!demoMode} onClick={() => setDemoMode(false)} tone="green">Microphone</SelectionChip>
             </div>
           </div>
         )}
@@ -207,7 +207,7 @@ export function OnboardingFlow() {
             <p>You're set. Start with a 30-second long tone -- the tuner helps right away, and the real payoff is seeing which notes you consistently miss.</p>
             <div className="onboarding-callout">
               <strong>{instrumentId}</strong>
-              <span>A4 {referencePitch} Hz · {demoMode ? 'Guided audio' : 'Microphone mode'}</span>
+              <span>A4 {referencePitch} Hz · {demoMode ? 'Guided audio' : 'Microphone'}</span>
             </div>
           </div>
         )}

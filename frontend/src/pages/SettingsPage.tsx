@@ -94,7 +94,7 @@ export function SettingsPage() {
               <input type="number" min={430} max={450} step={0.5} value={referencePitch} onChange={(event) => setReferencePitch(Number(event.target.value))} />
             </label>
             <label className="switch-row">
-              <span>Demo mode</span>
+              <span>Guided audio (practice tones)</span>
               <input type="checkbox" checked={demoMode} onChange={(event) => setDemoMode(event.target.checked)} />
             </label>
             <label className="field">

@@ -45,6 +45,7 @@ export function PlayAlongPage() {
   const graderRef = useRef<PlayAlongGrader | null>(null);
   const phaseRef = useRef<Phase>('idle');
   const finishRef = useRef<() => void>(() => {});
+  const mountedRef = useRef(true);
   phaseRef.current = phase;
 
   const exercise = EXERCISES.find((item) => item.id === exerciseId) ?? EXERCISES[0];
@@ -71,7 +72,13 @@ export function PlayAlongPage() {
     stream.stopMicrophone();
   };
 
-  useEffect(() => () => stream.stopMicrophone(), []); // stop mic on unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      stream.stopMicrophone();
+    };
+  }, []); // stop mic on unmount
 
   const start = async () => {
     setError('');
@@ -79,6 +86,11 @@ export function PlayAlongPage() {
     setSnapshot(graderRef.current.snapshot());
     setPhase('running');
     const mic = await stream.startMicrophone();
+    if (!mountedRef.current) {
+      // Unmounted (or navigated away) while the permission dialog was open.
+      stream.stopMicrophone();
+      return;
+    }
     if (!mic) {
       setPhase('idle');
       setError('Microphone access is needed to grade your playing. Allow the mic and try again.');

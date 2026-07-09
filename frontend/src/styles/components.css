@@ -2128,6 +2128,40 @@ td a {
   white-space: nowrap;
 }
 
+/* Page error boundary fallback */
+.route-error {
+  display: grid;
+  place-items: center;
+  min-height: 60vh;
+  padding: 24px;
+}
+
+.route-error-card {
+  max-width: 460px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  text-align: center;
+}
+
+.route-error-card .settings-actions {
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* Destructive actions (remove student, stop, delete account) */
+.danger-action {
+  color: var(--red);
+  border-color: rgba(226, 93, 93, 0.4);
+}
+
+.danger-action:hover:not(:disabled) {
+  border-color: var(--red);
+  background: rgba(226, 93, 93, 0.1);
+}
+
 /* Play-Along Trainer */
 .playalong-live {
   display: flex;

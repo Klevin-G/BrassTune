@@ -83,7 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               aria-pressed={demoMode}
               aria-label={demoMode ? 'Switch to microphone mode' : 'Switch to guided audio mode'}
             >
-              {demoMode ? 'Guided audio' : 'Mic mode'}
+              {demoMode ? 'Guided audio' : 'Microphone'}
             </button>
             {auth.isSignedIn ? (
               <Link to="/settings" className="icon-button labeled" aria-label="Open profile settings">

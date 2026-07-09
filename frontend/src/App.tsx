@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './state/AuthContext';
 import { AuthGatewayPage } from './pages/AuthGatewayPage';
 import { AuthPage } from './pages/AuthPage';
@@ -42,6 +43,7 @@ function appRoute(element: JSX.Element) {
 export default function App() {
   return (
     <AppShell>
+      <ErrorBoundary>
       <Suspense fallback={<div className="route-loading" role="status">Loading</div>}>
         <Routes>
           <Route path="/" element={<AuthGatewayPage />} />
@@ -70,6 +72,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      </ErrorBoundary>
     </AppShell>
   );
 }
