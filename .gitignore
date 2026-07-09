@@ -30,3 +30,6 @@ skills-lock.json
 **/.vercel/
 .vercel
 .env*
+
+# Supabase CLI local link state
+supabase/.temp/
