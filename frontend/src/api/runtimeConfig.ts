@@ -1,3 +1,4 @@
+const HOSTED_RENDER_API_BASE = 'https://brasstune-u8qj.onrender.com';
 const CONFIGURED_API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 const CONFIGURED_WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? '';
 
@@ -30,11 +31,10 @@ export function isVercelHostedOrigin(hostname = currentHostname()) {
 
 export function apiBase() {
   if (CONFIGURED_API_BASE) return cleanBase(CONFIGURED_API_BASE);
-  // On our own Vercel deployment (production, preview, or a *.vercel.app host)
-  // the backend is served same-origin under /api via the vercel.json service
-  // rewrite, so use a relative base. Set VITE_API_BASE_URL to override (e.g. to
-  // point the frontend at a separately hosted backend such as Render).
-  if (isKnownBrassTuneHostedOrigin() || isVercelHostedOrigin()) return '';
+  // The frontend (Vercel) calls the Render backend cross-origin. VITE_API_BASE_URL
+  // is the primary source (baked at build time); this hosted default is a safety net
+  // so a Vercel production/preview build still reaches the backend if the env is absent.
+  if (isKnownBrassTuneHostedOrigin() || isVercelHostedOrigin()) return HOSTED_RENDER_API_BASE;
   // Unknown origin: same-origin ('') is only acceptable during local development.
   // In a production build we must never silently hit an unconfigured host.
   return import.meta.env.PROD ? UNRESOLVED_BASE : '';

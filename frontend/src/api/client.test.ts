@@ -34,56 +34,56 @@ describe('API client runtime URLs', () => {
     expect(await pitchWebSocketUrl()).toBe('wss://api.example.test/ws/pitch');
   });
 
-  it('uses same-origin /api on Vercel git preview deployments (vercel.json rewrite)', async () => {
+  it('uses the Render backend default on Vercel git preview deployments when Vite envs are absent', async () => {
     const { exportUrl, pitchWebSocketUrl } = await loadClient();
     vi.stubGlobal('window', {
       location: {
         protocol: 'https:',
-        host: 'brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app',
-        hostname: 'brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app',
+        host: 'brass-tune-git-main-kelvis-prject.vercel.app',
+        hostname: 'brass-tune-git-main-kelvis-prject.vercel.app',
       },
     });
-    expect(exportUrl('/api/health')).toBe('/api/health');
-    expect(await pitchWebSocketUrl()).toBe('wss://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app/ws/pitch');
+    expect(exportUrl('/api/health')).toBe('https://brasstune-u8qj.onrender.com/api/health');
+    expect(await pitchWebSocketUrl()).toBe('wss://brasstune-u8qj.onrender.com/ws/pitch');
   });
 
-  it('uses same-origin /api on exact Vercel preview deployment hostnames', async () => {
+  it('uses the Render backend default on exact Vercel preview deployment hostnames', async () => {
     const { exportUrl, pitchWebSocketUrl } = await loadClient();
     vi.stubGlobal('window', {
       location: {
         protocol: 'https:',
-        host: 'brass-tune-d99807eh3-aryaswebsites.vercel.app',
-        hostname: 'brass-tune-d99807eh3-aryaswebsites.vercel.app',
+        host: 'brass-tune-d99807eh3-kelvis-prject.vercel.app',
+        hostname: 'brass-tune-d99807eh3-kelvis-prject.vercel.app',
       },
     });
-    expect(exportUrl('/api/instruments')).toBe('/api/instruments');
-    expect(await pitchWebSocketUrl()).toBe('wss://brass-tune-d99807eh3-aryaswebsites.vercel.app/ws/pitch');
+    expect(exportUrl('/api/instruments')).toBe('https://brasstune-u8qj.onrender.com/api/instruments');
+    expect(await pitchWebSocketUrl()).toBe('wss://brasstune-u8qj.onrender.com/ws/pitch');
   });
 
-  it('uses same-origin /api on any of its vercel.app hosts', async () => {
+  it('uses the Render backend default on any of its vercel.app hosts', async () => {
     const { exportUrl, pitchWebSocketUrl } = await loadClient();
     vi.stubGlobal('window', {
       location: {
         protocol: 'https:',
-        host: 'unrelated-preview.vercel.app',
-        hostname: 'unrelated-preview.vercel.app',
+        host: 'brass-tune.vercel.app',
+        hostname: 'brass-tune.vercel.app',
       },
     });
-    expect(exportUrl('/api/health')).toBe('/api/health');
-    expect(await pitchWebSocketUrl()).toBe('wss://unrelated-preview.vercel.app/ws/pitch');
+    expect(exportUrl('/api/health')).toBe('https://brasstune-u8qj.onrender.com/api/health');
+    expect(await pitchWebSocketUrl()).toBe('wss://brasstune-u8qj.onrender.com/ws/pitch');
   });
 
-  it('uses same-origin /api on the Vercel team alias', async () => {
-    const { exportUrl, pitchWebSocketUrl } = await loadClient();
+  it('prefers the configured VITE_API_BASE_URL over the hosted default', async () => {
+    const { exportUrl, pitchWebSocketUrl } = await loadClient('', 'https://brasstune-u8qj.onrender.com');
     vi.stubGlobal('window', {
       location: {
         protocol: 'https:',
-        host: 'brass-tune-aryaswebsites.vercel.app',
-        hostname: 'brass-tune-aryaswebsites.vercel.app',
+        host: 'brass-tune.vercel.app',
+        hostname: 'brass-tune.vercel.app',
       },
     });
-    expect(exportUrl('/api/ready')).toBe('/api/ready');
-    expect(await pitchWebSocketUrl()).toBe('wss://brass-tune-aryaswebsites.vercel.app/ws/pitch');
+    expect(exportUrl('/api/ready')).toBe('https://brasstune-u8qj.onrender.com/api/ready');
+    expect(await pitchWebSocketUrl()).toBe('wss://brasstune-u8qj.onrender.com/ws/pitch');
   });
 
   it('keeps authorization headers when requests add upload headers', async () => {
