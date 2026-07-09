@@ -12,10 +12,29 @@ the release-readiness ledger; those files are historical June-beta evidence.
 
 ## Decision
 
-- **Web: DEPLOYED.** Backend live and verified; frontend deployed on Vercel with env wired.
+- **Web: DEPLOYED and verified live.** Frontend on Vercel + backend on Render + Supabase, end-to-end verified (below).
 - **Native (iOS): code COMPLETE** on `main`; remaining is physical-device validation + Apple signing/TestFlight (owner/hardware).
 
-`main` HEAD: `0f318b9` (backend commit live on Render). Only branch is `main`.
+`main` HEAD deployed. Only branch is `main`.
+
+## Live verification (2026-07-09)
+
+- Frontend `https://brass-tune.vercel.app` → HTTP 200; production bundle has the new
+  Supabase URL + anon key (index chunk) and Render backend URL (client chunk) baked in.
+- Backend `https://brasstune-u8qj.onrender.com` → `/api/health|live|version|ready` 200;
+  `/api/version` commit matches `main`; `/api/ready` = postgresql/production; instruments
+  read from Supabase; protected routes 401; CORS preflight from the Vercel origin allowed.
+- Supabase auth: anon sign-in path → `400 invalid_credentials` (working); service-key admin
+  API reachable. JWKS ES256 present.
+- Vercel Deployment Protection **disabled** (public site).
+
+## Operational note — Vercel git-author policy
+
+The `kelvis-prject` Vercel team blocks deployments whose git commit author is not a team
+member (`seatBlock: TEAM_ACCESS_REQUIRED`). Commits authored by `aryasalem09` are blocked;
+commits authored by the owner (`klevin-g`) deploy normally. To let all pushes to `main`
+auto-deploy the frontend, add `aryasalem09` to the Vercel team (or relax the git-author
+policy). The Render backend has no such restriction and auto-deploys any push to `main`.
 
 ## Providers (verified live 2026-07-09)
 
