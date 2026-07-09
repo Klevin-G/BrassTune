@@ -1,3 +1,5 @@
+import ImageIO
+import PDFKit
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -1046,7 +1048,7 @@ struct ScorePracticeView: View {
                     .accessibilityIdentifier("score.import.sample")
                 }
 
-                Text("Score intelligence here means local page previews, cleanup controls, OCR-style text suggestions when PDF text is available, and manual annotations. BrassTune does not upload copyrighted scores or claim optical music recognition.")
+                Text("Score intelligence here means full-resolution page viewing, cleanup controls, OCR-style text suggestions when PDF text is available, and manual annotations. BrassTune does not upload copyrighted scores or claim optical music recognition.")
                     .font(.footnote)
                     .foregroundStyle(BTTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1097,13 +1099,28 @@ struct ScorePracticeView: View {
 private struct ScoreDocumentCard: View {
     @EnvironmentObject private var model: AppModel
     @State private var confirmDelete = false
+    @State private var showFullPageViewer = false
     let score: ImportedScore
 
     var body: some View {
         BTCard(tint: score.id == model.activeScoreID ? BTTheme.surfaceWarm : BTTheme.surface) {
             HStack(alignment: .top, spacing: BTSpacing.md) {
-                ScoreThumbnailView(page: score.selectedPage)
-                    .frame(width: 98, height: 132)
+                Button {
+                    showFullPageViewer = true
+                } label: {
+                    ScoreThumbnailView(page: score.selectedPage)
+                        .frame(width: 98, height: 132)
+                        .overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(BTTheme.text)
+                                .padding(5)
+                                .background(BTTheme.surface.opacity(0.72), in: Circle())
+                                .padding(6)
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("score.viewFullPage.thumbnail")
                 VStack(alignment: .leading, spacing: BTSpacing.xs) {
                     Text(score.title)
                         .font(.title3.weight(.bold))
@@ -1144,6 +1161,14 @@ private struct ScoreDocumentCard: View {
             }
 
             ScoreAnnotationEditor(score: score)
+
+            Button {
+                showFullPageViewer = true
+            } label: {
+                Label("View full page", systemImage: "arrow.up.left.and.arrow.down.right.magnifyingglass")
+            }
+            .buttonStyle(BTSecondaryButtonStyle())
+            .accessibilityIdentifier("score.viewFullPage")
 
             HStack(spacing: BTSpacing.md) {
                 Button {
@@ -1196,6 +1221,9 @@ private struct ScoreDocumentCard: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes the imported file and clears score references from local sessions.")
+        }
+        .fullScreenCover(isPresented: $showFullPageViewer) {
+            ScorePageViewerView(score: score)
         }
     }
 }
@@ -1264,6 +1292,337 @@ private extension View {
         case .highContrast:
             self.saturation(0).contrast(1.85).brightness(0.05)
         }
+    }
+}
+
+// MARK: - Full-resolution page viewer
+
+/// Full-screen, zoomable viewer for an imported score page. Reads the
+/// full-resolution original from disk (PDF via PDFKit, image via ImageIO
+/// downsampling) and falls back to the stored page thumbnail when the original
+/// file is unavailable (e.g. the synthetic sample score, whose localFileName is
+/// nil). This is real viewing only — no OCR/analysis or score-following.
+private struct ScorePageViewerView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let score: ImportedScore
+    @State private var pageIndex: Int
+
+    init(score: ImportedScore) {
+        self.score = score
+        let selectedID = score.selectedPageID ?? score.pages.first?.id
+        _pageIndex = State(initialValue: score.pages.firstIndex { $0.id == selectedID } ?? 0)
+    }
+
+    private var currentPage: ScorePage? {
+        guard score.pages.indices.contains(pageIndex) else { return score.pages.first }
+        return score.pages[pageIndex]
+    }
+
+    private var isPDF: Bool { score.sourceKind == .filesPDF }
+
+    private var showsImagePager: Bool { !isPDF && score.pages.count > 1 }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            Group {
+                if isPDF, let url = model.storedScoreFileURL(for: score), let document = PDFDocument(url: url) {
+                    ScorePDFKitView(document: document, initialPageIndex: pageIndex)
+                        .ignoresSafeArea(edges: .bottom)
+                } else if let page = currentPage {
+                    ScoreImagePageView(score: score, page: page)
+                        .ignoresSafeArea(edges: .bottom)
+                } else {
+                    unavailableView
+                }
+            }
+
+            VStack(spacing: 0) {
+                topBar
+                Spacer()
+                if showsImagePager {
+                    pager
+                }
+            }
+        }
+        .accessibilityIdentifier("score.fullPageViewer")
+    }
+
+    private var topBar: some View {
+        HStack(alignment: .center, spacing: BTSpacing.md) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(score.title)
+                    .font(.headline)
+                    .foregroundStyle(BTTheme.text)
+                    .lineLimit(1)
+                Text(isPDF ? score.pageCountLabel : "Page \(currentPage?.pageNumber ?? pageIndex + 1) of \(score.pages.count)")
+                    .font(.caption)
+                    .foregroundStyle(BTTheme.muted)
+            }
+            Spacer(minLength: BTSpacing.md)
+            Button {
+                dismiss()
+            } label: {
+                Text("Done")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(BTTheme.text)
+                    .padding(.horizontal, BTSpacing.lg)
+                    .padding(.vertical, BTSpacing.sm)
+                    .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: true)
+            }
+            .accessibilityIdentifier("score.viewer.done")
+        }
+        .padding(BTSpacing.md)
+        .background(.ultraThinMaterial.opacity(0.9))
+    }
+
+    private var pager: some View {
+        HStack(spacing: BTSpacing.xl) {
+            Button {
+                pageIndex = max(0, pageIndex - 1)
+            } label: {
+                Image(systemName: "chevron.left").font(.title3.weight(.bold))
+            }
+            .disabled(pageIndex <= 0)
+            .accessibilityIdentifier("score.viewer.previousPage")
+
+            Text("\(currentPage?.pageNumber ?? pageIndex + 1) / \(score.pages.count)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BTTheme.text)
+                .monospacedDigit()
+
+            Button {
+                pageIndex = min(score.pages.count - 1, pageIndex + 1)
+            } label: {
+                Image(systemName: "chevron.right").font(.title3.weight(.bold))
+            }
+            .disabled(pageIndex >= score.pages.count - 1)
+            .accessibilityIdentifier("score.viewer.nextPage")
+        }
+        .foregroundStyle(BTTheme.text)
+        .padding(.horizontal, BTSpacing.xl)
+        .padding(.vertical, BTSpacing.md)
+        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: true)
+        .padding(.bottom, BTSpacing.xl)
+    }
+
+    private var unavailableView: some View {
+        VStack(spacing: BTSpacing.md) {
+            Image(systemName: "doc.text.image")
+                .font(.largeTitle)
+                .foregroundStyle(BTTheme.muted)
+            Text("The full-resolution page is unavailable on this device.")
+                .font(.subheadline)
+                .foregroundStyle(BTTheme.muted)
+                .multilineTextAlignment(.center)
+        }
+        .padding(BTSpacing.xl)
+        .accessibilityIdentifier("score.viewer.unavailable")
+    }
+}
+
+/// Loads and shows a single image page in a zoomable container. Uses ImageIO
+/// downsampling (capped, memory-safe) on the full-resolution original, falling
+/// back to the stored thumbnail when the original file is missing.
+private struct ScoreImagePageView: View {
+    @EnvironmentObject private var model: AppModel
+    let score: ImportedScore
+    let page: ScorePage
+    @State private var image: UIImage?
+    @State private var didFinishLoading = false
+
+    var body: some View {
+        Group {
+            if let image {
+                ScoreZoomableImageView(image: image)
+                    .scoreEnhancement(page.enhancement)
+            } else if didFinishLoading {
+                VStack(spacing: BTSpacing.md) {
+                    Image(systemName: "doc.text.image")
+                        .font(.largeTitle)
+                        .foregroundStyle(BTTheme.muted)
+                    Text("The full-resolution page is unavailable on this device.")
+                        .font(.subheadline)
+                        .foregroundStyle(BTTheme.muted)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(BTSpacing.xl)
+                .accessibilityIdentifier("score.viewer.unavailable")
+            } else {
+                ProgressView()
+                    .tint(BTTheme.text)
+            }
+        }
+        .task(id: page.id) {
+            didFinishLoading = false
+            let storedURL = model.storedScoreFileURL(for: score)
+            let target = ScoreImageLoader.viewerMaxPixelSize()
+            let thumbnailData = page.thumbnailPNGData
+            let rotation = page.rotationDegrees
+            let loaded = await Task.detached(priority: .userInitiated) {
+                let base = storedURL.flatMap { ScoreImageLoader.downsampledImage(at: $0, maxPixelSize: target) }
+                    ?? thumbnailData.flatMap(UIImage.init(data:))
+                return base?.bt_rotated(byDegrees: rotation)
+            }.value
+            image = loaded
+            didFinishLoading = true
+        }
+    }
+}
+
+/// UIScrollView-backed pinch/double-tap zoom container for a single UIImage.
+private struct ScoreZoomableImageView: UIViewRepresentable {
+    let image: UIImage
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.backgroundColor = .clear
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 6
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.bouncesZoom = true
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.isUserInteractionEnabled = true
+        scrollView.addSubview(imageView)
+        context.coordinator.imageView = imageView
+
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTap)
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        if context.coordinator.imageView?.image !== image {
+            context.coordinator.imageView?.image = image
+            scrollView.setZoomScale(1, animated: false)
+        }
+        context.coordinator.layout(scrollView)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var imageView: UIImageView?
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            centerContent(scrollView)
+        }
+
+        func layout(_ scrollView: UIScrollView) {
+            guard let imageView else { return }
+            let bounds = scrollView.bounds.size
+            guard bounds.width > 0, bounds.height > 0 else { return }
+            if scrollView.zoomScale == 1 {
+                imageView.frame = CGRect(origin: .zero, size: bounds)
+                scrollView.contentSize = bounds
+            }
+            centerContent(scrollView)
+        }
+
+        private func centerContent(_ scrollView: UIScrollView) {
+            guard let imageView else { return }
+            let bounds = scrollView.bounds.size
+            var frame = imageView.frame
+            frame.origin.x = frame.width < bounds.width ? (bounds.width - frame.width) / 2 : 0
+            frame.origin.y = frame.height < bounds.height ? (bounds.height - frame.height) / 2 : 0
+            imageView.frame = frame
+        }
+
+        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let scrollView = gesture.view as? UIScrollView else { return }
+            if scrollView.zoomScale > scrollView.minimumZoomScale {
+                scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+            } else {
+                let targetScale = min(scrollView.maximumZoomScale, 3)
+                let point = gesture.location(in: imageView)
+                let size = CGSize(width: scrollView.bounds.width / targetScale, height: scrollView.bounds.height / targetScale)
+                let rect = CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height)
+                scrollView.zoom(to: rect, animated: true)
+            }
+        }
+    }
+}
+
+/// PDFKit-backed page viewer. PDFView provides pinch-zoom and paging for free.
+private struct ScorePDFKitView: UIViewRepresentable {
+    let document: PDFDocument
+    let initialPageIndex: Int
+
+    func makeUIView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.backgroundColor = .clear
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.maxScaleFactor = 6
+        pdfView.document = document
+        if document.pageCount > 0 {
+            let index = max(0, min(initialPageIndex, document.pageCount - 1))
+            if let page = document.page(at: index) {
+                DispatchQueue.main.async {
+                    pdfView.go(to: page)
+                }
+            }
+        }
+        return pdfView
+    }
+
+    func updateUIView(_ pdfView: PDFView, context: Context) {}
+}
+
+/// Memory-safe image decoding helpers for the full-page viewer.
+private enum ScoreImageLoader {
+    /// Longest-edge pixel cap for the decoded viewer image. Generous enough for
+    /// crisp zooming but bounded so a high-megapixel scan never expands into an
+    /// oversized bitmap in memory.
+    static func viewerMaxPixelSize() -> CGFloat {
+        let screen = UIScreen.main
+        let longestEdgePixels = max(screen.bounds.width, screen.bounds.height) * screen.scale
+        return max(3000, longestEdgePixels)
+    }
+
+    static func downsampledImage(at url: URL, maxPixelSize: CGFloat) -> UIImage? {
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions as CFDictionary) else {
+            return nil
+        }
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
+    }
+}
+
+private extension UIImage {
+    /// Applies a 0/90/180/270 rotation cheaply via image orientation (no redraw).
+    func bt_rotated(byDegrees degrees: Int) -> UIImage {
+        let normalized = ((degrees % 360) + 360) % 360
+        guard normalized != 0, let cgImage else { return self }
+        let orientation: UIImage.Orientation
+        switch normalized {
+        case 90: orientation = .right
+        case 180: orientation = .down
+        case 270: orientation = .left
+        default: return self
+        }
+        return UIImage(cgImage: cgImage, scale: scale, orientation: orientation)
     }
 }
 

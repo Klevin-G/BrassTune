@@ -20,13 +20,14 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 - `NSMicrophoneUsageDescription` is configured in build settings.
 - `NSPhotoLibraryUsageDescription` is configured for user-selected score image import.
 - Camera capture is not implemented, is hidden from the UI, and no camera usage string is declared in the app target.
-- `PrivacyInfo.xcprivacy` exists.
+- `PrivacyInfo.xcprivacy` exists and declares collected data (email, audio) and the one required-reason API in use (UserDefaults, CA92.1). The score-import file APIs use `.fileSizeKey`/`.contentTypeKey`, which are not required-reason APIs.
+- App icon asset is present (a 1024×1024 brass tuning-fork placeholder in `AppIcon.appiconset`); replace with final brand artwork before store submission.
 - In-app privacy, terms, support, data export, and account deletion surfaces exist.
 - Account deletion can be initiated in app.
 - Local clear/delete controls remove imported score metadata and copied local score files.
 - Simulator Debug/Release builds pass with Xcode 26.2 / iOS 26.2 SDK.
 - Native metronome simulator scope exists: visual pulse, audible click output, haptic option, mute, volume, meter, subdivision, and tap tempo.
-- Native score assist simulator scope exists: PDF/image/Photos/sample import, thumbnails, page selection, rotate/crop/enhance preview, annotations, metadata export, and local delete.
+- Native score assist scope: PDF/image/Photos/sample import, thumbnails, page selection, rotate/crop/enhance preview, a full-resolution zoomable page viewer (PDFKit for PDFs, memory-safe ImageIO decoding for images), annotations, metadata + original-file export, and local delete.
 - Local AVAudioEngine live microphone capture code exists with permission handling, PCM input tap, pitch/confidence/RMS/no-lock detection, route/interruption notices, and sample-mode fallback.
 
 ## Owner Decisions Required
@@ -37,6 +38,7 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 - App Store Connect app record.
 - Marketing version and build-number strategy.
 - Display name and subtitle.
+- Final app icon artwork (a brass tuning-fork placeholder is in place; replace with brand artwork).
 - Category, keywords, description, screenshots, app previews.
 - Support URL/email.
 - Privacy Policy public URL and legal controller identity.
