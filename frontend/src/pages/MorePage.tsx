@@ -1,15 +1,16 @@
-import { Activity, Bug, FileText, LogIn, LogOut, Music2, Settings, Timer, UserRound, Users } from 'lucide-react';
+import { Activity, Bug, FileText, LogIn, LogOut, Music2, Settings, Target, Timer, UserRound, Users } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
 
 const moreItems = [
+  { to: '/practice/play-along', title: 'Play-Along Trainer', detail: 'Play an exercise and get graded note by note in real time.', icon: Target },
   { to: '/metronome', title: 'Metronome', detail: 'Tempo, count-in, subdivisions, and ramp practice.', icon: Timer },
-  { to: '/practice/score', title: 'Score practice', detail: 'PDF, image, and camera score practice on this device.', icon: FileText },
+  { to: '/practice/score', title: 'Score practice', detail: 'Read imported PDF or photo sheet music while you practice.', icon: FileText },
   { to: '/sessions', title: 'Sessions', detail: 'Review practice history and open saved takes.', icon: Music2 },
   { to: '/progress', title: 'Progress', detail: 'See weekly pulse, improvement, and consistency.', icon: Activity },
-  { to: '/ensemble', title: 'Ensemble', detail: 'Director briefing cards and rehearsal focus.', icon: Users },
+  { to: '/ensemble', title: 'Ensemble', detail: 'Create a class, add students, and track their practice.', icon: Users },
   { to: '/settings', title: 'Settings', detail: 'Instrument, A4 reference, and practice preferences.', icon: Settings },
   { to: '/settings/audio-lab', title: 'Audio Lab', detail: 'Microphone and detector diagnostics for live tuning checks.', icon: Bug },
   { to: '/privacy', title: 'Privacy', detail: 'Data use, export, deletion, and recording handling.', icon: FileText },

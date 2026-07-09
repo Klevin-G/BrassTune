@@ -14,6 +14,7 @@ const EnsemblePage = lazy(() => import('./pages/EnsemblePage').then((module) => 
 const LegalPage = lazy(() => import('./pages/LegalPage').then((module) => ({ default: module.LegalPage })));
 const MorePage = lazy(() => import('./pages/MorePage').then((module) => ({ default: module.MorePage })));
 const MetronomePage = lazy(() => import('./pages/MetronomePage').then((module) => ({ default: module.MetronomePage })));
+const PlayAlongPage = lazy(() => import('./pages/PlayAlongPage').then((module) => ({ default: module.PlayAlongPage })));
 const PracticePage = lazy(() => import('./pages/PracticePage').then((module) => ({ default: module.PracticePage })));
 const ProgressPage = lazy(() => import('./pages/ProgressPage').then((module) => ({ default: module.ProgressPage })));
 const ScorePracticePage = lazy(() => import('./pages/ScorePracticePage').then((module) => ({ default: module.ScorePracticePage })));
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="/home" element={appRoute(<DashboardPage />)} />
           <Route path="/practice" element={appRoute(<PracticePage />)} />
           <Route path="/practice/score" element={appRoute(<ScorePracticePage />)} />
+          <Route path="/practice/play-along" element={appRoute(<PlayAlongPage />)} />
           <Route path="/metronome" element={appRoute(<MetronomePage />)} />
           <Route path="/sessions" element={appRoute(<SessionsPage />)} />
           <Route path="/sessions/:id" element={appRoute(<SessionReviewPage />)} />

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Activity, BarChart3, FileText, Gauge, GraduationCap, Home, LogIn, MoreHorizontal, Music2, Settings, Timer, UserRound, Users } from 'lucide-react';
+import { Activity, BarChart3, FileText, Gauge, GraduationCap, Home, LogIn, MoreHorizontal, Music2, Settings, Target, Timer, UserRound, Users } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
@@ -16,6 +16,7 @@ const primaryNav = [
 ];
 
 const secondaryNav = [
+  { to: '/practice/play-along', label: 'Play-Along', icon: Target },
   { to: '/metronome', label: 'Metronome', icon: Timer },
   { to: '/practice/score', label: 'Score', icon: FileText },
   { to: '/sessions', label: 'Sessions', icon: Music2 },

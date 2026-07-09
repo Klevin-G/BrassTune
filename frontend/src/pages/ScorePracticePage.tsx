@@ -1,5 +1,6 @@
-import { Camera, CheckCircle2, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Maximize2, Music2, RotateCw, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react';
+import { Camera, CheckCircle2, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Maximize2, Music2, RotateCw, Target, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { SCORE_DOCUMENTS_DB_NAME, SCORE_DOCUMENTS_STORE_NAME } from '../domain/scoreDocuments';
@@ -533,9 +534,16 @@ export function ScorePracticePage() {
           )}
         </SectionCard>
       </div>
-      <SectionCard title="Local preview only" eyebrow="No score following">
+      <SectionCard title="Want BrassTune to grade you?" eyebrow="Play-Along Trainer">
+        <p className="muted-copy">This page is for reading sheet music. To have BrassTune listen and score how accurately you play, use the Play-Along Trainer — pick an exercise and it grades each note in real time.</p>
+        <Link className="primary-button" to="/practice/play-along">
+          <Target size={18} />
+          Open Play-Along Trainer
+        </Link>
+      </SectionCard>
+      <SectionCard title="How reading works" eyebrow="Local preview">
         <div className="insight-grid">
-          <InsightCard title="Manual review" detail="Zoom, rotate, pages" body="Use the zoom, rotate, and page controls above to read the imported score. There is no note recognition, automatic score following, or alignment in this build." icon={Music2} tone="gold" />
+          <InsightCard title="Manual review" detail="Zoom, rotate, pages" body="Use the zoom, rotate, and page controls above to read the imported score. Pages are read locally on your device." icon={Music2} tone="gold" />
           <InsightCard title="Metronome" detail="Separate tool" body="Open the metronome from More for tempo and count-in while you read. It runs on its own and is not synced to the score." icon={CheckCircle2} />
         </div>
       </SectionCard>
