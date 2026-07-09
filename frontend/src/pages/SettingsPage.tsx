@@ -136,42 +136,7 @@ export function SettingsPage() {
           <ThemeSelector />
         </SectionCard>
         <SectionCard title="Practice tools" eyebrow="Device and data">
-          <div className="insight-grid">
-            <InsightCard
-              title="Audio Lab"
-              detail="Microphone checks"
-              body="Open the calibration readout for microphone checks, save eligibility, and detector diagnostics."
-              icon={Bug}
-              tone="gold"
-            />
-            <InsightCard
-              title="Onboarding"
-              detail="First-run flow"
-              body="Reopen instrument setup, reference pitch, input mode, and the No lock versus unstable pitch explanation."
-              icon={SlidersHorizontal}
-            />
-            <InsightCard
-              title="Export all local data"
-              detail="JSON"
-              body="Download guest practice saved in this browser, or account data after sign-in."
-              icon={Download}
-              tone="gold"
-            />
-            <InsightCard
-              title="Clear preferences"
-              detail="Browser storage"
-              body="Resets local UI preferences without touching saved cloud sessions."
-              icon={Trash2}
-              tone="red"
-            />
-            <InsightCard
-              title="Local score pages"
-              detail="Device only"
-              body="Remove score PDFs and images imported into Score Practice on this device."
-              icon={Trash2}
-              tone="red"
-            />
-          </div>
+          <p className="muted-copy">Microphone diagnostics, reopening the setup tour, exports, and clearing device data.</p>
           <div className="settings-actions">
             <Link className="primary-button" to="/settings/audio-lab">
               <Bug size={18} />

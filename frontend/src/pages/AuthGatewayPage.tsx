@@ -1,4 +1,4 @@
-import { ArrowRight, KeyRound, LogIn, Mail, ShieldCheck, UserPlus } from 'lucide-react';
+import { ArrowRight, KeyRound, LogIn, Mail, Music2, ShieldCheck, UserPlus } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ThemeSelector } from '../components/ThemeSelector';
@@ -54,7 +54,7 @@ export function AuthGatewayPage() {
         <section className="auth-panel gateway-panel">
           <div className="brand auth-brand">
             <span className="brand-mark">
-              <ShieldCheck size={20} />
+              <Music2 size={20} />
             </span>
             <span>
               <strong>BrassTune</strong>

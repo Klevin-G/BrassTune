@@ -138,6 +138,10 @@ export function OnboardingFlow() {
 
         {step === 0 && (
           <div className="onboarding-step">
+            <div className="onboarding-brand">
+              <span className="brand-mark"><Music2 size={22} /></span>
+              <strong>BrassTune</strong>
+            </div>
             <TunerPreview />
             <p>BrassTune listens as you play, shows how sharp or flat each note is in real time, and remembers the notes you keep missing so your practice actually improves. This 60-second tour gets you set up.</p>
             <div className="onboarding-facts">

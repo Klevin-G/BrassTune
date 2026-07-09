@@ -1,5 +1,48 @@
+import { useState } from 'react';
+import { Copy, Check, Mail } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
+
+const SUPPORT_EMAIL = 'adam.zahaan@gmail.com';
+const SUPPORT_SUBJECT = 'BrassTune support';
+
+function SupportContact() {
+  const [copied, setCopied] = useState(false);
+  const gmailCompose = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(SUPPORT_EMAIL)}&su=${encodeURIComponent(SUPPORT_SUBJECT)}`;
+
+  const copyEmail = async () => {
+    try {
+      await navigator.clipboard.writeText(SUPPORT_EMAIL);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="support-contact">
+      <p className="support-address-line">
+        Email us at <a className="support-address" href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(SUPPORT_SUBJECT)}`}>{SUPPORT_EMAIL}</a>
+      </p>
+      <div className="settings-actions">
+        <a className="primary-button" href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(SUPPORT_SUBJECT)}`}>
+          <Mail size={18} />
+          Open in mail app
+        </a>
+        <a className="ghost-button" href={gmailCompose} target="_blank" rel="noopener noreferrer">
+          <Mail size={18} />
+          Compose in Gmail
+        </a>
+        <button className="ghost-button" type="button" onClick={copyEmail} aria-live="polite">
+          {copied ? <Check size={18} /> : <Copy size={18} />}
+          {copied ? 'Copied' : 'Copy email address'}
+        </button>
+      </div>
+      <p className="support-hint muted-copy">If the mail button does nothing, your device has no default mail app set — use “Compose in Gmail” or copy the address into your email.</p>
+    </div>
+  );
+}
 
 export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
   if (kind === 'terms') {
@@ -25,7 +68,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
         <SectionCard title="Getting help">
           <p>Students should contact the teacher, director, or organization that provided BrassTune access.</p>
           <p>For account deletion, export, sign-in, microphone permission, recording, playback, and ensemble access issues, include the affected screen and approximate time of the issue.</p>
-          <a className="primary-button" href="mailto:adam.zahaan@gmail.com?subject=BrassTune%20support">Email support</a>
+          <SupportContact />
         </SectionCard>
       </ScreenContainer>
     );

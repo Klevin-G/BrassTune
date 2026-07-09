@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react';
-import { Activity, BarChart3, FileText, Gauge, GraduationCap, Home, LogIn, MoreHorizontal, Music2, Settings, SlidersHorizontal, Timer, UserRound, Users } from 'lucide-react';
+import { Activity, BarChart3, FileText, Gauge, GraduationCap, Home, LogIn, MoreHorizontal, Music2, Settings, Timer, UserRound, Users } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
 import { InstrumentSelector } from './InstrumentSelector';
 import { OnboardingFlow } from './OnboardingFlow';
-import { FloatingTabBar, StatusBadge } from './ui/AppPrimitives';
+import { FloatingTabBar } from './ui/AppPrimitives';
 
 const primaryNav = [
   { to: '/home', label: 'Home', icon: Home },
@@ -25,7 +25,7 @@ const secondaryNav = [
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode } = useAppSettings();
+  const { instrumentId, setInstrumentId, demoMode, setDemoMode } = useAppSettings();
   const auth = useAuth();
   const location = useLocation();
   const moreActive = location.pathname === '/more' || secondaryNav.some((item) => location.pathname.startsWith(item.to));
@@ -36,11 +36,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       {!authRoute && <aside className="sidebar">
         <NavLink to="/home" className="brand" aria-label="BrassTune home">
           <span className="brand-mark">
-            <SlidersHorizontal size={19} />
+            <Music2 size={19} />
           </span>
           <span>
             <strong>BrassTune</strong>
-            <small>Analytics</small>
+            <small>Brass tuner</small>
           </span>
         </NavLink>
         <nav className="nav-list" aria-label="Primary navigation">
@@ -75,18 +75,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <div className="topbar-controls">
             <InstrumentSelector value={instrumentId} onChange={setInstrumentId} compact />
-            <label className="control-inline">
-              A4
-              <input
-                className="number-input"
-                type="number"
-                min={430}
-                max={450}
-                step={0.5}
-                value={referencePitch}
-                onChange={(event) => setReferencePitch(Number(event.target.value))}
-              />
-            </label>
             <button
               className={`toggle ${demoMode ? 'on' : ''}`}
               onClick={() => setDemoMode(!demoMode)}
@@ -94,9 +82,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               aria-pressed={demoMode}
               aria-label={demoMode ? 'Switch to microphone mode' : 'Switch to guided audio mode'}
             >
-              Guide
+              {demoMode ? 'Guided audio' : 'Mic mode'}
             </button>
-            <StatusBadge tone={demoMode ? 'gold' : 'green'}>{demoMode ? 'Guided audio' : 'Mic mode'}</StatusBadge>
             {auth.isSignedIn ? (
               <Link to="/settings" className="icon-button labeled" aria-label="Open profile settings">
                 <UserRound size={18} />
