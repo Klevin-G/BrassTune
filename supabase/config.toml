@@ -1,0 +1,29 @@
+# Supabase config reference for BrassTune (project ref: yznziwewxrlwnwiynlvl).
+# Apply the auth URL settings + provider secrets in the Supabase dashboard
+# (Authentication → URL Configuration / Providers) or via `supabase config push`.
+
+project_id = "yznziwewxrlwnwiynlvl"
+
+[auth]
+site_url = "https://brass-tune.vercel.app"
+additional_redirect_urls = [
+  "https://brass-tune.vercel.app/auth/callback",
+  "https://brass-tune.vercel.app/auth/reset-password",
+  "https://*.vercel.app/auth/callback",
+  "http://localhost:5173/auth/callback",
+]
+
+# Google OAuth — the frontend already calls signInWithOAuth({provider:'google'}).
+# Create a Google Cloud "Web application" OAuth client with authorized redirect
+# URI https://yznziwewxrlwnwiynlvl.supabase.co/auth/v1/callback, then set these.
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_GOOGLE_SECRET)"
+
+# Apple OAuth (web) — requires an Apple Services ID + Sign in with Apple key.
+# The native iOS app uses the Sign in with Apple entitlement + button directly.
+[auth.external.apple]
+enabled = true
+client_id = "env(SUPABASE_AUTH_APPLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_APPLE_SECRET)"
