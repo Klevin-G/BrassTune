@@ -29,7 +29,7 @@ test('critical routes render identifiable content', async ({ page }) => {
     ['/analytics', /Analytics/i],
     ['/progress', /Progress/i],
     ['/coach', /Coach/i],
-    ['/ensemble', /Ensemble access/i],
+    ['/ensemble', /Ensembles/i],
     ['/settings', /Practice preferences/i],
     ['/settings/audio-lab', /Audio Calibration Lab|Calibration/i],
     ['/auth/sign-in', /Welcome back/i],
@@ -51,9 +51,9 @@ test('critical routes render identifiable content', async ({ page }) => {
 
 test('guest ensemble route does not expose director report controls', async ({ page }) => {
   await page.goto('/ensemble');
-  await expect(page.getByRole('heading', { name: /ensemble access/i })).toBeVisible();
-  await expect(page.getByText(/membership required/i)).toBeVisible();
-  await expect(page.locator('body')).not.toContainText(/Director briefing|Print report|Roster admin|Section trends|Top problem notes/i);
+  await expect(page.getByRole('heading', { name: /sign in to use ensembles/i })).toBeVisible();
+  await expect(page.getByText(/an account keeps rosters private/i)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/Director briefing|Print report|Roster admin|Section trends|Top problem notes|Add student by username/i);
 });
 
 test('auth unavailable surfaces route testers into guest practice', async ({ page }) => {
