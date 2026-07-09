@@ -2,7 +2,8 @@ import { Camera, CheckCircle2, ChevronLeft, ChevronRight, FileText, Image as Ima
 import { useCallback, useEffect, useRef, useState } from 'react';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
-import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
+import { SCORE_DOCUMENTS_DB_NAME, SCORE_DOCUMENTS_STORE_NAME } from '../domain/scoreDocuments';
+import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, sheetMusicNameHint, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
 
 interface ImportedScorePage {
   id: string;
@@ -17,14 +18,11 @@ interface ImportedScorePage {
   persisted: boolean;
 }
 
-const DB_NAME = 'brasstune-score-practice';
-const STORE_NAME = 'scoreDocuments';
-
 function openScoreDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(SCORE_DOCUMENTS_DB_NAME, 1);
     request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      request.result.createObjectStore(SCORE_DOCUMENTS_STORE_NAME, { keyPath: 'id' });
     };
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
@@ -34,8 +32,8 @@ function openScoreDb() {
 async function saveScoreDocument(page: ImportedScorePage) {
   const db = await openScoreDb();
   await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    transaction.objectStore(STORE_NAME).put({
+    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readwrite');
+    transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).put({
       id: page.id,
       name: page.name,
       source: page.source,
@@ -56,8 +54,8 @@ async function saveScoreDocument(page: ImportedScorePage) {
 async function deleteScoreDocument(id: string) {
   const db = await openScoreDb();
   await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    transaction.objectStore(STORE_NAME).delete(id);
+    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readwrite');
+    transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).delete(id);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -67,8 +65,8 @@ async function deleteScoreDocument(id: string) {
 async function loadScoreDocuments(): Promise<ImportedScorePage[]> {
   const db = await openScoreDb();
   const rows = await new Promise<any[]>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const request = transaction.objectStore(STORE_NAME).getAll();
+    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readonly');
+    const request = transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).getAll();
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -405,7 +403,7 @@ export function ScorePracticePage() {
       <PageHeader
         eyebrow="Practice with score"
         title="Score practice"
-        description="Import a PDF, image, or camera capture, confirm the page quality, then practice with tuner and metronome overlays."
+        description="Import a PDF, image, or camera capture, review the page, and keep it on this device. Pages are read locally, with no note recognition or automatic score following."
         meta={<StatusBadge tone="gold">Local by default</StatusBadge>}
       />
       <SectionCard title="Import score" eyebrow="Three actions">
@@ -520,7 +518,7 @@ export function ScorePracticePage() {
                 )}
               </div>
               <div className="insight-grid">
-                <InsightCard title={selected.summary.label} detail={`${Math.round(selected.summary.quality.likelySheetMusicScore * 100)}% likely sheet music`} body={selected.summary.quality.messages.join(' ')} icon={CheckCircle2} tone={selected.summary.quality.status === 'good' ? 'green' : 'amber'} />
+                <InsightCard title={selected.summary.label} detail={sheetMusicNameHint(selected.summary.quality.likelySheetMusicScore)} body={selected.summary.quality.messages.join(' ')} icon={CheckCircle2} tone={selected.summary.quality.status === 'good' ? 'green' : 'amber'} />
                 <InsightCard title="Privacy" detail={`${formatSize(selected.file.size)} ${selected.file.type || selected.kind}`} body="The source page is stored locally after confirmation. Export reports should omit source pages unless you choose otherwise." icon={FileText} />
               </div>
               <div className="settings-actions">
@@ -535,10 +533,10 @@ export function ScorePracticePage() {
           )}
         </SectionCard>
       </div>
-      <SectionCard title="Practice overlays" eyebrow="Manual alignment">
+      <SectionCard title="Local preview only" eyebrow="No score following">
         <div className="insight-grid">
-          <InsightCard title="Manual markers" detail="Rehearsal, measure, phrase" body="Use page and timestamp markers during review. Automatic score following is not claimed in this build." icon={Music2} tone="gold" />
-          <InsightCard title="Metronome overlay" detail="Count-in ready" body="Open the metronome for tempo and count-in. Printed-note mismatch flags require confirmed OMR and alignment, which remain experimental." icon={CheckCircle2} />
+          <InsightCard title="Manual review" detail="Zoom, rotate, pages" body="Use the zoom, rotate, and page controls above to read the imported score. There is no note recognition, automatic score following, or alignment in this build." icon={Music2} tone="gold" />
+          <InsightCard title="Metronome" detail="Separate tool" body="Open the metronome from More for tempo and count-in while you read. It runs on its own and is not synced to the score." icon={CheckCircle2} />
         </div>
       </SectionCard>
     </ScreenContainer>

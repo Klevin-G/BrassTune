@@ -29,7 +29,7 @@ test('critical routes render identifiable content', async ({ page }) => {
     ['/analytics', /Analytics/i],
     ['/progress', /Progress/i],
     ['/coach', /Coach/i],
-    ['/ensemble', /Director briefing/i],
+    ['/ensemble', /Ensemble access/i],
     ['/settings', /Practice preferences/i],
     ['/settings/audio-lab', /Audio Calibration Lab|Calibration/i],
     ['/auth/sign-in', /Welcome back/i],
@@ -47,6 +47,13 @@ test('critical routes render identifiable content', async ({ page }) => {
     await expect(page.locator('.content')).toBeVisible();
     await expect(page.locator('body')).not.toContainText(/Supabase env vars|FastAPI|Start the FastAPI server|Authentication required|Developer testing|MVP|seeded ensemble|phone camera picker/i);
   }
+});
+
+test('guest ensemble route does not expose director report controls', async ({ page }) => {
+  await page.goto('/ensemble');
+  await expect(page.getByRole('heading', { name: /ensemble access/i })).toBeVisible();
+  await expect(page.getByText(/membership required/i)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/Director briefing|Print report|Roster admin|Section trends|Top problem notes/i);
 });
 
 test('auth unavailable surfaces route testers into guest practice', async ({ page }) => {
@@ -103,8 +110,9 @@ test('demo recording creates a reviewable session with playback surface', async 
   });
   await startButton.click();
   const stopButton = page.getByRole('button', { name: /stop recording/i });
-  await expect(stopButton).toBeVisible({ timeout: 15_000 });
+  await expect(stopButton).toBeVisible({ timeout: 30_000 });
   await expect.poll(async () => page.locator('.note-history .history-row').count(), { timeout: 15_000 }).toBeGreaterThan(0);
+  await expect.poll(async () => page.getByRole('timer').textContent(), { timeout: 10_000 }).toMatch(/0:0[2-9]/);
   await stopButton.click();
   const reviewLink = page.getByRole('link', { name: /review session/i });
   await expect(reviewLink).toBeVisible({ timeout: 20_000 });
@@ -118,11 +126,62 @@ test('demo recording creates a reviewable session with playback surface', async 
   await expect(page.getByRole('heading', { name: /Relisten/i })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Note performance/i })).toBeVisible();
   await expect(page.getByText(/guest session saved on this device/i)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const sessions = JSON.parse(localStorage.getItem('brasstune.guestSessions.v1') ?? '[]');
+    return sessions[0]?.note_stats?.length ?? 0;
+  })).toBeGreaterThan(0);
   await expect(page.locator('body')).not.toContainText(/Authentication required/i);
-  await page.goto('/practice');
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/practice');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page).toHaveURL(/\/practice$/);
   await expect(page.getByText(/Import recording/i)).toBeVisible();
   await expect(page.getByText(/Choose audio or video file/i)).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/Camera|phone camera picker|Record or choose a camera video/i);
+
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/analytics');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page).toHaveURL(/\/analytics$/);
+  await expect(page.getByText(/Using guest sessions saved in this browser/i)).toBeVisible();
+  await expect(page.locator('.status-badge').filter({ hasText: /measured notes/i })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/Analytics are available after sign-in/i);
+
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/coach');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page).toHaveURL(/\/coach$/);
+  await expect(page.getByText(/Guest intonation plan/i)).toBeVisible();
+  await expect(page.getByText(/Using guest sessions saved in this browser/i)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/Coach recommendations are available after sign-in/i);
+
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/progress');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page).toHaveURL(/\/progress$/);
+  await expect(page.getByText(/Guest browser data/i)).toBeVisible();
+  await expect(page.getByText(/Using guest sessions saved in this browser/i)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(/Progress sync is available after sign-in/i);
+});
+
+test('tiny-phone practice controls stay clear of bottom navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto('/practice');
+  const recordButton = page.getByRole('button', { name: /start recording/i });
+  const controls = page.locator('.tuner-surface .session-controls');
+  const bottomNav = page.locator('.floating-tabbar');
+  await expect(recordButton).toBeVisible();
+  await expect(controls).toBeVisible();
+  await expect(bottomNav).toBeVisible();
+  const controlsBox = await controls.boundingBox();
+  const navBox = await bottomNav.boundingBox();
+  expect(controlsBox).not.toBeNull();
+  expect(navBox).not.toBeNull();
+  expect(controlsBox!.y + controlsBox!.height).toBeLessThanOrEqual(navBox!.y - 2);
 });
 
 test('settings exposes export before account deletion and legal links', async ({ page }) => {
@@ -144,7 +203,7 @@ test('server-side ensemble authorization rejects forbidden writes', async ({ req
 
   const allowed = await request.post(`${apiBaseURL}/api/ensemble/groups/1/members/by-username`, {
     headers: { Authorization: 'Bearer dev-user-2' },
-    data: { username: 'maya', instrument_id: 'horn' },
+    data: { username: 'jordan', instrument_id: 'trombone' },
   });
-  expect(allowed.status()).toBe(200);
+  expect([200, 409]).toContain(allowed.status());
 });

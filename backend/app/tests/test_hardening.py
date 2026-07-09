@@ -16,8 +16,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
-from app.api.auth import AuthContext, _sync_supabase_user
-from app.api.routes import _filtered_events, _group_scoped_sessions, _read_limited_body, delete_my_account
+from app.api.auth import AuthContext, _sync_supabase_user, delete_supabase_identity
+from app.api.routes import _filtered_events, _group_scoped_sessions, _read_limited_body, delete_my_account, retry_account_deletion_jobs
+from app.core.security import allowed_origins, cors_allowed_origin_regex
 from app.core.analytics.stats import build_instrument_heatmap, calculate_most_improved_notes, calculate_note_stats
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
@@ -56,6 +57,13 @@ def test_backend_requirements_install_uvicorn_websocket_protocol():
     assert importlib.util.find_spec("websockets") or importlib.util.find_spec("wsproto")
 
 
+def test_backend_requirements_use_sqlalchemy_two_floor():
+    requirements = (Path(__file__).resolve().parents[2] / "requirements.txt").read_text()
+    constraints = (Path(__file__).resolve().parents[2] / "constraints.txt").read_text()
+    assert "sqlalchemy>=2.0,<3" in requirements.lower()
+    assert "sqlalchemy>=2.0" in constraints.lower()
+
+
 def _session(db, user_id: int, instrument_id: str, started_at: dt.datetime):
     if db.query(User).filter(User.id == user_id).first() is None:
         db.add(User(id=user_id, name="Test User", role="student", primary_instrument_id=instrument_id))
@@ -79,8 +87,9 @@ def _set_production_auth_env(monkeypatch):
     monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "supabase")
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
-    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_test")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-service-key-placeholder")
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("BRASSTUNE_DATABASE_URL", "postgresql://postgres@example.supabase.co:5432/postgres")
 
 
 def _event(db, session, note: str, octave: int, avg_abs: float, avg_signed: float = None):
@@ -146,6 +155,51 @@ def test_configurable_rate_limit_rejects_repeated_requests(monkeypatch):
     main_module._RATE_LIMIT_BUCKETS.clear()
 
 
+def test_rate_limit_prunes_expired_buckets_before_cardinality_cap(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_RATE_LIMIT_PER_MINUTE", "5")
+    monkeypatch.setenv("BRASSTUNE_RATE_LIMIT_MAX_BUCKETS", "1")
+    main_module._RATE_LIMIT_BUCKETS.clear()
+    expired_timestamp = main_module.time.monotonic() - main_module._RATE_LIMIT_WINDOW_SECONDS - 1
+    main_module._RATE_LIMIT_BUCKETS[("old-client", "/api/instruments")].append(expired_timestamp)
+    with TestClient(app) as client:
+        response = client.get("/api/instruments")
+    assert response.status_code == 200
+    assert ("old-client", "/api/instruments") not in main_module._RATE_LIMIT_BUCKETS
+    main_module._RATE_LIMIT_BUCKETS.clear()
+
+
+def test_deployed_cors_regex_requires_explicit_escape_hatch(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+    monkeypatch.delenv("BRASSTUNE_ALLOW_CORS_REGEX", raising=False)
+    with pytest.raises(RuntimeError):
+        cors_allowed_origin_regex()
+    monkeypatch.setenv("BRASSTUNE_ALLOW_CORS_REGEX", "1")
+    assert cors_allowed_origin_regex() == r"https://.*\.vercel\.app"
+
+
+def test_deployed_cors_origins_reject_wildcards_and_insecure_values(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("FRONTEND_ORIGIN", raising=False)
+    with pytest.raises(RuntimeError):
+        allowed_origins()
+    for origin in ["*", "https://*.vercel.app", "http://brass-tune.vercel.app", "https://brass-tune.vercel.app/callback"]:
+        monkeypatch.setenv("CORS_ALLOWED_ORIGINS", origin)
+        with pytest.raises(RuntimeError):
+            allowed_origins()
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app/")
+    assert allowed_origins() == ["https://brass-tune.vercel.app"]
+
+
+def test_default_deployed_environment_requires_explicit_cors_origins(monkeypatch):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("FRONTEND_ORIGIN", raising=False)
+    with pytest.raises(RuntimeError, match="CORS_ALLOWED_ORIGINS"):
+        allowed_origins()
+
+
 def test_api_responses_include_security_headers():
     with TestClient(app) as client:
         response = client.get("/api/health")
@@ -154,6 +208,91 @@ def test_api_responses_include_security_headers():
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert response.headers["x-frame-options"] == "DENY"
+
+
+def test_unhandled_http_errors_are_generic_and_hardened():
+    route_path = "/api/__test_unhandled_error"
+
+    if not any(getattr(route, "path", None) == route_path for route in app.routes):
+        @app.get(route_path)
+        def _raise_test_error():
+            raise RuntimeError("database password leaked in traceback")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get(route_path)
+    assert response.status_code == 500
+    assert response.json()["detail"] == "The server could not complete this request."
+    assert "password" not in response.text.lower()
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+
+
+def test_live_and_version_endpoints_are_public(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "local")
+    with TestClient(app) as client:
+        live = client.get("/api/live")
+        version = client.get("/api/version")
+    assert live.status_code == 200
+    assert live.json()["ok"] is True
+    assert version.status_code == 200
+    assert "commit_sha" in version.json()
+
+
+def test_ready_endpoint_fails_when_dependency_checks_fail(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setattr(
+        "app.api.routes.readiness_report",
+        lambda: {
+            "ok": False,
+            "service": "BrassTune Analytics API",
+            "environment": "local",
+            "database_backend": "sqlite",
+            "checks": {"database": {"ok": False, "issues": ["Missing table: account_deletion_jobs."]}},
+        },
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/ready")
+    assert response.status_code == 503
+    assert response.json()["detail"]["ok"] is False
+    assert response.json()["detail"]["checks"]["database"] == {"ok": False}
+    assert "Missing table" not in json.dumps(response.json())
+
+
+def test_ready_endpoint_redacts_operational_secret_names(monkeypatch):
+    _set_production_auth_env(monkeypatch)
+    monkeypatch.setattr(
+        "app.api.routes.readiness_report",
+        lambda: {
+            "ok": False,
+            "service": "BrassTune Analytics API",
+            "environment": "production",
+            "database_backend": "postgresql",
+            "checks": {
+                "auth": {"ok": False, "issues": ["SUPABASE_SECRET_KEY is required."]},
+                "maintenance": {"ok": False, "issues": ["Missing BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET."]},
+            },
+        },
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/ready")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["detail"]["checks"] == {"auth": {"ok": False}, "maintenance": {"ok": False}}
+    assert "SUPABASE_SECRET_KEY" not in json.dumps(body)
+    assert "BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET" not in json.dumps(body)
+
+
+def test_postgres_readiness_requires_account_deletion_counts_jsonb():
+    from app.db.readiness import _postgres_column_type_issues
+
+    assert _postgres_column_type_issues(
+        "account_deletion_jobs",
+        [{"name": "counts_json", "type": "TEXT"}],
+    ) == ["Column account_deletion_jobs.counts_json must be jsonb, not text."]
+    assert _postgres_column_type_issues(
+        "account_deletion_jobs",
+        [{"name": "counts_json", "type": "JSONB"}],
+    ) == []
 
 
 def test_websocket_audio_frame_returns_pitch_frame_for_synthetic_pcm():
@@ -371,9 +510,7 @@ def test_repair_demo_data_rebuilds_broken_seed_sessions():
 
 
 def test_production_startup_does_not_seed_demo_data_by_default(monkeypatch):
-    monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
-    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    _set_production_auth_env(monkeypatch)
     monkeypatch.delenv("BRASSTUNE_SEED_DEMO_DATA", raising=False)
     calls = []
 
@@ -390,7 +527,7 @@ def test_production_startup_does_not_seed_demo_data_by_default(monkeypatch):
 
 
 def test_explicit_demo_seed_override_still_works_in_non_release_envs(monkeypatch):
-    monkeypatch.setenv("APP_ENV", "preview")
+    monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
     monkeypatch.setenv("BRASSTUNE_SEED_DEMO_DATA", "1")
@@ -435,20 +572,34 @@ def test_deployed_staging_requires_explicit_auth_mode(monkeypatch):
             pass
 
 
-def test_production_disabled_auth_mode_starts_and_fails_private_routes_closed(monkeypatch):
+def test_production_disabled_auth_mode_fails_startup(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("BRASSTUNE_DATABASE_URL", "postgresql://postgres@example.supabase.co:5432/postgres")
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
     monkeypatch.delenv("SUPABASE_PUBLISHABLE_KEY", raising=False)
-    with TestClient(app) as client:
-        assert client.get("/api/health").status_code == 200
-        assert client.get("/api/instruments").status_code == 200
-        assert client.get("/api/sessions").status_code == 401
-        token_response = client.get("/api/users/current", headers={"Authorization": "Bearer any-token"})
-    assert token_response.status_code == 401
-    assert "unavailable" in token_response.json()["detail"].lower()
+    with pytest.raises(RuntimeError, match="disabled"):
+        with TestClient(app):
+            pass
+
+
+def test_production_startup_requires_database_url(monkeypatch):
+    _set_production_auth_env(monkeypatch)
+    monkeypatch.delenv("BRASSTUNE_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        with TestClient(app):
+            pass
+
+
+def test_production_startup_rejects_sqlite_database_url(monkeypatch):
+    _set_production_auth_env(monkeypatch)
+    monkeypatch.setenv("BRASSTUNE_DATABASE_URL", "sqlite:///./prod.db")
+    with pytest.raises(RuntimeError, match="PostgreSQL"):
+        with TestClient(app):
+            pass
 
 
 def test_production_supabase_mode_requires_supabase_config(monkeypatch):
@@ -553,6 +704,53 @@ def test_session_zip_contains_expected_files():
     assert any(name.startswith("audio/") for name in names)
 
 
+def test_session_exports_reject_too_many_rows(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_EXPORT_MAX_ROWS_PER_SESSION", "1")
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        frame = frequency_to_pitch_frame(midi_to_frequency(60), MIN_RECORDING_CONFIDENCE, 0.1, 0, "trumpet", 440.0).to_dict()
+        assert client.post(f"/api/sessions/{session['id']}/samples/batch", json=[frame, {**frame, "timestamp_ms": 20}]).status_code == 200
+        for path in [
+            f"/api/export/session/{session['id']}.csv",
+            f"/api/export/session/{session['id']}.json",
+            f"/api/export/session/{session['id']}.zip",
+        ]:
+            response = client.get(path)
+            assert response.status_code == 413
+            assert "too many" in response.json()["detail"].lower()
+
+
+def test_account_export_rejects_too_many_sessions(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_EXPORT_MAX_SESSIONS", "1")
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/sessions/start",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        )
+        second = client.post(
+            "/api/sessions/start",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        response = client.get("/api/users/me/export.zip", headers={"Authorization": "Bearer dev-user-1"})
+    assert response.status_code == 413
+    assert "too many sessions" in response.json()["detail"].lower()
+
+
+def test_full_json_export_rejects_too_many_total_rows(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_EXPORT_MAX_TOTAL_ROWS", "1")
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        frame = frequency_to_pitch_frame(midi_to_frequency(60), MIN_RECORDING_CONFIDENCE, 0.1, 0, "trumpet", 440.0).to_dict()
+        assert client.post(f"/api/sessions/{session['id']}/samples/batch", json=[frame, {**frame, "timestamp_ms": 20}]).status_code == 200
+        response = client.get("/api/export/all.json")
+    assert response.status_code == 413
+    assert "too many rows" in response.json()["detail"].lower()
+
+
 def test_director_can_add_member_by_username_but_student_cannot():
     with TestClient(app) as client:
         student_response = client.post(
@@ -564,7 +762,7 @@ def test_director_can_add_member_by_username_but_student_cannot():
         director_response = client.post(
             "/api/ensemble/groups/1/members/by-username",
             headers={"Authorization": "Bearer dev-user-2"},
-            json={"username": "maya", "instrument_id": "horn"},
+            json={"username": "jordan", "instrument_id": "trombone"},
         )
         assert director_response.status_code == 200
         missing_response = client.post(
@@ -573,6 +771,32 @@ def test_director_can_add_member_by_username_but_student_cannot():
             json={"username": "missing-player", "instrument_id": "horn"},
         )
         assert missing_response.status_code == 404
+
+
+def test_director_cannot_readd_active_member_and_overwrite_role():
+    with TestClient(app) as client:
+        response = client.patch(
+            "/api/ensemble/groups/1/members/1",
+            headers={"Authorization": "Bearer dev-user-2"},
+            json={"role_in_group": "assistant", "instrument_id": "horn"},
+        )
+        assert response.status_code == 200
+        duplicate = client.post(
+            "/api/ensemble/groups/1/members/by-username",
+            headers={"Authorization": "Bearer dev-user-2"},
+            json={"username": "avery", "instrument_id": "trumpet", "role_in_group": "student"},
+        )
+        assert duplicate.status_code == 409
+        group = client.get("/api/ensemble/groups/1", headers={"Authorization": "Bearer dev-user-2"}).json()
+    avery = next(member for member in group["members"] if member["username"] == "avery")
+    assert avery["role_in_group"] == "assistant"
+    assert avery["instrument_id"] == "horn"
+    with TestClient(app) as client:
+        client.patch(
+            "/api/ensemble/groups/1/members/1",
+            headers={"Authorization": "Bearer dev-user-2"},
+            json={"role_in_group": "student", "instrument_id": "trumpet"},
+        )
 
 
 def test_websocket_stop_session_requires_owner_or_admin():
@@ -611,6 +835,14 @@ def test_websocket_rejects_query_token_auth():
     assert "query-token" in message["message"]
 
 
+def test_websocket_rejects_any_auth_like_query_parameter():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch?access_token=dev-user-1") as websocket:
+            message = websocket.receive_json()
+    assert message["type"] == "error"
+    assert "query-token" in message["message"]
+
+
 def test_websocket_rejects_unapproved_origin():
     with TestClient(app) as client:
         with client.websocket_connect("/ws/pitch", headers={"Origin": "https://evil.example"}) as websocket:
@@ -621,7 +853,11 @@ def test_websocket_rejects_unapproved_origin():
 
 def test_deployed_websocket_rejects_missing_origin(monkeypatch):
     monkeypatch.setenv("APP_ENV", "preview")
-    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
+    monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "supabase")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-service-key-placeholder")
+    monkeypatch.setenv("BRASSTUNE_DATABASE_URL", "postgresql://postgres@example.supabase.co:5432/postgres")
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
     with TestClient(app) as client:
         with client.websocket_connect("/ws/pitch") as websocket:
@@ -709,6 +945,33 @@ def test_supabase_user_does_not_link_to_existing_account_by_email_alone():
         db.close()
 
 
+def test_supabase_app_metadata_cannot_create_privileged_role():
+    db = _test_db()
+    try:
+        user = _sync_supabase_user(
+            db,
+            {
+                "id": "supabase-user-director",
+                "email": "director-claim@example.com",
+                "user_metadata": {"username": "director-claim", "display_name": "Director Claim"},
+                "app_metadata": {"role": "director"},
+            },
+        )
+        assert user.role == "student"
+        user = _sync_supabase_user(
+            db,
+            {
+                "id": "supabase-user-director",
+                "email": "director-claim@example.com",
+                "user_metadata": {},
+                "app_metadata": {"role": "admin"},
+            },
+        )
+        assert user.role == "student"
+    finally:
+        db.close()
+
+
 def test_ensemble_aggregate_reports_are_manager_only():
     with TestClient(app) as client:
         group_response = client.get("/api/ensemble/groups/1", headers={"Authorization": "Bearer dev-user-1"})
@@ -717,6 +980,8 @@ def test_ensemble_aggregate_reports_are_manager_only():
         assert student_report.status_code == 403
         director_report = client.get("/api/ensemble/groups/1/report", headers={"Authorization": "Bearer dev-user-2"})
         assert director_report.status_code == 200
+        assert "seeded" not in str(director_report.json()).lower()
+        assert "mvp" not in str(director_report.json()).lower()
 
 
 def test_director_roster_view_includes_member_identity():
@@ -831,8 +1096,11 @@ def test_account_export_contains_profile_and_lifecycle_data():
         names = set(archive.namelist())
         assert {"account.json", "sessions.json", "memberships.json", "owned_groups.json", "invitations.json", "recommendations.json"}.issubset(names)
         account = json.loads(archive.read("account.json"))
+        sessions = json.loads(archive.read("sessions.json"))
     assert account["id"] == 1
     assert account["role"] == "student"
+    assert all("audio_object_key" not in row for row in sessions)
+    assert all("audio_storage_provider" not in row for row in sessions)
 
 
 def test_clear_practice_data_deletes_audio_before_bulk_rows(monkeypatch):
@@ -957,6 +1225,8 @@ def test_account_deletion_records_completed_job_and_external_cleanup_last(monkey
         job = db.query(AccountDeletionJob).filter(AccountDeletionJob.user_id == user.id).one()
         assert job.status == "completed"
         assert job.stage == "completed"
+        assert isinstance(job.counts_json, dict)
+        assert job.counts_json["practice_sessions"] == 1
     finally:
         db.close()
 
@@ -996,6 +1266,207 @@ def test_account_deletion_external_failure_blocks_supabase_recreation(monkeypatc
         db.close()
 
 
+def test_account_deletion_retryable_job_blocks_existing_user_token():
+    db = _test_db()
+    try:
+        user = User(id=252, username="delete252", name="Delete Pending", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-252")
+        db.add(user)
+        db.add(
+            AccountDeletionJob(
+                user_id=user.id,
+                supabase_user_id="supabase-252",
+                idempotency_key="delete-user-252",
+                stage="external_cleanup_failed",
+                status="retryable_failure",
+                next_retry_at=dt.datetime.utcnow() + dt.timedelta(minutes=5),
+                counts_json="{}",
+            )
+        )
+        db.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            _sync_supabase_user(
+                db,
+                {
+                    "id": "supabase-252",
+                    "email": "delete252@example.com",
+                    "user_metadata": {"display_name": "Should Not Update"},
+                    "app_metadata": {},
+                },
+            )
+
+        assert exc.value.status_code == 423
+        db.refresh(user)
+        assert user.name == "Delete Pending"
+    finally:
+        db.close()
+
+
+def test_account_deletion_retry_endpoint_requires_secret(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", "retry-secret")
+    with TestClient(app) as client:
+        response = client.post("/api/maintenance/account-deletions/retry")
+        assert response.status_code == 403
+        response = client.post("/api/maintenance/account-deletions/retry", headers={"X-BrassTune-Maintenance-Secret": "retry-secret"})
+        assert response.status_code == 200
+
+
+def test_account_deletion_retry_executor_completes_external_cleanup(monkeypatch):
+    db = _test_db()
+    try:
+        job = AccountDeletionJob(
+            user_id=153,
+            supabase_user_id="supabase-153",
+            idempotency_key="delete-user-153",
+            stage="external_cleanup_failed",
+            status="retryable_failure",
+            next_retry_at=dt.datetime.utcnow() - dt.timedelta(minutes=1),
+            counts_json="{}",
+        )
+        db.add(job)
+        db.commit()
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda user_id: user_id == "supabase-153")
+
+        result = retry_account_deletion_jobs(db)
+
+        assert result["processed"] == 1
+        assert result["completed"] == 1
+        db.refresh(job)
+        assert job.status == "completed"
+        assert job.stage == "completed"
+        assert job.next_retry_at is None
+    finally:
+        db.close()
+
+
+def test_account_deletion_retry_executor_keeps_retryable_external_failures(monkeypatch):
+    db = _test_db()
+    try:
+        job = AccountDeletionJob(
+            user_id=154,
+            supabase_user_id="supabase-154",
+            idempotency_key="delete-user-154",
+            stage="external_cleanup_failed",
+            status="retryable_failure",
+            next_retry_at=dt.datetime.utcnow() - dt.timedelta(minutes=1),
+            counts_json="{}",
+        )
+        db.add(job)
+        db.commit()
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda user_id: False)
+
+        result = retry_account_deletion_jobs(db)
+
+        assert result["processed"] == 1
+        assert result["still_retryable"] == 1
+        db.refresh(job)
+        assert job.status == "retryable_failure"
+        assert job.stage == "external_cleanup_failed"
+        assert job.retry_count == 1
+        assert job.next_retry_at is not None
+    finally:
+        db.close()
+
+
+def test_account_deletion_retry_executor_recovers_stale_external_cleanup(monkeypatch):
+    db = _test_db()
+    try:
+        job = AccountDeletionJob(
+            user_id=157,
+            supabase_user_id="supabase-157",
+            idempotency_key="delete-user-157",
+            stage="external_cleanup_started",
+            status="in_progress",
+            updated_at=dt.datetime.utcnow() - dt.timedelta(minutes=20),
+            counts_json="{}",
+        )
+        db.add(job)
+        db.commit()
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda user_id: user_id == "supabase-157")
+
+        result = retry_account_deletion_jobs(db)
+
+        assert result["processed"] == 1
+        assert result["completed"] == 1
+        db.refresh(job)
+        assert job.status == "completed"
+        assert job.stage == "completed"
+    finally:
+        db.close()
+
+
+def test_account_deletion_retry_executor_ignores_fresh_in_progress(monkeypatch):
+    db = _test_db()
+    try:
+        job = AccountDeletionJob(
+            user_id=158,
+            supabase_user_id="supabase-158",
+            idempotency_key="delete-user-158",
+            stage="external_cleanup_started",
+            status="in_progress",
+            updated_at=dt.datetime.utcnow(),
+            counts_json="{}",
+        )
+        db.add(job)
+        db.commit()
+
+        result = retry_account_deletion_jobs(db)
+
+        assert result["processed"] == 0
+        db.refresh(job)
+        assert job.status == "in_progress"
+    finally:
+        db.close()
+
+
+def test_delete_supabase_identity_treats_missing_user_as_complete(monkeypatch):
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-service-key")
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+
+    def raise_not_found(*args, **kwargs):
+        raise urllib.error.HTTPError("https://project.supabase.co/auth/v1/admin/users/missing", 404, "not found", None, None)
+
+    import urllib.error
+
+    monkeypatch.setattr("urllib.request.urlopen", raise_not_found)
+
+    assert delete_supabase_identity("missing") is True
+
+
+def test_account_deletion_retry_executor_recovers_local_cleanup_failure(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(id=155, username="delete155", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-155")
+        db.add(user)
+        db.commit()
+        session = _session(db, user.id, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "155/%s/recording.webm" % session.id
+        job = AccountDeletionJob(
+            user_id=user.id,
+            supabase_user_id=user.supabase_user_id,
+            idempotency_key="delete-user-155",
+            stage="local_cleanup_failed",
+            status="retryable_failure",
+            next_retry_at=dt.datetime.utcnow() - dt.timedelta(minutes=1),
+            counts_json="{}",
+        )
+        db.add_all([session, job])
+        db.commit()
+        monkeypatch.setattr("app.api.routes.delete_audio_for_session", lambda _session: None)
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda user_id: user_id == "supabase-155")
+
+        result = retry_account_deletion_jobs(db)
+
+        assert result["processed"] == 1
+        assert db.query(User).filter(User.id == user.id).first() is None
+        db.refresh(job)
+        assert job.status == "completed"
+        assert job.stage == "completed"
+    finally:
+        db.close()
+
+
 def test_account_deletion_removes_sessions_audio_and_teacher_owned_group():
     with TestClient(app) as client:
         session = client.post(
@@ -1020,3 +1491,15 @@ def test_account_deletion_removes_sessions_audio_and_teacher_owned_group():
         assert payload["deleted"] is True
         assert payload["counts"]["teacher_owned_groups"] >= 1
         assert client.get("/api/ensemble/groups/1", headers={"Authorization": "Bearer dev-user-1"}).status_code in {403, 404}
+
+
+def test_account_deletion_rejects_short_confirmation_phrase():
+    with TestClient(app) as client:
+        response = client.request(
+            "DELETE",
+            "/api/users/me",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"confirmation": "delete"},
+        )
+    assert response.status_code == 400
+    assert 'delete my account' in response.json()["detail"]

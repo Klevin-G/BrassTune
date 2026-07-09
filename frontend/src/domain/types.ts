@@ -46,8 +46,6 @@ export interface PracticeSession {
   average_signed_cents: number;
   average_abs_cents: number;
   in_tune_percentage: number;
-  audio_storage_provider?: string | null;
-  audio_object_key?: string | null;
   audio_mime_type?: string | null;
   audio_duration_seconds?: number | null;
   audio_size_bytes?: number | null;

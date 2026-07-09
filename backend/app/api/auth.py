@@ -41,6 +41,8 @@ def assert_auth_configured() -> None:
         raise RuntimeError("BRASSTUNE_ALLOW_LOCAL_AUTH cannot be enabled in deployed environments.")
     mode = auth_mode()
     if mode == "disabled":
+        if environment in DEPLOYED_ENVIRONMENTS:
+            raise RuntimeError("BRASSTUNE_AUTH_MODE=disabled is not allowed in deployed environments.")
         return
     if not os.getenv("SUPABASE_URL"):
         raise RuntimeError("SUPABASE_URL is required when BRASSTUNE_AUTH_MODE=supabase.")
@@ -87,20 +89,17 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
         raise HTTPException(status_code=401, detail="Supabase token did not include a user id.")
     email = payload.get("email")
     metadata = payload.get("user_metadata") or {}
-    app_metadata = payload.get("app_metadata") or {}
-    requested_role = app_metadata.get("role") if app_metadata.get("role") in {"student", "director", "admin"} else None
+    deletion_job = (
+        db.query(AccountDeletionJob)
+        .filter(AccountDeletionJob.supabase_user_id == supabase_id)
+        .order_by(AccountDeletionJob.updated_at.desc())
+        .first()
+    )
+    if deletion_job is not None:
+        if deletion_job.status == "completed":
+            raise HTTPException(status_code=410, detail="This account has been deleted.")
+        raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
-    if user is None:
-        deletion_job = (
-            db.query(AccountDeletionJob)
-            .filter(AccountDeletionJob.supabase_user_id == supabase_id)
-            .order_by(AccountDeletionJob.updated_at.desc())
-            .first()
-        )
-        if deletion_job is not None:
-            if deletion_job.status == "completed":
-                raise HTTPException(status_code=410, detail="This account has been deleted.")
-            raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
     if user is None:
         preferred_username = metadata.get("username") or (email.split("@")[0] if email else "player")
         user = User(
@@ -109,7 +108,7 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             username=_unique_username(db, preferred_username),
             name=metadata.get("display_name") or metadata.get("name") or email or "BrassTune Player",
             display_name=metadata.get("display_name") or metadata.get("name"),
-            role=requested_role or "student",
+            role="student",
             primary_instrument_id=metadata.get("primary_instrument_id") if is_valid_instrument_id(metadata.get("primary_instrument_id", "")) else "trumpet",
         )
         db.add(user)
@@ -123,8 +122,6 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             user.username = _unique_username(db, metadata["username"], user.id)
         if is_valid_instrument_id(metadata.get("primary_instrument_id", "")):
             user.primary_instrument_id = metadata["primary_instrument_id"]
-        if requested_role:
-            user.role = requested_role
     user.updated_at = dt.datetime.utcnow()
     db.commit()
     db.refresh(user)
@@ -164,7 +161,7 @@ def _fetch_supabase_user(token: str) -> dict:
 def _supabase_service_key() -> str:
     key = os.getenv("SUPABASE_SECRET_KEY")
     if not key:
-        raise HTTPException(status_code=503, detail="SUPABASE_SECRET_KEY is required for account deletion.")
+        raise HTTPException(status_code=503, detail="Account deletion is unavailable.")
     return key
 
 
@@ -201,6 +198,8 @@ def delete_supabase_identity(supabase_user_id: Optional[str]) -> bool:
         with urllib.request.urlopen(request, timeout=10):  # nosec B310
             return True
     except urllib.error.HTTPError as exc:
+        if exc.code in {404, 410}:
+            return True
         raise HTTPException(status_code=502, detail="Supabase identity deletion failed.") from exc
     except OSError as exc:
         raise HTTPException(status_code=503, detail="Could not reach Supabase to delete the identity.") from exc

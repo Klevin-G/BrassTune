@@ -9,8 +9,8 @@ const apiBaseURL = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:8000';
 const wsBaseURL = process.env.E2E_WS_BASE_URL ?? apiBaseURL.replace(/^http/, 'ws');
 const ci = !!process.env.CI;
 const defaultBackendPython = process.platform === 'win32'
-  ? (existsSync('../backend/.venv/Scripts/python.exe') ? '../backend/.venv/Scripts/python.exe' : 'py -3')
-  : (existsSync('../backend/.venv/bin/python') ? '../backend/.venv/bin/python' : 'python3');
+  ? (existsSync('../backend/.venv/Scripts/python.exe') ? '.venv\\Scripts\\python.exe' : 'py -3')
+  : (existsSync('../backend/.venv/bin/python') ? '.venv/bin/python' : 'python3');
 const backendPython = process.env.E2E_BACKEND_PYTHON ?? defaultBackendPython;
 const backendCommand = `cd ../backend && ${backendPython} -m uvicorn app.main:app --host 127.0.0.1 --port 8000`;
 const backendDatabaseURL = process.env.E2E_BACKEND_DATABASE_URL ?? `sqlite:///${join(tmpdir(), `brasstune-e2e-${process.pid}.db`)}`;

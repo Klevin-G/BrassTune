@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
+import logging
 import os
+import re
 import time
 
 from fastapi import FastAPI, Request
@@ -10,12 +12,14 @@ from fastapi.responses import JSONResponse
 from app.api.auth import assert_auth_configured
 from app.api.routes import router as api_router
 from app.api.websocket import router as websocket_router
-from app.core.security import LOCAL_ENVIRONMENTS, allowed_origins, app_environment
+from app.core.security import LOCAL_ENVIRONMENTS, allowed_origins, app_environment, cors_allowed_origin_regex
 from app.db.database import SessionLocal, init_db
 from app.db.seed import seed_demo_data
 
 
 _RATE_LIMIT_BUCKETS = defaultdict(deque)
+_RATE_LIMIT_WINDOW_SECONDS = 60
+logger = logging.getLogger("brasstune.api")
 
 
 def should_seed_demo_data() -> bool:
@@ -52,6 +56,16 @@ def _positive_int_env(name: str, default: int) -> int:
         return max(0, int(os.getenv(name, str(default))))
     except ValueError:
         return default
+
+
+def _prune_rate_limit_buckets(now: float | None = None) -> None:
+    timestamp = time.monotonic() if now is None else now
+    for key in list(_RATE_LIMIT_BUCKETS.keys()):
+        bucket = _RATE_LIMIT_BUCKETS[key]
+        while bucket and timestamp - bucket[0] > _RATE_LIMIT_WINDOW_SECONDS:
+            bucket.popleft()
+        if not bucket:
+            del _RATE_LIMIT_BUCKETS[key]
 
 
 class JSONBodyLimitMiddleware:
@@ -95,11 +109,22 @@ class JSONBodyLimitMiddleware:
         await self.app(scope, replay_receive, send)
 
 
+_CORS_ALLOWED_ORIGINS = cors_origins()
+_CORS_ALLOWED_ORIGIN_REGEX = cors_allowed_origin_regex()
+_CORS_ORIGIN_REGEX_PATTERN = re.compile(_CORS_ALLOWED_ORIGIN_REGEX) if _CORS_ALLOWED_ORIGIN_REGEX else None
+
+
+def _origin_allowed_for_cors(origin: str) -> bool:
+    if "*" in _CORS_ALLOWED_ORIGINS or origin in _CORS_ALLOWED_ORIGINS:
+        return True
+    return _CORS_ORIGIN_REGEX_PATTERN is not None and _CORS_ORIGIN_REGEX_PATTERN.fullmatch(origin) is not None
+
+
 app.add_middleware(JSONBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins(),
-    allow_origin_regex=os.getenv("CORS_ALLOWED_ORIGIN_REGEX"),
+    allow_origins=_CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=_CORS_ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -116,6 +141,13 @@ async def request_abuse_limits(request: Request, call_next):
         response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
         if request.url.scheme == "https" or app_environment() in {"production", "staging", "preview"}:
             response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+        # Guard responses (413/429/500) short-circuit before CORSMiddleware, so mirror the CORS
+        # headers here for allowed origins; stays fail-closed and never overrides CORSMiddleware.
+        origin = request.headers.get("origin")
+        if origin and "access-control-allow-origin" not in response.headers and _origin_allowed_for_cors(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers.setdefault("Vary", "Origin")
         return response
 
     if request.method.upper() == "OPTIONS":
@@ -132,18 +164,27 @@ async def request_abuse_limits(request: Request, call_next):
             return harden_response(JSONResponse({"detail": "Invalid request size."}, status_code=400))
 
     rate_limit = _positive_int_env("BRASSTUNE_RATE_LIMIT_PER_MINUTE", 900)
-    if rate_limit and request.url.path != "/api/health":
+    if rate_limit and request.url.path not in {"/api/health", "/api/live"}:
         client_host = request.client.host if request.client else "unknown"
         key = (client_host, request.url.path)
         now = time.monotonic()
+        max_buckets = _positive_int_env("BRASSTUNE_RATE_LIMIT_MAX_BUCKETS", 10000)
+        if max_buckets and key not in _RATE_LIMIT_BUCKETS and len(_RATE_LIMIT_BUCKETS) >= max_buckets:
+            _prune_rate_limit_buckets(now)
+            if len(_RATE_LIMIT_BUCKETS) >= max_buckets:
+                return harden_response(JSONResponse({"detail": "Too many request sources. Try again soon."}, status_code=429))
         bucket = _RATE_LIMIT_BUCKETS[key]
-        while bucket and now - bucket[0] > 60:
+        while bucket and now - bucket[0] > _RATE_LIMIT_WINDOW_SECONDS:
             bucket.popleft()
         if len(bucket) >= rate_limit:
             return harden_response(JSONResponse({"detail": "Too many requests. Try again soon."}, status_code=429))
         bucket.append(now)
 
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("Unhandled backend request failure")
+        response = JSONResponse({"detail": "The server could not complete this request."}, status_code=500)
     return harden_response(response)
 
 

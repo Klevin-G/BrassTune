@@ -1,11 +1,42 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "generated_at": "2026-06-21T05:51:09Z",
-  "repo": "aryasalem09/BrassTune",
-  "phase": "phase_1_web_production_completion",
-  "production_auth_mode": "disabled",
+  "repo": "Klevin-G/BrassTune",
+  "phase": "historical_phase_1_web_production_completion",
+  "current_audit_2026_07_08": {
+    "status": "historical_only_not_current_release_decision",
+    "web_release_decision": "blocked",
+    "native_release_decision": "blocked",
+    "current_main_sha": "1c998d5480f52b5fcf0e2c143f5078893caead66",
+    "web_pr_7_head_sha": "b37ed6ce6c8bb33089e14ce950c3de768a295602",
+    "native_pr_8_head_sha": "989abb1684cc8a2076e061607678a70f31e25969",
+    "local_web_validation": {
+      "status": "passed_locally_not_committed_or_deployed",
+      "backend_pytest": "104 passed",
+      "frontend_unit": "50 passed",
+      "frontend_build": "passed",
+      "local_e2e": "95 passed",
+      "bandit": "no issues",
+      "pip_audit_local": "no known vulnerabilities",
+      "npm_audit_omit_dev": "0 vulnerabilities",
+      "diff_check": "passed",
+      "secret_and_large_file_dirty_diff_scan": "no high-confidence secrets or dirty files over 1MiB observed"
+    },
+    "provider_blockers": [
+      "Production Render returns 404 for /api/live, /api/ready, and /api/version.",
+      "Production Vercel is publicly reachable but cannot be release-valid while production Render is stale.",
+      "PR #7 preview deployment dpl_J6mJ8Qyk2NA4Z9FUdGwBmpG2udP6 is Ready but SSO-protected without accepted automation bypass/share evidence.",
+      "Deploy, Backend, Frontend, Production Smoke, Device Simulation, and Render Keepalive workflows are disabled manually."
+    ],
+    "native_blockers": [
+      "Real AVAudioEngine microphone pitch capture is implemented locally in PR #8, but no physical iPhone/iPad microphone validation was available.",
+      "No physical iPhone/iPad validation was available.",
+      "Apple signing, archive validation, TestFlight, and App Store Connect gates are unavailable."
+    ]
+  },
+  "production_auth_mode": "historical_disabled_guest_first_beta",
   "web_version": "0.1.0-beta.1",
-  "web_production_completion_gate": "passed",
+  "web_production_completion_gate": "historical_passed_june_2026_not_current_release_decision",
   "native_phase_allowed": true,
   "web_completion_branch_sha": "a642508ab638233e1fe297653147b8ccd3ceaf54",
   "web_completion_merge_sha": "b956cf5bc6914fcb07fc6a18c83eac75c1d70446",
@@ -129,5 +160,5 @@
     "Apple signing/TestFlight/App Store submission remains external",
     "Physical-device microphone/brass validation remains hardware-gated"
   ],
-  "gate_line": "WEB PRODUCTION COMPLETION GATE: PASSED"
+  "gate_line": "HISTORICAL WEB PRODUCTION COMPLETION GATE: PASSED"
 }

@@ -1611,8 +1611,8 @@ td a {
 
 .icon-button {
   display: inline-grid;
-  width: 40px;
-  height: 40px;
+  min-width: var(--tap);
+  min-height: var(--tap);
   place-items: center;
   color: var(--text);
   border: 1px solid var(--line);

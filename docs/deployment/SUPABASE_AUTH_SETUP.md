@@ -19,6 +19,7 @@ Set these in Render:
 - `SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_JWKS_URL` if the backend is configured to validate JWTs through JWKS
+- `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET`
 
 Keep the secret key provider-side only. It must never be exposed to the browser or committed.
 
@@ -27,7 +28,9 @@ Keep the secret key provider-side only. It must never be exposed to the browser 
 Configure Supabase Auth redirect allowlist for:
 
 - Local development: `http://localhost:5173/auth/callback`
+- Local development: `http://localhost:5173/auth/reset-password`
 - Production: `https://brass-tune.vercel.app/auth/callback`
+- Production: `https://brass-tune.vercel.app/auth/reset-password`
 - Approved preview: the exact Vercel preview URL, only while that preview is in use
 
 Apple provider setup remains an external owner task through Apple Developer and Supabase provider settings.

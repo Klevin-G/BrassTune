@@ -1,10 +1,12 @@
 # BrassTune Final Web-First Report
 
+2026-07-08 notice: this report is historical June web-beta evidence, not the current release decision. Current PR #7 web/backend release status is blocked and tracked in `WEB_RECOVERY_FINDINGS.md`; current PR #8/native status is simulator/sample-mode only and tracked in the native `TEST_MATRIX.md`.
+
 Updated: 2026-06-21T05:51:09Z
 
 ## Current State
 
-Phase 1 web/backend production certification is complete for the guest-first beta release. The final web main SHA is `6acb91d54a734e722ed937590aecb51dec53543c`.
+Phase 1 web/backend production certification was complete for the June guest-first beta release. The final web main SHA for that historical release was `6acb91d54a734e722ed937590aecb51dec53543c`.
 
 `WEB_PRODUCTION_COMPLETION_GATE.md` contains the required pass line, so Phase 2 Swift work may begin from `main` after this evidence commit and tag are published.
 

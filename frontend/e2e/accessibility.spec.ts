@@ -17,6 +17,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
     localStorage.setItem('brasstune.demoMode', 'true');
+    localStorage.setItem('brasstune.guestAccess', 'true');
     localStorage.setItem('brasstune.guestSessions.v1', JSON.stringify([
       {
         id: -12345,
@@ -104,3 +105,15 @@ for (const route of routes) {
     expect(serious, JSON.stringify(serious, null, 2)).toEqual([]);
   });
 }
+
+test('tablet shell navigation remains accessible when labels are visually compacted', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/home');
+  await expect(page.getByRole('link', { name: 'Home' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /switch to microphone mode/i })).toBeVisible();
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  const serious = results.violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical');
+  expect(serious, JSON.stringify(serious, null, 2)).toEqual([]);
+});

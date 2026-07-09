@@ -5,6 +5,11 @@ import tls from 'node:tls';
 const DEFAULT_WEB_BASE_URL = 'https://brass-tune.vercel.app';
 const DEFAULT_API_BASE_URL = 'https://brasstune.onrender.com';
 const DEFAULT_WS_BASE_URL = 'wss://brasstune.onrender.com';
+const APPROVED_RENDER_HOST = 'brasstune.onrender.com';
+const APPROVED_VERCEL_HOSTS = new Set([
+  'brass-tune.vercel.app',
+  'brass-tune-aryaswebsites.vercel.app',
+]);
 
 const webBaseURL = cleanBase(process.env.BRASSTUNE_WEB_BASE_URL || DEFAULT_WEB_BASE_URL);
 const webAccessURL = process.env.BRASSTUNE_WEB_ACCESS_URL || urlWithPath(webBaseURL, '/');
@@ -13,6 +18,8 @@ const wsBaseURL = cleanBase(process.env.BRASSTUNE_WS_BASE_URL || DEFAULT_WS_BASE
 const liveAuth = process.env.E2E_LIVE_AUTH === '1';
 const authToken = process.env.BRASSTUNE_WS_AUTH_TOKEN || process.env.BRASSTUNE_AUTH_TOKEN || '';
 const vercelBypassSecret = process.env.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET || process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '';
+const expectedSHA = process.env.BRASSTUNE_EXPECTED_BACKEND_SHA
+  || (process.env.BRASSTUNE_ENFORCE_EXPECTED_SHA === '1' ? (process.env.BRASSTUNE_EXPECTED_SHA || process.env.GITHUB_SHA || '') : '');
 
 const results = [];
 
@@ -34,6 +41,21 @@ function assertHostedURL(label, value, expectedProtocol) {
   }
 }
 
+function isApprovedVercelHost(hostname) {
+  return APPROVED_VERCEL_HOSTS.has(hostname)
+    || (hostname.startsWith('brass-tune-') && hostname.endsWith('-aryaswebsites.vercel.app'));
+}
+
+function assertApprovedSecretDestination(label, value, type) {
+  const url = new URL(value);
+  if (type === 'vercel' && !isApprovedVercelHost(url.hostname)) {
+    throw new Error(`${label} is not an approved BrassTune Vercel host: ${url.hostname}`);
+  }
+  if (type === 'render' && url.hostname !== APPROVED_RENDER_HOST) {
+    throw new Error(`${label} is not the approved Render backend host: ${url.hostname}`);
+  }
+}
+
 function record(name, status, detail) {
   results.push({ name, status, detail });
   const marker = status === 'pass' ? 'PASS' : status === 'skip' ? 'SKIP' : 'FAIL';
@@ -51,10 +73,20 @@ async function checkHTTP(name, fn) {
 }
 
 async function checkWebRoot() {
+  if (vercelBypassSecret) {
+    assertApprovedSecretDestination('BRASSTUNE_WEB_ACCESS_URL', webAccessURL, 'vercel');
+  }
   const headers = vercelBypassSecret ? { 'x-vercel-protection-bypass': vercelBypassSecret } : {};
   const response = await fetch(webAccessURL, { redirect: 'follow', headers });
   const text = await response.text();
-  if (response.status === 401 || response.status === 403 || /vercel authentication|single sign-on/i.test(text)) {
+  const finalURL = new URL(response.url);
+  if (
+    response.status === 401
+    || response.status === 403
+    || finalURL.hostname === 'vercel.com'
+    || finalURL.hostname.endsWith('.vercel.com')
+    || /vercel authentication|single sign-on|log in to vercel|continue with sso/i.test(text)
+  ) {
     throw new Error(`web app is protected by Vercel auth/SSO: HTTP ${response.status}`);
   }
   if (!response.ok) {
@@ -65,13 +97,28 @@ async function checkWebRoot() {
   }
 }
 
-async function checkHealth() {
-  const response = await fetch(urlWithPath(apiBaseURL, '/api/health'), {
+async function checkReadiness() {
+  const response = await fetch(urlWithPath(apiBaseURL, '/api/ready'), {
     headers: { Origin: webBaseURL },
   });
-  if (!response.ok) throw new Error(`/api/health returned HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`/api/ready returned HTTP ${response.status}: ${await response.text()}`);
   const body = await response.json();
-  if (body.ok !== true) throw new Error('/api/health did not report ok=true');
+  if (body.ok !== true) throw new Error('/api/ready did not report ok=true');
+  if (body.database_backend !== 'postgresql') {
+    throw new Error(`/api/ready reported database_backend=${body.database_backend}, expected postgresql`);
+  }
+}
+
+async function checkVersion() {
+  const response = await fetch(urlWithPath(apiBaseURL, '/api/version'), {
+    headers: { Origin: webBaseURL },
+  });
+  if (!response.ok) throw new Error(`/api/version returned HTTP ${response.status}`);
+  const body = await response.json();
+  if (!body.commit_sha) throw new Error('/api/version did not include commit_sha');
+  if (expectedSHA && body.commit_sha !== expectedSHA) {
+    throw new Error(`/api/version commit_sha ${body.commit_sha} did not match expected ${expectedSHA}`);
+  }
 }
 
 async function checkCORS(path) {
@@ -255,14 +302,17 @@ try {
   assertHostedURL('BRASSTUNE_WEB_ACCESS_URL', webAccessURL, 'https:');
   assertHostedURL('BRASSTUNE_API_BASE_URL', apiBaseURL, 'https:');
   assertHostedURL('BRASSTUNE_WS_BASE_URL', wsBaseURL, 'wss:');
+  assertApprovedSecretDestination('BRASSTUNE_API_BASE_URL', apiBaseURL, 'render');
+  assertApprovedSecretDestination('BRASSTUNE_WS_BASE_URL', wsBaseURL, 'render');
 } catch (error) {
   console.error(`FAIL configuration - ${error.message}`);
   process.exit(1);
 }
 
 await checkHTTP('web root loads', checkWebRoot);
-await checkHTTP('Render /api/health', checkHealth);
-await checkHTTP('CORS /api/health', () => checkCORS('/api/health'));
+await checkHTTP('Render /api/ready', checkReadiness);
+await checkHTTP('Render /api/version', checkVersion);
+await checkHTTP('CORS /api/ready', () => checkCORS('/api/ready'));
 await checkHTTP('CORS /api/sessions/start', () => checkCORS('/api/sessions/start'));
 await checkHTTP('WebSocket /ws/pitch app-level response', checkWebSocket);
 await checkHTTP('WebSocket rejects query-token auth', checkWebSocketQueryTokenRejected);

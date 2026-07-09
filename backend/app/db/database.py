@@ -4,21 +4,64 @@ from pathlib import Path
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from app.core.security import DEPLOYED_ENVIRONMENTS, app_environment
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("BRASSTUNE_DATABASE_URL") or "sqlite:///%s" % (DATA_DIR / "brasstune.db")
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+DEFAULT_SQLITE_DATABASE_URL = "sqlite:///%s" % (DATA_DIR / "brasstune.db")
 
-connect_args = {"check_same_thread": False, "timeout": 30} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+
+def normalize_database_url(value: str) -> str:
+    if value.startswith("postgres://"):
+        value = value.replace("postgres://", "postgresql://", 1)
+    if value.startswith("postgresql://"):
+        value = value.replace("postgresql://", "postgresql+psycopg://", 1)
+    return value
+
+
+def configured_database_url() -> str:
+    return normalize_database_url(os.getenv("BRASSTUNE_DATABASE_URL") or os.getenv("DATABASE_URL") or DEFAULT_SQLITE_DATABASE_URL)
+
+
+DATABASE_URL = configured_database_url()
+
+
+def database_backend(url: str = DATABASE_URL) -> str:
+    if url.startswith("sqlite"):
+        return "sqlite"
+    if url.startswith("postgresql"):
+        return "postgresql"
+    return "unknown"
+
+
+def _engine_kwargs(url: str) -> dict:
+    if database_backend(url) == "sqlite":
+        return {"connect_args": {"check_same_thread": False, "timeout": 30}}
+    return {"pool_pre_ping": True}
+
+
+def build_engine(url: str = DATABASE_URL):
+    return create_engine(url, **_engine_kwargs(url))
+
+
+def assert_database_configured() -> None:
+    if app_environment() not in DEPLOYED_ENVIRONMENTS:
+        return
+    configured_url = os.getenv("BRASSTUNE_DATABASE_URL") or os.getenv("DATABASE_URL")
+    if not configured_url:
+        raise RuntimeError("BRASSTUNE_DATABASE_URL or DATABASE_URL is required when APP_ENV is deployed.")
+    if database_backend(normalize_database_url(configured_url)) != "postgresql":
+        raise RuntimeError("Deployed environments must use PostgreSQL for BRASSTUNE_DATABASE_URL or DATABASE_URL.")
+
+
+engine = build_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-if DATABASE_URL.startswith("sqlite"):
+if database_backend(DATABASE_URL) == "sqlite":
     @event.listens_for(engine, "connect")
     def _configure_sqlite(dbapi_connection, _connection_record) -> None:
         cursor = dbapi_connection.cursor()
@@ -40,6 +83,10 @@ def get_db():
 
 
 def init_db() -> None:
+    assert_database_configured()
+    if app_environment() in DEPLOYED_ENVIRONMENTS:
+        return
+
     from app.models.db import Base as ModelsBase
 
     ModelsBase.metadata.create_all(bind=engine)
@@ -60,7 +107,7 @@ def _add_sqlite_column(table_name: str, column_name: str, definition: str) -> No
 
 
 def ensure_additive_columns() -> None:
-    if not DATABASE_URL.startswith("sqlite"):
+    if database_backend(DATABASE_URL) != "sqlite":
         return
     additions = {
         "users": {

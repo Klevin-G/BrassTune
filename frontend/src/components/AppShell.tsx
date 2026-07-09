@@ -34,7 +34,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className={`app-shell ${authRoute ? 'auth-shell' : ''}`}>
       {!authRoute && <aside className="sidebar">
-        <NavLink to="/home" className="brand">
+        <NavLink to="/home" className="brand" aria-label="BrassTune home">
           <span className="brand-mark">
             <SlidersHorizontal size={19} />
           </span>
@@ -48,6 +48,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink
               to={item.to}
               key={item.to}
+              aria-label={item.label}
               className={({ isActive }) => `nav-item ${item.to === '/more' ? (moreActive ? 'active' : '') : isActive ? 'active' : ''}`}
               end={item.to === '/'}
             >
@@ -59,7 +60,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <p className="sidebar-section-label">More</p>
         <nav className="secondary-nav" aria-label="Secondary navigation">
           {secondaryNav.map((item) => (
-            <NavLink to={item.to} key={item.to} className={({ isActive }) => `secondary-nav-item ${isActive ? 'active' : ''}`}>
+            <NavLink to={item.to} key={item.to} aria-label={item.label} className={({ isActive }) => `secondary-nav-item ${isActive ? 'active' : ''}`}>
               <item.icon size={17} />
               <span>{item.label}</span>
             </NavLink>
@@ -86,7 +87,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 onChange={(event) => setReferencePitch(Number(event.target.value))}
               />
             </label>
-            <button className={`toggle ${demoMode ? 'on' : ''}`} onClick={() => setDemoMode(!demoMode)} type="button">
+            <button
+              className={`toggle ${demoMode ? 'on' : ''}`}
+              onClick={() => setDemoMode(!demoMode)}
+              type="button"
+              aria-pressed={demoMode}
+              aria-label={demoMode ? 'Switch to microphone mode' : 'Switch to guided audio mode'}
+            >
               Guide
             </button>
             <StatusBadge tone={demoMode ? 'gold' : 'green'}>{demoMode ? 'Guided audio' : 'Mic mode'}</StatusBadge>
@@ -115,6 +122,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink
               to={item.to}
               key={item.to}
+              aria-label={item.label}
               className={({ isActive }) => (item.to === '/more' ? (moreActive ? 'active' : '') : isActive ? 'active' : '')}
               end={item.to === '/'}
             >

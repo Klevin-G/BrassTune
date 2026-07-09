@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { uploadSessionAudio } from '../api/client';
+import { friendlyUserFacingError, uploadSessionAudio } from '../api/client';
 import type { GuestAudio } from '../domain/guestSessions';
 
 type UploadStatus = 'idle' | 'recording' | 'uploading' | 'uploaded' | 'saved' | 'failed' | 'unavailable';
@@ -149,7 +149,7 @@ export function useAudioRecorder() {
       return result.audio;
     } catch (uploadError) {
       setStatus('failed');
-      setError(uploadError instanceof Error ? uploadError.message : 'Audio upload failed.');
+      setError(friendlyUserFacingError(uploadError, 'Audio upload failed. Pitch analytics remain available.'));
       return null;
     } finally {
       cleanup();
@@ -180,7 +180,7 @@ export function useAudioRecorder() {
         };
       } catch (localError) {
         setStatus('failed');
-        setError(localError instanceof Error ? localError.message : 'Audio could not be saved on this device.');
+        setError(friendlyUserFacingError(localError, 'Audio could not be saved on this device.'));
         return null;
       } finally {
         cleanup();

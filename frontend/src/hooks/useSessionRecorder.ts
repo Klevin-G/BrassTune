@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { startSession, stopSession } from '../api/client';
+import { friendlyUserFacingError, startSession, stopSession } from '../api/client';
 import { createGuestSession, saveGuestSessionFromFrames, type GuestAudio, type GuestSessionDraft } from '../domain/guestSessions';
 import type { PitchFrame, PracticeSession } from '../domain/types';
 
@@ -44,7 +44,7 @@ export function useSessionRecorder(instrumentId: string, referencePitch: number,
       })
       .catch((startError) => {
         setState('failed');
-        setError(startError instanceof Error ? startError.message : String(startError));
+        setError(friendlyUserFacingError(startError, 'Practice recording could not start. Guest practice still works on this device.'));
         throw startError;
       })
       .finally(() => {
@@ -77,7 +77,7 @@ export function useSessionRecorder(instrumentId: string, referencePitch: number,
       })
       .catch((stopError) => {
         setState('failed');
-        setError(stopError instanceof Error ? stopError.message : String(stopError));
+        setError(friendlyUserFacingError(stopError, 'Practice recording could not be saved. Try again after reconnecting.'));
         throw stopError;
       })
       .finally(() => {

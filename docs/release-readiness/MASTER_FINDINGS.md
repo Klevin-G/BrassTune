@@ -1,8 +1,10 @@
 # Current Branch Notice
 
+2026-07-08 notice: this file is historical June web-beta evidence, not the current PR #7/PR #8 release decision. Current web/backend release status is tracked in `WEB_RECOVERY_FINDINGS.md`: PR #7 remains blocked on stale Render readiness/version routes, protected Vercel preview access, disabled deploy/smoke workflows, live Supabase acceptance, and remaining guest-first UX polish. Current native status is tracked in the native `TEST_MATRIX.md`: PR #8 remains simulator/sample-mode only and is blocked on live acoustic capture, physical-device validation, signing/archive, and TestFlight/App Store gates.
+
 Updated: 2026-06-21T05:24:54Z for `arya/final-web-completion` at base SHA `a8ce933a8ccfdac75b4244fe1c1bb2630655d14b`.
 
-Current evidence is maintained in `FINAL_REPORT.md`, `TEST_MATRIX.md`, `release-evidence.json`, `FINAL_WEB_SCOPE.md`, `WEB_CONTROL_MANIFEST.md`, and `WEB_PRODUCTION_COMPLETION_GATE.md`.
+Historical June evidence is maintained in `FINAL_REPORT.md`, `TEST_MATRIX.md`, `release-evidence.json`, `FINAL_WEB_SCOPE.md`, `WEB_CONTROL_MANIFEST.md`, and `WEB_PRODUCTION_COMPLETION_GATE.md`.
 
 Older entries below are historical unless they are repeated in the current evidence files. Do not use older merged PR SHAs or deployment IDs below as evidence that this branch has been merged, deployed, or production-certified.
 

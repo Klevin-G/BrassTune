@@ -1,10 +1,16 @@
 # Web Production Completion Gate
 
+## 2026-07-08 Current Audit Notice
+
+This file is historical evidence for the June guest-first beta gate. It is not the current PR #7 production-completion decision.
+
+Current release state is blocked: production Render still serves a stale backend (`/api/health` returns `200`, while `/api/live`, `/api/ready`, and `/api/version` return `404`), production Vercel still aliases the older `main` deployment, PR #7 preview access is Vercel SSO-protected without an accepted automation bypass/share URL, and live Supabase auth/storage/account deletion acceptance has not been proven with disposable credentials. Use `WEB_RECOVERY_FINDINGS.md` for the current web/backend recovery gate.
+
 Updated: 2026-06-21T05:51:09Z
 
 ## Status
 
-Phase 1 web/backend production certification is complete for the guest-first beta release.
+Phase 1 web/backend production certification was complete for the June guest-first beta release recorded below.
 
 ## Release Identity
 
@@ -63,4 +69,4 @@ Phase 1 web/backend production certification is complete for the guest-first bet
 - Native SwiftUI implementation and App Store/TestFlight readiness remain separate Phase 2 gates.
 - Physical-device microphone/brass validation remains hardware gated.
 
-WEB PRODUCTION COMPLETION GATE: PASSED
+HISTORICAL WEB PRODUCTION COMPLETION GATE: PASSED (NOT CURRENT PR #7 RELEASE DECISION)

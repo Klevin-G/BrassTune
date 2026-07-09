@@ -32,7 +32,9 @@ describe('guest session storage', () => {
     });
 
     expect(saved.audio_available).toBe(true);
-    expect(saved.audio_storage_provider).toBe('browser_guest');
+    expect(saved.audio_mime_type).toBe('audio/wav');
+    expect(saved.audio_duration_seconds).toBe(3);
+    expect(saved.audio_size_bytes).toBe(44);
     expect(saved.guest_audio_data_url).toContain('data:audio/wav');
   });
 
