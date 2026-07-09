@@ -116,6 +116,7 @@ def ensure_additive_columns() -> None:
             "display_name": "VARCHAR",
             "email": "VARCHAR",
             "onboarding_completed_at": "DATETIME",
+            "last_active_at": "DATETIME",
             "updated_at": "DATETIME",
         },
         "practice_sessions": {

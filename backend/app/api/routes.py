@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
@@ -20,11 +20,12 @@ from app.core.recommendations.rules import generate_practice_plan, generate_reco
 from app.db.database import get_db
 from app.db.readiness import public_readiness_report, readiness_report, version_payload
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
-from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, User
+from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
 from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
-from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, sample_to_dict, session_to_dict, user_to_dict
+from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
+from app.services.usage import record_event
 
 router = APIRouter(prefix="/api")
 
@@ -345,7 +346,9 @@ def update_user_profile(payload: UserProfileUpdate, db: Session = Depends(get_db
 def start_practice_session(payload: StartSessionRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _validate_instrument(payload.instrument_id)
     session = start_session(db, payload.instrument_id, payload.name, payload.reference_pitch_hz, auth.user.id)
-    return session_to_dict(session)
+    result = session_to_dict(session)
+    record_event(db, "session_started", auth.user.id, {"session_id": result["id"], "instrument_id": payload.instrument_id})
+    return result
 
 
 @router.post("/sessions/{session_id}/samples")
@@ -379,7 +382,9 @@ def stop_practice_session(session_id: int, db: Session = Depends(get_db), auth: 
     session = stop_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return session_to_dict(session)
+    result = session_to_dict(session)
+    record_event(db, "session_completed", auth.user.id, {"session_id": session_id, "duration_seconds": result["duration_seconds"], "notes_count": result["notes_count"]})
+    return result
 
 
 @router.get("/sessions")
@@ -1042,11 +1047,16 @@ def _visible_group_members(db: Session, group: Group, user: User):
 
 
 @router.post("/ensemble/groups")
-def create_ensemble_group(payload: CreateGroupRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(require_roles("director", "admin"))):
+def create_ensemble_group(payload: CreateGroupRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    # Self-serve: any signed-in user can start an ensemble and becomes its director.
     group = Group(name=payload.name.strip(), director_user_id=auth.user.id)
     db.add(group)
+    if auth.user.role == "student":
+        auth.user.role = "director"
+        db.add(auth.user)
     db.commit()
     db.refresh(group)
+    record_event(db, "group_created", auth.user.id, {"group_id": group.id})
     return group_to_dict(group)
 
 
@@ -1176,3 +1186,97 @@ def ensemble_summary(group_id: int = 1, db: Session = Depends(get_db), auth: Aut
 @router.get("/ensemble/report")
 def ensemble_report(group_id: int = 1, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     return ensemble_group_report(group_id, db, auth)
+
+
+def _weighted_mean(pairs):
+    total_weight = sum(weight for _, weight in pairs)
+    if total_weight <= 0:
+        return None
+    return sum(value * weight for value, weight in pairs) / total_weight
+
+
+@router.get("/ensemble/groups/{group_id}/roster")
+def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    """Per-student practice stats for the ensemble director/admin."""
+    _require_group_manager(db, group_id, auth)
+    members = (
+        db.query(GroupMember)
+        .options(joinedload(GroupMember.user))
+        .filter(GroupMember.group_id == group_id, GroupMember.status == "active")
+        .order_by(GroupMember.created_at.asc())
+        .all()
+    )
+    students = []
+    for member in members:
+        since = _member_active_since(member)
+        sessions = (
+            db.query(PracticeSession)
+            .filter(PracticeSession.user_id == member.user_id, PracticeSession.started_at >= since)
+            .all()
+        )
+        weighted = [(s.average_abs_cents, s.notes_count or 0) for s in sessions if (s.notes_count or 0) > 0]
+        intune = [(s.in_tune_percentage, s.notes_count or 0) for s in sessions if (s.notes_count or 0) > 0]
+        avg_abs_cents = _weighted_mean(weighted)
+        in_tune_pct = _weighted_mean(intune)
+        last_practice_at = max((s.started_at for s in sessions), default=None)
+        user = member.user
+        students.append({
+            "member_id": member.id,
+            "user_id": member.user_id,
+            "username": getattr(user, "username", None),
+            "display_name": getattr(user, "display_name", None) or getattr(user, "name", None),
+            "instrument_id": member.instrument_id,
+            "role_in_group": getattr(member, "role_in_group", "student"),
+            "sessions_count": len(sessions),
+            "practice_minutes": round(sum(s.duration_seconds or 0.0 for s in sessions) / 60.0, 1),
+            "average_abs_cents": round(avg_abs_cents, 1) if avg_abs_cents is not None else None,
+            "in_tune_percentage": round(in_tune_pct, 1) if in_tune_pct is not None else None,
+            "last_practice_at": iso(last_practice_at),
+            "last_active_at": iso(getattr(user, "last_active_at", None)),
+        })
+    return {"group_id": group_id, "students": students}
+
+
+@router.get("/admin/metrics")
+def admin_usage_metrics(db: Session = Depends(get_db), auth: AuthContext = Depends(require_roles("admin"))):
+    """Private product-usage dashboard data. Admin-only."""
+    now = dt.datetime.utcnow()
+
+    def since(days: int) -> dt.datetime:
+        return now - dt.timedelta(days=days)
+
+    def count(model, *conditions) -> int:
+        query = db.query(func.count(model.id))
+        for condition in conditions:
+            query = query.filter(condition)
+        return int(query.scalar() or 0)
+
+    event_rows = (
+        db.query(UsageEvent.event_name, func.count(UsageEvent.id))
+        .filter(UsageEvent.created_at >= since(30))
+        .group_by(UsageEvent.event_name)
+        .all()
+    )
+    signup_rows = (
+        db.query(func.date(User.created_at), func.count(User.id))
+        .filter(User.created_at >= since(14))
+        .group_by(func.date(User.created_at))
+        .all()
+    )
+    return {
+        "generated_at": iso(now),
+        "totals": {
+            "users": count(User),
+            "sessions": count(PracticeSession),
+            "ensembles": count(Group),
+        },
+        "new_users": {"last_7d": count(User, User.created_at >= since(7)), "last_30d": count(User, User.created_at >= since(30))},
+        "active_users": {
+            "dau": count(User, User.last_active_at >= since(1)),
+            "wau": count(User, User.last_active_at >= since(7)),
+            "mau": count(User, User.last_active_at >= since(30)),
+        },
+        "sessions": {"last_7d": count(PracticeSession, PracticeSession.started_at >= since(7)), "last_30d": count(PracticeSession, PracticeSession.started_at >= since(30))},
+        "events_30d": {name: int(total) for name, total in event_rows},
+        "signups_by_day": [{"date": str(day), "count": int(total)} for day, total in sorted(signup_rows, key=lambda row: str(row[0]))],
+    }

@@ -19,6 +19,7 @@ class User(Base):
     role = Column(String, nullable=False, default="student")
     primary_instrument_id = Column(String, nullable=False, default="trumpet")
     onboarding_completed_at = Column(DateTime, nullable=True)
+    last_active_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
@@ -171,6 +172,16 @@ class Recommendation(Base):
     message = Column(Text, nullable=False)
     suggestions_json = Column(Text, nullable=False, default="[]")
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+
+class UsageEvent(Base):
+    __tablename__ = "usage_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    event_name = Column(String, nullable=False, index=True)
+    properties = Column(JSON().with_variant(JSONB(), "postgresql"), nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
 
 
 class AccountDeletionJob(Base):

@@ -16,9 +16,16 @@ from app.core.instruments.profiles import is_valid_instrument_id
 from app.db.database import get_db
 from app.models.db import AccountDeletionJob, User
 from app.services.session_service import get_or_create_default_user
+from app.services.usage import record_event
 
 
 USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,32}$")
+
+
+def _admin_emails() -> set:
+    """Emails promoted to the 'admin' role on sign-in (comma-separated env var)."""
+    raw = os.getenv("BRASSTUNE_ADMIN_EMAILS", "")
+    return {value.strip().lower() for value in raw.split(",") if value.strip()}
 
 
 @dataclass
@@ -100,6 +107,7 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             raise HTTPException(status_code=410, detail="This account has been deleted.")
         raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
+    is_new = user is None
     if user is None:
         preferred_username = metadata.get("username") or (email.split("@")[0] if email else "player")
         user = User(
@@ -122,9 +130,16 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             user.username = _unique_username(db, metadata["username"], user.id)
         if is_valid_instrument_id(metadata.get("primary_instrument_id", "")):
             user.primary_instrument_id = metadata["primary_instrument_id"]
-    user.updated_at = dt.datetime.utcnow()
+    # Promote configured owner/admin emails on sign-in (never demote existing admins).
+    if email and email.strip().lower() in _admin_emails() and user.role != "admin":
+        user.role = "admin"
+    now = dt.datetime.utcnow()
+    user.last_active_at = now
+    user.updated_at = now
     db.commit()
     db.refresh(user)
+    if is_new:
+        record_event(db, "signup", user.id, {"source": "supabase"})
     return user
 
 
