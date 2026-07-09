@@ -1,16 +1,17 @@
 # Release Readiness Docs Index
 
 Date: 2026-07-08
-Branch: `arya/native-swift-parity-surfaces-20260628`
+Branch: `arya-s/web-production-recovery-20260625`
 
-Current audit status: this native worktree has simulator/sample-mode validation plus local AVAudioEngine live-capture implementation. PR #8 is not Apple-release-ready because the live microphone path has not been validated on a physical iPhone/iPad, current app test execution is blocked by CoreSimulator runner preflight failures, and signing/archive/TestFlight/App Store gates remain blocked. Web production evidence in this workspace is historical June evidence only; the current PR #7 web/backend recovery gate lives in the separate web recovery branch/worktree and remains blocked on stale Render readiness/version routes, protected Vercel preview access, disabled deploy/smoke workflows, and live Supabase acceptance.
+Current audit status: PR #7 web/backend recovery is not production-complete yet. Production Render is still stale (`/api/live`, `/api/ready`, and `/api/version` return 404), production Vercel still points at the older `main` deployment, several deploy/smoke workflows are disabled, and live Supabase auth/storage/account-lifecycle acceptance remains unproven. PR #8/native remains a separate simulator/sample-mode gate.
 
 ## Canonical Current Files
 
 | Topic | Canonical File | Notes |
 |---|---|---|
-| Current native simulator/live-capture evidence | `TEST_MATRIX.md`, `NATIVE_PARITY_SURFACES.md` | Current source of truth for PR #8 simulator/sample-mode status, local live-capture implementation, and native blockers. |
-| Historical June web beta evidence | `MASTER_FINDINGS.md`, `FINAL_REPORT.md`, `WEB_PRODUCTION_COMPLETION_GATE.md`, `release-evidence.json` | Historical only; not current PR #7 production evidence. |
+| Current PR #7 recovery status | `WEB_RECOVERY_FINDINGS.md` | Current source of truth for web/backend/provider blockers until PR #7 is deployed and smoke-tested. |
+| Historical June web beta completion | `WEB_PRODUCTION_COMPLETION_GATE.md`, `release-evidence.json` | Historical guest-first beta evidence only; not current PR #7 production evidence. |
+| Machine-readable historical evidence | `release-evidence.json` | Superseded by the 2026-07-08 provider audit for current release decisions. |
 | Local recovery inventory | `LOCAL_IMPLEMENTATION_INVENTORY.md` | Lists dirty/untracked implementation files and known gaps. |
 | Workstream ownership | `WORKSTREAM_OWNERSHIP.md` | Maps multi-agent audits, evidence, and remaining blockers. |
 | Test evidence matrix | `TEST_MATRIX.md` | Must be refreshed after final commit and CI. Treat older counts as historical. |
@@ -32,10 +33,11 @@ Current audit status: this native worktree has simulator/sample-mode validation 
 
 ## Duplicate Handling
 
-- `TEST_MATRIX.md` and `NATIVE_PARITY_SURFACES.md` own the current PR #8 native simulator/sample/live-capture decision.
-- `MASTER_FINDINGS.md`, `FINAL_REPORT.md`, and `release-evidence.json` are historical June web evidence unless refreshed for the current PR #7/PR #8 gate.
+- `WEB_RECOVERY_FINDINGS.md` owns the current PR #7 web/backend release decision.
+- `release-evidence.json` is historical June evidence with a July 8 blocked-audit overlay; do not treat its June pass fields as current release evidence.
 - `FAILURE_LOG.md` owns historical failure narratives.
-- `FINAL_REPORT.md` should summarize, not duplicate, the full evidence matrix after it is refreshed.
+- `TEST_MATRIX.md` owns native simulator command/result evidence after final validation.
+- `FINAL_REPORT.md` is historical until refreshed after exact-SHA CI, preview, deployment, and hosted smoke.
 - `BETA_LOAD_ABUSE_SMOKE.md` and `LOAD_ABUSE_SMOKE.md` overlap; keep one canonical load/abuse procedure in the next docs cleanup.
 - `BETA_QA_GUIDE.md` and `FRIEND_QA_SCRIPT.md` overlap; keep the beta guide canonical and make friend scripts persona-specific.
 

@@ -5,6 +5,7 @@ import { getPracticePlan, getRecommendations } from '../api/client';
 import { PracticePlanCard } from '../components/PracticePlanCard';
 import { RecommendationCard } from '../components/RecommendationCard';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
+import { buildGuestNoteStats, buildGuestPracticePlan, buildGuestRecommendations } from '../domain/guestInsights';
 import type { PracticePlan, Recommendation } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
@@ -18,9 +19,15 @@ export function CoachPage() {
 
   useEffect(() => {
     if (!auth.isSignedIn) {
-      setPlan(null);
-      setRecommendations([]);
-      setError('Coach recommendations are available after sign-in. Practice and local review still work.');
+      const guestStats = buildGuestNoteStats(instrumentId);
+      const guestPlan = buildGuestPracticePlan(guestStats, instrumentId);
+      setPlan(guestPlan);
+      setRecommendations(buildGuestRecommendations(guestStats));
+      setError(
+        guestStats.length
+          ? 'Using guest sessions saved in this browser. Sign in to sync coach plans across devices.'
+          : 'Record a guest take to unlock a local coach plan on this device.',
+      );
       return;
     }
     Promise.all([getPracticePlan(instrumentId), getRecommendations(instrumentId)])
@@ -49,7 +56,7 @@ export function CoachPage() {
           </Link>
         }
       />
-      {error && <div className="alert">{error}</div>}
+      {error && <div className="alert" role="status" aria-live="polite">{error}</div>}
       {plan && <PracticePlanCard plan={plan} />}
       <div className="insight-grid">
         <InsightCard
@@ -75,6 +82,7 @@ export function CoachPage() {
       </div>
       <SectionCard title="Rule-based recommendations" eyebrow="Detailed drills">
         <div className="recommendation-grid">
+          {recommendations.length === 0 && <p className="muted-copy">Record a guest take to generate local recommendations on this device.</p>}
           {recommendations.map((recommendation) => (
             <RecommendationCard key={`${recommendation.related_note}-${recommendation.category}`} recommendation={recommendation} />
           ))}

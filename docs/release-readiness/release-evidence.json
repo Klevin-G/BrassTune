@@ -10,24 +10,26 @@
     "current_main_sha": "1c998d5480f52b5fcf0e2c143f5078893caead66",
     "web_pr_7_head_sha": "b37ed6ce6c8bb33089e14ce950c3de768a295602",
     "native_pr_8_head_sha": "989abb1684cc8a2076e061607678a70f31e25969",
-    "local_native_validation": {
-      "status": "partially_passed_locally_not_committed_or_ci_green",
-      "brass_tune_core_swift_test": "3 passed",
-      "design_token_verification": "15 colors verified",
-      "native_app_unit_tests": "18 passed",
-      "iphone_debug_simulator_build": "passed",
-      "iphone_release_simulator_build": "passed",
-      "ipad_debug_simulator_build": "passed",
-      "ui_smoke_execution": "blocked by CoreSimulator SBMainWorkspace/preflight Busy before app launch",
+    "local_web_validation": {
+      "status": "passed_locally_not_committed_or_deployed",
+      "backend_pytest": "104 passed",
+      "frontend_unit": "50 passed",
+      "frontend_build": "passed",
+      "local_e2e": "95 passed",
+      "bandit": "no issues",
+      "pip_audit_local": "no known vulnerabilities",
+      "npm_audit_omit_dev": "0 vulnerabilities",
       "diff_check": "passed",
       "secret_and_large_file_dirty_diff_scan": "no high-confidence secrets or dirty files over 1MiB observed"
     },
-    "web_blockers": [
-      "Current PR #7 web/backend recovery lives in the separate web recovery worktree and remains blocked on stale Render readiness/version routes, protected Vercel preview access, disabled deploy/smoke workflows, and live Supabase acceptance."
+    "provider_blockers": [
+      "Production Render returns 404 for /api/live, /api/ready, and /api/version.",
+      "Production Vercel is publicly reachable but cannot be release-valid while production Render is stale.",
+      "PR #7 preview deployment dpl_J6mJ8Qyk2NA4Z9FUdGwBmpG2udP6 is Ready but SSO-protected without accepted automation bypass/share evidence.",
+      "Deploy, Backend, Frontend, Production Smoke, Device Simulation, and Render Keepalive workflows are disabled manually."
     ],
     "native_blockers": [
-      "Real AVAudioEngine microphone pitch capture is implemented locally, but the live microphone path has not been validated on physical iPhone/iPad hardware.",
-      "Current UI smoke execution is blocked by CoreSimulator SBMainWorkspace/preflight Busy before the test body runs.",
+      "Real AVAudioEngine microphone pitch capture is implemented locally in PR #8, but no physical iPhone/iPad microphone validation was available.",
       "No physical iPhone/iPad validation was available.",
       "Apple signing, archive validation, TestFlight, and App Store Connect gates are unavailable."
     ]

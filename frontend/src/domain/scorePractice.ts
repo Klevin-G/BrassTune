@@ -85,6 +85,14 @@ export function likelySheetMusicFromName(name: string) {
   return Math.max(0, Math.min(1, score));
 }
 
+// Presentation only: turns the filename/format heuristic into an honest hint.
+// This is a quick check of the file name and size, not content analysis or note recognition.
+export function sheetMusicNameHint(score: number): string {
+  if (score >= 0.55) return 'Filename looks like a score';
+  if (score >= 0.42) return 'Filename check: possible score';
+  return 'Filename check inconclusive';
+}
+
 export function verifyScoreFile(file: File, dimensions?: { width: number; height: number }, verifiedKind?: ScoreSourceKind): ScoreImportSummary {
   const kind = verifiedKind ?? scoreSourceKind(file);
   const messages: string[] = [];

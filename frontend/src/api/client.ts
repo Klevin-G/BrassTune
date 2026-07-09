@@ -1,6 +1,7 @@
 import type { InstrumentProfile, NoteEvent, NoteStats, PitchFrame, PracticePlan, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
-import { apiBase, wsBase } from './runtimeConfig';
+import { apiBase, UNRESOLVED_BASE, wsBase } from './runtimeConfig';
 let authTokenProvider: (() => Promise<string | null>) | null = null;
+export const MAX_PITCH_FRAMES_PER_BATCH = 1000;
 
 export interface DateRangeParams {
   date_from?: string;
@@ -9,6 +10,14 @@ export interface DateRangeParams {
 
 export function setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
   authTokenProvider = provider;
+}
+
+function resolvedApiBase(): string {
+  const base = apiBase();
+  if (base === UNRESOLVED_BASE) {
+    throw new Error('Cloud practice is not configured for this deployment.');
+  }
+  return base;
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -25,7 +34,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...(await authHeaders()),
   });
   new Headers(options?.headers).forEach((value, key) => headers.set(key, value));
-  const response = await fetch(`${apiBase()}${path}`, {
+  const response = await fetch(`${resolvedApiBase()}${path}`, {
     ...options,
     headers,
   });
@@ -34,6 +43,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(friendlyRequestError(message, response.status));
   }
   return response.json() as Promise<T>;
+}
+
+export function friendlyUserFacingError(error: unknown, fallback = 'That action could not complete. Try again after reconnecting.') {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  if (/quota|storage/i.test(raw)) return 'This browser could not save the latest local practice data. Export or delete old local sessions and try again.';
+  if (/permission|denied|notallowed/i.test(raw)) return 'Permission was blocked. Check browser permissions and try again.';
+  if (/network|failed to fetch|load failed|offline/i.test(raw)) return 'Network access is unavailable right now. Guest practice still works on this device.';
+  if (/authentication required|sign in|unauthorized|forbidden|access/i.test(raw)) return 'Sign in with the right account to use that cloud feature.';
+  if (/too many|413|payload/i.test(raw)) return 'That request is too large. Try a shorter recording or smaller file.';
+  if (/fastapi|traceback|stack|sql|relation|supabase|env var|vite|render|vercel|http:|https:/i.test(raw) || raw.length > 180) return fallback;
+  return raw || fallback;
 }
 
 function friendlyRequestError(message: string, status: number) {
@@ -50,13 +70,24 @@ function friendlyRequestError(message: string, status: number) {
   if (/fastapi|backend|env var|SUPABASE_|VITE_/i.test(raw)) {
     return 'Cloud practice is unavailable right now. Guest practice still works on this device.';
   }
-  return raw || `Request failed: ${status}`;
+  if (status === 403) return 'You do not have access to that BrassTune resource.';
+  if (status === 404) return 'That BrassTune item is not available for this account.';
+  if (status === 409) return 'That change conflicts with existing account or ensemble data.';
+  if (status === 413) return 'That request is too large. Try a shorter recording or smaller file.';
+  if (status >= 500) return 'Cloud practice is unavailable right now. Guest practice still works on this device.';
+  return friendlyUserFacingError(raw, `Request failed with status ${status}.`);
 }
 
 export const exportUrl = (path: string) => `${apiBase()}${path}`;
 
 export async function pitchWebSocketUrl() {
-  const base = wsBase() || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  const configuredBase = wsBase();
+  if (configuredBase === UNRESOLVED_BASE) {
+    // Hosted/production build with no resolvable WS base: never derive wss from
+    // the static frontend host, which has no pitch backend.
+    throw new Error('Pitch streaming is not configured for this deployment.');
+  }
+  const base = configuredBase || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
   const url = new URL('/ws/pitch', base);
   return url.toString();
 }
@@ -84,6 +115,7 @@ export function getInstruments() {
 export function getCurrentUser() {
   return request<{
     id: number;
+    supabase_user_id?: string | null;
     username: string | null;
     name: string;
     display_name: string;
@@ -115,11 +147,46 @@ export function recordPitchFrame(sessionId: number, frame: PitchFrame) {
   });
 }
 
-export function recordPitchFrames(sessionId: number, frames: PitchFrame[]) {
+export function recordPitchFrames(sessionId: number, frames: PitchFrame[], options: { signal?: AbortSignal } = {}) {
   return request<{ saved: number; rejected: number }>(`/api/sessions/${sessionId}/samples/batch`, {
     method: 'POST',
     body: JSON.stringify(frames),
+    signal: options.signal,
   });
+}
+
+export async function recordPitchFramesInBatches(
+  sessionId: number,
+  frames: PitchFrame[],
+  options: {
+    batchSize?: number;
+    signal?: AbortSignal;
+    onProgress?: (saved: number, attempted: number) => void;
+  } = {},
+) {
+  const batchSize = Math.max(1, Math.min(options.batchSize ?? MAX_PITCH_FRAMES_PER_BATCH, MAX_PITCH_FRAMES_PER_BATCH));
+  let saved = 0;
+  let rejected = 0;
+  let attempted = 0;
+  for (let index = 0; index < frames.length; index += batchSize) {
+    if (options.signal?.aborted) {
+      throw new DOMException('Pitch frame save was canceled.', 'AbortError');
+    }
+    const batch = frames.slice(index, index + batchSize);
+    let result: { saved: number; rejected: number };
+    try {
+      result = await recordPitchFrames(sessionId, batch, { signal: options.signal });
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error('Pitch frame save failed.');
+      Object.assign(failure, { saved, rejected, attempted, failedFrames: frames.slice(attempted) });
+      throw failure;
+    }
+    saved += result.saved;
+    rejected += result.rejected;
+    attempted += batch.length;
+    options.onProgress?.(saved, attempted);
+  }
+  return { saved, rejected, attempted };
 }
 
 export function stopSession(sessionId: number) {
@@ -149,9 +216,9 @@ export function sessionAudioUrl(sessionId: number | string) {
 }
 
 export async function downloadExport(path: string, filename: string) {
-  const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
+  const response = await fetch(`${resolvedApiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(friendlyRequestError(await response.text(), response.status));
   }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
@@ -165,7 +232,7 @@ export async function downloadExport(path: string, filename: string) {
 }
 
 export async function objectUrlFor(path: string) {
-  const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
+  const response = await fetch(`${resolvedApiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -236,6 +303,8 @@ export function clearLocalSessions() {
 export function deleteMyAccount(confirmation: string) {
   return request<{
     deleted: boolean;
+    deletion_status?: string;
+    deletion_stage?: string;
     counts: Record<string, number>;
     supabase_sessions_revoked: boolean;
     supabase_identity_deleted: boolean;

@@ -75,7 +75,7 @@ def local_audio_path(object_key: str) -> Path:
 def _supabase_headers(mime_type: Optional[str] = None) -> dict:
     key = os.getenv("SUPABASE_SECRET_KEY")
     if not key:
-        raise HTTPException(status_code=503, detail="SUPABASE_SECRET_KEY is required for Supabase audio storage.")
+        raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
     headers = {"apikey": key, "Authorization": "Bearer %s" % key}
     if mime_type:
         headers["Content-Type"] = mime_type
@@ -85,13 +85,13 @@ def _supabase_headers(mime_type: Optional[str] = None) -> dict:
 def _supabase_url(path: str) -> str:
     base = os.getenv("SUPABASE_URL")
     if not base:
-        raise HTTPException(status_code=503, detail="SUPABASE_URL is required for Supabase audio storage.")
+        raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
     parsed = urllib.parse.urlparse(base)
     is_local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
     if parsed.scheme != "https" and not is_local_http:
-        raise HTTPException(status_code=503, detail="SUPABASE_URL must be HTTPS outside local development.")
+        raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
     if not parsed.netloc:
-        raise HTTPException(status_code=503, detail="SUPABASE_URL is invalid.")
+        raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
     return "%s/%s" % (base.rstrip("/"), path.lstrip("/"))
 
 

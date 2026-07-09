@@ -7,8 +7,18 @@ const aliases = new Map([
   ['E2E_WS_BASE_URL', 'BRASSTUNE_WS_BASE_URL'],
   ['E2E_VERCEL_AUTOMATION_BYPASS_SECRET', 'BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET'],
 ]);
+const approvedVercelHosts = new Set([
+  'brass-tune.vercel.app',
+  'brass-tune-aryaswebsites.vercel.app',
+]);
+const approvedRenderHost = 'brasstune.onrender.com';
 
+const forwardedArgs = process.argv.slice(2).filter((arg) => arg !== '--strict');
+const strictMode = process.argv.slice(2).includes('--strict');
 const env = { ...process.env, E2E_START_LOCAL_SERVERS: '0' };
+if (strictMode) {
+  env.E2E_STRICT_HOSTED_CONTENT = '1';
+}
 
 for (const [target, source] of aliases) {
   if (!env[target] && env[source]) {
@@ -48,17 +58,41 @@ for (const [name, protocol] of checks) {
   }
 }
 
+function isApprovedVercelHost(hostname) {
+  return approvedVercelHosts.has(hostname)
+    || (hostname.startsWith('brass-tune-') && hostname.endsWith('-aryaswebsites.vercel.app'));
+}
+
+function assertApprovedHost(name, value, type) {
+  const url = new URL(value);
+  if (type === 'vercel' && !isApprovedVercelHost(url.hostname)) {
+    console.error(`${name} is not an approved BrassTune Vercel host.`);
+    process.exit(1);
+  }
+  if (type === 'render' && url.hostname !== approvedRenderHost) {
+    console.error(`${name} is not the approved Render backend host.`);
+    process.exit(1);
+  }
+}
+
+assertApprovedHost('E2E_API_BASE_URL', env.E2E_API_BASE_URL, 'render');
+assertApprovedHost('E2E_WS_BASE_URL', env.E2E_WS_BASE_URL, 'render');
+if (env.E2E_VERCEL_AUTOMATION_BYPASS_SECRET) {
+  assertApprovedHost('E2E_BASE_URL', env.E2E_BASE_URL, 'vercel');
+}
+
 if (env.E2E_VERCEL_SHARE_URL) {
   const url = new URL(env.E2E_VERCEL_SHARE_URL);
   if (url.protocol !== 'https:') {
     console.error('E2E_VERCEL_SHARE_URL must use https:.');
     process.exit(1);
   }
+  assertApprovedHost('E2E_VERCEL_SHARE_URL', env.E2E_VERCEL_SHARE_URL, 'vercel');
 }
 
 const result = spawnSync(
   'npx',
-  ['playwright', 'test', 'e2e/hosted-smoke.spec.ts', ...process.argv.slice(2)],
+  ['playwright', 'test', 'e2e/hosted-smoke.spec.ts', ...forwardedArgs],
   {
     env,
     shell: process.platform === 'win32',

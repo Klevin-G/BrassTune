@@ -1,6 +1,7 @@
 import { ArrowRight, FileText, Gauge, History, Mic, Play, Timer, UploadCloud } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { friendlyUserFacingError } from '../api/client';
 import { LocalMediaImportPanel } from '../components/LocalMediaImportPanel';
 import { NoteDisplay } from '../components/NoteDisplay';
 import { SessionControls } from '../components/SessionControls';
@@ -48,7 +49,7 @@ export function PracticePage() {
       await audioRecorder.start(session.id, demoMode, inputStream);
     } catch (error) {
       if (openedMicrophone) stream.stopMicrophone();
-      recorder.setError(String(error));
+      recorder.setError(friendlyUserFacingError(error, 'Recording could not start. Guest practice still works on this device.'));
     } finally {
       setTransitionBusy(false);
     }
@@ -71,17 +72,35 @@ export function PracticePage() {
       }
       if (sessionId && demoMode) {
         const uploadPromise = audioRecorder.stopAndUpload(sessionId, true);
+        const flush = await stream.finishPersistingFrames();
         const summary = await recorder.stop();
-        void uploadPromise.catch(() => undefined);
+        uploadPromise
+          .then((audio) => {
+            if (!audio) recorder.setError('Session saved, but cloud audio upload failed. Pitch analytics remain available.');
+          })
+          .catch(() => recorder.setError('Session saved, but cloud audio upload failed. Pitch analytics remain available.'));
+        if (flush.failed > 0) recorder.setError('Session saved, but the latest pitch frames could not sync. Try recording again if the summary looks incomplete.');
         return summary;
       }
+      let uploadFailed = false;
+      let frameSyncFailed = false;
       if (sessionId) {
-        await audioRecorder.stopAndUpload(sessionId, demoMode);
+        const uploadPromise = audioRecorder.stopAndUpload(sessionId, demoMode);
+        const flush = await stream.finishPersistingFrames();
+        try {
+          const uploaded = await uploadPromise;
+          if (!uploaded) uploadFailed = true;
+        } catch {
+          uploadFailed = true;
+        }
+        frameSyncFailed = flush.failed > 0;
       }
       const summary = await recorder.stop();
+      if (frameSyncFailed) recorder.setError('Session saved, but the latest pitch frames could not sync. Try recording again if the summary looks incomplete.');
+      if (uploadFailed) recorder.setError('Session saved, but cloud audio upload failed. Pitch analytics remain available.');
       return summary;
     } catch (error) {
-      recorder.setError(String(error));
+      recorder.setError(friendlyUserFacingError(error, 'Recording could not be saved. Try again after reconnecting.'));
       return null;
     } finally {
       setTransitionBusy(false);
@@ -99,7 +118,7 @@ export function PracticePage() {
             <div>
               <p className="eyebrow">Live tuner cockpit</p>
               <h1>{latestValid?.written_note_name ? `${latestValid.written_note_name}${latestValid.written_octave}` : 'Ready'}</h1>
-              <p>{stream.statusMessage}</p>
+              <p className="tuner-status-message">{stream.statusMessage}</p>
               {!cloudSessionEnabled && <p className="muted-copy">Guest sessions stay on this device. Sign in to sync practice history and ensemble features.</p>}
             </div>
             <span className={`record-dot ${recorder.recording ? 'on' : ''}`}>{recorder.recording ? 'Recording' : demoMode ? 'Guest demo ready' : 'Microphone optional'}</span>
@@ -119,7 +138,7 @@ export function PracticePage() {
             onMicStop={stream.stopMicrophone}
           />
           <SignalMeter frame={stream.currentFrame} />
-          {recorder.error && <div className="alert">{recorder.error}</div>}
+          {recorder.error && <div className="alert" role="alert">{recorder.error}</div>}
         </section>
         <aside className="section-card side-panel">
           <div className="section-card-heading">

@@ -8,6 +8,7 @@ import { HeatMapGrid } from '../components/HeatMapGrid';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { NoteStatsTable } from '../components/NoteStatsTable';
 import { InsightCard, MetricTile, PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge } from '../components/ui/AppPrimitives';
+import { buildGuestHeatmap, buildGuestNoteStats } from '../domain/guestInsights';
 import type { NoteStats } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
@@ -39,9 +40,14 @@ export function AnalyticsPage() {
 
   useEffect(() => {
     if (!auth.isSignedIn) {
-      setStats([]);
-      setHeatmap([]);
-      setError('Analytics are available after sign-in. Guest practice and local review still work on this device.');
+      const guestStats = buildGuestNoteStats(instrumentId, range);
+      setStats(guestStats);
+      setHeatmap(buildGuestHeatmap(instrumentId, guestStats));
+      setError(
+        guestStats.length
+          ? 'Using guest sessions saved in this browser. Sign in to sync analytics across devices.'
+          : 'Record a guest take to unlock local analytics on this device. Sign in when you want cloud sync.',
+      );
       return;
     }
     Promise.all([getNoteStats(instrumentId, range), getHeatmap(instrumentId, range)])
@@ -99,7 +105,7 @@ export function AnalyticsPage() {
           </div>
         }
       />
-      {error && <div className="alert">{error}</div>}
+      {error && <div className="alert" role="status" aria-live="polite">{error}</div>}
       <SectionCard
         className="analytics-controls"
         title="Period and instrument"

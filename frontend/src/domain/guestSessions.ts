@@ -3,6 +3,7 @@ import type { NoteEvent, NoteStats, PitchFrame, PracticeSession, Recommendation 
 const GUEST_SESSIONS_KEY = 'brasstune.guestSessions.v1';
 const GUEST_USER_ID = 0;
 let memoryGuestSessions: GuestSessionDetail[] = [];
+let lastGuestId = 0;
 
 export interface GuestAudio {
   dataUrl: string;
@@ -30,10 +31,37 @@ function readStored(): GuestSessionDetail[] {
     const raw = localStorage.getItem(GUEST_SESSIONS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.map(normalizeGuestSession).filter((session): session is GuestSessionDetail => Boolean(session)) : [];
   } catch {
     return [];
   }
+}
+
+function normalizeGuestSession(value: unknown): GuestSessionDetail | null {
+  if (!value || typeof value !== 'object') return null;
+  const session = value as Partial<GuestSessionDetail>;
+  if (typeof session.id !== 'number' || typeof session.instrument_id !== 'string' || typeof session.started_at !== 'string') return null;
+  return {
+    ...(session as GuestSessionDetail),
+    user_id: session.user_id ?? GUEST_USER_ID,
+    name: session.name ?? 'Guest practice',
+    ended_at: session.ended_at ?? null,
+    duration_seconds: Number(session.duration_seconds ?? 0),
+    reference_pitch_hz: Number(session.reference_pitch_hz ?? 440),
+    notes_count: Number(session.notes_count ?? 0),
+    average_signed_cents: Number(session.average_signed_cents ?? 0),
+    average_abs_cents: Number(session.average_abs_cents ?? 0),
+    in_tune_percentage: Number(session.in_tune_percentage ?? 0),
+    audio_available: Boolean(session.audio_available),
+    guest_session: true,
+    created_at: session.created_at ?? session.started_at,
+    samples_count: Number(session.samples_count ?? 0),
+    note_events: Array.isArray(session.note_events) ? session.note_events : [],
+    note_stats: Array.isArray(session.note_stats) ? session.note_stats : [],
+    heatmap: Array.isArray(session.heatmap) ? session.heatmap : Array.isArray(session.note_stats) ? session.note_stats : [],
+    recommendations: Array.isArray(session.recommendations) ? session.recommendations : [],
+    frames: Array.isArray(session.frames) ? session.frames : [],
+  };
 }
 
 function writeStored(sessions: GuestSessionDetail[]) {
@@ -46,7 +74,8 @@ function writeStored(sessions: GuestSessionDetail[]) {
 }
 
 function guestId() {
-  return -Math.max(1, Date.now());
+  lastGuestId = Math.max(lastGuestId + 1, Date.now());
+  return -lastGuestId;
 }
 
 function validFrames(frames: PitchFrame[]) {
@@ -208,7 +237,6 @@ export function saveGuestSessionFromFrames(
     average_abs_cents: average(cents.map(Math.abs)),
     in_tune_percentage: cents.length ? (cents.filter((value) => Math.abs(value) <= 5).length / cents.length) * 100 : 0,
     audio_available: Boolean(audio?.dataUrl),
-    audio_storage_provider: audio?.dataUrl ? 'browser_guest' : null,
     audio_mime_type: audio?.mimeType ?? null,
     audio_duration_seconds: audio?.durationSeconds ?? null,
     audio_size_bytes: audio?.sizeBytes ?? null,

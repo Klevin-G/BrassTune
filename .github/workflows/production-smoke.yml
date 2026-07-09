@@ -1,6 +1,9 @@
 name: Production Smoke
 
 on:
+  workflow_run:
+    workflows: ["Deploy"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       web_base_url:
@@ -27,9 +30,36 @@ concurrency:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    name: protocol-smoke
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 10
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    environment: production
     env:
+      BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brass-tune.vercel.app' }}
+      BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune.onrender.com' }}
+      BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune.onrender.com' }}
+      BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
+      BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
+      BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.event.workflow_run.head_sha || vars.BRASSTUNE_EXPECTED_BACKEND_SHA || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Run hosted production smoke
+        run: npm run smoke:hosted
+
+  browser-smoke:
+    name: browser-smoke
+    needs: smoke
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || vars.BRASSTUNE_FRONTEND_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 20
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    environment: production
+    env:
+      CI: "true"
+      PLAYWRIGHT_HTML_OPEN: never
       BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brass-tune.vercel.app' }}
       BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune.onrender.com' }}
       BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune.onrender.com' }}
@@ -39,6 +69,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-      - name: Run hosted production smoke
-        run: npm run smoke:hosted
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run hosted browser smoke
+        working-directory: frontend
+        run: npm run e2e:hosted:strict -- --project=chromium

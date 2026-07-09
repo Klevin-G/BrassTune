@@ -7,7 +7,7 @@ Status: blocked until the owner provides disposable Supabase/Apple test configur
 - Vercel production env vars are set: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_API_BASE_URL`, `VITE_WS_BASE_URL`.
 - Render production env vars are set: Supabase URL, publishable key, secret key, JWKS URL, database URL, and `APP_ENV=production`.
 - Supabase Site URL is `https://brass-tune.vercel.app`.
-- Supabase redirect allowlist includes `/auth/callback` for production and approved previews only.
+- Supabase redirect allowlist includes `/auth/callback` and `/auth/reset-password` for production and approved previews only.
 - Email/password auth policy, confirmation requirement, and SMTP sender are owner-approved.
 - Apple provider is configured only with owner-approved Apple Developer values.
 

@@ -23,7 +23,7 @@ concurrency:
 jobs:
   deploy-frontend:
     if: ${{ github.ref == 'refs/heads/main' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'frontend') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_DEPLOY_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 30
     environment: production
     env:
@@ -34,15 +34,19 @@ jobs:
       VITE_WS_BASE_URL: ${{ secrets.VITE_WS_BASE_URL }}
       VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
       VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      VITE_AUTH_GOOGLE_ENABLED: ${{ vars.VITE_AUTH_GOOGLE_ENABLED || secrets.VITE_AUTH_GOOGLE_ENABLED || 'false' }}
+      VITE_AUTH_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED || secrets.VITE_AUTH_APPLE_ENABLED || 'false' }}
+      VITE_SUPABASE_GOOGLE_ENABLED: ${{ vars.VITE_AUTH_GOOGLE_ENABLED || secrets.VITE_AUTH_GOOGLE_ENABLED || 'false' }}
+      VITE_SUPABASE_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED || secrets.VITE_AUTH_APPLE_ENABLED || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install Vercel CLI
-        run: npm install -g vercel
+        run: npm install -g vercel@54.14.0
       - name: Pull Vercel environment
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
       - name: Build frontend
@@ -52,9 +56,18 @@ jobs:
 
   deploy-backend:
     if: ${{ github.ref == 'refs/heads/main' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'backend') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_DEPLOY_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 20
     environment: production
+    env:
+      BRASSTUNE_API_BASE_URL: ${{ vars.BRASSTUNE_API_BASE_URL || 'https://brasstune.onrender.com' }}
+      BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.sha }}
     steps:
+      - uses: actions/checkout@v4
       - name: Trigger Render deploy hook
         run: curl --max-time 30 -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Wait for Render backend release
+        run: npm run wait:backend-release

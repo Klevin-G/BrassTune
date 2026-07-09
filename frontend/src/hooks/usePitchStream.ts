@@ -2,9 +2,37 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { nextDemoPitchFrame } from '../domain/demoPitch';
 import { pitchFrameFromPcm } from '../domain/localPitchDetection';
 import type { PitchFrame } from '../domain/types';
-import { recordPitchFrame } from '../api/client';
+import { recordPitchFramesInBatches } from '../api/client';
 
 const AUDIO_FRAME_SIZE = 4096;
+const PERSIST_BATCH_SIZE = 100;
+const PERSIST_FLUSH_INTERVAL_MS = 750;
+const MAX_BUFFERED_PERSIST_FRAMES = 1500;
+
+export interface PendingPersistFrameQueue {
+  sessionId: number | null;
+  frames: PitchFrame[];
+}
+
+export function enqueuePendingPersistFrame(queue: PendingPersistFrameQueue, sessionId: number, frame: PitchFrame): PendingPersistFrameQueue {
+  const frames = queue.sessionId === sessionId ? [...queue.frames, frame] : [frame];
+  return { sessionId, frames: frames.slice(-MAX_BUFFERED_PERSIST_FRAMES) };
+}
+
+export function requeueFailedPersistFrames(
+  queue: PendingPersistFrameQueue,
+  failedSessionId: number,
+  frames: PitchFrame[],
+  { currentSessionId, persistenceClosed }: { currentSessionId?: number; persistenceClosed: boolean },
+): PendingPersistFrameQueue {
+  if (persistenceClosed || currentSessionId !== failedSessionId) {
+    return queue.sessionId === failedSessionId ? { sessionId: null, frames: [] } : queue;
+  }
+  if (queue.sessionId !== null && queue.sessionId !== failedSessionId) {
+    return queue;
+  }
+  return { sessionId: failedSessionId, frames: [...frames, ...queue.frames].slice(-MAX_BUFFERED_PERSIST_FRAMES) };
+}
 
 export interface PitchStreamInfo {
   frameSize: number;
@@ -12,6 +40,11 @@ export interface PitchStreamInfo {
   sentFrames: number;
   droppedFrames: number;
   detectorSource: string;
+}
+
+export interface PitchFrameFlushResult {
+  flushed: number;
+  failed: number;
 }
 
 interface UsePitchStreamOptions {
@@ -62,6 +95,10 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const instrumentIdRef = useRef(instrumentId);
   const referencePitchRef = useRef(referencePitch);
   const persistDemoFramesToBackendRef = useRef(persistDemoFramesToBackend);
+  const persistenceClosedRef = useRef(false);
+  const pendingPersistQueueRef = useRef<PendingPersistFrameQueue>({ sessionId: null, frames: [] });
+  const flushTimerRef = useRef<number | null>(null);
+  const flushPromiseRef = useRef<Promise<PitchFrameFlushResult> | null>(null);
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -71,7 +108,96 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     instrumentIdRef.current = instrumentId;
     referencePitchRef.current = referencePitch;
     persistDemoFramesToBackendRef.current = persistDemoFramesToBackend;
+    if (recording) {
+      persistenceClosedRef.current = false;
+      if (sessionId && pendingPersistQueueRef.current.sessionId && pendingPersistQueueRef.current.sessionId !== sessionId) {
+        pendingPersistQueueRef.current = { sessionId: null, frames: [] };
+      }
+    }
   }, [recording, sessionId, onFrame, demoMode, instrumentId, referencePitch, persistDemoFramesToBackend]);
+
+  const clearFlushTimer = useCallback(() => {
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+  }, []);
+
+  const flushPendingFrames = useCallback(async function flushPendingFrames(): Promise<PitchFrameFlushResult> {
+    clearFlushTimer();
+    let result: PitchFrameFlushResult = { flushed: 0, failed: 0 };
+    if (flushPromiseRef.current) {
+      result = await flushPromiseRef.current;
+      if (pendingPersistQueueRef.current.frames.length === 0) return result;
+    }
+
+    const currentSessionId = pendingPersistQueueRef.current.sessionId;
+    if (!currentSessionId || currentSessionId !== sessionIdRef.current || pendingPersistQueueRef.current.frames.length === 0) return result;
+
+    const frames = pendingPersistQueueRef.current.frames;
+    pendingPersistQueueRef.current = { sessionId: currentSessionId, frames: [] };
+    let flush: Promise<PitchFrameFlushResult> = Promise.resolve(result);
+    let attempted = 0;
+    let saved = 0;
+    flush = recordPitchFramesInBatches(currentSessionId, frames, {
+      batchSize: PERSIST_BATCH_SIZE,
+      onProgress: (savedCount, attemptedCount) => {
+        saved = savedCount;
+        attempted = attemptedCount;
+      },
+    })
+      .then((batchResult) => ({ flushed: batchResult.saved, failed: batchResult.rejected }))
+      .catch(() => {
+        const retryFrames = frames.slice(attempted);
+        pendingPersistQueueRef.current = requeueFailedPersistFrames(pendingPersistQueueRef.current, currentSessionId, retryFrames, {
+          currentSessionId: sessionIdRef.current,
+          persistenceClosed: persistenceClosedRef.current,
+        });
+        const retryable = pendingPersistQueueRef.current.sessionId === currentSessionId && pendingPersistQueueRef.current.frames.length > 0;
+        setStatusMessage(
+          retryable
+            ? 'Pitch is visible, but cloud sync could not save the latest frames. Guest practice still works on this device.'
+            : 'Session stopped before the latest pitch frames could sync. New recordings will start with a clean frame queue.',
+        );
+        if (retryable && flushTimerRef.current === null) {
+          flushTimerRef.current = window.setTimeout(() => {
+            flushTimerRef.current = null;
+            void flushPendingFrames();
+          }, PERSIST_FLUSH_INTERVAL_MS);
+        }
+        return { flushed: saved, failed: retryFrames.length };
+      })
+      .finally(() => {
+        if (flushPromiseRef.current === flush) {
+          flushPromiseRef.current = null;
+        }
+      });
+    flushPromiseRef.current = flush;
+    const attempt = await flush;
+    result = { flushed: result.flushed + attempt.flushed, failed: result.failed + attempt.failed };
+    if (attempt.failed === 0 && pendingPersistQueueRef.current.sessionId === currentSessionId && pendingPersistQueueRef.current.frames.length === 0) {
+      pendingPersistQueueRef.current = { sessionId: null, frames: [] };
+    }
+    if (attempt.failed === 0 && pendingPersistQueueRef.current.frames.length > 0) {
+      const next = await flushPendingFrames();
+      result = { flushed: result.flushed + next.flushed, failed: result.failed + next.failed };
+    }
+    return result;
+  }, [clearFlushTimer]);
+
+  const schedulePersistFlush = useCallback(() => {
+    if (flushTimerRef.current !== null || flushPromiseRef.current) return;
+    flushTimerRef.current = window.setTimeout(() => {
+      flushTimerRef.current = null;
+      void flushPendingFrames().catch(() => undefined);
+    }, PERSIST_FLUSH_INTERVAL_MS);
+  }, [flushPendingFrames]);
+
+  const finishPersistingFrames = useCallback(async () => {
+    persistenceClosedRef.current = true;
+    recordingRef.current = false;
+    return flushPendingFrames();
+  }, [flushPendingFrames]);
 
   const handleFrame = useCallback((frame: PitchFrame) => {
     setCurrentFrame(frame);
@@ -82,12 +208,15 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     // persist them from the frontend. Microphone frames are saved by the cloud
     // pitch stream when a session_id is present.
     const currentSessionId = sessionIdRef.current;
-    if (shouldPersistFrameFromFrontend(demoModeRef.current, recordingRef.current, currentSessionId, frame, persistDemoFramesToBackendRef.current) && currentSessionId !== undefined) {
-      recordPitchFrame(currentSessionId, frame).catch(() => {
-        setStatusMessage('Pitch is visible, but cloud sync could not save this frame. Guest practice still works on this device.');
-      });
+    if (!persistenceClosedRef.current && shouldPersistFrameFromFrontend(demoModeRef.current, recordingRef.current, currentSessionId, frame, persistDemoFramesToBackendRef.current) && currentSessionId !== undefined) {
+      pendingPersistQueueRef.current = enqueuePendingPersistFrame(pendingPersistQueueRef.current, currentSessionId, frame);
+      if (pendingPersistQueueRef.current.frames.length >= PERSIST_BATCH_SIZE) {
+        void flushPendingFrames().catch(() => undefined);
+      } else {
+        schedulePersistFlush();
+      }
     }
-  }, []);
+  }, [flushPendingFrames, schedulePersistFlush]);
 
   useEffect(() => {
     if (!enabled || !demoMode) return;
@@ -188,8 +317,12 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     if (demoMode) {
       stopMicrophone();
     }
-    return () => stopMicrophone();
-  }, [demoMode, stopMicrophone]);
+    return () => {
+      clearFlushTimer();
+      void flushPendingFrames().catch(() => undefined);
+      stopMicrophone();
+    };
+  }, [clearFlushTimer, demoMode, flushPendingFrames, stopMicrophone]);
 
-  return { currentFrame, history, statusMessage, micActive, mediaStream, streamInfo, startMicrophone, stopMicrophone };
+  return { currentFrame, history, statusMessage, micActive, mediaStream, streamInfo, startMicrophone, stopMicrophone, flushPendingFrames, finishPersistingFrames };
 }

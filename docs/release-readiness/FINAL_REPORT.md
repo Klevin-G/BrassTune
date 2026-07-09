@@ -1,6 +1,6 @@
 # BrassTune Final Web-First Report
 
-2026-07-08 notice: this report is historical June web-beta evidence, not the current release decision. Current PR #8/native status is tracked in `TEST_MATRIX.md` / `NATIVE_PARITY_SURFACES.md`: local AVAudioEngine live capture is implemented, but app test execution is currently CoreSimulator-blocked and physical-device/Apple gates remain open. Current PR #7/web status is blocked in the separate web recovery worktree until Render/Vercel/Supabase/provider gates pass.
+2026-07-08 notice: this report is historical June web-beta evidence, not the current release decision. Current PR #7 web/backend release status is blocked and tracked in `WEB_RECOVERY_FINDINGS.md`; current PR #8/native status is simulator/sample-mode only and tracked in the native `TEST_MATRIX.md`.
 
 Updated: 2026-06-21T05:51:09Z
 
@@ -52,4 +52,4 @@ Phase 1 web/backend production certification was complete for the June guest-fir
 - Live Supabase/Google/Apple account lifecycle without owner credentials.
 - Apple signing/TestFlight/App Store submission.
 - Physical-device brass/microphone validation.
-- Native SwiftUI repository completion, physical-device validation, and Apple release gates.
+- Native SwiftUI repository completion, now allowed to start as Phase 2 but not yet complete.

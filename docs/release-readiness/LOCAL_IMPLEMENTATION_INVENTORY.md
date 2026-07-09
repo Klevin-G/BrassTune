@@ -1,5 +1,7 @@
 # Local Implementation Inventory
 
+2026-07-08 notice: this file is retained as historical June recovery inventory. It is not the current release decision; current PR #7 evidence is tracked in `WEB_RECOVERY_FINDINGS.md`, `WEB_E2E_REPORT.md`, and `WEB_PRODUCTION_COMPLETION_GATE.md`.
+
 Date: 2026-06-20
 Branch: `arya/release-readiness-hardening`
 Starting pushed head: `cd37fee3ef927001e755cb4976cf5d52eb00af72`
@@ -18,7 +20,7 @@ This inventory records local modified and untracked files that existed after the
 | `.github/workflows/backend.yml` | Modified | Backend CI uses same dependency floor as local audit | Updated to install with `constraints.txt` | Verify GitHub Actions after push | Backend/CI |
 | `.github/workflows/security.yml` | Modified | Security CI audits runtime and dev dependencies without broad ignores | Updated; old Starlette ignores removed | Verify GitHub Actions after push | Security/CI |
 | `.env.example` | Modified | Documents explicit backend auth mode | Added `BRASSTUNE_AUTH_MODE=disabled` for local example | Ensure production docs explain `disabled` vs `supabase` | Deployment |
-| `render.yaml` | Modified | Render env contract | Adds explicit `BRASSTUNE_AUTH_MODE=disabled` as the current production-safe account-disabled mode | Owner must switch to `supabase` only after provider secrets are configured | Deployment |
+| `render.yaml` | Modified | Render env contract | Production now declares `BRASSTUNE_AUTH_MODE=supabase` and deployed startup fails closed when auth/storage/database settings are incomplete | Owner must deploy the exact reviewed SHA and verify `/api/ready` on Render | Deployment |
 | `backend/requirements.txt` | Modified | Runtime dependency security floor | FastAPI/Starlette/python-dotenv upgraded for Python 3.11+ | CI must verify on pushed SHA | Backend/dependencies |
 | `backend/requirements-dev.txt` | Modified | Dev/test/security dependency security floor | pytest, pip-audit, Bandit pinned to patched floor | CI must verify on pushed SHA | Backend/dependencies |
 | `backend/constraints.txt` | Untracked | Resolver security floor | Added minimum patched constraints | Not a full lockfile; use with requirements in CI | Backend/dependencies |
