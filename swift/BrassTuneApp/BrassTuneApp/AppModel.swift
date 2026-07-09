@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import PDFKit
 import UIKit
 import UniformTypeIdentifiers
@@ -245,6 +246,10 @@ final class AppModel: ObservableObject {
         case .sample:
             stopDemoRecording()
         }
+        // Stopping a take also stops the metronome so it never keeps ticking
+        // without an inline control. It stays independently usable from the
+        // Metronome screen and floating controls via startMetronome().
+        stopMetronome()
     }
 
     func clearLocalPracticeData() {
@@ -333,6 +338,10 @@ final class AppModel: ObservableObject {
         let score = try scoreImporter.importImageData(data, preferredName: preferredName, sourceKind: .photos)
         scores.insert(score, at: 0)
         activeScoreID = score.id
+    }
+
+    func storedScoreFileURL(for score: ImportedScore) -> URL? {
+        scoreImporter.storedFileURL(named: score.localFileName)
     }
 
     func deleteScore(id: ImportedScore.ID) {
@@ -663,6 +672,12 @@ struct NativeScoreImportService {
         try? FileManager.default.removeItem(at: storageDirectory.appendingPathComponent(fileName))
     }
 
+    func storedFileURL(named fileName: String?) -> URL? {
+        guard let fileName else { return nil }
+        let url = storageDirectory.appendingPathComponent(fileName)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     func deleteAllStoredFiles() {
         try? FileManager.default.removeItem(at: storageDirectory)
     }
@@ -700,7 +715,11 @@ struct NativeScoreImportService {
     }
 
     private func makeImageScore(from url: URL, localFileName: String, fileSize: Int64, sourceKind: ScoreSourceKind) throws -> ImportedScore {
-        guard let image = UIImage(contentsOfFile: url.path) else { throw ImportError.unreadableFile }
+        // Decode the image through ImageIO downsampling so a high-megapixel photo
+        // never gets fully expanded into an uncompressed bitmap in memory (which
+        // can trip jetsam on device even under the file-size gate). The original
+        // file on disk stays untouched; only the in-memory image is capped.
+        guard let image = downsampledImage(at: url, maxPixelSize: 2400) else { throw ImportError.unreadableFile }
         let thumbnail = downsampledPNG(image: image)
         let page = ScorePage(
             id: UUID(),
@@ -744,6 +763,23 @@ struct NativeScoreImportService {
             ScoreRegion(id: UUID(), label: "Staff group \(pageNumber).2", normalizedX: 0.10, normalizedY: 0.44, normalizedWidth: 0.80, normalizedHeight: 0.18),
             ScoreRegion(id: UUID(), label: "Staff group \(pageNumber).3", normalizedX: 0.10, normalizedY: 0.70, normalizedWidth: 0.80, normalizedHeight: 0.18),
         ]
+    }
+
+    private func downsampledImage(at url: URL, maxPixelSize: CGFloat) -> UIImage? {
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions as CFDictionary) else {
+            return nil
+        }
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
     }
 
     private func downsampledPNG(image: UIImage) -> Data? {

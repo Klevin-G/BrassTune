@@ -55,7 +55,7 @@ struct AppRootView: View {
                 NavigationStack { SettingsView(onboardingPresented: $onboardingPresented) }
             } else {
                 TabView(selection: $selectedTab) {
-                    NavigationStack { HomeView(selectedTab: $selectedTab) }
+                    NavigationStack { HomeView(selectedTab: $selectedTab, onboardingPresented: $onboardingPresented) }
                         .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.systemImage) }
                         .tag(AppTab.home)
                     NavigationStack { PracticeView(selectedTab: $selectedTab) }
@@ -92,6 +92,7 @@ struct AppRootView: View {
 struct HomeView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var selectedTab: AppTab
+    @Binding var onboardingPresented: Bool
 
     var body: some View {
         BTScreen {
@@ -129,7 +130,7 @@ struct HomeView: View {
                 .accessibilityIdentifier("home.scorePractice")
 
                 NavigationLink {
-                    SettingsView(onboardingPresented: .constant(false))
+                    SettingsView(onboardingPresented: $onboardingPresented)
                 } label: {
                     BTInsightTile(title: "Settings", detail: "Horn, pitch, data", systemImage: "gearshape", tint: BTTheme.secondaryAccent, interactive: true)
                 }
@@ -1169,6 +1170,14 @@ private struct ScoreDocumentCard: View {
                 }
                 .buttonStyle(BTSecondaryButtonStyle())
                 .accessibilityIdentifier("score.export")
+
+                if let fileURL = model.storedScoreFileURL(for: score) {
+                    ShareLink(item: fileURL) {
+                        Label("Share original file", systemImage: "doc")
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("score.shareFile")
+                }
 
                 Button(role: .destructive) {
                     confirmDelete = true
