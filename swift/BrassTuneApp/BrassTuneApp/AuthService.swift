@@ -41,6 +41,9 @@ final class AuthService: NSObject {
                 "password": password
             ]
         )
+        if response.accessToken == nil, response.user?.email != nil {
+            throw UserVisibleError.emailConfirmationRequired
+        }
         return try store(response: response, fallbackEmail: email)
     }
 

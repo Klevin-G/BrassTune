@@ -32,30 +32,55 @@ final class BrassTuneAppUITests: XCTestCase {
         }
         let recordingState = app.staticTexts["practice.recordingState"]
         XCTAssertTrue(
-            waitForAnyElement([recordingState, app.staticTexts["Ready"]], timeout: 5),
+            waitForAnyElement([recordingState, app.staticTexts["Sample ready"]], timeout: 5),
             "Recording state should be visible"
         )
         startRecordButton.tap()
         XCTAssertTrue(
-            waitForAnyElement([recordingState, app.staticTexts["Recording"]], timeout: 5),
-            "Recording state should switch to recording"
+            waitForAnyElement([recordingState, app.staticTexts["Sample running"]], timeout: 5),
+            "Sample state should switch to running"
         )
-        guard let stopRecordButton = firstAvailableElement(
-            [
-                app.descendants(matching: .any)["practice.recordButton"],
-                app.buttons["Stop sample take"]
-            ],
+        let floatingStop = app.descendants(matching: .any)["practice.floating.stop"]
+        XCTAssertTrue(floatingStop.waitForExistence(timeout: 5), "Recording should expose floating stop control")
+        let floatingMetronome = app.descendants(matching: .any)["practice.floating.metronome"]
+        XCTAssertTrue(floatingMetronome.waitForExistence(timeout: 5), "Floating controls should expose metronome control")
+        floatingMetronome.tap()
+        floatingStop.tap()
+        if !waitForAnyElement([recordingState, app.staticTexts["Sample ready"]], timeout: 5) {
+            guard let stopRecordButton = firstAvailableElement(
+                [
+                    app.descendants(matching: .any)["practice.recordButton"],
+                    app.buttons["Stop sample take"]
+                ],
+                in: app,
+                timeout: 5
+            ) else {
+                XCTFail("Practice stop control should be visible")
+                return
+            }
+            stopRecordButton.tap()
+        }
+        let floatingMetronomeAgain = app.descendants(matching: .any)["practice.floating.metronome"]
+        if floatingMetronomeAgain.waitForExistence(timeout: 2) {
+            floatingMetronomeAgain.tap()
+        }
+        XCTAssertTrue(
+            waitForAnyElement([recordingState, app.staticTexts["Sample ready"]], timeout: 5),
+            "Sample state should return to ready"
+        )
+
+        guard let metronomeShortcut = firstAvailableElement(
+            [app.descendants(matching: .any)["practice.metronome"], app.buttons["Metronome"]],
             in: app,
             timeout: 5
         ) else {
-            XCTFail("Practice stop control should be visible")
+            XCTFail("Practice should link to metronome")
             return
         }
-        stopRecordButton.tap()
-        XCTAssertTrue(
-            waitForAnyElement([recordingState, app.staticTexts["Ready"]], timeout: 5),
-            "Recording state should return to ready"
-        )
+        metronomeShortcut.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.metronome"].waitForExistence(timeout: 5), "Metronome screen should be implemented")
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.toggle"].waitForExistence(timeout: 5), "Metronome should expose start/stop")
+        closeNavigationDetailIfPresent(in: app)
 
         guard let viewAnalyticsButton = firstAvailableElement(
             [
@@ -72,16 +97,46 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["analytics.metrics"].waitForExistence(timeout: 5), "Analytics should derive from the local sample take")
 
         app.descendants(matching: .any)["analytics.reviewSessions"].tap()
-        if !app.staticTexts["Guided take"].waitForExistence(timeout: 3) {
+        if !app.staticTexts["Sample take"].waitForExistence(timeout: 3) {
             openTab("Sessions", in: app)
         }
-        let demoTake = app.staticTexts["Guided take"]
-        XCTAssertTrue(demoTake.waitForExistence(timeout: 5), "Stopping a guided recording should create a saved session")
+        let demoTake = app.staticTexts["Sample take"]
+        XCTAssertTrue(demoTake.waitForExistence(timeout: 5), "Stopping a sample recording should create a saved session")
         demoTake.tap()
         let deleteSessionButton = app.descendants(matching: .any)["session.deleteButton"]
         XCTAssertTrue(waitForElementOrScroll(deleteSessionButton, in: app), "Session detail should expose a delete control")
         deleteSessionButton.tap()
+        let confirmDeleteSession = app.buttons["Delete local session"]
+        XCTAssertTrue(confirmDeleteSession.waitForExistence(timeout: 5), "Deleting a session should require confirmation")
+        confirmDeleteSession.tap()
         XCTAssertTrue(app.staticTexts["No saved sessions"].waitForExistence(timeout: 5), "Deleting the session should remove it from the list")
+
+        openTab("Coach", in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["screen.coach"].waitForExistence(timeout: 5), "Coach tab should expose the native coach surface")
+
+        openTab("More", in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["screen.more"].waitForExistence(timeout: 5), "More tab should expose the native hub")
+
+        app.descendants(matching: .any)["more.sessions"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.sessions"].waitForExistence(timeout: 5), "More should link to saved sessions")
+        closeNavigationDetailIfPresent(in: app)
+
+        app.descendants(matching: .any)["more.metronome"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.metronome"].waitForExistence(timeout: 5), "More should link to the native metronome")
+        closeNavigationDetailIfPresent(in: app)
+
+        app.descendants(matching: .any)["more.scorepractice"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.scorePractice"].waitForExistence(timeout: 5), "More should link to native Score Practice")
+        let sampleScoreButton = app.buttons["score.import.sample"]
+        XCTAssertTrue(sampleScoreButton.waitForExistence(timeout: 5), "Score Practice should expose a sample import for simulator coverage")
+        sampleScoreButton.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["score.card"].waitForExistence(timeout: 5), "Sample score should create a local score card")
+        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["score.rotate"], in: app), "Score pages should expose rotate")
+        closeNavigationDetailIfPresent(in: app)
+
+        app.descendants(matching: .any)["more.settings"].tap()
+        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["settings.deleteAccount"], in: app), "More should link to Settings")
+        XCTAssertTrue(app.descendants(matching: .any)["settings.clearLocalData"].waitForExistence(timeout: 5), "Settings should expose local data clearing")
 
         app.terminate()
         app.launchArguments = ["UITEST_SETTINGS", "UITEST_RESET_STATE"]
@@ -123,6 +178,20 @@ final class BrassTuneAppUITests: XCTestCase {
             app.swipeUp()
         }
         return elements.first { $0.exists && $0.isHittable }
+    }
+
+    @MainActor
+    private func closeNavigationDetailIfPresent(in app: XCUIApplication) {
+        let backButtons = [
+            app.navigationBars.buttons["BackButton"],
+            app.navigationBars.buttons["Practice"],
+            app.navigationBars.buttons["More"],
+            app.navigationBars.buttons["Back"]
+        ]
+        for button in backButtons where button.waitForExistence(timeout: 2) {
+            button.tap()
+            return
+        }
     }
 
     @MainActor

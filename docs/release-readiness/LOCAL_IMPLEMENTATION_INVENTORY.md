@@ -108,4 +108,4 @@ These images are intentional only if they correspond to a fresh `npm run simulat
 - Guest-safe UI and auth-disabled UX are improved locally, but provider completion for Google/Apple/email live flows is not complete.
 - Backend production auth hardening now includes the explicit `BRASSTUNE_AUTH_MODE=disabled|supabase` contract locally, but account deletion durability remains incomplete.
 - Account deletion durability/outbox retry remains incomplete.
-- Native live microphone, native metronome, native score practice, native provider auth, and App Store/TestFlight readiness remain incomplete or externally blocked.
+- Native live microphone code, native metronome, and native score practice are implemented locally but still need stronger device/performance validation; native provider auth and App Store/TestFlight readiness remain incomplete or externally blocked.

@@ -1,6 +1,6 @@
 # Apple App Store Checklist
 
-Official Apple sources checked on 2026-06-18 and refreshed for this run on 2026-06-20:
+Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-20, and native status updated on 2026-07-04:
 
 - [SDK minimum requirements](https://developer.apple.com/news/upcoming-requirements/?id=02032026a): apps uploaded to App Store Connect must be built with Xcode 26 or later using iOS/iPadOS 26 SDKs since April 28, 2026.
 - [Submitting apps](https://developer.apple.com/app-store/submitting/): build and test with current Xcode/latest SDKs.
@@ -18,11 +18,16 @@ Official Apple sources checked on 2026-06-18 and refreshed for this run on 2026-
 - Not a web wrapper.
 - Unit and UI test targets exist.
 - `NSMicrophoneUsageDescription` is configured in build settings.
+- `NSPhotoLibraryUsageDescription` is configured for user-selected score image import.
+- Camera capture is not implemented, is hidden from the UI, and no camera usage string is declared in the app target.
 - `PrivacyInfo.xcprivacy` exists.
 - In-app privacy, terms, support, data export, and account deletion surfaces exist.
 - Account deletion can be initiated in app.
+- Local clear/delete controls remove imported score metadata and copied local score files.
 - Simulator Debug/Release builds pass with Xcode 26.2 / iOS 26.2 SDK.
-- Web score practice and metronome were added, but native equivalents are not complete.
+- Native metronome simulator scope exists: visual pulse, audible click output, haptic option, mute, volume, meter, subdivision, and tap tempo.
+- Native score assist simulator scope exists: PDF/image/Photos/sample import, thumbnails, page selection, rotate/crop/enhance preview, annotations, metadata export, and local delete.
+- Local AVAudioEngine live microphone capture code exists with permission handling, PCM input tap, pitch/confidence/RMS/no-lock detection, route/interruption notices, and sample-mode fallback.
 
 ## Owner Decisions Required
 
@@ -56,6 +61,8 @@ Official Apple sources checked on 2026-06-18 and refreshed for this run on 2026-
 - Third-party SDK privacy signature/manifest audit after final dependencies are pinned.
 - Required-reason API final audit after adding production Supabase Swift client.
 - Physical-device microphone validation.
-- Native score scanner/VisionKit flow.
-- Native metronome parity and timing validation.
+- Physical-device validation of the local live microphone path with real brass input.
+- Physical-device metronome click-bleed, haptic, route, speaker, headphone, and timing validation.
+- Physical-device Files/Photos score import validation.
+- Native camera score scanner/VisionKit flow.
 - Owner/legal metadata.

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var deletionConfirmation = ""
+    @State private var localDataConfirmation = ""
     @State private var rawAppleNonce = ""
 
     private var accountActionsEnabled: Bool {
@@ -32,7 +33,7 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Tuner", subtitle: "Instrument and reference pitch affect local sample takes.")
+                BTSectionHeader(title: "Tuner", subtitle: "Instrument and reference pitch affect local live and sample takes.")
                 Picker("Instrument", selection: $model.selectedInstrumentId) {
                     instrumentPickerOptions()
                 }
@@ -49,76 +50,105 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Sign in", subtitle: accountActionsEnabled ? "Use beta account email or Apple sign-in." : "Accounts are not enabled in this beta build yet.")
-                TextField("Email", text: $email)
-                    .textContentType(.emailAddress)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .disabled(!accountActionsEnabled)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("settings.email")
-                SecureField("Password", text: $password)
-                    .textContentType(.password)
-                    .disabled(!accountActionsEnabled)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("settings.password")
-                HStack(spacing: BTSpacing.md) {
-                    Button("Sign in") {
-                        Task { await model.signIn(email: email, password: password) }
+                BTSectionHeader(title: "Metronome defaults", subtitle: "These settings also drive the floating live/sample controls.")
+                Stepper("BPM \(model.metronome.bpm)", value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 30...240, step: 1)
+                    .accessibilityIdentifier("settings.metronomeBPM")
+                Picker("Subdivision", selection: Binding(get: { model.metronome.subdivision }, set: { model.metronome.subdivision = $0 })) {
+                    ForEach(MetronomeSubdivision.allCases) { subdivision in
+                        Text(subdivision.title).tag(subdivision)
+                    }
+                }
+                .accessibilityIdentifier("settings.metronomeSubdivision")
+                Toggle("Visual-only by default", isOn: Binding(get: { model.metronome.visualOnly }, set: { model.setMetronomeVisualOnly($0) }))
+                    .accessibilityIdentifier("settings.metronomeVisualOnly")
+            }
+
+            if accountActionsEnabled {
+                BTCard {
+                    BTSectionHeader(title: "Sign in", subtitle: "Use beta account email or Apple sign-in.")
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("settings.email")
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("settings.password")
+                    HStack(spacing: BTSpacing.md) {
+                        Button("Sign in") {
+                            Task { await model.signIn(email: email, password: password) }
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("settings.signIn")
+
+                        Button("Create account") {
+                            Task { await model.signUp(email: email, password: password) }
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("settings.createAccount")
+                    }
+                    Button {
+                        Task { await model.requestPasswordReset(email: email) }
+                    } label: {
+                        Label("Send password reset", systemImage: "envelope")
                     }
                     .buttonStyle(BTSecondaryButtonStyle())
-                    .disabled(!accountActionsEnabled)
-                    .accessibilityIdentifier("settings.signIn")
-
-                    Button("Create account") {
-                        Task { await model.signUp(email: email, password: password) }
+                    .accessibilityIdentifier("settings.passwordReset")
+                    SignInWithAppleButton(.signIn) { request in
+                        rawAppleNonce = AuthService.randomNonce()
+                        request.requestedScopes = [.email]
+                        request.nonce = AuthService.sha256(rawAppleNonce)
+                    } onCompletion: { result in
+                        handleAppleSignIn(result)
                     }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .disabled(!accountActionsEnabled)
-                    .accessibilityIdentifier("settings.createAccount")
+                    .frame(height: 44)
+                    .accessibilityIdentifier("settings.appleSignIn")
                 }
-                Button {
-                    Task { await model.requestPasswordReset(email: email) }
-                } label: {
-                    Label("Send password reset", systemImage: "envelope")
-                }
-                .buttonStyle(BTSecondaryButtonStyle())
-                .disabled(!accountActionsEnabled)
-                .accessibilityIdentifier("settings.passwordReset")
-                SignInWithAppleButton(.signIn) { request in
-                    rawAppleNonce = AuthService.randomNonce()
-                    request.requestedScopes = [.email]
-                    request.nonce = AuthService.sha256(rawAppleNonce)
-                } onCompletion: { result in
-                    handleAppleSignIn(result)
-                }
-                .frame(height: 44)
-                .disabled(!accountActionsEnabled)
-                .accessibilityIdentifier("settings.appleSignIn")
-
-                HStack(spacing: BTSpacing.md) {
+            } else {
+                BTCard {
+                    BTSectionHeader(title: "Guest mode", subtitle: "Cloud accounts are hidden because provider configuration is not present in this native beta.")
                     Button("Continue as guest") {
                         model.enterGuestDemo()
                     }
                     .buttonStyle(BTSecondaryButtonStyle())
                     .accessibilityIdentifier("settings.continueAsGuest")
-
-                    Button("Sign out") {
-                        model.signOut()
-                    }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .accessibilityIdentifier("settings.signOut")
                 }
             }
 
             BTCard {
-                BTSectionHeader(title: "Data", subtitle: "Export local practice summaries or clear account-related local data.")
+                BTSectionHeader(title: "Session", subtitle: "Sign out affects account state; local practice data can be cleared separately below.")
+                Button("Sign out") {
+                    model.signOut()
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("settings.signOut")
+            }
+
+            BTCard {
+                BTSectionHeader(title: "Data", subtitle: "Export local practice summaries or clear sessions and scores on this device.")
                 ShareLink(item: model.exportDataText()) {
                     Label("Export local data", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(BTSecondaryButtonStyle())
                 .accessibilityIdentifier("settings.exportData")
+
+                TextField("Type clear local data", text: $localDataConfirmation)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("settings.localDataConfirmation")
+
+                Button(role: .destructive) {
+                    model.clearLocalPracticeData()
+                } label: {
+                    Label("Clear local practice data", systemImage: "trash")
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .disabled(localDataConfirmation.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "clear local data")
+                .accessibilityIdentifier("settings.clearLocalData")
 
                 TextField("Type delete my account", text: $deletionConfirmation)
                     .textInputAutocapitalization(.never)
@@ -151,6 +181,10 @@ struct SettingsView: View {
                 }
             }
 
+            BTCard {
+                BTSectionHeader(title: "About", subtitle: "Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0") build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"). Scores and sample sessions are local unless you explicitly share/export.")
+            }
+
             if let error = model.lastError {
                 BTCard {
                     BTSectionHeader(title: "Status", subtitle: error.localizedDescription)
@@ -181,7 +215,7 @@ struct SettingsView: View {
 
     private var deletionHelpText: String {
         if model.authState.usesRemoteAccount {
-            return "Deletion sends the account request to cloud sync when an account session is available, then clears local sessions and credentials."
+            return "Deletion sends the account request to the account service when a session is available, then clears local sessions and credentials."
         }
         return "No remote account is active. The confirmation clears local sessions, demo ensemble state, and stored credentials on this device."
     }
@@ -249,7 +283,7 @@ struct LegalDetailView: View {
                     title: "Privacy Policy",
                     messages: [
                         "BrassTune uses account, practice, pitch, recommendation, ensemble, export, and optional recording data to provide tuning feedback and account lifecycle controls.",
-                        "Local media imports are analyzed on device; source video or audio is not uploaded by the native demo flow.",
+                        "Local score imports and sample-session data stay on this device unless you explicitly share or export them. The native beta does not upload copyrighted scores by default.",
                     ]
                 )
             case .terms:
@@ -265,7 +299,7 @@ struct LegalDetailView: View {
                     title: "Support",
                     messages: [
                         "Contact the teacher, director, or organization that provided BrassTune access.",
-                        "Include the affected screen, approximate time of the issue, account state, and whether the take was a sample or microphone session.",
+                        "Include the affected screen, approximate time of the issue, account state, and whether the issue happened during a live microphone or sample take.",
                     ]
                 )
             }

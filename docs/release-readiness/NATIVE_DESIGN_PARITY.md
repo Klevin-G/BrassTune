@@ -23,7 +23,7 @@ The native app now uses shared SwiftUI primitives for screens, cards, metric til
 ## Current Native Behavior
 
 - Home shows a beta account state and local-practice focus.
-- Practice has a prominent local sample-take tuner, microphone permission state, and saved-take actions.
+- Practice has prominent live/sample tuner controls, microphone permission state, and saved-take actions.
 - Sessions supports review and delete for local demo sessions.
 - Analytics derives metrics from local sessions.
 - Ensemble clearly labels account-required/demo state.
@@ -33,12 +33,12 @@ The native app now uses shared SwiftUI primitives for screens, cards, metric til
 
 - Native unit tests pass.
 - iPhone Debug/Release and iPad Debug simulator builds pass.
-- `BrassTuneAppUISmoke` passes the first-launch, practice, record/stop, analytics, session review, delete, and settings journey.
+- Current `BrassTuneAppUISmoke` execution is blocked before launch by CoreSimulator `SBMainWorkspace` preflight `Busy`; previous UI-smoke passes are historical until rerun.
 
 Screenshot capture instructions live in `docs/release-readiness/native-screenshots/README.md`.
 
 ## Remaining Differences
 
 - Native microphone quality is not validated on physical brass hardware.
-- Native live cloud sync and Apple account flows remain provider/config gated.
+- Native account services and Apple account flows remain provider/config gated; local practice/session evidence is not cloud-synced.
 - Visual tuning can continue after tester screenshots from real iPhone/iPad hardware.

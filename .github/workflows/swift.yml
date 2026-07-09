@@ -1,6 +1,7 @@
 name: Swift
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "swift/**"
@@ -15,7 +16,7 @@ on:
 
 jobs:
   package-and-ios:
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_SWIFT_RUNNER || '"macos-latest"') }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +28,8 @@ jobs:
       - name: Swift package tests
         working-directory: swift/BrassTuneCore
         run: swift test
+      - name: Verify native design tokens
+        run: python3 swift/BrassTuneApp/scripts/verify_design_tokens.py
       - name: Select available iPhone simulator
         id: simulator
         run: |
