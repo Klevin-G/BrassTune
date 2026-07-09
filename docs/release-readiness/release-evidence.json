@@ -3,6 +3,18 @@
   "generated_at": "2026-06-21T05:51:09Z",
   "repo": "Klevin-G/BrassTune",
   "phase": "historical_phase_1_web_production_completion",
+  "authoritative_status_2026_07_09": {
+    "see": "docs/release-readiness/RELEASE_STATUS_2026-07-09.md",
+    "web_code": "complete_and_merged_to_main",
+    "native_code": "complete_and_merged_to_main",
+    "main_sha": "7913ba9",
+    "merged_prs": [7, 8],
+    "closed_prs": [1, 6],
+    "web_deploy_decision": "blocked_on_owner: reconnect Render + Vercel GitHub integrations (repo transfer severed them) and enable GitHub Actions billing",
+    "native_store_decision": "blocked_on_owner: physical-device validation + Apple signing/TestFlight",
+    "supabase": "active_healthy_verified",
+    "note": "The current_audit_2026_07_08 block below and earlier gate files are historical June-beta evidence, not the current decision."
+  },
   "current_audit_2026_07_08": {
     "status": "historical_only_not_current_release_decision",
     "web_release_decision": "blocked",
