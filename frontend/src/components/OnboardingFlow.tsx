@@ -1,17 +1,56 @@
-import { ArrowRight, CheckCircle2, Gauge, Mic, Music2, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Gauge, Mic, Music2, Palette, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { InstrumentSelector } from './InstrumentSelector';
+import { ThemeSelector } from './ThemeSelector';
 import { SelectionChip } from './ui/AppPrimitives';
 
 const steps = [
+  { title: 'Welcome to BrassTune', icon: Sparkles },
   { title: 'Choose your brass voice', icon: Music2 },
   { title: 'Set the reference pitch', icon: SlidersHorizontal },
   { title: 'Pick the input mode', icon: Mic },
   { title: 'Read the lock status', icon: Gauge },
+  { title: 'Make it yours', icon: Palette },
   { title: 'Record the first take', icon: CheckCircle2 },
 ];
+
+/** A small animated tuner gauge shown on the welcome step. */
+function TunerPreview() {
+  return (
+    <div className="onboarding-hero" aria-hidden="true">
+      <svg viewBox="0 0 240 140" className="onboarding-gauge" role="presentation">
+        <defs>
+          <linearGradient id="ob-arc" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="var(--red)" />
+            <stop offset="0.5" stopColor="var(--green)" />
+            <stop offset="1" stopColor="var(--red)" />
+          </linearGradient>
+        </defs>
+        <path d="M24 122 A96 96 0 0 1 216 122" fill="none" stroke="var(--line)" strokeWidth="14" strokeLinecap="round" />
+        <path d="M24 122 A96 96 0 0 1 216 122" fill="none" stroke="url(#ob-arc)" strokeWidth="4" strokeLinecap="round" opacity="0.85" />
+        {[-60, -40, -20, 0, 20, 40, 60].map((deg) => (
+          <line
+            key={deg}
+            x1="120"
+            y1="34"
+            x2="120"
+            y2={deg === 0 ? '20' : '26'}
+            stroke={deg === 0 ? 'var(--green)' : 'var(--muted-2)'}
+            strokeWidth={deg === 0 ? 3 : 2}
+            transform={`rotate(${deg} 120 122)`}
+          />
+        ))}
+        <g className="onboarding-needle">
+          <line x1="120" y1="122" x2="120" y2="40" stroke="var(--gold-soft)" strokeWidth="4" strokeLinecap="round" />
+          <circle cx="120" cy="122" r="8" fill="var(--gold)" />
+        </g>
+      </svg>
+      <span className="onboarding-hero-note">A4 · 440 Hz</span>
+    </div>
+  );
+}
 
 export function OnboardingFlow() {
   const {
@@ -74,6 +113,8 @@ export function OnboardingFlow() {
     completeOnboarding();
   };
 
+  const lastStep = steps.length - 1;
+
   return (
     <div className="onboarding-backdrop" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" ref={dialogRef}>
       <section className="onboarding-panel">
@@ -90,21 +131,33 @@ export function OnboardingFlow() {
             <CurrentIcon size={20} />
           </span>
           <div>
-            <p className="eyebrow">First-run setup {progress}</p>
+            <p className="eyebrow">{step === 0 ? 'Quick tour' : 'First-run setup'} {progress}</p>
             <h2 id="onboarding-title">{steps[step].title}</h2>
           </div>
         </div>
 
         {step === 0 && (
           <div className="onboarding-step">
-            <p>BrassTune uses your selected instrument to transpose concert pitch into written notes and to reject pitches outside the expected range.</p>
-            <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
+            <TunerPreview />
+            <p>BrassTune listens as you play, shows how sharp or flat each note is in real time, and remembers the notes you keep missing so your practice actually improves. This 60-second tour gets you set up.</p>
+            <div className="onboarding-facts">
+              <span><Music2 size={15} /> Live tuner</span>
+              <span><Gauge size={15} /> Note-by-note accuracy</span>
+              <span><Sparkles size={15} /> Progress that sticks</span>
+            </div>
           </div>
         )}
 
         {step === 1 && (
           <div className="onboarding-step">
-            <p>A4 defaults to 440 Hz. Change it only when your ensemble or drone uses a different reference.</p>
+            <p>Pick your instrument so BrassTune transposes concert pitch into the notes you actually read, and ignores pitches outside its range.</p>
+            <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="onboarding-step">
+            <p>A4 defaults to 440 Hz. Only change it if your ensemble or drone tunes to a different reference.</p>
             <label className="field">
               <span>A4 reference</span>
               <input type="number" min={430} max={450} step={0.5} value={referencePitch} onChange={(event) => setReferencePitch(Number(event.target.value))} />
@@ -112,9 +165,9 @@ export function OnboardingFlow() {
           </div>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <div className="onboarding-step">
-            <p>Guided mode provides repeatable practice tones. Microphone mode is for live tuning during physical practice.</p>
+            <p>Guided mode plays repeatable practice tones. Microphone mode listens to you live as you play.</p>
             <div className="chip-row">
               <SelectionChip active={demoMode} onClick={() => setDemoMode(true)} tone="gold">Guided mode</SelectionChip>
               <SelectionChip active={!demoMode} onClick={() => setDemoMode(false)} tone="green">Microphone mode</SelectionChip>
@@ -122,24 +175,32 @@ export function OnboardingFlow() {
           </div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="onboarding-step">
+            <p>Two labels tell you what the tuner is doing so you can trust every reading:</p>
             <div className="insight-grid">
               <article className="insight-card tone-amber">
                 <h3>No lock</h3>
-                <p>The detector confidence is too low, so the frame is not saved into analytics.</p>
+                <p>Confidence is too low to trust the note, so that frame is left out of your analytics.</p>
               </article>
               <article className="insight-card tone-green">
                 <h3>Unstable pitch</h3>
-                <p>The detector has a reliable lock, but your cents values vary over time enough to flag stability work.</p>
+                <p>The note is locked in, but your cents wander enough to flag as stability work.</p>
               </article>
             </div>
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div className="onboarding-step">
-            <p>Start with a 30-second long-tone take. The tuner is useful now, but the product value comes from learning which notes you consistently miss.</p>
+            <p>Choose a look that's easy on your eyes -- bright white, warm daylight, or a dark studio. You can change it anytime in Settings.</p>
+            <ThemeSelector />
+          </div>
+        )}
+
+        {step === lastStep && (
+          <div className="onboarding-step">
+            <p>You're set. Start with a 30-second long tone -- the tuner helps right away, and the real payoff is seeing which notes you consistently miss.</p>
             <div className="onboarding-callout">
               <strong>{instrumentId}</strong>
               <span>A4 {referencePitch} Hz · {demoMode ? 'Guided audio' : 'Microphone mode'}</span>
@@ -149,7 +210,7 @@ export function OnboardingFlow() {
 
         <div className="onboarding-actions">
           <button className="ghost-button" type="button" onClick={skip}>
-            Skip
+            Skip tour
           </button>
           <div>
             {step > 0 && (
@@ -157,9 +218,9 @@ export function OnboardingFlow() {
                 Back
               </button>
             )}
-            {step < steps.length - 1 ? (
+            {step < lastStep ? (
               <button className="primary-button" type="button" onClick={() => setStep((value) => value + 1)}>
-                Next
+                {step === 0 ? 'Start tour' : 'Next'}
                 <ArrowRight size={18} />
               </button>
             ) : (

@@ -76,7 +76,7 @@ test('root gateway starts guest practice and persists theme selection', async ({
   await page.addInitScript(() => localStorage.removeItem('brasstune.guestAccess'));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /sign in or start a guest practice session/i })).toBeVisible();
-  await page.getByLabel(/theme/i).selectOption('brass-day');
+  await page.locator('label[data-theme-swatch="brass-day"]').click();
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('brass-day');
   await page.reload();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.theme'))).toBe('brass-day');
@@ -89,7 +89,7 @@ test('root gateway starts guest practice and persists theme selection', async ({
 test('onboarding traps keyboard focus and closes with Escape', async ({ page }) => {
   await page.goto('/settings');
   await page.getByRole('button', { name: /reopen onboarding/i }).click();
-  const dialog = page.getByRole('dialog', { name: /choose your brass voice/i });
+  const dialog = page.getByRole('dialog', { name: /welcome to brasstune/i });
   await expect(dialog).toBeVisible();
   await expect(page.getByRole('button', { name: /close onboarding/i })).toBeFocused();
   await page.keyboard.press('Escape');

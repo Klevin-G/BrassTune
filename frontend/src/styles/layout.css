@@ -14,7 +14,7 @@
   height: 100vh;
   padding: 20px 14px;
   border-right: 1px solid var(--line);
-  background: rgba(5, 8, 13, 0.78);
+  background: var(--chrome-bg);
   backdrop-filter: blur(var(--glass-blur));
 }
 
@@ -88,7 +88,7 @@
   gap: 10px;
   min-height: var(--tap);
   padding: 0 12px;
-  color: #bac7d3;
+  color: var(--muted);
   border: 1px solid transparent;
   border-radius: 17px;
   transition:
@@ -126,7 +126,7 @@
   min-height: 76px;
   padding: 14px 28px;
   border-bottom: 1px solid var(--line);
-  background: rgba(7, 10, 15, 0.72);
+  background: var(--chrome-bg);
   backdrop-filter: blur(var(--glass-blur));
 }
 
@@ -248,9 +248,7 @@
   max-width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgba(23, 35, 48, 0.86), rgba(11, 17, 24, 0.86)),
-    rgba(255, 255, 255, 0.025);
+  background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
 

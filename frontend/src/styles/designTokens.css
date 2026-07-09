@@ -39,6 +39,12 @@
   --radius-xl: 28px;
   --tap: 44px;
   --content-max: 1480px;
+  /* Theme-driven surfaces so light themes render light cards (see brass-day/brass-white). */
+  --surface: linear-gradient(180deg, rgba(23, 35, 48, 0.86), rgba(11, 17, 24, 0.86)), rgba(255, 255, 255, 0.025);
+  --surface-raised: linear-gradient(180deg, rgba(21, 32, 45, 0.94), rgba(8, 13, 20, 0.94));
+  --surface-sunken: rgba(6, 10, 15, 0.72);
+  --surface-menu: rgba(9, 14, 21, 0.98);
+  --chrome-bg: rgba(7, 10, 15, 0.74);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -78,6 +84,51 @@
   --body-gradient-bottom: #ece4d4;
   --grid-line-y: rgba(23, 32, 42, 0.05);
   --grid-line-x: rgba(23, 32, 42, 0.04);
+  --surface: linear-gradient(180deg, rgba(255, 251, 243, 0.97), rgba(247, 240, 226, 0.94)), #fffaf0;
+  --surface-raised: linear-gradient(180deg, #fffaf0, #f3ead8);
+  --surface-sunken: rgba(238, 229, 211, 0.72);
+  --surface-menu: #fffaf0;
+  --chrome-bg: rgba(255, 250, 240, 0.84);
+}
+
+[data-theme='brass-white'] {
+  color-scheme: light;
+  background: #ffffff;
+  color: #10151b;
+  --bg: #ffffff;
+  --bg-elevated: #ffffff;
+  --panel: rgba(255, 255, 255, 0.92);
+  --panel-solid: #ffffff;
+  --panel-strong: #eef1f5;
+  --panel-warm: rgba(244, 246, 249, 0.94);
+  --line: rgba(16, 21, 27, 0.12);
+  --line-strong: rgba(176, 125, 22, 0.34);
+  --text: #10151b;
+  --muted: #55606d;
+  --muted-2: #7c8794;
+  --gold: #b07d16;
+  --gold-soft: #c68f1f;
+  --gold-dim: #8a621d;
+  --green: #1f8043;
+  --teal: #12796a;
+  --amber: #8a6410;
+  --orange: #a24e14;
+  --red: #c0342f;
+  --blue: #1f6fb0;
+  --shadow: 0 22px 54px rgba(15, 23, 42, 0.1);
+  --shadow-soft: 0 12px 26px rgba(15, 23, 42, 0.08);
+  --body-glow-gold: rgba(197, 143, 31, 0.1);
+  --body-glow-accent: rgba(18, 121, 106, 0.06);
+  --body-gradient-top: #ffffff;
+  --body-gradient-mid: #fbfcfd;
+  --body-gradient-bottom: #f2f4f7;
+  --grid-line-y: rgba(16, 21, 27, 0.04);
+  --grid-line-x: rgba(16, 21, 27, 0.03);
+  --surface: linear-gradient(180deg, #ffffff, #f7f9fb);
+  --surface-raised: linear-gradient(180deg, #ffffff, #eff3f8);
+  --surface-sunken: #f2f5f8;
+  --surface-menu: #ffffff;
+  --chrome-bg: rgba(255, 255, 255, 0.86);
 }
 
 [data-theme='liquid-clear'] {
@@ -130,6 +181,11 @@
   --body-gradient-bottom: #000;
   --grid-line-y: rgba(255, 255, 255, 0.12);
   --grid-line-x: rgba(255, 255, 255, 0.1);
+  --surface: #0a0a0a;
+  --surface-raised: #0d0d0d;
+  --surface-sunken: #050505;
+  --surface-menu: #0a0a0a;
+  --chrome-bg: #000000;
 }
 
 * {
