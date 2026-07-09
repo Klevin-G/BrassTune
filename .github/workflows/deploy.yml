@@ -60,7 +60,7 @@ jobs:
     timeout-minutes: 20
     environment: production
     env:
-      BRASSTUNE_API_BASE_URL: ${{ vars.BRASSTUNE_API_BASE_URL || 'https://brasstune.onrender.com' }}
+      BRASSTUNE_API_BASE_URL: ${{ vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4

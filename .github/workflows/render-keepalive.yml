@@ -26,7 +26,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.BRASSTUNE_RENDER_KEEPALIVE_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 5
     env:
-      DEFAULT_RENDER_KEEPALIVE_URL: https://brasstune.onrender.com/api/live
+      DEFAULT_RENDER_KEEPALIVE_URL: https://brasstune-u8qj.onrender.com/api/live
       INPUT_HEALTH_URL: ${{ github.event.inputs.health_url }}
       SECRET_HEALTH_URL: ${{ secrets.RENDER_KEEPALIVE_URL }}
       VAR_HEALTH_URL: ${{ vars.RENDER_KEEPALIVE_URL }}

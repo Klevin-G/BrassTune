@@ -10,7 +10,7 @@
 - [P0] Owner-approved Render deployment before production beta smoke
   - Owner type: owner/provider
   - Acceptance criteria: Render serves the branch's WebSocket hardening; hosted smoke passes root, health, CORS, basic WS, query-token rejection, and bad-Origin rejection.
-  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` after owner-approved deploy.
+  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_WEB_ACCESS_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted` after owner-approved deploy.
 
 - [P1] Keep release docs non-contradictory
   - Owner type: repo
@@ -22,7 +22,7 @@
 - [P0] Run post-merge production smoke before inviting testers
   - Owner type: provider
   - Acceptance criteria: production Vercel and Render are on the merged commit; root, deep links, health, CORS, WebSocket, legal routes, export surfaces, and no-localhost checks pass.
-  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` or a green `.github/workflows/production-smoke.yml` run.
+  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted` or a green `.github/workflows/production-smoke.yml` run.
 
 - [P0] Validate live Supabase auth and account lifecycle with disposable users
   - Owner type: provider
@@ -37,7 +37,7 @@
 - [P2] Unblock protected Vercel preview browser automation
   - Owner type: provider
   - Acceptance criteria: protected Vercel previews can be exercised by Playwright through an owner-approved bypass/share/public-preview decision.
-  - Verification command or evidence: `cd frontend && E2E_BASE_URL=<preview> E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted -- --project=chromium`.
+  - Verification command or evidence: `cd frontend && E2E_BASE_URL=<preview> E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted -- --project=chromium`.
 
 - [P2] Improve teacher/student beta depth with real test personas
   - Owner type: product

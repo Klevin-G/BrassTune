@@ -259,7 +259,7 @@ Repo-side deployment scaffolding is included:
 - `supabase/migrations/20260617_brasstune_production_readiness.sql`
 - `docs/deployment.md`
 
-The expected hosted backend URL is `https://brasstune.onrender.com`. Set `VITE_API_BASE_URL` and `VITE_WS_BASE_URL` in Vercel for phone testing.
+The expected hosted backend URL is `https://brasstune-u8qj.onrender.com`. Set `VITE_API_BASE_URL` and `VITE_WS_BASE_URL` in Vercel for phone testing.
 
 ## Known Limitations
 

@@ -35,8 +35,8 @@ Set these Vercel env vars:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
-- `VITE_API_BASE_URL=https://brasstune.onrender.com`
-- `VITE_WS_BASE_URL=wss://brasstune.onrender.com`
+- `VITE_API_BASE_URL=https://brasstune-u8qj.onrender.com`
+- `VITE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com`
 
 Do not set backend secret keys as `VITE_` variables.
 
@@ -45,8 +45,8 @@ Production and preview variables should be scoped deliberately in Vercel. Change
 Recommended production values:
 
 ```text
-VITE_API_BASE_URL=https://brasstune.onrender.com
-VITE_WS_BASE_URL=wss://brasstune.onrender.com
+VITE_API_BASE_URL=https://brasstune-u8qj.onrender.com
+VITE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com
 VITE_SUPABASE_URL=<supabase project url>
 VITE_SUPABASE_PUBLISHABLE_KEY=<publishable key only>
 ```
@@ -77,25 +77,25 @@ Required Render env vars:
 Liveness check for Render:
 
 ```text
-https://brasstune.onrender.com/api/live
+https://brasstune-u8qj.onrender.com/api/live
 ```
 
 Release readiness check:
 
 ```text
-https://brasstune.onrender.com/api/ready
+https://brasstune-u8qj.onrender.com/api/ready
 ```
 
 Version identity check:
 
 ```text
-https://brasstune.onrender.com/api/version
+https://brasstune-u8qj.onrender.com/api/version
 ```
 
 WebSocket:
 
 ```text
-wss://brasstune.onrender.com/ws/pitch
+wss://brasstune-u8qj.onrender.com/ws/pitch
 ```
 
 WebSocket Origin checks use explicit `CORS_ALLOWED_ORIGINS`/`FRONTEND_ORIGIN` entries, not `CORS_ALLOWED_ORIGIN_REGEX`. Include `https://brass-tune.vercel.app` and any owner-approved preview/share origins explicitly when WebSocket smoke must pass from those hosts.
@@ -113,7 +113,7 @@ The backend exposes `POST /api/maintenance/account-deletions/retry` for retryabl
 `.github/workflows/render-keepalive.yml` pings the Render liveness endpoint every 10 minutes and on manual dispatch. The default URL is:
 
 ```text
-https://brasstune.onrender.com/api/live
+https://brasstune-u8qj.onrender.com/api/live
 ```
 
 Optional overrides:
@@ -146,8 +146,8 @@ The hosted production smoke workflow lives at `.github/workflows/production-smok
 
 ```bash
 BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app \
-BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com \
-BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com \
+BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
+BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
 npm run smoke:hosted
 ```
 

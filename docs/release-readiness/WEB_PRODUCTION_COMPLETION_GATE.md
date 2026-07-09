@@ -33,7 +33,7 @@ Phase 1 web/backend production certification was complete for the June guest-fir
 | Vercel production SHA | `6acb91d54a734e722ed937590aecb51dec53543c` |
 | Vercel production aliases | `brass-tune.vercel.app`, `brass-tune-aryaswebsites.vercel.app`, `brass-tune-git-main-aryaswebsites.vercel.app` |
 | Render deployment ID | Not exposed by available tooling; production backend was verified live by new API security headers and hosted smoke after the merge. |
-| Render production evidence | `https://brasstune.onrender.com/api/health` returned `200` with `content-security-policy`, `permissions-policy`, `strict-transport-security`, `x-content-type-options`, and `x-frame-options`; observed `rndr-id` `3d161b7d-d73f-4d77`. |
+| Render production evidence | `https://brasstune-u8qj.onrender.com/api/health` returned `200` with `content-security-policy`, `permissions-policy`, `strict-transport-security`, `x-content-type-options`, and `x-frame-options`; observed `rndr-id` `3d161b7d-d73f-4d77`. |
 | Rollback target | Vercel previous production deployment `dpl_2T68p4MQo8VbbAst4f7gnbHKitnP`; earlier baseline rollback candidate `dpl_9edFrpDGQgTgaaXNCUXJdKDMwwct` remains visible in Vercel history. |
 
 ## Local And CI Evidence

@@ -79,7 +79,7 @@ No secret values were printed or committed. Local/example config names observed:
 | Browser | `cd frontend && npm run e2e:local` | Current CI-repair command passed: `30 passed` across Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. Hosted smoke is now an explicit command. |
 | Device simulation | `cd frontend && npm run simulate:devices` | Passed and updated `docs/device-simulation-report.md` plus screenshots. |
 | Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3 tests`. |
-| Hosted production smoke | `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com npm run smoke:hosted` | Passed for root, health, CORS, and WebSocket upgrade/app response. |
+| Hosted production smoke | `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted` | Passed for root, health, CORS, and WebSocket upgrade/app response. |
 | Hosted preview smoke | `BRASSTUNE_WEB_BASE_URL=https://brass-tune-git-arya-release-readiness-hardening-aryaswebsites.vercel.app ... npm run smoke:hosted` | Passed with protected-page skips: `15 passed`, `20 skipped`; health, CORS, and raw WebSocket upgrade passed. |
 | Native project list | `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj` | Passed; schemes `BrassTuneApp`, `BrassTuneAppUISmoke`, `BrassTuneCore`. |
 | Native unit | `xcodebuild test ... -only-testing:BrassTuneAppTests` | Current post-fix pass on iPhone 17 Pro simulator: `3` tests. |
@@ -96,6 +96,6 @@ No secret values were printed or committed. Local/example config names observed:
 |---|---|---|
 | Vercel root | `curl -IL --max-time 30 https://brass-tune.vercel.app` | Passed: `HTTP/2 200`, `server: Vercel`. |
 | Vercel deep link | `curl -IL --max-time 30 https://brass-tune.vercel.app/settings` | Passed: `HTTP/2 200`, `filename="index.html"`. |
-| Render health | `curl -fsS --max-time 70 https://brasstune.onrender.com/api/health` | Passed after cold start: `{"ok":true,"service":"BrassTune Analytics API"}`. |
+| Render health | `curl -fsS --max-time 70 https://brasstune-u8qj.onrender.com/api/health` | Passed after cold start: `{"ok":true,"service":"BrassTune Analytics API"}`. |
 | Render CORS | `OPTIONS /api/health` from Vercel origin | Passed after warmup: `access-control-allow-origin: https://brass-tune.vercel.app`. |
-| Hosted WebSocket handshake | Node `WebSocket('wss://brasstune.onrender.com/ws/pitch')` ping probe | Initially failed with Uvicorn missing WebSocket protocol support; fixed by `uvicorn[standard]` and verified after Render deploy `dep-d8q7296gvqtc73a0djm0`. |
+| Hosted WebSocket handshake | Node `WebSocket('wss://brasstune-u8qj.onrender.com/ws/pitch')` ping probe | Initially failed with Uvicorn missing WebSocket protocol support; fixed by `uvicorn[standard]` and verified after Render deploy `dep-d8q7296gvqtc73a0djm0`. |

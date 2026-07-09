@@ -28,3 +28,5 @@ swift/**/*.xcodeproj/xcuserdata/
 skills-lock.json
 .vercel/
 **/.vercel/
+.vercel
+.env*

@@ -21,7 +21,7 @@ Use disposable data only.
 - If a preview URL shows Vercel Authentication, use production or an owner-approved share/bypass URL.
 - If the app appears stale, hard refresh or clear site data for the tested URL.
 - If microphone access fails, confirm the browser is on HTTPS and the OS/browser permission is allowed.
-- If live tuning is unavailable, capture whether `/api/health` works and whether Audio Lab shows `wss://brasstune.onrender.com`.
+- If live tuning is unavailable, capture whether `/api/health` works and whether Audio Lab shows `wss://brasstune-u8qj.onrender.com`.
 - If sign-up/reset does not send email, stop auth testing and check Supabase email/SMTP/provider configuration with the owner.
 - If Apple sign-in fails, record the visible error and stop; do not retry with personal Apple IDs until the provider setup is confirmed.
 

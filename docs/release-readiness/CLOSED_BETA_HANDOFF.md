@@ -5,9 +5,9 @@ Status: web/backend closed-beta production path deployed and smoke-passed in gue
 ## Tester URLs
 
 - Production web URL: `https://brass-tune.vercel.app`
-- Backend API: `https://brasstune.onrender.com`
-- Backend health: `https://brasstune.onrender.com/api/health`
-- WebSocket endpoint: `wss://brasstune.onrender.com/ws/pitch`
+- Backend API: `https://brasstune-u8qj.onrender.com`
+- Backend health: `https://brasstune-u8qj.onrender.com/api/health`
+- WebSocket endpoint: `wss://brasstune-u8qj.onrender.com/ws/pitch`
 
 The old branch preview may require Vercel Authentication and should not be the primary tester URL now that PR #2 is merged.
 

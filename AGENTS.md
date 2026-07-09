@@ -18,7 +18,7 @@ BrassTune is a brass-practice analytics product with a React/Vite web app, FastA
 - Frontend build/typecheck: `cd frontend && npm run build`.
 - Frontend dependency audit: `cd frontend && npm audit --omit=dev`.
 - Local browser journeys: `cd frontend && npm run e2e:local`.
-- Hosted read-only smoke: `cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted`.
+- Hosted read-only smoke: `cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted`.
 - Device simulation: `cd frontend && npm run simulate:devices`.
 - Swift package tests: `cd swift/BrassTuneCore && swift test`.
 - Native app schemes: `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj`.
@@ -107,7 +107,7 @@ Run/dev commands:
 
 Deployment commands:
 - Vercel frontend and Render backend deploy through configured workflows; do not change production config or secrets without approval.
-- cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com npm run e2e:hosted
+- cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted
 
 Coding and safety conventions:
 - Never commit env files, Supabase service keys, Vercel tokens, Render hooks, Apple credentials, recordings, local DBs, Playwright traces, or Xcode derived data.

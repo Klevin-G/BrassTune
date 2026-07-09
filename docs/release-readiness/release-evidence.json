@@ -155,7 +155,7 @@
     {
       "id": "strict-hosted-playwright",
       "gate": "Strict hosted browser smoke",
-      "command": "cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune.onrender.com E2E_WS_BASE_URL=wss://brasstune.onrender.com E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted -- --project=chromium",
+      "command": "cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted -- --project=chromium",
       "status": "passed",
       "result": "7 passed"
     },

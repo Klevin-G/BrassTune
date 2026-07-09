@@ -11,7 +11,7 @@ const approvedVercelHosts = new Set([
   'brass-tune.vercel.app',
   'brass-tune-aryaswebsites.vercel.app',
 ]);
-const approvedRenderHost = 'brasstune.onrender.com';
+const approvedRenderHost = 'brasstune-u8qj.onrender.com';
 
 const forwardedArgs = process.argv.slice(2).filter((arg) => arg !== '--strict');
 const strictMode = process.argv.slice(2).includes('--strict');

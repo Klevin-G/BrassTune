@@ -3,9 +3,9 @@ import net from 'node:net';
 import tls from 'node:tls';
 
 const DEFAULT_WEB_BASE_URL = 'https://brass-tune.vercel.app';
-const DEFAULT_API_BASE_URL = 'https://brasstune.onrender.com';
-const DEFAULT_WS_BASE_URL = 'wss://brasstune.onrender.com';
-const APPROVED_RENDER_HOST = 'brasstune.onrender.com';
+const DEFAULT_API_BASE_URL = 'https://brasstune-u8qj.onrender.com';
+const DEFAULT_WS_BASE_URL = 'wss://brasstune-u8qj.onrender.com';
+const APPROVED_RENDER_HOST = 'brasstune-u8qj.onrender.com';
 const APPROVED_VERCEL_HOSTS = new Set([
   'brass-tune.vercel.app',
   'brass-tune-aryaswebsites.vercel.app',

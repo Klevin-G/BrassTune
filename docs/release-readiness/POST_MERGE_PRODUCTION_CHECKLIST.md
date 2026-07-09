@@ -14,7 +14,7 @@ Precondition: the latest PR #2 head must have green Backend, Frontend, Security,
    git rev-parse HEAD
    ```
 2. Confirm Vercel production deployment is ready for the merged `main` commit in the Vercel dashboard or GitHub deployment status.
-3. Confirm Render backend deploy state and commit in Render. The backend service is `https://brasstune.onrender.com`.
+3. Confirm Render backend deploy state and commit in Render. The backend service is `https://brasstune-u8qj.onrender.com`.
 4. Confirm the owner has recorded remaining external blockers in `HUMAN_ACTIONS.md`.
 5. Confirm production deploy uses the repo-root GitHub workflow path. The root `vercel.json` builds `frontend`; do not assume the GitHub production deploy should run from `frontend`.
 6. Confirm required secret names exist without printing values: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_API_BASE_URL`, `VITE_WS_BASE_URL`, Supabase frontend vars, and the Render deploy hook.
@@ -27,8 +27,8 @@ Run from the repo root:
 
 ```bash
 BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app \
-BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com \
-BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com \
+BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
+BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
 npm run smoke:hosted
 ```
 
@@ -37,8 +37,8 @@ Manual HTTP checks:
 ```bash
 curl -IL --max-time 30 https://brass-tune.vercel.app
 curl -IL --max-time 30 https://brass-tune.vercel.app/settings
-curl -fsS --max-time 70 https://brasstune.onrender.com/api/health
-curl -i -X OPTIONS https://brasstune.onrender.com/api/health \
+curl -fsS --max-time 70 https://brasstune-u8qj.onrender.com/api/health
+curl -i -X OPTIONS https://brasstune-u8qj.onrender.com/api/health \
   -H "Origin: https://brass-tune.vercel.app" \
   -H "Access-Control-Request-Method: GET"
 ```
@@ -56,7 +56,7 @@ curl -i -X OPTIONS https://brasstune.onrender.com/api/health \
 9. Confirm mobile viewport layout.
 10. Confirm denied microphone state is understandable.
 11. Confirm no browser request goes to `localhost` or `127.0.0.1`.
-12. Confirm WebSocket uses `wss://brasstune.onrender.com/ws/pitch`.
+12. Confirm WebSocket uses `wss://brasstune-u8qj.onrender.com/ws/pitch`.
 13. Confirm no provider secrets or private env values appear in built client output.
 
 Suggested production hosted browser run after deployment:
@@ -65,8 +65,8 @@ Suggested production hosted browser run after deployment:
 cd frontend
 E2E_START_LOCAL_SERVERS=0 \
 E2E_BASE_URL=https://brass-tune.vercel.app \
-E2E_API_BASE_URL=https://brasstune.onrender.com \
-E2E_WS_BASE_URL=wss://brasstune.onrender.com \
+E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com \
+E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
 npm run e2e:hosted
 ```
 
@@ -76,8 +76,8 @@ Strict production content check after this branch is deployed:
 cd frontend
 E2E_START_LOCAL_SERVERS=0 \
 E2E_BASE_URL=https://brass-tune.vercel.app \
-E2E_API_BASE_URL=https://brasstune.onrender.com \
-E2E_WS_BASE_URL=wss://brasstune.onrender.com \
+E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com \
+E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
 npm run e2e:hosted:strict
 ```
 

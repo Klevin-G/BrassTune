@@ -19,8 +19,12 @@ services:
         sync: false
       - key: CORS_ALLOWED_ORIGIN_REGEX
         sync: false
+      - key: BRASSTUNE_ALLOW_CORS_REGEX
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
       - key: BACKEND_PUBLIC_URL
-        value: https://brasstune.onrender.com
+        value: https://brasstune-u8qj.onrender.com
       - key: BRASSTUNE_DATABASE_URL
         sync: false
       - key: BRASSTUNE_RELEASE_SHA

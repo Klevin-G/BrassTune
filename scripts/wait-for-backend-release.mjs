@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'https://brasstune.onrender.com';
+const DEFAULT_API_BASE_URL = 'https://brasstune-u8qj.onrender.com';
 const apiBaseURL = cleanBase(process.env.BRASSTUNE_API_BASE_URL || DEFAULT_API_BASE_URL);
 const expectedSHA = process.env.BRASSTUNE_EXPECTED_BACKEND_SHA || process.env.GITHUB_SHA || '';
 const timeoutMs = positiveInt(process.env.BRASSTUNE_RELEASE_WAIT_TIMEOUT_MS, 10 * 60 * 1000);

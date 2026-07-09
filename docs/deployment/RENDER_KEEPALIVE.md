@@ -10,7 +10,7 @@ Workflow: `.github/workflows/render-keepalive.yml`
 
 - Schedule: `*/10 * * * *`
 - Manual trigger: `workflow_dispatch`
-- Endpoint: `https://brasstune.onrender.com/api/live`
+- Endpoint: `https://brasstune-u8qj.onrender.com/api/live`
 - Secrets: none required by default
 - Data mutation: none
 - Overlap protection: workflow concurrency group `render-keepalive`
@@ -20,7 +20,7 @@ The workflow prints only safe status information and fails if the liveness endpo
 ## Manual Verification
 
 ```bash
-curl --fail --silent --show-error --max-time 20 https://brasstune.onrender.com/api/live
+curl --fail --silent --show-error --max-time 20 https://brasstune-u8qj.onrender.com/api/live
 ```
 
 ## Disable
@@ -40,7 +40,7 @@ If approved, use:
 with:
 
 ```bash
-curl --fail --silent --show-error --max-time 20 https://brasstune.onrender.com/api/live
+curl --fail --silent --show-error --max-time 20 https://brasstune-u8qj.onrender.com/api/live
 ```
 
 Render Free can still restart, spin down, or hit usage limits. Paid Render is the clean always-on solution.

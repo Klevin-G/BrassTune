@@ -18,14 +18,14 @@ Run only against owner-approved production or staging URLs. Keep volume low enou
 1. Hosted baseline:
    ```bash
    BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app \
-   BRASSTUNE_API_BASE_URL=https://brasstune.onrender.com \
-   BRASSTUNE_WS_BASE_URL=wss://brasstune.onrender.com \
+   BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
+   BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
    npm run smoke:hosted
    ```
 2. Health burst, low volume:
    ```bash
    for i in $(seq 1 10); do
-     curl -fsS --max-time 30 https://brasstune.onrender.com/api/health >/dev/null &
+     curl -fsS --max-time 30 https://brasstune-u8qj.onrender.com/api/health >/dev/null &
    done
    wait
    ```

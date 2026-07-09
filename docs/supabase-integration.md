@@ -96,7 +96,7 @@ supabase/migrations/20260625_invitation_fk_indexes.sql
 
 `20260616_brasstune_baseline.sql` is the clean-database schema baseline. `20260617_brasstune_production_readiness.sql` remains additive for existing deployments, `20260618_lock_down_rls_auto_enable.sql` revokes public execution from the drifted helper RPC reported by Supabase advisors, `20260620_account_deletion_and_membership_windows.sql` adds account deletion and membership-window schema, and `20260625_invitation_fk_indexes.sql` adds the missing invitation foreign-key indexes reported by Supabase advisors.
 
-As of the 2026-07-04 provider gate, the connected project `uvbcvqupelcrncyhqsrq` records all five migrations. The June 20 and June 25 migrations were applied through Supabase migration history as `20260704022241` and `20260704022304` after a zero-row production safety snapshot.
+As of the 2026-07-04 provider gate, the connected project `yznziwewxrlwnwiynlvl` records all five migrations. The June 20 and June 25 migrations were applied through Supabase migration history as `20260704022241` and `20260704022304` after a zero-row production safety snapshot.
 
 Post-apply verification showed:
 

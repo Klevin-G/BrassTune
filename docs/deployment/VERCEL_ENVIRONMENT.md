@@ -5,8 +5,8 @@ Status: required before real account/sync testing.
 ## Required Frontend Variables
 
 ```text
-VITE_API_BASE_URL=https://brasstune.onrender.com
-VITE_WS_BASE_URL=wss://brasstune.onrender.com
+VITE_API_BASE_URL=https://brasstune-u8qj.onrender.com
+VITE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com
 VITE_SUPABASE_URL=<from Supabase>
 VITE_SUPABASE_PUBLISHABLE_KEY=<from Supabase>
 ```

@@ -14,12 +14,12 @@ on:
       api_base_url:
         description: Backend API base URL
         required: false
-        default: https://brasstune.onrender.com
+        default: https://brasstune-u8qj.onrender.com
         type: string
       ws_base_url:
         description: Backend WebSocket base URL
         required: false
-        default: wss://brasstune.onrender.com
+        default: wss://brasstune-u8qj.onrender.com
         type: string
 permissions:
   contents: read
@@ -37,8 +37,8 @@ jobs:
     environment: production
     env:
       BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brass-tune.vercel.app' }}
-      BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune.onrender.com' }}
-      BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune.onrender.com' }}
+      BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
+      BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
       BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
       BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.event.workflow_run.head_sha || vars.BRASSTUNE_EXPECTED_BACKEND_SHA || github.sha }}
@@ -61,8 +61,8 @@ jobs:
       CI: "true"
       PLAYWRIGHT_HTML_OPEN: never
       BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brass-tune.vercel.app' }}
-      BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune.onrender.com' }}
-      BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune.onrender.com' }}
+      BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
+      BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
       BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:

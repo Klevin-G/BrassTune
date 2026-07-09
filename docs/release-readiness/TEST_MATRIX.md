@@ -43,7 +43,7 @@ Web production work is paused by owner direction as of 2026-07-04. The following
 | Production smoke | `npm run smoke:hosted` | Passed: `7/7` | Root, health, CORS, WebSocket app response, query-token rejection, bad-Origin rejection. |
 | Strict hosted Playwright | `E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted -- --project=chromium` | Passed: `7 passed` | Production browser smoke after final main deploy. |
 | Vercel headers | `curl -I https://brass-tune.vercel.app` | Passed | CSP, HSTS, Permissions-Policy, Referrer-Policy, `X-Content-Type-Options`. |
-| Render headers | `curl -D - -H 'Origin: https://brass-tune.vercel.app' https://brasstune.onrender.com/api/health` | Passed | API security headers observed. |
+| Render headers | `curl -D - -H 'Origin: https://brass-tune.vercel.app' https://brasstune-u8qj.onrender.com/api/health` | Passed | API security headers observed. |
 | Diff hygiene | `git diff --check` | Passed | No whitespace errors. |
 
 ## Remaining External Gates

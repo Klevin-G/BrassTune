@@ -7,7 +7,7 @@ Automated Chromium simulation verifies layout and demo recording. It does not pr
 ## Test URLs
 
 - Frontend: set after Vercel deployment
-- Backend health: `https://brasstune.onrender.com/api/health`
+- Backend health: `https://brasstune-u8qj.onrender.com/api/health`
 - Audio Lab: `/settings/audio-lab`
 
 ## Devices
