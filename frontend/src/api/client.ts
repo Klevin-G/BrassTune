@@ -296,6 +296,43 @@ export function updateEnsembleMember(groupId: number, memberId: number, payload:
   return request<any>(`/api/ensemble/groups/${groupId}/members/${memberId}`, { method: 'PATCH', body: JSON.stringify(payload) });
 }
 
+export function removeEnsembleMember(groupId: number, memberId: number) {
+  return request<{ removed: boolean }>(`/api/ensemble/groups/${groupId}/members/${memberId}`, { method: 'DELETE' });
+}
+
+export interface EnsembleRosterStudent {
+  member_id: number;
+  user_id: number;
+  username: string | null;
+  display_name: string | null;
+  instrument_id: string;
+  role_in_group: string;
+  sessions_count: number;
+  practice_minutes: number;
+  average_abs_cents: number | null;
+  in_tune_percentage: number | null;
+  last_practice_at: string | null;
+  last_active_at: string | null;
+}
+
+export function getEnsembleRoster(groupId: number) {
+  return request<{ group_id: number; students: EnsembleRosterStudent[] }>(`/api/ensemble/groups/${groupId}/roster`);
+}
+
+export interface AdminMetrics {
+  generated_at: string;
+  totals: { users: number; sessions: number; ensembles: number };
+  new_users: { last_7d: number; last_30d: number };
+  active_users: { dau: number; wau: number; mau: number };
+  sessions: { last_7d: number; last_30d: number };
+  events_30d: Record<string, number>;
+  signups_by_day: { date: string; count: number }[];
+}
+
+export function getAdminMetrics() {
+  return request<AdminMetrics>('/api/admin/metrics');
+}
+
 export function clearLocalSessions() {
   return request<{ cleared: Record<string, number> }>('/api/users/me/clear-sessions', { method: 'POST' });
 }

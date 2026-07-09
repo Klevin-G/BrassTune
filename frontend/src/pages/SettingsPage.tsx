@@ -1,4 +1,4 @@
-import { Bug, DatabaseBackup, Download, LogIn, LogOut, RefreshCcw, RotateCcw, SlidersHorizontal, Trash2, UserRound } from 'lucide-react';
+import { BarChart3, Bug, DatabaseBackup, Download, LogIn, LogOut, RefreshCcw, RotateCcw, SlidersHorizontal, Trash2, UserRound } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clearLocalSessions, downloadExport, friendlyUserFacingError, repairDemoData, resetDemoData } from '../api/client';
@@ -135,6 +135,17 @@ export function SettingsPage() {
         <SectionCard title="Appearance" eyebrow="Theme">
           <ThemeSelector />
         </SectionCard>
+        {auth.profile?.role === 'admin' && (
+          <SectionCard title="Admin" eyebrow="Private">
+            <p className="muted-copy">Usage metrics for the whole app — user counts, active users, and feature usage.</p>
+            <div className="settings-actions">
+              <Link className="primary-button" to="/admin">
+                <BarChart3 size={18} />
+                Open usage dashboard
+              </Link>
+            </div>
+          </SectionCard>
+        )}
         <SectionCard title="Practice tools" eyebrow="Device and data">
           <p className="muted-copy">Microphone diagnostics, reopening the setup tour, exports, and clearing device data.</p>
           <div className="settings-actions">

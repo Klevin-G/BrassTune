@@ -5,6 +5,7 @@ import { useAuth } from './state/AuthContext';
 import { AuthGatewayPage } from './pages/AuthGatewayPage';
 import { AuthPage } from './pages/AuthPage';
 
+const AdminMetricsPage = lazy(() => import('./pages/AdminMetricsPage').then((module) => ({ default: module.AdminMetricsPage })));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })));
 const AudioLabPage = lazy(() => import('./pages/AudioLabPage').then((module) => ({ default: module.AudioLabPage })));
 const CoachPage = lazy(() => import('./pages/CoachPage').then((module) => ({ default: module.CoachPage })));
@@ -56,6 +57,7 @@ export default function App() {
           <Route path="/ensemble" element={appRoute(<EnsemblePage />)} />
           <Route path="/settings" element={appRoute(<SettingsPage />)} />
           <Route path="/settings/audio-lab" element={appRoute(<AudioLabPage />)} />
+          <Route path="/admin" element={appRoute(<AdminMetricsPage />)} />
           <Route path="/privacy" element={<LegalPage kind="privacy" />} />
           <Route path="/terms" element={<LegalPage kind="terms" />} />
           <Route path="/support" element={<LegalPage kind="support" />} />
