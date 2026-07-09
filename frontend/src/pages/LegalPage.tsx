@@ -25,7 +25,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
         <SectionCard title="Getting help">
           <p>Students should contact the teacher, director, or organization that provided BrassTune access.</p>
           <p>For account deletion, export, sign-in, microphone permission, recording, playback, and ensemble access issues, include the affected screen and approximate time of the issue.</p>
-          <p>The public support URL and owner-operated contact channel must be supplied before App Store submission.</p>
+          <a className="primary-button" href="mailto:adam.zahaan@gmail.com?subject=BrassTune%20support">Email support</a>
         </SectionCard>
       </ScreenContainer>
     );

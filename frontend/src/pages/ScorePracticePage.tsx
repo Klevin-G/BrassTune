@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { SCORE_DOCUMENTS_DB_NAME, SCORE_DOCUMENTS_STORE_NAME } from '../domain/scoreDocuments';
-import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
+import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, sheetMusicNameHint, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
 
 interface ImportedScorePage {
   id: string;
@@ -403,7 +403,7 @@ export function ScorePracticePage() {
       <PageHeader
         eyebrow="Practice with score"
         title="Score practice"
-        description="Import a PDF, image, or camera capture, confirm the page quality, then practice with tuner and metronome overlays."
+        description="Import a PDF, image, or camera capture, review the page, and keep it on this device. Pages are read locally, with no note recognition or automatic score following."
         meta={<StatusBadge tone="gold">Local by default</StatusBadge>}
       />
       <SectionCard title="Import score" eyebrow="Three actions">
@@ -518,7 +518,7 @@ export function ScorePracticePage() {
                 )}
               </div>
               <div className="insight-grid">
-                <InsightCard title={selected.summary.label} detail={`${Math.round(selected.summary.quality.likelySheetMusicScore * 100)}% likely sheet music`} body={selected.summary.quality.messages.join(' ')} icon={CheckCircle2} tone={selected.summary.quality.status === 'good' ? 'green' : 'amber'} />
+                <InsightCard title={selected.summary.label} detail={sheetMusicNameHint(selected.summary.quality.likelySheetMusicScore)} body={selected.summary.quality.messages.join(' ')} icon={CheckCircle2} tone={selected.summary.quality.status === 'good' ? 'green' : 'amber'} />
                 <InsightCard title="Privacy" detail={`${formatSize(selected.file.size)} ${selected.file.type || selected.kind}`} body="The source page is stored locally after confirmation. Export reports should omit source pages unless you choose otherwise." icon={FileText} />
               </div>
               <div className="settings-actions">
@@ -533,10 +533,10 @@ export function ScorePracticePage() {
           )}
         </SectionCard>
       </div>
-      <SectionCard title="Practice overlays" eyebrow="Manual alignment">
+      <SectionCard title="Local preview only" eyebrow="No score following">
         <div className="insight-grid">
-          <InsightCard title="Manual markers" detail="Rehearsal, measure, phrase" body="Use page and timestamp markers during review. Automatic score following is not claimed in this build." icon={Music2} tone="gold" />
-          <InsightCard title="Metronome overlay" detail="Count-in ready" body="Open the metronome for tempo and count-in. Printed-note mismatch flags require confirmed OMR and alignment, which remain experimental." icon={CheckCircle2} />
+          <InsightCard title="Manual review" detail="Zoom, rotate, pages" body="Use the zoom, rotate, and page controls above to read the imported score. There is no note recognition, automatic score following, or alignment in this build." icon={Music2} tone="gold" />
+          <InsightCard title="Metronome" detail="Separate tool" body="Open the metronome from More for tempo and count-in while you read. It runs on its own and is not synced to the score." icon={CheckCircle2} />
         </div>
       </SectionCard>
     </ScreenContainer>

@@ -5,6 +5,7 @@ import { getHeatmap, getProgress, getRecommendations, listSessions } from '../ap
 import { HeatMapGrid } from '../components/HeatMapGrid';
 import { RecommendationCard } from '../components/RecommendationCard';
 import { EmptyActionState, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { buildGuestHeatmap, buildGuestNoteStats, buildGuestProgress, buildGuestRecommendations } from '../domain/guestInsights';
 import { listGuestSessions } from '../domain/guestSessions';
 import type { NoteStats, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
@@ -31,10 +32,12 @@ export function DashboardPage() {
 
   useEffect(() => {
     if (!auth.isSignedIn) {
-      setProgress(null);
-      setSessions(listGuestSessions().slice(0, 3));
-      setHeatmap([]);
-      setRecommendations([]);
+      const guestSessions = listGuestSessions();
+      const guestStats = buildGuestNoteStats(instrumentId);
+      setProgress(guestSessions.length ? buildGuestProgress(instrumentId, guestStats) : null);
+      setSessions(guestSessions.slice(0, 3));
+      setHeatmap(buildGuestHeatmap(instrumentId, guestStats));
+      setRecommendations(buildGuestRecommendations(guestStats).slice(0, 3));
       setError(null);
       return;
     }

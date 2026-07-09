@@ -1,5 +1,5 @@
 import type { InstrumentProfile, NoteEvent, NoteStats, PitchFrame, PracticePlan, PracticeSession, ProgressMetrics, Recommendation } from '../domain/types';
-import { apiBase, wsBase } from './runtimeConfig';
+import { apiBase, UNRESOLVED_BASE, wsBase } from './runtimeConfig';
 let authTokenProvider: (() => Promise<string | null>) | null = null;
 export const MAX_PITCH_FRAMES_PER_BATCH = 1000;
 
@@ -10,6 +10,14 @@ export interface DateRangeParams {
 
 export function setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
   authTokenProvider = provider;
+}
+
+function resolvedApiBase(): string {
+  const base = apiBase();
+  if (base === UNRESOLVED_BASE) {
+    throw new Error('Cloud practice is not configured for this deployment.');
+  }
+  return base;
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -26,7 +34,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...(await authHeaders()),
   });
   new Headers(options?.headers).forEach((value, key) => headers.set(key, value));
-  const response = await fetch(`${apiBase()}${path}`, {
+  const response = await fetch(`${resolvedApiBase()}${path}`, {
     ...options,
     headers,
   });
@@ -73,7 +81,13 @@ function friendlyRequestError(message: string, status: number) {
 export const exportUrl = (path: string) => `${apiBase()}${path}`;
 
 export async function pitchWebSocketUrl() {
-  const base = wsBase() || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  const configuredBase = wsBase();
+  if (configuredBase === UNRESOLVED_BASE) {
+    // Hosted/production build with no resolvable WS base: never derive wss from
+    // the static frontend host, which has no pitch backend.
+    throw new Error('Pitch streaming is not configured for this deployment.');
+  }
+  const base = configuredBase || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
   const url = new URL('/ws/pitch', base);
   return url.toString();
 }
@@ -202,7 +216,7 @@ export function sessionAudioUrl(sessionId: number | string) {
 }
 
 export async function downloadExport(path: string, filename: string) {
-  const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
+  const response = await fetch(`${resolvedApiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
     throw new Error(friendlyRequestError(await response.text(), response.status));
   }
@@ -218,7 +232,7 @@ export async function downloadExport(path: string, filename: string) {
 }
 
 export async function objectUrlFor(path: string) {
-  const response = await fetch(`${apiBase()}${path}`, { headers: await authHeaders() });
+  const response = await fetch(`${resolvedApiBase()}${path}`, { headers: await authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }

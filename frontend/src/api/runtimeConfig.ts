@@ -2,6 +2,11 @@ const HOSTED_RENDER_API_BASE = 'https://brasstune.onrender.com';
 const CONFIGURED_API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 const CONFIGURED_WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? '';
 
+// Sentinel returned when no base can be resolved in a hosted/production build.
+// Callers must treat this as "no backend configured" instead of silently
+// falling back to localhost or the static same-origin host.
+export const UNRESOLVED_BASE = 'unavailable';
+
 function cleanBase(base: string) {
   return base.replace(/\/+$/, '');
 }
@@ -26,13 +31,21 @@ export function isVercelHostedOrigin(hostname = currentHostname()) {
 
 export function apiBase() {
   if (CONFIGURED_API_BASE) return cleanBase(CONFIGURED_API_BASE);
-  return isKnownBrassTuneHostedOrigin() || isVercelHostedOrigin() ? HOSTED_RENDER_API_BASE : '';
+  if (isKnownBrassTuneHostedOrigin() || isVercelHostedOrigin()) return HOSTED_RENDER_API_BASE;
+  // Unknown origin: same-origin ('') is only acceptable during local development.
+  // In a production build we must never silently hit the static same-origin host.
+  return import.meta.env.PROD ? UNRESOLVED_BASE : '';
 }
 
 export function wsBase() {
   if (CONFIGURED_WS_BASE) return cleanBase(CONFIGURED_WS_BASE);
   const base = apiBase();
+  if (base === UNRESOLVED_BASE) return UNRESOLVED_BASE;
   return base ? base.replace(/^http/, 'ws') : '';
+}
+
+export function isApiBaseResolved(base = apiBase()) {
+  return base !== UNRESOLVED_BASE;
 }
 
 export function runtimeDiagnostics() {

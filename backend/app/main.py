@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from collections import defaultdict, deque
 import logging
 import os
+import re
 import time
 
 from fastapi import FastAPI, Request
@@ -108,11 +109,22 @@ class JSONBodyLimitMiddleware:
         await self.app(scope, replay_receive, send)
 
 
+_CORS_ALLOWED_ORIGINS = cors_origins()
+_CORS_ALLOWED_ORIGIN_REGEX = cors_allowed_origin_regex()
+_CORS_ORIGIN_REGEX_PATTERN = re.compile(_CORS_ALLOWED_ORIGIN_REGEX) if _CORS_ALLOWED_ORIGIN_REGEX else None
+
+
+def _origin_allowed_for_cors(origin: str) -> bool:
+    if "*" in _CORS_ALLOWED_ORIGINS or origin in _CORS_ALLOWED_ORIGINS:
+        return True
+    return _CORS_ORIGIN_REGEX_PATTERN is not None and _CORS_ORIGIN_REGEX_PATTERN.fullmatch(origin) is not None
+
+
 app.add_middleware(JSONBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins(),
-    allow_origin_regex=cors_allowed_origin_regex(),
+    allow_origins=_CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=_CORS_ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,6 +141,13 @@ async def request_abuse_limits(request: Request, call_next):
         response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
         if request.url.scheme == "https" or app_environment() in {"production", "staging", "preview"}:
             response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+        # Guard responses (413/429/500) short-circuit before CORSMiddleware, so mirror the CORS
+        # headers here for allowed origins; stays fail-closed and never overrides CORSMiddleware.
+        origin = request.headers.get("origin")
+        if origin and "access-control-allow-origin" not in response.headers and _origin_allowed_for_cors(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers.setdefault("Vary", "Origin")
         return response
 
     if request.method.upper() == "OPTIONS":
@@ -164,7 +183,7 @@ async def request_abuse_limits(request: Request, call_next):
     try:
         response = await call_next(request)
     except Exception:
-        logger.error("Unhandled backend request failure")
+        logger.exception("Unhandled backend request failure")
         response = JSONResponse({"detail": "The server could not complete this request."}, status_code=500)
     return harden_response(response)
 

@@ -1,7 +1,7 @@
 import { Activity, Bug, Clipboard, Gauge, Mic, Radio, Save, Settings2, Waves } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { getInstruments, pitchWebSocketUrl } from '../api/client';
-import { apiBase as runtimeApiBase } from '../api/runtimeConfig';
+import { friendlyUserFacingError, getInstruments, pitchWebSocketUrl } from '../api/client';
+import { apiBase as runtimeApiBase, UNRESOLVED_BASE } from '../api/runtimeConfig';
 import { SessionControls } from '../components/SessionControls';
 import { SignalMeter } from '../components/SignalMeter';
 import { MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
@@ -29,7 +29,11 @@ export function AudioLabPage() {
   const [permissionState, setPermissionState] = useState('unknown');
   const [wsUrl, setWsUrl] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
-  const apiBase = runtimeApiBase() || `${window.location.origin}`;
+  const rawApiBase = runtimeApiBase();
+  const apiConfigured = rawApiBase !== '' && rawApiBase !== UNRESOLVED_BASE;
+  // Never surface window.location.origin as the cloud base: an unresolved hosted
+  // build must read as 'unavailable', and dev same-origin as 'Not configured'.
+  const apiBase = apiConfigured ? rawApiBase : rawApiBase === UNRESOLVED_BASE ? 'unavailable' : 'Not configured';
   const recorder = useSessionRecorder(instrumentId, referencePitch, { cloudEnabled: auth.isSignedIn });
   const stream = usePitchStream({
     enabled: true,
@@ -66,7 +70,7 @@ export function AudioLabPage() {
       }
       await recorder.start(`Calibration lab ${new Date().toLocaleDateString()}`);
     } catch (error) {
-      recorder.setError(String(error));
+      recorder.setError(friendlyUserFacingError(error, 'Calibration take could not start. Guest practice still works on this device.'));
     }
   };
   const stop = async () => {
@@ -74,7 +78,7 @@ export function AudioLabPage() {
       await stream.finishPersistingFrames();
       await recorder.stop();
     } catch (error) {
-      recorder.setError(String(error));
+      recorder.setError(friendlyUserFacingError(error, 'Calibration take could not be saved. Try again after reconnecting.'));
     }
   };
   const copyDiagnostics = () => {
@@ -154,7 +158,7 @@ export function AudioLabPage() {
                 </span>
                 <div>
                   <h3>Cloud service</h3>
-                  <span>{apiBase ? 'Configured' : 'Using app origin'}</span>
+                  <span>{apiConfigured ? 'Configured' : apiBase}</span>
                 </div>
               </div>
               <p>Practice still works in guest mode if cloud sync is unavailable.</p>
