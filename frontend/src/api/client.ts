@@ -300,12 +300,35 @@ export function removeEnsembleMember(groupId: number, memberId: number) {
   return request<{ removed: boolean }>(`/api/ensemble/groups/${groupId}/members/${memberId}`, { method: 'DELETE' });
 }
 
+export interface EnsembleInvitation {
+  member_id: number;
+  group_id: number;
+  group_name: string;
+  instrument_id: string;
+  role_in_group: string;
+  invited_at: string | null;
+  director_name: string | null;
+}
+
+export function getEnsembleInvitations() {
+  return request<{ invitations: EnsembleInvitation[] }>('/api/ensemble/invitations');
+}
+
+export function acceptEnsembleInvitation(memberId: number) {
+  return request<{ accepted: boolean; group_id: number }>(`/api/ensemble/invitations/${memberId}/accept`, { method: 'POST' });
+}
+
+export function declineEnsembleInvitation(memberId: number) {
+  return request<{ declined: boolean }>(`/api/ensemble/invitations/${memberId}/decline`, { method: 'POST' });
+}
+
 export interface EnsembleRosterStudent {
   member_id: number;
   user_id: number;
   username: string | null;
   display_name: string | null;
   instrument_id: string;
+  status: string;
   role_in_group: string;
   sessions_count: number;
   practice_minutes: number;

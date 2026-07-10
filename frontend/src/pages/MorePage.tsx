@@ -1,11 +1,11 @@
-import { Activity, Bug, FileText, LogIn, LogOut, Music2, Settings, Target, Timer, UserRound, Users } from 'lucide-react';
+import { Activity, Bug, FileText, GraduationCap, LogIn, LogOut, Music2, Settings, Timer, UserRound, Users } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
 
 const moreItems = [
-  { to: '/practice/play-along', title: 'Play-Along Trainer', detail: 'Play an exercise and get graded note by note in real time.', icon: Target },
+  { to: '/coach', title: 'Coach', detail: 'Personalized practice plan and recommendations.', icon: GraduationCap },
   { to: '/metronome', title: 'Metronome', detail: 'Tempo, count-in, subdivisions, and ramp practice.', icon: Timer },
   { to: '/practice/score', title: 'Score practice', detail: 'Read imported PDF or photo sheet music while you practice.', icon: FileText },
   { to: '/sessions', title: 'Sessions', detail: 'Review practice history and open saved takes.', icon: Music2 },

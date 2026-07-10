@@ -170,7 +170,22 @@ export function PlayAlongPage() {
             <div className="playalong-detected">
               <span className="playalong-detected-label">You’re playing</span>
               <strong className={snapshot.detectedName === snapshot.currentName ? 'match' : ''}>{snapshot.detectedName ?? '—'}</strong>
-              <span className="playalong-cents">{snapshot.detectedCents != null ? `${snapshot.detectedCents > 0 ? '+' : ''}${Math.round(snapshot.detectedCents)}c` : 'listening…'}</span>
+              {(() => {
+                const cents = snapshot.detectedCents;
+                const onTarget = snapshot.detectedName === snapshot.currentName && cents != null;
+                if (!onTarget) {
+                  return <span className="playalong-cents">{snapshot.detectedName ? `Move to ${snapshot.currentName}` : 'listening…'}</span>;
+                }
+                const rounded = Math.round(cents as number);
+                if (Math.abs(rounded) <= 5) {
+                  return <span className="playalong-cents locked">✓ Locked in — hold it</span>;
+                }
+                return (
+                  <span className={`playalong-cents ${rounded > 0 ? 'sharp' : 'flat'}`}>
+                    {rounded > 0 ? '▲' : '▼'} {Math.abs(rounded)}c {rounded > 0 ? 'sharp — ease down' : 'flat — lift up'}
+                  </span>
+                );
+              })()}
               <span className="muted-copy">{stream.statusMessage}</span>
             </div>
           </div>

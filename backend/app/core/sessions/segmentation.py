@@ -54,7 +54,9 @@ def compute_note_event_stats(frames: List[object]) -> Dict[str, object]:
 
 def segment_note_events(
     frames: Iterable[object],
-    max_merge_gap_ms: int = 220,
+    # Clients downsample persisted frames to ~150ms spacing to keep cloud
+    # storage lean, so consecutive frames of one held note can be ~300ms apart.
+    max_merge_gap_ms: int = 340,
     min_duration_ms: int = 120,
 ) -> List[Dict[str, object]]:
     ordered = sorted(list(frames), key=lambda frame: int(_value(frame, "timestamp_ms", 0)))

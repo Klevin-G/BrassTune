@@ -1,4 +1,5 @@
 import { ArrowRight, KeyRound, LogIn, Mail, Music2, ShieldCheck, UserPlus } from 'lucide-react';
+import { GoogleIcon } from '../components/GoogleIcon';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { InstrumentSelector } from '../components/InstrumentSelector';
@@ -133,6 +134,15 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
               </Link>
             </>
           )}
+          {mode !== 'reset' && auth.configured && auth.providers.google && (
+            <>
+              <button className="google-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`).catch((error) => setMessage(error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.'))}>
+                <GoogleIcon size={18} />
+                {isSignup ? 'Sign up with Google' : 'Continue with Google'}
+              </button>
+              <div className="auth-divider" aria-hidden="true"><span>or use your email</span></div>
+            </>
+          )}
           {auth.configured && (
             <form className="auth-form" onSubmit={onSubmit}>
               {!isPasswordRecovery && (
@@ -172,19 +182,12 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
               </button>
             </form>
           )}
-          {mode !== 'reset' && auth.configured && (
+          {mode !== 'reset' && auth.configured && auth.providers.apple && (
             <div className="provider-button-stack">
-              {auth.providers.google && (
-                <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`).catch((error) => setMessage(error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.'))}>
-                  Continue with Google
-                </button>
-              )}
-              {auth.providers.apple && (
-                <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`).catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in could not start. Try again later.'))}>
-                  <ShieldCheck size={18} />
-                  Continue with Apple
-                </button>
-              )}
+              <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`).catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in could not start. Try again later.'))}>
+                <ShieldCheck size={18} />
+                Continue with Apple
+              </button>
             </div>
           )}
           {(message || auth.profileError) && <div className="alert" role="status">{message ?? auth.profileError}</div>}

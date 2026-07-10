@@ -1,4 +1,5 @@
 import { ArrowRight, KeyRound, LogIn, Mail, Music2, ShieldCheck, UserPlus } from 'lucide-react';
+import { GoogleIcon } from '../components/GoogleIcon';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ThemeSelector } from '../components/ThemeSelector';
@@ -91,6 +92,15 @@ export function AuthGatewayPage() {
 
             {!auth.loading && auth.configured && (
               <>
+                {auth.providers.google && (
+                  <>
+                    <button className="google-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.'))}>
+                      <GoogleIcon size={18} />
+                      Continue with Google
+                    </button>
+                    <div className="auth-divider" aria-hidden="true"><span>or use your email</span></div>
+                  </>
+                )}
                 <form className="auth-form" onSubmit={signIn}>
                   <label>
                     Email
@@ -106,11 +116,6 @@ export function AuthGatewayPage() {
                   </button>
                 </form>
                 <div className="provider-button-stack">
-                  {auth.providers.google && (
-                    <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.'))}>
-                      Continue with Google
-                    </button>
-                  )}
                   {auth.providers.apple && (
                     <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in could not start. Try again later.'))}>
                       <ShieldCheck size={18} />

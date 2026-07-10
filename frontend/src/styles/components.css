@@ -821,8 +821,8 @@ meter {
 }
 
 .theme-card-hint {
-  color: var(--muted-2);
-  font-size: 0.72rem;
+  color: var(--muted);
+  font-size: 0.74rem;
   font-weight: 600;
   line-height: 1.25;
 }
@@ -2081,6 +2081,53 @@ td a {
   font-weight: 700;
 }
 
+.roster-table tr.roster-invited td {
+  color: var(--muted-2);
+}
+
+.roster-invited-cell {
+  font-style: italic;
+}
+
+/* Ensemble invitations */
+.invitation-list {
+  display: grid;
+  gap: 10px;
+}
+
+.invitation-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--surface-sunken);
+}
+
+.invitation-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.invitation-copy strong {
+  color: var(--text);
+}
+
+.invitation-copy em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.84rem;
+}
+
+.invitation-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* Admin usage dashboard */
 .metrics-grid {
   display: grid;
@@ -2126,6 +2173,53 @@ td a {
   font-size: 0.62rem;
   color: var(--muted-2);
   white-space: nowrap;
+}
+
+/* Google sign-in — familiar white button per Google identity guidelines. */
+.google-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: var(--tap);
+  padding: 0 18px;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #3c4043;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.google-button:hover:not(:disabled) {
+  background: #f8f9fa;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3);
+}
+
+.google-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0;
+  color: var(--muted-2);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
 }
 
 /* Page error boundary fallback */
@@ -2246,6 +2340,18 @@ td a {
 .playalong-cents {
   font-weight: 800;
   color: var(--gold-soft);
+}
+
+.playalong-cents.locked {
+  color: var(--green);
+}
+
+.playalong-cents.sharp {
+  color: var(--orange);
+}
+
+.playalong-cents.flat {
+  color: var(--blue);
 }
 
 .playalong-sequence {

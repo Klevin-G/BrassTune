@@ -8,6 +8,10 @@ const AUDIO_FRAME_SIZE = 4096;
 const PERSIST_BATCH_SIZE = 100;
 const PERSIST_FLUSH_INTERVAL_MS = 750;
 const MAX_BUFFERED_PERSIST_FRAMES = 1500;
+// Detection runs at full rate locally (~85ms/frame); only a downsampled
+// stream is persisted to the cloud to keep storage lean. Server-side note
+// segmentation merges gaps up to 340ms, so 150ms spacing is safely inside it.
+export const MIN_PERSIST_SPACING_MS = 150;
 
 export interface PendingPersistFrameQueue {
   sessionId: number | null;
@@ -96,6 +100,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const referencePitchRef = useRef(referencePitch);
   const persistDemoFramesToBackendRef = useRef(persistDemoFramesToBackend);
   const persistenceClosedRef = useRef(false);
+  const lastPersistTsRef = useRef<number | null>(null);
   const pendingPersistQueueRef = useRef<PendingPersistFrameQueue>({ sessionId: null, frames: [] });
   const flushTimerRef = useRef<number | null>(null);
   const flushPromiseRef = useRef<Promise<PitchFrameFlushResult> | null>(null);
@@ -209,6 +214,13 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     // pitch stream when a session_id is present.
     const currentSessionId = sessionIdRef.current;
     if (!persistenceClosedRef.current && shouldPersistFrameFromFrontend(demoModeRef.current, recordingRef.current, currentSessionId, frame, persistDemoFramesToBackendRef.current) && currentSessionId !== undefined) {
+      // Downsample the persisted stream: local detection/UI stay full-rate,
+      // but the cloud only needs ~150ms-spaced frames for analytics.
+      const last = pendingPersistQueueRef.current.sessionId === currentSessionId ? lastPersistTsRef.current : null;
+      if (last !== null && frame.timestamp_ms - last < MIN_PERSIST_SPACING_MS) {
+        return;
+      }
+      lastPersistTsRef.current = frame.timestamp_ms;
       pendingPersistQueueRef.current = enqueuePendingPersistFrame(pendingPersistQueueRef.current, currentSessionId, frame);
       if (pendingPersistQueueRef.current.frames.length >= PERSIST_BATCH_SIZE) {
         void flushPendingFrames().catch(() => undefined);

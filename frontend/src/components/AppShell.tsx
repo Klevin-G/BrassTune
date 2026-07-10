@@ -10,13 +10,13 @@ import { FloatingTabBar } from './ui/AppPrimitives';
 const primaryNav = [
   { to: '/home', label: 'Home', icon: Home },
   { to: '/practice', label: 'Practice', icon: Gauge },
+  { to: '/practice/play-along', label: 'Play-Along', icon: Target },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/coach', label: 'Coach', icon: GraduationCap },
   { to: '/more', label: 'More', icon: MoreHorizontal },
 ];
 
 const secondaryNav = [
-  { to: '/practice/play-along', label: 'Play-Along', icon: Target },
+  { to: '/coach', label: 'Coach', icon: GraduationCap },
   { to: '/metronome', label: 'Metronome', icon: Timer },
   { to: '/practice/score', label: 'Score', icon: FileText },
   { to: '/sessions', label: 'Sessions', icon: Music2 },
@@ -51,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               key={item.to}
               aria-label={item.label}
               className={({ isActive }) => `nav-item ${item.to === '/more' ? (moreActive ? 'active' : '') : isActive ? 'active' : ''}`}
-              end={item.to === '/'}
+              end={item.to === '/' || item.to === '/practice'}
             >
               <item.icon size={18} />
               <span>{item.label}</span>
@@ -112,7 +112,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               key={item.to}
               aria-label={item.label}
               className={({ isActive }) => (item.to === '/more' ? (moreActive ? 'active' : '') : isActive ? 'active' : '')}
-              end={item.to === '/'}
+              end={item.to === '/' || item.to === '/practice'}
             >
               <item.icon size={19} />
               <span>{item.label}</span>

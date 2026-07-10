@@ -1095,6 +1095,8 @@ def get_ensemble_members(group_id: int, db: Session = Depends(get_db), auth: Aut
 
 @router.post("/ensemble/groups/{group_id}/members/by-username")
 def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    """Invite a user to the ensemble by username. The user joins with
+    status='invited' and must accept before they become an active member."""
     _require_group_manager(db, group_id, auth)
     _validate_instrument(payload.instrument_id)
     if payload.role_in_group not in {"student", "assistant", "director"}:
@@ -1103,23 +1105,83 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     if user is None:
         raise HTTPException(status_code=404, detail="No user exists with that username.")
     existing = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
-    now = dt.datetime.utcnow()
     if existing:
         previous_status = existing.status
         if previous_status == "active":
             raise HTTPException(status_code=409, detail="This user is already an active ensemble member.")
+        if previous_status == "invited":
+            raise HTTPException(status_code=409, detail="This user already has a pending invitation.")
         existing.instrument_id = payload.instrument_id
         existing.role_in_group = payload.role_in_group
-        existing.status = "active"
-        existing.active_since = now
+        existing.status = "invited"
+        existing.active_since = None
         existing.removed_at = None
         member = existing
     else:
-        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=payload.instrument_id, role_in_group=payload.role_in_group, status="active", active_since=now)
+        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=payload.instrument_id, role_in_group=payload.role_in_group, status="invited", active_since=None)
         db.add(member)
     db.commit()
     db.refresh(member)
+    record_event(db, "invitation_sent", auth.user.id, {"group_id": group_id, "invited_user_id": user.id})
     return group_member_to_dict(db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.id == member.id).first())
+
+
+def _my_invitation_or_404(db: Session, member_id: int, auth: AuthContext) -> GroupMember:
+    member = (
+        db.query(GroupMember)
+        .filter(GroupMember.id == member_id, GroupMember.user_id == auth.user.id, GroupMember.status == "invited")
+        .first()
+    )
+    if member is None:
+        raise HTTPException(status_code=404, detail="Invitation not found.")
+    return member
+
+
+@router.get("/ensemble/invitations")
+def list_my_invitations(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    """Pending ensemble invitations for the signed-in user."""
+    rows = (
+        db.query(GroupMember, Group)
+        .join(Group, Group.id == GroupMember.group_id)
+        .filter(GroupMember.user_id == auth.user.id, GroupMember.status == "invited")
+        .order_by(GroupMember.created_at.desc())
+        .all()
+    )
+    invitations = []
+    for member, group in rows:
+        director = db.query(User).filter(User.id == group.director_user_id).first()
+        invitations.append({
+            "member_id": member.id,
+            "group_id": group.id,
+            "group_name": group.name,
+            "instrument_id": member.instrument_id,
+            "role_in_group": member.role_in_group,
+            "invited_at": iso(member.created_at),
+            "director_name": (director.display_name or director.name) if director else None,
+        })
+    return {"invitations": invitations}
+
+
+@router.post("/ensemble/invitations/{member_id}/accept")
+def accept_invitation(member_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    member = _my_invitation_or_404(db, member_id, auth)
+    member.status = "active"
+    member.active_since = dt.datetime.utcnow()
+    member.removed_at = None
+    db.add(member)
+    db.commit()
+    record_event(db, "invitation_accepted", auth.user.id, {"group_id": member.group_id})
+    return {"accepted": True, "group_id": member.group_id}
+
+
+@router.post("/ensemble/invitations/{member_id}/decline")
+def decline_invitation(member_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    member = _my_invitation_or_404(db, member_id, auth)
+    member.status = "removed"
+    member.removed_at = dt.datetime.utcnow()
+    db.add(member)
+    db.commit()
+    return {"declined": True}
 
 
 @router.patch("/ensemble/groups/{group_id}/members/{member_id}")
@@ -1202,18 +1264,20 @@ def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: Au
     members = (
         db.query(GroupMember)
         .options(joinedload(GroupMember.user))
-        .filter(GroupMember.group_id == group_id, GroupMember.status == "active")
+        .filter(GroupMember.group_id == group_id, GroupMember.status.in_(["active", "invited"]))
         .order_by(GroupMember.created_at.asc())
         .all()
     )
     students = []
     for member in members:
         since = _member_active_since(member)
-        sessions = (
-            db.query(PracticeSession)
-            .filter(PracticeSession.user_id == member.user_id, PracticeSession.started_at >= since)
-            .all()
-        )
+        sessions = []
+        if member.status == "active":
+            sessions = (
+                db.query(PracticeSession)
+                .filter(PracticeSession.user_id == member.user_id, PracticeSession.started_at >= since)
+                .all()
+            )
         weighted = [(s.average_abs_cents, s.notes_count or 0) for s in sessions if (s.notes_count or 0) > 0]
         intune = [(s.in_tune_percentage, s.notes_count or 0) for s in sessions if (s.notes_count or 0) > 0]
         avg_abs_cents = _weighted_mean(weighted)
@@ -1226,6 +1290,7 @@ def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: Au
             "username": getattr(user, "username", None),
             "display_name": getattr(user, "display_name", None) or getattr(user, "name", None),
             "instrument_id": member.instrument_id,
+            "status": member.status,
             "role_in_group": getattr(member, "role_in_group", "student"),
             "sessions_count": len(sessions),
             "practice_minutes": round(sum(s.duration_seconds or 0.0 for s in sessions) / 60.0, 1),

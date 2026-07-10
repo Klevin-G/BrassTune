@@ -72,28 +72,41 @@ export function summarizeGrades(results: NoteGrade[]): GradeSummary {
   };
 }
 
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 /**
  * Self-paced grading engine. Feed it live pitch frames; when the player sustains
- * the correct pitch class for `holdMs`, the note is scored (average cents over
- * the held window) and the target advances. Playing a different confident note
- * resets the current hold; brief silence/low-confidence dropouts are tolerated.
+ * the correct pitch class for `holdMs`, the note is scored and the target
+ * advances. Playing a different confident note resets the current hold; brief
+ * silence/low-confidence dropouts are tolerated.
+ *
+ * Scoring is intonation-grade accurate: the attack transient (first
+ * `attackTrimMs` of the held note, where brass pitch naturally scoops) is
+ * excluded, and the score is the MEDIAN cents of the sustained portion —
+ * robust to detector blips and vibrato extremes in a way a mean is not.
  */
 export class PlayAlongGrader {
   readonly notes: string[];
   holdMs: number;
   minConfidence: number;
   minSamples: number;
+  attackTrimMs: number;
   private idx = 0;
   private firstMatchTs: number | null = null;
   private lastNow = 0;
-  private centsBuf: number[] = [];
+  private centsBuf: { ts: number; cents: number }[] = [];
   results: NoteGrade[] = [];
 
-  constructor(notes: string[], options: { holdMs?: number; minConfidence?: number; minSamples?: number } = {}) {
+  constructor(notes: string[], options: { holdMs?: number; minConfidence?: number; minSamples?: number; attackTrimMs?: number } = {}) {
     this.notes = notes;
     this.holdMs = options.holdMs ?? 450;
-    this.minConfidence = options.minConfidence ?? 0.5;
+    this.minConfidence = options.minConfidence ?? 0.65;
     this.minSamples = options.minSamples ?? 5;
+    this.attackTrimMs = options.attackTrimMs ?? 120;
   }
 
   get done(): boolean {
@@ -105,8 +118,16 @@ export class PlayAlongGrader {
   }
 
   private finalize(hit: boolean): void {
-    const avg = hit && this.centsBuf.length ? this.centsBuf.reduce((a, b) => a + b, 0) / this.centsBuf.length : null;
-    const rounded = avg == null ? null : Math.round(avg * 10) / 10;
+    let scored: number | null = null;
+    if (hit && this.centsBuf.length && this.firstMatchTs != null) {
+      // Score the sustain, not the attack: trim the first attackTrimMs unless
+      // that would leave too few samples to be trustworthy.
+      const start = this.firstMatchTs;
+      const sustained = this.centsBuf.filter((entry) => entry.ts - start >= this.attackTrimMs);
+      const source = sustained.length >= Math.min(this.minSamples, 3) ? sustained : this.centsBuf;
+      scored = median(source.map((entry) => entry.cents));
+    }
+    const rounded = scored == null ? null : Math.round(scored * 10) / 10;
     this.results.push({ name: this.notes[this.idx], avgCents: rounded, samples: this.centsBuf.length, grade: centsGrade(rounded) });
     this.idx += 1;
     this.firstMatchTs = null;
@@ -126,7 +147,7 @@ export class PlayAlongGrader {
       const matches = confident && frame.written_note_name === target && frame.cents_deviation != null;
       if (matches) {
         if (this.firstMatchTs == null) this.firstMatchTs = nowMs;
-        this.centsBuf.push(frame.cents_deviation as number);
+        this.centsBuf.push({ ts: nowMs, cents: frame.cents_deviation as number });
         if (nowMs - this.firstMatchTs >= this.holdMs && this.centsBuf.length >= this.minSamples) {
           this.finalize(true);
         }

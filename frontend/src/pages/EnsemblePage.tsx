@@ -1,16 +1,20 @@
-import { FileText, Plus, Printer, Trash2, UserPlus, Users } from 'lucide-react';
+import { Check, FileText, Mail, Plus, Printer, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  acceptEnsembleInvitation,
   addEnsembleMemberByUsername,
   createEnsembleGroup,
+  declineEnsembleInvitation,
   friendlyUserFacingError,
   getEnsembleGroup,
   getEnsembleGroups,
+  getEnsembleInvitations,
   getEnsembleReport,
   getEnsembleRoster,
   getEnsembleSummary,
   removeEnsembleMember,
+  type EnsembleInvitation,
   type EnsembleRosterStudent,
 } from '../api/client';
 import { NoteStatsTable } from '../components/NoteStatsTable';
@@ -34,6 +38,7 @@ export function EnsemblePage() {
   const [summary, setSummary] = useState<any>(null);
   const [report, setReport] = useState<any>(null);
   const [roster, setRoster] = useState<EnsembleRosterStudent[] | null>(null);
+  const [invitations, setInvitations] = useState<EnsembleInvitation[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
   const [newGroupName, setNewGroupName] = useState('');
@@ -84,6 +89,30 @@ export function EnsemblePage() {
     }
   };
 
+  const loadEverything = async () => {
+    setLoading(true);
+    try {
+      const [groupsData, invitesData] = await Promise.all([
+        getEnsembleGroups(),
+        getEnsembleInvitations().catch(() => ({ invitations: [] })),
+      ]);
+      setGroups(groupsData);
+      setInvitations(invitesData.invitations ?? []);
+      if (groupsData[0]) {
+        await selectGroup(groupsData[0].id);
+      } else {
+        setSelectedGroup(null);
+        setSummary(null);
+        setReport(null);
+        setRoster(null);
+      }
+    } catch (error) {
+      setEnsembleStatus(friendlyUserFacingError(error, 'Could not load ensemble data.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!auth.isSignedIn) {
       setGroups([]);
@@ -91,27 +120,29 @@ export function EnsemblePage() {
       setSummary(null);
       setReport(null);
       setRoster(null);
+      setInvitations([]);
       setEnsembleStatus('');
       setLoading(false);
       return;
     }
-    setLoading(true);
-    getEnsembleGroups()
-      .then((groupsData) => {
-        setGroups(groupsData);
-        if (groupsData[0]) {
-          return selectGroup(groupsData[0].id);
-        }
-        setSelectedGroup(null);
-        setSummary(null);
-        setReport(null);
-        setRoster(null);
-        return undefined;
-      })
-      .catch((error) => setEnsembleStatus(friendlyUserFacingError(error, 'Could not load ensemble data.')))
-      .finally(() => setLoading(false));
+    void loadEverything();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.isSignedIn]);
+
+  const respondToInvitation = async (invitation: EnsembleInvitation, accept: boolean) => {
+    try {
+      if (accept) {
+        await acceptEnsembleInvitation(invitation.member_id);
+        setEnsembleStatus(`You joined “${invitation.group_name}”.`);
+      } else {
+        await declineEnsembleInvitation(invitation.member_id);
+        setEnsembleStatus(`Invitation to “${invitation.group_name}” declined.`);
+      }
+      await loadEverything();
+    } catch (error) {
+      setEnsembleStatus(friendlyUserFacingError(error, 'Could not update the invitation.'));
+    }
+  };
 
   const createGroup = async () => {
     if (!newGroupName.trim()) {
@@ -143,10 +174,10 @@ export function EnsemblePage() {
     try {
       await addEnsembleMemberByUsername(selectedGroup.id, { username: memberUsername, instrument_id: instrumentId, role_in_group: 'student' });
       setMemberUsername('');
-      setEnsembleStatus('Student added.');
+      setEnsembleStatus('Invitation sent. The student will see it on their Ensemble page and can accept to join.');
       await selectGroup(selectedGroup.id);
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not add the student. Check the username is exact.'));
+      setEnsembleStatus(friendlyUserFacingError(error, 'Could not send the invite. Check the username is exact.'));
     }
   };
 
@@ -199,6 +230,32 @@ export function EnsemblePage() {
         ) : undefined}
       />
 
+      {invitations.length > 0 && (
+        <SectionCard title="You’re invited" eyebrow="Ensemble invitations">
+          <div className="invitation-list">
+            {invitations.map((invitation) => (
+              <div className="invitation-row" key={invitation.member_id}>
+                <span className="insight-icon"><Mail size={17} /></span>
+                <div className="invitation-copy">
+                  <strong>{invitation.group_name}</strong>
+                  <em>{invitation.director_name ? `Invited by ${invitation.director_name}` : 'You were invited to join'} · {invitation.instrument_id}</em>
+                </div>
+                <div className="invitation-actions">
+                  <button className="primary-button" type="button" onClick={() => respondToInvitation(invitation, true)}>
+                    <Check size={16} />
+                    Accept
+                  </button>
+                  <button className="ghost-button" type="button" onClick={() => respondToInvitation(invitation, false)}>
+                    <X size={16} />
+                    Decline
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
       {/* Create / start an ensemble — available to everyone (self-serve). */}
       <SectionCard title="Start an ensemble" eyebrow="You become the director">
         <p className="muted-copy">Name a class, section, or studio. You’ll be able to add students by their BrassTune username and see each student’s practice minutes and intonation.</p>
@@ -250,12 +307,12 @@ export function EnsemblePage() {
             <>
               <div className="settings-actions ensemble-add-row">
                 <label className="field compact-field">
-                  <span>Add student by username</span>
+                  <span>Invite student by username</span>
                   <input value={memberUsername} onChange={(event) => setMemberUsername(event.target.value.toLowerCase())} placeholder="student-username" onKeyDown={(event) => { if (event.key === 'Enter') addMember(); }} />
                 </label>
                 <button className="ghost-button" type="button" onClick={addMember} disabled={!memberUsername.trim()}>
                   <UserPlus size={17} />
-                  Add student
+                  Send invite
                 </button>
               </div>
               {roster && roster.length > 0 ? (
@@ -275,14 +332,20 @@ export function EnsemblePage() {
                     </thead>
                     <tbody>
                       {roster.map((student) => (
-                        <tr key={student.member_id}>
+                        <tr key={student.member_id} className={student.status === 'invited' ? 'roster-invited' : undefined}>
                           <td>{student.display_name ?? (student.username ? `@${student.username}` : 'Student')}</td>
                           <td>{student.instrument_id}</td>
-                          <td>{student.practice_minutes}</td>
-                          <td>{student.sessions_count}</td>
-                          <td>{student.average_abs_cents != null ? `${student.average_abs_cents}c` : '—'}</td>
-                          <td>{student.in_tune_percentage != null ? `${student.in_tune_percentage}%` : '—'}</td>
-                          <td>{relativeWhen(student.last_practice_at)}</td>
+                          {student.status === 'invited' ? (
+                            <td colSpan={5} className="roster-invited-cell">Invited — waiting for them to accept</td>
+                          ) : (
+                            <>
+                              <td>{student.practice_minutes}</td>
+                              <td>{student.sessions_count}</td>
+                              <td>{student.average_abs_cents != null ? `${student.average_abs_cents}c` : '—'}</td>
+                              <td>{student.in_tune_percentage != null ? `${student.in_tune_percentage}%` : '—'}</td>
+                              <td>{relativeWhen(student.last_practice_at)}</td>
+                            </>
+                          )}
                           <td>
                             <button
                               className="icon-button danger-action"
@@ -299,7 +362,7 @@ export function EnsemblePage() {
                   </table>
                 </div>
               ) : (
-                <p className="muted-copy">No students yet. Add your first student by their username above. Practice stats appear here once they practice after joining.</p>
+                <p className="muted-copy">No students yet. Invite your first student by their username above — they accept from their own Ensemble page, and practice stats appear once they play after joining.</p>
               )}
             </>
           ) : (

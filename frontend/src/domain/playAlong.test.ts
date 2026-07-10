@@ -74,6 +74,36 @@ describe('PlayAlongGrader', () => {
     expect(grader.results[0].grade).toBe('good');
   });
 
+  it('trims the attack transient so a scooped attack does not wreck the grade', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 400, minSamples: 3, attackTrimMs: 120 });
+    // Brass-style attack: badly sharp for the first ~100ms, then settles at +4c.
+    grader.feed(frame('C', 45), 0);
+    grader.feed(frame('C', 30), 80);
+    grader.feed(frame('C', 4), 200);
+    grader.feed(frame('C', 4), 320);
+    grader.feed(frame('C', 4), 450);
+    expect(grader.results.length).toBe(1);
+    expect(grader.results[0].avgCents).toBeCloseTo(4, 5);
+    expect(grader.results[0].grade).toBe('excellent');
+  });
+
+  it('uses the median so one detector blip cannot skew the score', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 400, minSamples: 3, attackTrimMs: 0 });
+    grader.feed(frame('C', 5), 0);
+    grader.feed(frame('C', 5), 120);
+    grader.feed(frame('C', 60), 240); // single wild blip
+    grader.feed(frame('C', 5), 360);
+    grader.feed(frame('C', 5), 480);
+    expect(grader.results[0].avgCents).toBeCloseTo(5, 5);
+    expect(grader.results[0].grade).toBe('excellent');
+  });
+
+  it('ignores low-confidence frames entirely', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    for (let t = 0; t <= 600; t += 100) grader.feed(frame('C', 5, 0.4), t); // below 0.65 gate
+    expect(grader.results.length).toBe(0);
+  });
+
   it('marks a skipped note as missed', () => {
     const grader = new PlayAlongGrader(['C', 'D'], { holdMs: 400 });
     grader.skip();

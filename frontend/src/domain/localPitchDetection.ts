@@ -69,11 +69,13 @@ export function estimatePitchFromPcm(samples: ArrayLike<number>, sampleRate: num
   const minLag = Math.max(2, Math.floor(sampleRate / maxFrequencyHz));
   const maxLag = Math.min(samples.length - 2, Math.ceil(sampleRate / minFrequencyHz));
   const mean = meanForSamples(samples);
+  const correlations = new Float32Array(maxLag - minLag + 1);
   let bestLag = 0;
   let bestCorrelation = 0;
 
   for (let lag = minLag; lag <= maxLag; lag += 1) {
     const correlation = correlationAt(samples, lag, mean);
+    correlations[lag - minLag] = correlation;
     if (correlation > bestCorrelation) {
       bestCorrelation = correlation;
       bestLag = lag;
@@ -83,6 +85,32 @@ export function estimatePitchFromPcm(samples: ArrayLike<number>, sampleRate: num
   const minCorrelation = options.minCorrelation ?? DEFAULT_MIN_CORRELATION;
   if (!bestLag || bestCorrelation < minCorrelation) {
     return { frequencyHz: null, confidence: clamp(bestCorrelation, 0, 0.94), rms };
+  }
+
+  // Octave-error guard (McLeod-style): harmonic-rich tones (brass!) often
+  // correlate marginally higher at 2x the true period, halving the reported
+  // frequency. Prefer the SMALLEST local-maximum lag whose correlation is
+  // within tolerance of the global peak — but only after the correlation has
+  // first dipped below zero, so the near-lag-0 plateau of low-frequency tones
+  // can never masquerade as a peak.
+  const OCTAVE_PEAK_TOLERANCE = 0.93;
+  const threshold = bestCorrelation * OCTAVE_PEAK_TOLERANCE;
+  let crossedZero = false;
+  for (let lag = minLag; lag < bestLag; lag += 1) {
+    const index = lag - minLag;
+    const correlation = correlations[index];
+    if (!crossedZero) {
+      if (correlation <= 0) crossedZero = true;
+      continue;
+    }
+    if (correlation < threshold || correlation < minCorrelation) continue;
+    const before = index > 0 ? correlations[index - 1] : correlation;
+    const after = index < correlations.length - 1 ? correlations[index + 1] : correlation;
+    if (correlation >= before && correlation >= after) {
+      bestLag = lag;
+      bestCorrelation = correlation;
+      break;
+    }
   }
 
   const previous = bestLag > minLag ? correlationAt(samples, bestLag - 1, mean) : bestCorrelation;
