@@ -3,7 +3,7 @@ import { Copy, Check, Mail } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 
-const SUPPORT_EMAIL = 'adam.zahaan@gmail.com';
+const SUPPORT_EMAIL = 'brasstune1@gmail.com';
 const SUPPORT_SUBJECT = 'BrassTune support';
 
 function SupportContact() {
