@@ -108,9 +108,9 @@ for (const route of routes) {
 
 test('tablet shell navigation remains accessible when labels are visually compacted', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
-  await page.goto('/home');
-  await expect(page.getByRole('link', { name: 'Home' }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: /switch to microphone mode/i })).toBeVisible();
+  await page.goto('/practice');
+  await expect(page.getByRole('link', { name: 'Tuner' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Play-Along' }).first()).toBeVisible();
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();

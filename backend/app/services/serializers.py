@@ -55,6 +55,8 @@ def group_to_dict(group, members=None, include_director_identity: bool = True) -
     }
     if include_director_identity:
         payload["director_user_id"] = group.director_user_id
+        # The join code is a management detail — only the director/admin sees it.
+        payload["join_code"] = getattr(group, "join_code", None)
     if members is not None:
         payload["members"] = members
     return payload

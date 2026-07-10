@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.security import DEPLOYED_ENVIRONMENTS, LOCAL_ENVIRONMENTS, app_environment, auth_mode
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.db.database import get_db
-from app.models.db import AccountDeletionJob, User
+from app.models.db import AccountDeletionJob, Group, User
 from app.services.session_service import get_or_create_default_user
 from app.services.usage import record_event
 
@@ -130,9 +130,19 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
             user.username = _unique_username(db, metadata["username"], user.id)
         if is_valid_instrument_id(metadata.get("primary_instrument_id", "")):
             user.primary_instrument_id = metadata["primary_instrument_id"]
-    # Promote configured owner/admin emails on sign-in (never demote existing admins).
-    if email and email.strip().lower() in _admin_emails() and user.role != "admin":
+    # Admin membership is declaratively controlled by BRASSTUNE_ADMIN_EMAILS.
+    # Grant admin to listed emails; revoke admin ONLY for users that this env
+    # list previously granted (admin_granted_by_env), so admins granted some
+    # other way are never touched. Revocation takes effect on next sign-in.
+    email_norm = (email or "").strip().lower()
+    is_env_admin = bool(email_norm) and email_norm in _admin_emails()
+    if is_env_admin:
         user.role = "admin"
+        user.admin_granted_by_env = True
+    elif user.role == "admin" and getattr(user, "admin_granted_by_env", False):
+        owns_group = db.query(Group.id).filter(Group.director_user_id == user.id).first() is not None
+        user.role = "director" if owns_group else "student"
+        user.admin_granted_by_env = False
     now = dt.datetime.utcnow()
     user.last_active_at = now
     user.updated_at = now

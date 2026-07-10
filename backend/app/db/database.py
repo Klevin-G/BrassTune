@@ -115,6 +115,7 @@ def ensure_additive_columns() -> None:
             "username": "VARCHAR",
             "display_name": "VARCHAR",
             "email": "VARCHAR",
+            "admin_granted_by_env": "BOOLEAN DEFAULT 0",
             "onboarding_completed_at": "DATETIME",
             "last_active_at": "DATETIME",
             "updated_at": "DATETIME",
@@ -129,6 +130,7 @@ def ensure_additive_columns() -> None:
         },
         "groups": {
             "updated_at": "DATETIME",
+            "join_code": "VARCHAR",
         },
         "group_members": {
             "role_in_group": "VARCHAR DEFAULT 'student'",

@@ -21,7 +21,7 @@ from app.db.database import get_db
 from app.db.readiness import public_readiness_report, readiness_report, version_payload
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
-from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
+from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
 from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
@@ -49,6 +49,21 @@ def _validate_instrument(instrument_id: str) -> None:
 def _validate_optional_instrument(instrument_id: Optional[str]) -> None:
     if instrument_id:
         _validate_instrument(instrument_id)
+
+
+# Unambiguous alphabet for class join codes (no 0/O/1/I/L confusion).
+_JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def _generate_join_code(db: Session) -> str:
+    import secrets
+
+    for _ in range(12):
+        code = "".join(secrets.choice(_JOIN_CODE_ALPHABET) for _ in range(6))
+        if db.query(Group.id).filter(Group.join_code == code).first() is None:
+            return code
+    # Extremely unlikely; widen the space rather than fail a class creation.
+    return "".join(secrets.choice(_JOIN_CODE_ALPHABET) for _ in range(8))
 
 
 def _parse_date_start(value: Optional[str], field_name: str) -> Optional[dt.datetime]:
@@ -366,6 +381,8 @@ def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depen
 @router.post("/sessions/{session_id}/samples/batch")
 def add_session_samples_batch(session_id: int, frames: List[PitchFrameIn], db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     session = _require_session_access(db, session_id, auth)
+    # The 1 MB JSON body cap (main.py) bounds the raw payload; this explicit
+    # 413 keeps a clear, tested contract for oversized batches.
     if len(frames) > MAX_BATCH_PITCH_FRAMES:
         raise HTTPException(status_code=413, detail="Too many pitch frames in one request.")
     for frame in frames:
@@ -1049,7 +1066,7 @@ def _visible_group_members(db: Session, group: Group, user: User):
 @router.post("/ensemble/groups")
 def create_ensemble_group(payload: CreateGroupRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     # Self-serve: any signed-in user can start an ensemble and becomes its director.
-    group = Group(name=payload.name.strip(), director_user_id=auth.user.id)
+    group = Group(name=payload.name.strip(), director_user_id=auth.user.id, join_code=_generate_join_code(db))
     db.add(group)
     if auth.user.role == "student":
         auth.user.role = "director"
@@ -1098,9 +1115,12 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     """Invite a user to the ensemble by username. The user joins with
     status='invited' and must accept before they become an active member."""
     _require_group_manager(db, group_id, auth)
-    _validate_instrument(payload.instrument_id)
+    _validate_optional_instrument(payload.instrument_id)
     if payload.role_in_group not in {"student", "assistant", "director"}:
         raise HTTPException(status_code=400, detail="Invalid role_in_group.")
+    # The instrument is optional at invite time; the student sets their own when
+    # they accept. Store a neutral placeholder until then.
+    invite_instrument = payload.instrument_id or "unassigned"
     user = db.query(User).filter(User.username == payload.username).first()
     if user is None:
         raise HTTPException(status_code=404, detail="No user exists with that username.")
@@ -1111,14 +1131,14 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
             raise HTTPException(status_code=409, detail="This user is already an active ensemble member.")
         if previous_status == "invited":
             raise HTTPException(status_code=409, detail="This user already has a pending invitation.")
-        existing.instrument_id = payload.instrument_id
+        existing.instrument_id = invite_instrument
         existing.role_in_group = payload.role_in_group
         existing.status = "invited"
         existing.active_since = None
         existing.removed_at = None
         member = existing
     else:
-        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=payload.instrument_id, role_in_group=payload.role_in_group, status="invited", active_since=None)
+        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=invite_instrument, role_in_group=payload.role_in_group, status="invited", active_since=None)
         db.add(member)
     db.commit()
     db.refresh(member)
@@ -1163,8 +1183,14 @@ def list_my_invitations(db: Session = Depends(get_db), auth: AuthContext = Depen
 
 
 @router.post("/ensemble/invitations/{member_id}/accept")
-def accept_invitation(member_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+def accept_invitation(member_id: int, payload: Optional[AcceptInvitationRequest] = None, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     member = _my_invitation_or_404(db, member_id, auth)
+    # The invited student may set their own instrument when accepting, overriding
+    # whatever placeholder the director used.
+    chosen_instrument = payload.instrument_id if payload else None
+    if chosen_instrument:
+        _validate_instrument(chosen_instrument)
+        member.instrument_id = chosen_instrument
     member.status = "active"
     member.active_since = dt.datetime.utcnow()
     member.removed_at = None
@@ -1184,6 +1210,37 @@ def decline_invitation(member_id: int, db: Session = Depends(get_db), auth: Auth
     return {"declined": True}
 
 
+@router.post("/ensemble/join")
+def join_ensemble_by_code(payload: JoinByCodeRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    """Self-join a class with its join code. Entering the code is the student's
+    consent, so they join as an active member immediately and choose their own
+    instrument."""
+    group = db.query(Group).filter(Group.join_code == payload.code).first()
+    if group is None:
+        raise HTTPException(status_code=404, detail="No class found with that code. Double-check it with your teacher.")
+    if group.director_user_id == auth.user.id:
+        raise HTTPException(status_code=400, detail="You're the director of this class.")
+    _validate_optional_instrument(payload.instrument_id)
+    instrument = payload.instrument_id or getattr(auth.user, "primary_instrument_id", None) or "unassigned"
+    existing = db.query(GroupMember).filter(GroupMember.group_id == group.id, GroupMember.user_id == auth.user.id).first()
+    if existing and existing.status == "active":
+        raise HTTPException(status_code=409, detail="You're already in this class.")
+    now = dt.datetime.utcnow()
+    if existing:
+        existing.status = "active"
+        existing.active_since = now
+        existing.removed_at = None
+        if payload.instrument_id:
+            existing.instrument_id = instrument
+        member = existing
+    else:
+        member = GroupMember(group_id=group.id, user_id=auth.user.id, instrument_id=instrument, role_in_group="student", status="active", active_since=now)
+        db.add(member)
+    db.commit()
+    record_event(db, "invitation_accepted", auth.user.id, {"group_id": group.id, "via": "join_code"})
+    return {"joined": True, "group_id": group.id, "group_name": group.name}
+
+
 @router.patch("/ensemble/groups/{group_id}/members/{member_id}")
 def update_ensemble_member(group_id: int, member_id: int, payload: UpdateGroupMemberRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_group_manager(db, group_id, auth)
@@ -1201,8 +1258,13 @@ def update_ensemble_member(group_id: int, member_id: int, payload: UpdateGroupMe
         if payload.status not in {"active", "invited", "removed"}:
             raise HTTPException(status_code=400, detail="Invalid member status.")
         previous_status = member.status
+        # A manager must NOT be able to convert a pending invite into an active
+        # membership — only the invited user can accept (see accept_invitation).
+        # This preserves the consent gate and prevents non-consensual monitoring.
+        if payload.status == "active" and previous_status == "invited":
+            raise HTTPException(status_code=409, detail="The invited student must accept the invitation themselves.")
         member.status = payload.status
-        if payload.status == "active" and previous_status != "active":
+        if payload.status == "active" and previous_status == "removed":
             member.active_since = dt.datetime.utcnow()
             member.removed_at = None
         elif payload.status in {"invited", "removed"} and previous_status == "active":
@@ -1297,7 +1359,9 @@ def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: Au
             "average_abs_cents": round(avg_abs_cents, 1) if avg_abs_cents is not None else None,
             "in_tune_percentage": round(in_tune_pct, 1) if in_tune_pct is not None else None,
             "last_practice_at": iso(last_practice_at),
-            "last_active_at": iso(getattr(user, "last_active_at", None)),
+            # Do not expose a not-yet-accepted (invited) person's activity — only
+            # show it once they have consented by accepting.
+            "last_active_at": iso(getattr(user, "last_active_at", None)) if member.status == "active" else None,
         })
     return {"group_id": group_id, "students": students}
 

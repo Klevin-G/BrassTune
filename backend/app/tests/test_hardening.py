@@ -1503,3 +1503,122 @@ def test_account_deletion_rejects_short_confirmation_phrase():
         )
     assert response.status_code == 400
     assert 'delete my account' in response.json()["detail"]
+
+
+def _create_class(client, token, name):
+    response = client.post("/api/ensemble/groups", headers={"Authorization": f"Bearer {token}"}, json={"name": name})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_manager_cannot_force_activate_invited_member():
+    # A director must not be able to convert a pending invite into an active
+    # membership; only the invited student can accept (consent gate).
+    with TestClient(app) as client:
+        group = _create_class(client, "dev-user-1", "Force Activate Test Class")
+        gid = group["id"]
+        invite = client.post(
+            f"/api/ensemble/groups/{gid}/members/by-username",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"username": "maya"},
+        )
+        assert invite.status_code == 200, invite.text
+        member_id = invite.json()["id"]
+        assert invite.json()["status"] == "invited"
+        forced = client.patch(
+            f"/api/ensemble/groups/{gid}/members/{member_id}",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"status": "active"},
+        )
+        assert forced.status_code == 409
+        # The victim's activity is NOT exposed while merely invited.
+        roster = client.get(f"/api/ensemble/groups/{gid}/roster", headers={"Authorization": "Bearer dev-user-1"}).json()
+        maya = next(s for s in roster["students"] if s["username"] == "maya")
+        assert maya["status"] == "invited"
+        assert maya["last_active_at"] is None
+
+
+def test_invited_student_sets_own_instrument_on_accept():
+    with TestClient(app) as client:
+        group = _create_class(client, "dev-user-1", "Accept Instrument Test Class")
+        gid = group["id"]
+        # Director invites without specifying an instrument.
+        invite = client.post(
+            f"/api/ensemble/groups/{gid}/members/by-username",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"username": "maya"},
+        )
+        assert invite.status_code == 200, invite.text
+        member_id = invite.json()["id"]
+        # The invited student (maya = dev-user-3) accepts and picks her own instrument.
+        accepted = client.post(
+            f"/api/ensemble/invitations/{member_id}/accept",
+            headers={"Authorization": "Bearer dev-user-3"},
+            json={"instrument_id": "tuba"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        roster = client.get(f"/api/ensemble/groups/{gid}/roster", headers={"Authorization": "Bearer dev-user-1"}).json()
+        maya = next(s for s in roster["students"] if s["username"] == "maya")
+        assert maya["status"] == "active"
+        assert maya["instrument_id"] == "tuba"
+
+
+def test_self_join_by_class_code():
+    with TestClient(app) as client:
+        group = _create_class(client, "dev-user-1", "Join Code Test Class")
+        gid = group["id"]
+        code = group["join_code"]
+        assert code and len(code) >= 4
+        # A user not in the class joins with the code and picks their instrument.
+        joined = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-3"}, json={"code": code, "instrument_id": "trumpet"})
+        assert joined.status_code == 200, joined.text
+        assert joined.json()["group_id"] == gid
+        # Joining again is a no-op conflict.
+        again = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-3"}, json={"code": code})
+        assert again.status_code == 409
+        # A wrong code is rejected.
+        bad = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-4"}, json={"code": "ZZZZZZ"})
+        assert bad.status_code == 404
+        # The director cannot join their own class.
+        own = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-1"}, json={"code": code})
+        assert own.status_code == 400
+        # The joined student now appears on the roster.
+        roster = client.get(f"/api/ensemble/groups/{gid}/roster", headers={"Authorization": "Bearer dev-user-1"}).json()
+        assert any(s["username"] == "maya" and s["instrument_id"] == "trumpet" for s in roster["students"])
+
+
+def test_env_granted_admin_is_revoked_when_email_removed(monkeypatch):
+    db = _test_db()
+    try:
+        monkeypatch.setenv("BRASSTUNE_ADMIN_EMAILS", "owner@example.com")
+        user = _sync_supabase_user(db, {"id": "admin-sub", "email": "owner@example.com", "user_metadata": {}, "app_metadata": {}})
+        assert user.role == "admin"
+        assert user.admin_granted_by_env is True
+        # Remove the email from the list; the next sign-in revokes admin.
+        monkeypatch.setenv("BRASSTUNE_ADMIN_EMAILS", "")
+        user2 = _sync_supabase_user(db, {"id": "admin-sub", "email": "owner@example.com", "user_metadata": {}, "app_metadata": {}})
+        assert user2.role != "admin"
+        assert user2.admin_granted_by_env is False
+    finally:
+        db.close()
+
+
+def test_manually_granted_admin_is_not_revoked_by_env(monkeypatch):
+    db = _test_db()
+    try:
+        monkeypatch.setenv("BRASSTUNE_ADMIN_EMAILS", "")
+        manual = User(
+            supabase_user_id="manual-sub",
+            email="manual@example.com",
+            username="manualadmin",
+            name="Manual Admin",
+            role="admin",
+            admin_granted_by_env=False,
+            primary_instrument_id="trumpet",
+        )
+        db.add(manual)
+        db.commit()
+        user = _sync_supabase_user(db, {"id": "manual-sub", "email": "manual@example.com", "user_metadata": {}, "app_metadata": {}})
+        assert user.role == "admin"  # not touched — was not env-granted
+    finally:
+        db.close()

@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -17,6 +17,10 @@ class User(Base):
     display_name = Column(String, nullable=True)
     email = Column(String, nullable=True, index=True)
     role = Column(String, nullable=False, default="student")
+    # True only when admin was granted by the BRASSTUNE_ADMIN_EMAILS env list, so
+    # removing an email can safely revoke that admin without touching admins that
+    # were granted some other way.
+    admin_granted_by_env = Column(Boolean, nullable=False, default=False)
     primary_instrument_id = Column(String, nullable=False, default="trumpet")
     onboarding_completed_at = Column(DateTime, nullable=True)
     last_active_at = Column(DateTime, nullable=True, index=True)
@@ -122,6 +126,8 @@ class Group(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     director_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Short shareable code students type to self-join the class.
+    join_code = Column(String, nullable=True, unique=True, index=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 

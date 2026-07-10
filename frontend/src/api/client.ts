@@ -288,8 +288,15 @@ export function getEnsembleGroup(groupId: number) {
   return request<any>(`/api/ensemble/groups/${groupId}`);
 }
 
-export function addEnsembleMemberByUsername(groupId: number, payload: { username: string; instrument_id: string; role_in_group?: string }) {
+export function addEnsembleMemberByUsername(groupId: number, payload: { username: string; instrument_id?: string; role_in_group?: string }) {
   return request<any>(`/api/ensemble/groups/${groupId}/members/by-username`, { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export function joinEnsembleByCode(code: string, instrumentId?: string) {
+  return request<{ joined: boolean; group_id: number; group_name: string }>(`/api/ensemble/join`, {
+    method: 'POST',
+    body: JSON.stringify({ code, instrument_id: instrumentId }),
+  });
 }
 
 export function updateEnsembleMember(groupId: number, memberId: number, payload: { instrument_id?: string; role_in_group?: string; status?: string }) {
@@ -314,8 +321,11 @@ export function getEnsembleInvitations() {
   return request<{ invitations: EnsembleInvitation[] }>('/api/ensemble/invitations');
 }
 
-export function acceptEnsembleInvitation(memberId: number) {
-  return request<{ accepted: boolean; group_id: number }>(`/api/ensemble/invitations/${memberId}/accept`, { method: 'POST' });
+export function acceptEnsembleInvitation(memberId: number, instrumentId?: string) {
+  return request<{ accepted: boolean; group_id: number }>(`/api/ensemble/invitations/${memberId}/accept`, {
+    method: 'POST',
+    body: JSON.stringify({ instrument_id: instrumentId }),
+  });
 }
 
 export function declineEnsembleInvitation(memberId: number) {

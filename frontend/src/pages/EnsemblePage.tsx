@@ -13,8 +13,8 @@ import {
   getEnsembleReport,
   getEnsembleRoster,
   getEnsembleSummary,
+  joinEnsembleByCode,
   removeEnsembleMember,
-  updateEnsembleMember,
   type EnsembleInvitation,
   type EnsembleRosterStudent,
 } from '../api/client';
@@ -84,6 +84,8 @@ export function EnsemblePage() {
   const [copied, setCopied] = useState('');
   const [acceptInstruments, setAcceptInstruments] = useState<Record<number, string>>({});
   const [pendingRemove, setPendingRemove] = useState<{ memberId: number; label: string } | null>(null);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [joinInstrument, setJoinInstrument] = useState('');
   const [loading, setLoading] = useState(true);
   const auth = useAuth();
   const myId = auth.profile?.id;
@@ -171,12 +173,9 @@ export function EnsemblePage() {
   const respondToInvitation = async (invitation: EnsembleInvitation, accept: boolean) => {
     try {
       if (accept) {
-        await acceptEnsembleInvitation(invitation.member_id);
-        // Let the student's own instrument choice win over whatever the director tagged.
+        // The student's own instrument choice is set as part of accepting.
         const chosen = acceptInstruments[invitation.member_id];
-        if (chosen && chosen !== invitation.instrument_id) {
-          await updateEnsembleMember(invitation.group_id, invitation.member_id, { instrument_id: chosen }).catch(() => undefined);
-        }
+        await acceptEnsembleInvitation(invitation.member_id, chosen && chosen !== invitation.instrument_id ? chosen : undefined);
         setEnsembleStatus(`You joined “${invitation.group_name}”.`);
       } else {
         await declineEnsembleInvitation(invitation.member_id);
@@ -185,6 +184,23 @@ export function EnsemblePage() {
       await loadEverything();
     } catch (error) {
       setEnsembleStatus(friendlyUserFacingError(error, 'Could not update the invitation.'));
+    }
+  };
+
+  const joinByCode = async () => {
+    const code = joinCodeInput.trim().toUpperCase();
+    if (code.length < 4) {
+      setEnsembleStatus('Enter the class code your teacher gave you.');
+      return;
+    }
+    try {
+      const result = await joinEnsembleByCode(code, joinInstrument || undefined);
+      setJoinCodeInput('');
+      setJoinInstrument('');
+      setEnsembleStatus(`You joined “${result.group_name}”.`);
+      await loadEverything();
+    } catch (error) {
+      setEnsembleStatus(friendlyUserFacingError(error, 'That code didn’t work. Double-check it with your teacher.'));
     }
   };
 
@@ -217,11 +233,14 @@ export function EnsemblePage() {
       return;
     }
     try {
-      // Pass the instrument the director chose — never the director's own tuner setting. The
-      // backend currently requires a valid instrument_id, so when the director leaves it unset we
-      // send a neutral placeholder that the student overrides when they accept (see updateEnsembleMember).
-      const instrument = inviteInstrument || 'trumpet';
-      await addEnsembleMemberByUsername(selectedGroup.id, { username: memberUsername, instrument_id: instrument, role_in_group: 'student' });
+      // Pass the instrument the director chose — never the director's own tuner setting.
+      // The instrument is optional: if the director leaves it unset the student picks
+      // their own when they accept the invitation.
+      await addEnsembleMemberByUsername(selectedGroup.id, {
+        username: memberUsername,
+        instrument_id: inviteInstrument || undefined,
+        role_in_group: 'student',
+      });
       setMemberUsername('');
       setInviteInstrument('');
       setEnsembleStatus('Invite sent — they’ll see it when they sign in.');
@@ -413,32 +432,60 @@ export function EnsemblePage() {
       )}
 
       {groups.length === 0 ? (
-        <SectionCard>
-          <div className="ec-empty">
-            <span className="ec-empty-icon"><Users size={26} /></span>
-            <h3>Start your first class</h3>
-            <p className="muted-copy">Name your class, then add students to see their practice.</p>
-            <div className="ec-create-row ec-no-print">
-              <input
-                className="ec-input"
-                value={newGroupName}
-                onChange={(event) => setNewGroupName(event.target.value)}
-                placeholder="e.g. Period 3 Brass"
-                aria-label="Class name"
-                onKeyDown={(event) => { if (event.key === 'Enter') createGroup(); }}
-              />
-              <button className="primary-button" type="button" onClick={createGroup} disabled={!newGroupName.trim()}>
-                <Plus size={18} />
-                Create a class
-              </button>
+        <>
+          <SectionCard title="Join your class" eyebrow="For students">
+            <div className="ec-empty">
+              <span className="ec-empty-icon"><Users size={26} /></span>
+              <p className="muted-copy">Enter the class code your teacher gave you.</p>
+              <div className="ec-create-row ec-no-print">
+                <input
+                  className="ec-input ec-code-input"
+                  value={joinCodeInput}
+                  onChange={(event) => setJoinCodeInput(event.target.value.toUpperCase())}
+                  placeholder="e.g. BXK4QD"
+                  aria-label="Class code"
+                  autoCapitalize="characters"
+                  maxLength={16}
+                  onKeyDown={(event) => { if (event.key === 'Enter') joinByCode(); }}
+                />
+                <select className="ec-input" value={joinInstrument} onChange={(event) => setJoinInstrument(event.target.value)} aria-label="Your instrument">
+                  <option value="">Your instrument</option>
+                  {INSTRUMENT_OPTIONS.map((id) => (
+                    <option key={id} value={id}>{instrumentDisplayName(id)}</option>
+                  ))}
+                </select>
+                <button className="primary-button" type="button" onClick={joinByCode} disabled={joinCodeInput.trim().length < 4}>
+                  <UserPlus size={18} />
+                  Join
+                </button>
+              </div>
+              {auth.profile?.username && (
+                <p className="ec-username-hint">
+                  No code? Ask your teacher to add you by your username: <strong>@{auth.profile.username}</strong>
+                </p>
+              )}
             </div>
-            {auth.profile?.username && (
-              <p className="ec-username-hint">
-                Are you a student? Ask your teacher to add you by your username: <strong>@{auth.profile.username}</strong>
-              </p>
-            )}
-          </div>
-        </SectionCard>
+          </SectionCard>
+          <SectionCard title="Start a class" eyebrow="For teachers">
+            <div className="ec-empty">
+              <p className="muted-copy">Name your class, then share the code so students can join.</p>
+              <div className="ec-create-row ec-no-print">
+                <input
+                  className="ec-input"
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                  placeholder="e.g. Period 3 Brass"
+                  aria-label="Class name"
+                  onKeyDown={(event) => { if (event.key === 'Enter') createGroup(); }}
+                />
+                <button className="primary-button" type="button" onClick={createGroup} disabled={!newGroupName.trim()}>
+                  <Plus size={18} />
+                  Create a class
+                </button>
+              </div>
+            </div>
+          </SectionCard>
+        </>
       ) : (
         <>
           <div className="ec-classbar ec-no-print">

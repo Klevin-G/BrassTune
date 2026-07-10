@@ -78,13 +78,30 @@ class CreateGroupRequest(BaseModel):
 
 class AddMemberByUsernameRequest(BaseModel):
     username: str = Field(min_length=3, max_length=32)
-    instrument_id: str
+    # Optional: the director may leave the instrument unset and the student
+    # chooses it when they accept the invitation.
+    instrument_id: Optional[str] = Field(default=None, max_length=40)
     role_in_group: str = "student"
 
     @field_validator("username")
     @classmethod
     def normalize_username(cls, value):
         return value.strip().lower()
+
+
+class AcceptInvitationRequest(BaseModel):
+    # A student may set their own instrument at the moment they accept.
+    instrument_id: Optional[str] = Field(default=None, max_length=40)
+
+
+class JoinByCodeRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=16)
+    instrument_id: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value):
+        return value.strip().upper().replace(" ", "")
 
 
 class UpdateGroupMemberRequest(BaseModel):

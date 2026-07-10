@@ -165,7 +165,14 @@ async def request_abuse_limits(request: Request, call_next):
 
     rate_limit = _positive_int_env("BRASSTUNE_RATE_LIMIT_PER_MINUTE", 900)
     if rate_limit and request.url.path not in {"/api/health", "/api/live"}:
+        # Behind a reverse proxy/CDN (Render/Vercel), request.client.host is the
+        # proxy IP and would collapse every user into one bucket. When
+        # BRASSTUNE_TRUST_PROXY is set, use the first X-Forwarded-For hop instead.
         client_host = request.client.host if request.client else "unknown"
+        if os.getenv("BRASSTUNE_TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"}:
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                client_host = forwarded.split(",")[0].strip() or client_host
         key = (client_host, request.url.path)
         now = time.monotonic()
         max_buckets = _positive_int_env("BRASSTUNE_RATE_LIMIT_MAX_BUCKETS", 10000)
