@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.api.auth import AuthContext, auth_context_from_token, local_auth_enabled
-from app.core.security import LOCAL_ENVIRONMENTS, allowed_origins, app_environment
+from app.core.security import LOCAL_ENVIRONMENTS, app_environment, origin_is_allowed
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.core.pitch.detector import PitchDetector
 from app.db.database import SessionLocal
@@ -32,7 +32,9 @@ def _origin_allowed(websocket: WebSocket) -> bool:
     origin = websocket.headers.get("origin")
     if not origin:
         return app_environment() in LOCAL_ENVIRONMENTS
-    return origin in allowed_origins()
+    # Mirror the HTTP CORS policy exactly (exact list OR regex) so a frontend
+    # allowed over HTTP is never silently rejected on the pitch WebSocket.
+    return origin_is_allowed(origin)
 
 
 @router.websocket("/ws/pitch")

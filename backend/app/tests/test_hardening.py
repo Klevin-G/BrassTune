@@ -851,6 +851,36 @@ def test_websocket_rejects_unapproved_origin():
     assert "origin" in message["message"].lower()
 
 
+def test_websocket_accepts_regex_matched_origin_not_in_exact_list(monkeypatch):
+    """Regression: a frontend origin allowed over HTTP by CORS_ALLOWED_ORIGIN_REGEX
+    (but absent from the exact CORS_ALLOWED_ORIGINS list) must also be accepted on
+    the pitch WebSocket — otherwise 'cloud practice' silently breaks for that host."""
+    _set_production_auth_env(monkeypatch)
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+    monkeypatch.setenv("BRASSTUNE_ALLOW_CORS_REGEX", "1")
+    with TestClient(app) as client:
+        # This origin is NOT in the exact list but DOES match the regex.
+        with client.websocket_connect("/ws/pitch", headers={"Origin": "https://brasstune.vercel.app"}) as websocket:
+            message = websocket.receive_json()
+    # Not rejected on origin — it proceeds to require authentication instead.
+    assert message["type"] != "error" or "origin" not in message["message"].lower()
+
+
+def test_origin_is_allowed_matches_http_cors_policy(monkeypatch):
+    from app.core.security import origin_is_allowed
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brasstune.vercel.app")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+    monkeypatch.setenv("BRASSTUNE_ALLOW_CORS_REGEX", "1")
+    assert origin_is_allowed("https://brasstune.vercel.app") is True
+    assert origin_is_allowed("https://brass-tune.vercel.app") is True
+    assert origin_is_allowed("https://evil.example.com") is False
+    # fullmatch prevents subdomain-suffix spoofing
+    assert origin_is_allowed("https://brasstune.vercel.app.evil.com") is False
+    assert origin_is_allowed(None) is False
+
+
 def test_deployed_websocket_rejects_missing_origin(monkeypatch):
     monkeypatch.setenv("APP_ENV", "preview")
     monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "supabase")

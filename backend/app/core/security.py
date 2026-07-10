@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List
 from urllib.parse import urlparse
 
@@ -68,3 +69,28 @@ def cors_allowed_origin_regex() -> str | None:
     if app_environment() in DEPLOYED_ENVIRONMENTS and os.getenv("BRASSTUNE_ALLOW_CORS_REGEX", "").strip().lower() not in {"1", "true", "yes", "on"}:
         raise RuntimeError("CORS_ALLOWED_ORIGIN_REGEX is disabled in deployed environments unless BRASSTUNE_ALLOW_CORS_REGEX=1 is explicitly set.")
     return regex
+
+
+def origin_is_allowed(origin: str | None) -> bool:
+    """True if the origin passes the SAME policy the HTTP CORS layer applies:
+    an exact match against the configured origin list OR the configured
+    origin regex (when enabled). Used by the WebSocket handshake so that WS and
+    HTTP never diverge — otherwise a frontend allowed over HTTP by the regex is
+    silently rejected on the pitch socket."""
+    if not origin:
+        return False
+    normalized = origin.strip().rstrip("/")
+    if normalized in allowed_origins():
+        return True
+    try:
+        regex = cors_allowed_origin_regex()
+    except RuntimeError:
+        regex = None
+    if regex:
+        try:
+            # Starlette's CORSMiddleware uses re.fullmatch for allow_origin_regex.
+            if re.fullmatch(regex, normalized):
+                return True
+        except re.error:
+            return False
+    return False
