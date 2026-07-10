@@ -10,10 +10,8 @@ const AdminMetricsPage = lazy(() => import('./pages/AdminMetricsPage').then((mod
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })));
 const AudioLabPage = lazy(() => import('./pages/AudioLabPage').then((module) => ({ default: module.AudioLabPage })));
 const CoachPage = lazy(() => import('./pages/CoachPage').then((module) => ({ default: module.CoachPage })));
-const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })));
 const EnsemblePage = lazy(() => import('./pages/EnsemblePage').then((module) => ({ default: module.EnsemblePage })));
 const LegalPage = lazy(() => import('./pages/LegalPage').then((module) => ({ default: module.LegalPage })));
-const MorePage = lazy(() => import('./pages/MorePage').then((module) => ({ default: module.MorePage })));
 const MetronomePage = lazy(() => import('./pages/MetronomePage').then((module) => ({ default: module.MetronomePage })));
 const PlayAlongPage = lazy(() => import('./pages/PlayAlongPage').then((module) => ({ default: module.PlayAlongPage })));
 const PracticePage = lazy(() => import('./pages/PracticePage').then((module) => ({ default: module.PracticePage })));
@@ -47,7 +45,8 @@ export default function App() {
       <Suspense fallback={<div className="route-loading" role="status">Loading</div>}>
         <Routes>
           <Route path="/" element={<AuthGatewayPage />} />
-          <Route path="/home" element={appRoute(<DashboardPage />)} />
+          <Route path="/home" element={<Navigate to="/practice" replace />} />
+          <Route path="/more" element={<Navigate to="/settings" replace />} />
           <Route path="/practice" element={appRoute(<PracticePage />)} />
           <Route path="/practice/score" element={appRoute(<ScorePracticePage />)} />
           <Route path="/practice/play-along" element={appRoute(<PlayAlongPage />)} />
@@ -57,7 +56,6 @@ export default function App() {
           <Route path="/analytics" element={appRoute(<AnalyticsPage />)} />
           <Route path="/progress" element={appRoute(<ProgressPage />)} />
           <Route path="/coach" element={appRoute(<CoachPage />)} />
-          <Route path="/more" element={appRoute(<MorePage />)} />
           <Route path="/ensemble" element={appRoute(<EnsemblePage />)} />
           <Route path="/settings" element={appRoute(<SettingsPage />)} />
           <Route path="/settings/audio-lab" element={appRoute(<AudioLabPage />)} />

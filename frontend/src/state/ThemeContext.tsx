@@ -1,49 +1,31 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-// Each option carries a short hint plus a 4-colour swatch (base / surface /
-// accent / ink) so the picker can render a real preview of every look instead
-// of a flat dropdown label.
+// Four genuinely distinct looks. Each carries a 4-colour swatch (base / surface
+// / accent / ink) so the picker renders a real preview. The System swatch shows
+// the true resolved Light + Dark pair rather than an invented colour.
 export const themeOptions = [
   {
     value: 'system',
     label: 'System',
-    hint: 'Match your device',
-    swatch: { base: '#f7f7f5', surface: '#0b1118', accent: '#d8a53f', ink: '#8a94a0' },
+    hint: 'Follows your device',
+    swatch: { base: '#ffffff', surface: '#0a1017', accent: '#c68f1f', ink: '#10151b' },
   },
   {
     value: 'brass-white',
-    label: 'White',
-    hint: 'Clean and bright',
+    label: 'Light',
+    hint: '',
     swatch: { base: '#ffffff', surface: '#eef1f5', accent: '#b07d16', ink: '#10151b' },
   },
   {
-    value: 'brass-day',
-    label: 'Daylight',
-    hint: 'Warm and light',
-    swatch: { base: '#f7f3e9', surface: '#efe5d0', accent: '#b57916', ink: '#17202a' },
-  },
-  {
     value: 'brass-night',
-    label: 'Midnight',
-    hint: 'Dark and focused',
-    swatch: { base: '#070a0f', surface: '#172330', accent: '#d8a53f', ink: '#f4f8fb' },
-  },
-  {
-    value: 'liquid-clear',
-    label: 'Liquid Clear',
-    hint: 'Glassy and deep',
-    swatch: { base: '#0a0f16', surface: '#14232f', accent: '#f0c970', ink: '#e8eef4' },
-  },
-  {
-    value: 'liquid-tinted',
-    label: 'Liquid Amber',
-    hint: 'Warm glass tint',
-    swatch: { base: '#12100a', surface: '#2d2313', accent: '#f0c970', ink: '#f4ecd8' },
+    label: 'Dark',
+    hint: '',
+    swatch: { base: '#0a1017', surface: '#172330', accent: '#f0c970', ink: '#f4f8fb' },
   },
   {
     value: 'high-contrast',
     label: 'High Contrast',
-    hint: 'Maximum legibility',
+    hint: '',
     swatch: { base: '#000000', surface: '#111111', accent: '#ffd65a', ink: '#ffffff' },
   },
 ] as const;
@@ -71,7 +53,7 @@ function readStoredTheme(): ThemePreference {
 
 function resolveTheme(theme: ThemePreference, prefersLight: boolean): Exclude<ThemePreference, 'system'> {
   if (theme !== 'system') return theme;
-  return prefersLight ? 'brass-day' : 'brass-night';
+  return prefersLight ? 'brass-white' : 'brass-night';
 }
 
 function applyTheme(theme: ThemePreference, resolvedTheme: Exclude<ThemePreference, 'system'>) {

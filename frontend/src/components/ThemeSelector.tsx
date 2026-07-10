@@ -1,13 +1,10 @@
-import { Check, Contrast, Droplets, Monitor, Moon, Sparkles, Sun, SunMedium, type LucideIcon } from 'lucide-react';
+import { Check, Contrast, Monitor, Moon, Sun, type LucideIcon } from 'lucide-react';
 import { themeOptions, useTheme, type ThemePreference } from '../state/ThemeContext';
 
 const themeIcons: Record<ThemePreference, LucideIcon> = {
   system: Monitor,
   'brass-white': Sun,
-  'brass-day': SunMedium,
   'brass-night': Moon,
-  'liquid-clear': Droplets,
-  'liquid-tinted': Sparkles,
   'high-contrast': Contrast,
 };
 
@@ -55,7 +52,7 @@ export function ThemeSelector({ compact = false }: { compact?: boolean }) {
               </span>
               <span className="theme-card-hint">
                 {showsResolved
-                  ? `Auto - now ${resolvedTheme === 'brass-day' || resolvedTheme === 'brass-white' ? 'light' : 'dark'}`
+                  ? `Now ${resolvedTheme === 'brass-white' ? 'light' : 'dark'}`
                   : option.hint}
               </span>
             </span>

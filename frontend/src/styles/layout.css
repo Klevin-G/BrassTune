@@ -223,9 +223,21 @@
   z-index: 1;
 }
 
+/* The hero banner is always dark in every theme, so its foreground must stay
+   light regardless of the active theme's --text token (fixes dark-on-dark
+   titles in the Light/System themes). */
+.page-header h1 {
+  color: #f6f9fc;
+}
+
 .page-header p {
   max-width: 720px;
   margin-bottom: 0;
+  color: rgba(233, 240, 247, 0.82);
+}
+
+.page-header .eyebrow {
+  color: var(--gold-soft);
 }
 
 .page-header-action {
