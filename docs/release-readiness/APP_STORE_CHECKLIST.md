@@ -1,6 +1,6 @@
 # Apple App Store Checklist
 
-Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-20, and native status updated on 2026-07-04:
+Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-20, and native implementation status updated on 2026-07-10:
 
 - [SDK minimum requirements](https://developer.apple.com/news/upcoming-requirements/?id=02032026a): apps uploaded to App Store Connect must be built with Xcode 26 or later using iOS/iPadOS 26 SDKs since April 28, 2026.
 - [Submitting apps](https://developer.apple.com/app-store/submitting/): build and test with current Xcode/latest SDKs.
@@ -25,10 +25,13 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 - In-app privacy, terms, support, data export, and account deletion surfaces exist.
 - Account deletion can be initiated in app.
 - Local clear/delete controls remove imported score metadata and copied local score files.
-- Simulator Debug/Release builds pass with Xcode 26.2 / iOS 26.2 SDK.
-- Native metronome simulator scope exists: visual pulse, audible click output, haptic option, mute, volume, meter, subdivision, and tap tempo.
-- Native score assist scope: PDF/image/Photos/sample import, thumbnails, page selection, rotate/crop/enhance preview, a full-resolution zoomable page viewer (PDFKit for PDFs, memory-safe ImageIO decoding for images), annotations, metadata + original-file export, and local delete.
-- Local AVAudioEngine live microphone capture code exists with permission handling, PCM input tap, pitch/confidence/RMS/no-lock detection, route/interruption notices, and sample-mode fallback.
+- The redesigned app has four focused tabs: Play-Along, Tuner, Progress, and Settings. Home/More/Coach/Audio Lab/demo Ensemble surfaces are removed from shipping navigation.
+- Native Play-Along uses the live pitch stream for written-pitch-class matching, sustained-note grading, median cents, per-note feedback, percentage, and stars.
+- Shipping Tuner and Play-Along behavior is real-microphone only. Deterministic pitch and score fixtures require explicit UI-test launch flags and are filtered from normal restored state.
+- Native metronome scope exists: audible-by-default click output at volume `0.6`, visual pulse, haptic option, mute, volume, meter, subdivision, and tap tempo. Output is temporarily muted only during an active live recording.
+- Native score scope includes PDF/image/Photos import, thumbnails, page selection, rotate/crop/enhance preview, a full-resolution zoomable page viewer (PDFKit for PDFs, memory-safe ImageIO decoding for images), annotations, metadata + original-file export, and local delete. The synthetic score is UI-test-only.
+- Adaptive system light/dark surfaces are implemented. Custom iOS 26 Liquid Glass is availability-gated and limited to floating transports, primary Start/Record actions, and the score viewer top controls, with iOS 17–25 fallbacks.
+- The current app, unit-test, and UI-test sources pass strict Swift 6 semantic type-checks for iOS 17 simulator/device SDK targets. `BrassTuneCore` tests execute successfully (`3/3`). The `35` app unit tests and `2` UI tests were not executed in this sandbox, so no current simulator pass is claimed.
 
 ## Owner Decisions Required
 
@@ -58,6 +61,7 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 
 ## Not Yet Complete
 
+- Unrestricted Xcode simulator Debug/Release builds and execution of the current `35` app unit tests plus `2` UI tests.
 - Signed archive validation/export.
 - App Store Connect upload/TestFlight.
 - Third-party SDK privacy signature/manifest audit after final dependencies are pinned.

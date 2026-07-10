@@ -9,7 +9,7 @@ final class NativeAudioEngine: ObservableObject {
     @Published private(set) var permissionDenied = false
     @Published private(set) var currentFrame: PitchFrame?
     @Published private(set) var frames: [PitchFrame] = []
-    @Published private(set) var activeSource: PracticeSessionSource = .sample
+    @Published private(set) var activeSource: PracticeSessionSource = .live
     @Published private(set) var audioNotice: String?
     @Published private(set) var routeChanged = false
 
@@ -18,18 +18,18 @@ final class NativeAudioEngine: ObservableObject {
     private var fixtureInstrumentId = "trumpet"
     private var fixtureReferencePitchHz = 440.0
     private var liveStartedAt: Date?
+    private var liveCaptureID: UUID?
+    private var liveStartRequestID: UUID?
     private let maxLiveFrames = 18_000
     private let pitchProcessingQueue = DispatchQueue(label: "com.brasstune.native.pitch-processing", qos: .userInitiated)
     private var routeChangeObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
 
     static var defaultRecordingSource: PracticeSessionSource {
-        #if targetEnvironment(simulator)
-        .sample
-        #else
-        .live
-        #endif
+        NativeTestFixtures.areEnabled ? .sample : .live
     }
+
+    static var testFixturesEnabled: Bool { NativeTestFixtures.areEnabled }
 
     init() {
         routeChangeObserver = NotificationCenter.default.addObserver(
@@ -39,7 +39,7 @@ final class NativeAudioEngine: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.routeChanged = true
-                self?.audioNotice = "Audio route changed. Confirm headphones or speaker output before continuing."
+                self?.audioNotice = "Your audio output changed. Check your headphones or speaker before continuing."
             }
         }
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -59,20 +59,29 @@ final class NativeAudioEngine: ObservableObject {
     }
 
     func requestMicrophonePermission() async -> Bool {
+        let granted: Bool
         if #available(iOS 17.0, *) {
-            let granted = await AVAudioApplication.requestRecordPermission()
-            permissionDenied = !granted
-            if granted {
-                audioNotice = nil
-            } else {
-                audioNotice = "Microphone access is denied. Sample mode remains available."
+            granted = await AVAudioApplication.requestRecordPermission()
+        } else {
+            granted = await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                    continuation.resume(returning: allowed)
+                }
             }
-            return granted
         }
-        return false
+        permissionDenied = !granted
+        audioNotice = granted ? nil : "Microphone access is off. Allow it in Settings, then try again."
+        return granted
     }
 
     func startFixtureRecording(instrumentId: String, referencePitchHz: Double) {
+        guard Self.testFixturesEnabled else {
+            stopAndResetAudioEngine()
+            activeSource = .live
+            frames.removeAll()
+            currentFrame = nil
+            return
+        }
         stopAndResetAudioEngine()
         recording = true
         permissionDenied = false
@@ -87,6 +96,12 @@ final class NativeAudioEngine: ObservableObject {
     }
 
     func stopFixtureRecording() -> [PitchFrame] {
+        guard Self.testFixturesEnabled, activeSource == .sample else {
+            stopAndResetAudioEngine()
+            frames.removeAll()
+            currentFrame = nil
+            return []
+        }
         let elapsed = max(3.5, Date().timeIntervalSince(fixtureStartedAt ?? Date()))
         let frameCount = min(240, max(12, Int((elapsed / 0.11).rounded())))
         frames = (0..<frameCount).map { PitchFrame.fixture(index: $0, instrumentId: fixtureInstrumentId, referencePitchHz: fixtureReferencePitchHz) }
@@ -97,7 +112,12 @@ final class NativeAudioEngine: ObservableObject {
     }
 
     func startLiveRecording(instrumentId: String, referencePitchHz: Double) async throws -> Bool {
-        guard await requestMicrophonePermission() else {
+        let requestID = UUID()
+        liveStartRequestID = requestID
+        let permissionGranted = await requestMicrophonePermission()
+        guard liveStartRequestID == requestID else { return false }
+        liveStartRequestID = nil
+        guard permissionGranted else {
             recording = false
             activeSource = .live
             frames.removeAll()
@@ -106,6 +126,10 @@ final class NativeAudioEngine: ObservableObject {
         }
         try configureAndStartLiveEngine(instrumentId: instrumentId, referencePitchHz: referencePitchHz)
         return true
+    }
+
+    func cancelPendingLiveStart() {
+        liveStartRequestID = nil
     }
 
     func stopLiveRecording() -> [PitchFrame] {
@@ -122,6 +146,8 @@ final class NativeAudioEngine: ObservableObject {
         recording = false
         fixtureStartedAt = nil
         liveStartedAt = nil
+        liveCaptureID = nil
+        liveStartRequestID = nil
     }
 
     private func configureAndStartLiveEngine(instrumentId: String, referencePitchHz: Double) throws {
@@ -138,15 +164,17 @@ final class NativeAudioEngine: ObservableObject {
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
-            audioNotice = "No usable microphone input route is available."
+            audioNotice = "BrassTune can't hear a microphone."
             throw NativeAudioEngineError.inputUnavailable
         }
 
         let startedAt = Date()
+        let captureID = UUID()
         frames.removeAll()
         currentFrame = nil
         activeSource = .live
         liveStartedAt = startedAt
+        liveCaptureID = captureID
         audioNotice = nil
         routeChanged = false
 
@@ -165,22 +193,24 @@ final class NativeAudioEngine: ObservableObject {
                         referencePitchHz: referencePitchHz
                     )
                     Task { @MainActor in
-                        self?.appendLiveFrame(frame)
+                        self?.appendLiveFrame(frame, captureID: captureID)
                     }
                 }
             }
             try engine.start()
         } catch {
             stopAndResetAudioEngine()
-            audioNotice = "Live microphone could not start. Check the current audio route and try again."
+            audioNotice = "BrassTune couldn't start the microphone. Check your audio input and try again."
             throw error
         }
 
         recording = true
     }
 
-    private func appendLiveFrame(_ frame: PitchFrame) {
-        guard recording, activeSource == .live else { return }
+    private func appendLiveFrame(_ frame: PitchFrame, captureID: UUID) {
+        guard recording,
+              activeSource == .live,
+              liveCaptureID == captureID else { return }
         frames.append(frame)
         if frames.count > maxLiveFrames {
             frames.removeFirst(frames.count - maxLiveFrames)

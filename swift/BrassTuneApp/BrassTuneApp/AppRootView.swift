@@ -6,38 +6,35 @@ import UniformTypeIdentifiers
 import UIKit
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case home
-    case practice
-    case analytics
-    case coach
-    case more
+    case playAlong
+    case tuner
+    case progress
+    case settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .home: return "Home"
-        case .practice: return "Practice"
-        case .analytics: return "Analytics"
-        case .coach: return "Coach"
-        case .more: return "More"
+        case .playAlong: return "Play-Along"
+        case .tuner: return "Tuner"
+        case .progress: return "Progress"
+        case .settings: return "Settings"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .home: return "house"
-        case .practice: return "gauge.with.dots.needle.67percent"
-        case .analytics: return "chart.bar.xaxis"
-        case .coach: return "sparkles"
-        case .more: return "square.grid.2x2"
+        case .playAlong: return "music.note.list"
+        case .tuner: return "tuningfork"
+        case .progress: return "chart.line.uptrend.xyaxis"
+        case .settings: return "gearshape"
         }
     }
 }
 
 struct AppRootView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selectedTab: AppTab = .home
+    @State private var selectedTab: AppTab = .playAlong
     @State private var onboardingPresented: Bool
     private let resetUITestState: Bool
     private let settingsOnlyLaunch: Bool
@@ -47,133 +44,78 @@ struct AppRootView: View {
         let arguments = ProcessInfo.processInfo.arguments
         settingsOnlyLaunch = arguments.contains("UITEST_SETTINGS")
         resetUITestState = arguments.contains("UITEST_RESET_STATE")
-        uiTestMode = arguments.contains("UITEST_DEMO") || arguments.contains("UITEST_SETTINGS")
+        uiTestMode = arguments.contains("UITEST_DEMO")
+            || arguments.contains("UITEST_FIXTURES")
+            || arguments.contains("UITEST_SETTINGS")
         _onboardingPresented = State(initialValue: !uiTestMode)
     }
 
     var body: some View {
         Group {
             if settingsOnlyLaunch {
-                NavigationStack { SettingsView(onboardingPresented: $onboardingPresented) }
+                NavigationStack {
+                    SettingsView(onboardingPresented: $onboardingPresented)
+                }
             } else {
                 TabView(selection: $selectedTab) {
-                    NavigationStack { HomeView(selectedTab: $selectedTab, onboardingPresented: $onboardingPresented) }
-                        .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.systemImage) }
-                        .tag(AppTab.home)
-                    NavigationStack { PracticeView(selectedTab: $selectedTab) }
-                        .tabItem { Label(AppTab.practice.title, systemImage: AppTab.practice.systemImage) }
-                        .tag(AppTab.practice)
-                    NavigationStack { AnalyticsView(selectedTab: $selectedTab) }
-                        .tabItem { Label(AppTab.analytics.title, systemImage: AppTab.analytics.systemImage) }
-                        .tag(AppTab.analytics)
-                    NavigationStack { CoachNativeView(selectedTab: $selectedTab) }
-                        .tabItem { Label(AppTab.coach.title, systemImage: AppTab.coach.systemImage) }
-                        .tag(AppTab.coach)
-                    NavigationStack { MoreHubView(onboardingPresented: $onboardingPresented, selectedTab: $selectedTab) }
-                        .tabItem { Label(AppTab.more.title, systemImage: AppTab.more.systemImage) }
-                        .tag(AppTab.more)
+                    NavigationStack {
+                        PlayAlongView()
+                    }
+                    .tabItem {
+                        Label(AppTab.playAlong.title, systemImage: AppTab.playAlong.systemImage)
+                    }
+                    .tag(AppTab.playAlong)
+
+                    NavigationStack {
+                        TunerView()
+                    }
+                    .tabItem {
+                        Label(AppTab.tuner.title, systemImage: AppTab.tuner.systemImage)
+                    }
+                    .tag(AppTab.tuner)
+
+                    NavigationStack {
+                        ProgressTabView(selectedTab: $selectedTab)
+                    }
+                    .tabItem {
+                        Label(AppTab.progress.title, systemImage: AppTab.progress.systemImage)
+                    }
+                    .tag(AppTab.progress)
+
+                    NavigationStack {
+                        SettingsView(onboardingPresented: $onboardingPresented)
+                    }
+                    .tabItem {
+                        Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage)
+                    }
+                    .tag(AppTab.settings)
                 }
                 .tint(BTTheme.accent)
-                .sheet(isPresented: $onboardingPresented) {
-                    OnboardingView(isPresented: $onboardingPresented, selectedTab: $selectedTab)
+                .onChange(of: selectedTab) { oldTab, newTab in
+                    if oldTab == .playAlong,
+                       newTab != .playAlong,
+                       model.playAlongPhase == .running || model.playAlongStartInProgress {
+                        model.stopPlayAlong()
+                    }
+                    if oldTab == .tuner, newTab != .tuner {
+                        model.cancelRecordingStart()
+                        if model.audioEngine.recording {
+                            model.stopRecording()
+                        }
+                    }
                 }
             }
+        }
+        .sheet(isPresented: $onboardingPresented) {
+            OnboardingView(isPresented: $onboardingPresented, selectedTab: $selectedTab)
         }
         .task {
             if resetUITestState {
                 model.resetForUITesting()
             }
-            if uiTestMode {
-                return
-            }
+            guard !uiTestMode else { return }
             await model.restoreSession()
         }
-    }
-}
-
-struct HomeView: View {
-    @EnvironmentObject private var model: AppModel
-    @Binding var selectedTab: AppTab
-    @Binding var onboardingPresented: Bool
-
-    var body: some View {
-        BTScreen {
-            BTPageHeader(
-                eyebrow: "Practice cockpit",
-                title: "BrassTune",
-                subtitle: "A focused brass tuner and local practice log for honest session review.",
-                trailing: model.authState.displayTitle
-            )
-            .accessibilityIdentifier("home.hero")
-
-            Button {
-                selectedTab = .practice
-            } label: {
-                Label("Start practice", systemImage: "play.fill")
-            }
-            .buttonStyle(BTPrimaryButtonStyle())
-            .accessibilityIdentifier("home.startPractice")
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                NavigationLink {
-                    MetronomeView()
-                } label: {
-                    BTInsightTile(title: "Metronome", detail: "\(model.metronome.bpm) BPM, \(model.metronome.meterLabel)", systemImage: "metronome", tint: BTTheme.warning, interactive: true)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("home.metronome")
-
-                NavigationLink {
-                    ScorePracticeView()
-                } label: {
-                    BTInsightTile(title: "Score Practice", detail: model.activeScore?.title ?? "Import or use sample", systemImage: "doc.viewfinder", tint: BTTheme.blue, interactive: true)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("home.scorePractice")
-
-                NavigationLink {
-                    SettingsView(onboardingPresented: $onboardingPresented)
-                } label: {
-                    BTInsightTile(title: "Settings", detail: "Horn, pitch, data", systemImage: "gearshape", tint: BTTheme.secondaryAccent, interactive: true)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("home.settings")
-            }
-
-            BTCard(tint: BTTheme.surfaceWarm) {
-                BTSectionHeader(title: "Today's intonation focus", subtitle: "Center the note before expanding range.")
-                VStack(alignment: .leading, spacing: BTSpacing.md) {
-                    Text(model.selectedInstrumentId == "horn" ? "G4" : "D5")
-                        .font(.system(size: 72, weight: .bold, design: .rounded))
-                        .foregroundStyle(BTTheme.accentSoft)
-                        .minimumScaleFactor(0.7)
-                    Text("Slow attacks, steady air, release cleanly. Guest practice stays on this device.")
-                        .font(.subheadline)
-                        .foregroundStyle(BTTheme.muted)
-                }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                    BTMetricTile(title: "Instrument", value: instrumentName(model.selectedInstrumentId), detail: "Written pitch")
-                    BTMetricTile(title: "Reference", value: String(format: "%.1f", model.referencePitchHz), detail: "A4 Hz", tint: BTTheme.secondaryAccent)
-                    BTMetricTile(title: "Saved", value: "\(model.sessions.count)", detail: "local takes", tint: BTTheme.blue)
-                    BTMetricTile(title: "In tune", value: model.analyticsSnapshot.hasSessions ? "\(String(format: "%.0f", model.analyticsSnapshot.averageInTunePercentage))%" : "--", detail: "local frames", tint: BTTheme.success)
-                }
-            }
-
-            if model.analyticsSnapshot.hasSessions {
-                LatestSessionSummary()
-            } else {
-                BTEmptyState(
-                    title: "No local takes yet",
-                    message: "Record a live or sample take to make analytics, export, and review screens show real local data.",
-                    systemImage: "waveform"
-                )
-                .accessibilityIdentifier("home.noSessions")
-            }
-
-            AccountStateCard()
-        }
-        .navigationTitle("Home")
-        .accessibilityIdentifier("screen.home")
     }
 }
 
@@ -185,254 +127,561 @@ struct OnboardingView: View {
     var body: some View {
         NavigationStack {
             BTScreen {
+                BTPageHeader(
+                    eyebrow: "BrassTune",
+                    title: "Choose your instrument",
+                    subtitle: "Pick your instrument so tuning matches your horn."
+                )
+                .accessibilityIdentifier("onboarding.hero")
+
                 BTCard {
-                    BTSectionHeader(
-                        title: "Set the horn before the first take",
-                        subtitle: "Choose your instrument and reference pitch. Simulator sample mode is ready; live microphone tuning runs on device and still needs physical-device validation."
-                    )
                     Picker("Instrument", selection: $model.selectedInstrumentId) {
                         instrumentPickerOptions()
                     }
-                    Stepper("A4 \(model.referencePitchHz, specifier: "%.1f") Hz", value: $model.referencePitchHz, in: 430...450, step: 0.5)
+                    .pickerStyle(.inline)
+                    .accessibilityIdentifier("onboarding.instrumentPicker")
                 }
 
-                BTCard {
-                    BTSectionHeader(
-                        title: "How BrassTune records",
-                        subtitle: "Live microphone mode uses iOS permission and on-device pitch detection. Simulator sample mode stays clearly labeled for repeatable testing."
-                    )
-                    Button {
-                        model.enterGuestDemo()
-                        selectedTab = .practice
-                        isPresented = false
-                    } label: {
-                        Label("Continue as guest", systemImage: "checkmark.circle.fill")
-                    }
-                    .buttonStyle(BTPrimaryButtonStyle())
-                    .accessibilityIdentifier("onboarding.startPractice")
-                    Text("No lock means confidence is too low to save. Unstable pitch means lock exists but cents vary too much.")
-                        .font(.footnote)
-                        .foregroundStyle(BTTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    model.enterGuestDemo()
+                    selectedTab = .playAlong
+                    isPresented = false
+                } label: {
+                    Label("Start", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                .accessibilityIdentifier("onboarding.startPractice")
             }
-            .navigationTitle("Setup")
+            .navigationTitle("Welcome")
         }
         .presentationDetents([.medium, .large])
     }
 }
 
-struct PracticeView: View {
+struct PlayAlongView: View {
     @EnvironmentObject private var model: AppModel
-    @Binding var selectedTab: AppTab
 
     var body: some View {
         BTScreen {
-            PracticeTunerSection(model: model, audioEngine: model.audioEngine)
-            PracticeToolsCard(selectedTab: $selectedTab)
-            MicrophoneSection(audioEngine: model.audioEngine)
-            if !model.sessions.isEmpty {
-                BTCard {
-                    BTSectionHeader(title: "Saved take ready", subtitle: "Review the latest take or inspect local analytics derived from saved frames.")
-                    VStack(spacing: BTSpacing.md) {
-                        BTMetricTile(title: "Analytics", value: "\(model.analyticsSnapshot.sessionCount)", detail: "saved take ready", tint: BTTheme.success)
-                            .accessibilityIdentifier("analytics.metrics")
+            BTPageHeader(
+                eyebrow: "BrassTune",
+                title: "Play-Along",
+                subtitle: "Choose an exercise, play each highlighted note, and hold it steady."
+            )
+            .accessibilityIdentifier("playAlong.hero")
 
-                        NavigationLink {
-                            SessionsView()
-                        } label: {
-                            Label("Review sessions", systemImage: "music.note.list")
-                        }
-                        .buttonStyle(BTSecondaryButtonStyle())
-                        .accessibilityIdentifier("analytics.reviewSessions")
-
-                        NavigationLink {
-                            AnalyticsView(selectedTab: $selectedTab)
-                        } label: {
-                            Label("View analytics", systemImage: "chart.bar.xaxis")
-                        }
-                        .buttonStyle(BTSecondaryButtonStyle())
-                        .accessibilityIdentifier("practice.viewAnalytics")
-                    }
+            switch model.playAlongPhase {
+            case .idle:
+                exercisePicker
+                startButton
+                microphoneRecovery
+            case .running:
+                if let session = model.playAlongSession {
+                    PlayAlongLiveView(session: session)
+                }
+            case .completed:
+                if let grade = model.playAlongGrade {
+                    PlayAlongResultsView(
+                        exercise: model.playAlongSession?.exercise ?? model.selectedPlayAlongExercise,
+                        grade: grade
+                    )
                 }
             }
         }
         .safeAreaInset(edge: .bottom) {
-            PracticeRecordingInset(audioEngine: model.audioEngine)
+            if model.playAlongPhase == .running {
+                PlayAlongTransportBar()
+                    .padding(.horizontal, BTSpacing.lg)
+                    .padding(.bottom, BTSpacing.md)
+            }
         }
-        .navigationTitle("Practice")
-        .accessibilityIdentifier("screen.practice")
+        .navigationTitle("Play-Along")
+        .accessibilityIdentifier("screen.playAlong")
+    }
+
+    private var exercisePicker: some View {
+        BTCard {
+            BTSectionHeader(title: "Choose an exercise", subtitle: "C major is a friendly place to start.")
+            Picker("Exercise", selection: $model.selectedPlayAlongExerciseID) {
+                ForEach(model.playAlongExercises) { exercise in
+                    Text("\(exercise.title) · \(exercise.difficulty)")
+                        .tag(exercise.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("playAlong.exercisePicker")
+
+            let exercise = model.selectedPlayAlongExercise
+            Text(exercise.detail)
+                .font(.subheadline)
+                .foregroundStyle(BTTheme.muted)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: BTSpacing.sm) {
+                    ForEach(Array(exercise.writtenNotes.enumerated()), id: \.offset) { _, note in
+                        Text(note)
+                            .font(.headline.monospaced())
+                            .padding(.horizontal, BTSpacing.md)
+                            .padding(.vertical, BTSpacing.sm)
+                            .background(BTTheme.surfaceAlt, in: Capsule())
+                    }
+                }
+            }
+            .accessibilityIdentifier("playAlong.exerciseNotes")
+        }
+    }
+
+    private var startButton: some View {
+        Button {
+            Task {
+                await model.startPlayAlong(exerciseID: model.selectedPlayAlongExerciseID)
+            }
+        } label: {
+            Label(model.playAlongStartInProgress ? "Getting ready…" : "Start listening", systemImage: "mic.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+        .disabled(model.playAlongStartInProgress)
+        .accessibilityIdentifier("playAlong.start")
+    }
+
+    @ViewBuilder
+    private var microphoneRecovery: some View {
+        if model.audioEngine.permissionDenied {
+            MicrophoneRecoveryView()
+        } else if let error = model.lastError {
+            Text(error.localizedDescription)
+                .font(.footnote)
+                .foregroundStyle(BTTheme.danger)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("playAlong.error")
+        } else {
+            Text("Your first tap asks for microphone access.")
+                .font(.footnote)
+                .foregroundStyle(BTTheme.muted)
+        }
     }
 }
 
-private struct PracticeRecordingInset: View {
-    @ObservedObject var audioEngine: NativeAudioEngine
+private struct PlayAlongLiveView: View {
+    let session: PlayAlongSession
 
     var body: some View {
-        if audioEngine.recording {
-            FloatingPracticeControlBar()
-                .padding(.horizontal, BTSpacing.lg)
-                .padding(.bottom, BTSpacing.md)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        BTCard(tint: BTTheme.surfaceWarm) {
+            Text("Note \(min(session.currentNoteIndex + 1, session.exercise.writtenNotes.count)) of \(session.exercise.writtenNotes.count)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(BTTheme.muted)
+
+            Text(session.currentNoteName ?? "—")
+                .font(.system(size: 64, weight: .bold, design: .rounded))
+                .foregroundStyle(BTTheme.accent)
+                .frame(maxWidth: .infinity)
+                .minimumScaleFactor(0.7)
+                .accessibilityIdentifier("playAlong.targetNote")
+
+            Text("Hold steady")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+
+            ProgressView(value: session.heldFraction)
+                .tint(BTTheme.success)
+                .accessibilityLabel("Hold progress")
+                .accessibilityValue("\(Int((session.heldFraction * 100).rounded())) percent")
+                .accessibilityIdentifier("playAlong.holdProgress")
+
+            VStack(spacing: BTSpacing.xs) {
+                Text(session.detectedNoteName.map { "You're playing \($0)" } ?? "Listening…")
+                    .font(.title3.weight(.semibold))
+                Text(playAlongFeedback(session))
+                    .font(.subheadline)
+                    .foregroundStyle(playAlongFeedbackTint(session))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("playAlong.feedback")
         }
+
+        PlayAlongSequenceView(session: session)
     }
 }
 
-private struct PracticeToolsCard: View {
-    @EnvironmentObject private var model: AppModel
-    @Binding var selectedTab: AppTab
+private struct PlayAlongSequenceView: View {
+    let session: PlayAlongSession
 
     var body: some View {
         BTCard {
-            BTSectionHeader(title: "Practice tools", subtitle: "Metronome and score notes stay local and can run during live or sample takes.")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                NavigationLink {
-                    MetronomeView()
-                } label: {
-                    BTInsightTile(title: "Metronome", detail: "\(model.metronome.bpm) BPM, \(model.metronome.meterLabel), \(model.metronome.subdivision.title)", systemImage: "metronome", tint: BTTheme.warning, interactive: true)
+            BTSectionHeader(title: "Exercise")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: BTSpacing.sm) {
+                    ForEach(Array(session.exercise.writtenNotes.enumerated()), id: \.offset) { index, note in
+                        let completed = index < session.noteGrades.count
+                        let active = index == session.currentNoteIndex
+                        let tint = completed
+                            ? playAlongRatingTint(session.noteGrades[index].rating)
+                            : (active ? BTTheme.accent : BTTheme.muted)
+                        Text(note)
+                            .font(.headline.monospaced())
+                            .foregroundStyle(tint)
+                            .frame(width: 44, height: 44)
+                            .background(tint.opacity(active || completed ? 0.15 : 0.06), in: Circle())
+                            .overlay {
+                                Circle().stroke(tint.opacity(active ? 0.75 : 0.25), lineWidth: active ? 2 : 1)
+                            }
+                            .accessibilityLabel("\(note), \(completed ? session.noteGrades[index].rating.title : (active ? "current note" : "up next"))")
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("practice.metronome")
+            }
+            .accessibilityIdentifier("playAlong.sequence")
+        }
+    }
+}
 
-                NavigationLink {
-                    ScorePracticeView()
-                } label: {
-                    BTInsightTile(title: "Score Practice", detail: model.selectedScoreForPracticeLabel, systemImage: "doc.viewfinder", tint: BTTheme.blue, interactive: true)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("practice.scorePractice")
+private struct PlayAlongResultsView: View {
+    @EnvironmentObject private var model: AppModel
+    let exercise: PlayAlongExercise
+    let grade: PlayAlongGrade
 
-                Button {
-                    selectedTab = .coach
-                } label: {
-                    BTInsightTile(title: "Coach", detail: model.analyticsSnapshot.recommendation, systemImage: "sparkles", tint: BTTheme.secondaryAccent, interactive: true)
+    var body: some View {
+        BTCard(tint: BTTheme.surfaceWarm) {
+            BTSectionHeader(title: "Your score", subtitle: exercise.title)
+
+            Text("\(grade.inTunePercentage)%")
+                .font(.system(size: 64, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(playAlongScoreTint(grade.inTunePercentage))
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("playAlong.score")
+
+            HStack(spacing: BTSpacing.sm) {
+                ForEach(0..<3, id: \.self) { index in
+                    Image(systemName: index < grade.stars ? "star.fill" : "star")
+                        .foregroundStyle(index < grade.stars ? BTTheme.accent : BTTheme.muted)
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("practice.coachShortcut")
+            }
+            .font(.title2)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel("\(grade.stars) out of 3 stars")
+
+            Text(playAlongScoreMessage(grade))
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+            HStack(spacing: BTSpacing.md) {
+                BTMetricTile(
+                    title: "Notes played",
+                    value: "\(grade.notesPlayed)/\(grade.totalNotes)",
+                    detail: "completed"
+                )
+                BTMetricTile(
+                    title: "Average",
+                    value: grade.averageAbsoluteCents.map { String(format: "%.1f", $0) } ?? "—",
+                    detail: "cents from center",
+                    tint: BTTheme.secondaryAccent
+                )
             }
         }
+
+        BTCard {
+            BTSectionHeader(title: "Note by note", subtitle: "Cents show the small distance from the center of a note.")
+            ForEach(grade.noteGrades) { noteGrade in
+                HStack {
+                    Text(noteGrade.writtenNoteName)
+                        .font(.headline.monospaced())
+                    Spacer()
+                    Text(noteGrade.medianCents.map { String(format: "%+.1f cents", $0) } ?? "Skipped")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(playAlongRatingTint(noteGrade.rating))
+                    Text(noteGrade.rating.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(playAlongRatingTint(noteGrade.rating))
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+
+        Button {
+            Task {
+                await model.startPlayAlong(exerciseID: exercise.id)
+            }
+        } label: {
+            Label("Play again", systemImage: "arrow.counterclockwise")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+        .accessibilityIdentifier("playAlong.playAgain")
+
+        Button {
+            model.resetPlayAlong()
+        } label: {
+            Label("Choose another exercise", systemImage: "music.note.list")
+        }
+        .buttonStyle(BTSecondaryButtonStyle())
+        .accessibilityIdentifier("playAlong.chooseAnother")
+    }
+}
+
+private struct PlayAlongTransportBar: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        HStack(spacing: BTSpacing.lg) {
+            Button {
+                model.skipPlayAlongNote()
+            } label: {
+                Label("Skip note", systemImage: "forward.end.fill")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("playAlong.skip")
+
+            Divider()
+                .frame(height: 24)
+
+            Button(role: .destructive) {
+                model.stopPlayAlong()
+            } label: {
+                Label("Stop", systemImage: "stop.fill")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("playAlong.stop")
+        }
+        .font(.headline)
+        .foregroundStyle(BTTheme.text)
+        .padding(.horizontal, BTSpacing.xl)
+        .padding(.vertical, BTSpacing.md)
+        .brassGlass(in: Capsule(), interactive: true)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("playAlong.transport")
+    }
+}
+
+struct TunerView: View {
+    @EnvironmentObject private var model: AppModel
+
+    private var activeFrame: PitchFrame? {
+        guard model.audioEngine.recording else { return nil }
+        guard model.audioEngine.activeSource == .live || model.testFixturesEnabled else { return nil }
+        return model.audioEngine.currentFrame
+    }
+
+    var body: some View {
+        BTScreen {
+            BTPageHeader(
+                eyebrow: "Tuner",
+                title: "Find the center",
+                subtitle: "Play a note and BrassTune will show whether it is flat, in tune, or sharp."
+            )
+
+            TunerReadout(frame: activeFrame)
+
+            if !model.audioEngine.recording {
+                Button {
+                    Task {
+                        await model.startRecording()
+                    }
+                } label: {
+                    Label("Start listening", systemImage: "mic.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                .disabled(model.recordingStartInProgress)
+                .accessibilityIdentifier("tuner.recordButton")
+            }
+
+            if model.audioEngine.permissionDenied {
+                MicrophoneRecoveryView()
+            } else if let notice = model.audioEngine.audioNotice {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("tuner.audioNotice")
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if model.audioEngine.recording {
+                FloatingPracticeControlBar()
+                    .padding(.horizontal, BTSpacing.lg)
+                    .padding(.bottom, BTSpacing.md)
+            }
+        }
+        .navigationTitle("Tuner")
+        .accessibilityIdentifier("screen.tuner")
+    }
+}
+
+private struct TunerReadout: View {
+    let frame: PitchFrame?
+
+    private var noteLabel: String {
+        guard let note = frame?.writtenNoteName else { return "Play a note" }
+        return "\(note)\(frame?.writtenOctave.map(String.init) ?? "")"
+    }
+
+    private var verdict: String {
+        guard let frame else { return "Listening…" }
+        switch frame.tuningStatus {
+        case .inTune: return "In tune — hold it steady"
+        case .sharp: return "A little sharp — ease down"
+        case .flat: return "A little flat — lift up"
+        case .silence, .noLock, .unstable: return "Listening…"
+        }
+    }
+
+    private var tint: Color {
+        guard let frame else { return BTTheme.muted }
+        switch frame.tuningStatus {
+        case .inTune: return BTTheme.success
+        case .sharp: return BTTheme.sharp
+        case .flat: return BTTheme.flat
+        case .silence, .noLock, .unstable: return BTTheme.muted
+        }
+    }
+
+    var body: some View {
+        BTCard(tint: BTTheme.surfaceWarm) {
+            Text(noteLabel)
+                .font(.system(size: 64, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .frame(maxWidth: .infinity)
+                .minimumScaleFactor(0.65)
+                .accessibilityIdentifier("tuner.note")
+
+            Text(verdict)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("tuner.verdict")
+
+            TuningMeter(cents: frame?.centsDeviation)
+        }
+        .accessibilityIdentifier("tuner.readout")
+    }
+}
+
+private struct TuningMeter: View {
+    let cents: Double?
+
+    private var clampedCents: Double {
+        min(50, max(-50, cents ?? 0))
+    }
+
+    private var accessibilityVerdict: String {
+        guard let cents else { return "Waiting for a note" }
+        if abs(cents) <= 5 { return "In tune" }
+        return cents > 0 ? "Sharp" : "Flat"
+    }
+
+    var body: some View {
+        VStack(spacing: BTSpacing.sm) {
+            GeometryReader { proxy in
+                let travel = max(0, proxy.size.width / 2 - 5)
+                ZStack {
+                    Capsule()
+                        .fill(BTTheme.surfaceAlt)
+                        .frame(height: 14)
+                    Capsule()
+                        .fill(BTTheme.success.opacity(0.30))
+                        .frame(width: max(18, proxy.size.width * 0.10), height: 14)
+                    Rectangle()
+                        .fill(BTTheme.text)
+                        .frame(width: 4, height: 34)
+                        .clipShape(Capsule())
+                        .offset(x: CGFloat(clampedCents / 50) * travel)
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .frame(height: 40)
+
+            HStack {
+                Label("Flat", systemImage: "arrow.down")
+                    .foregroundStyle(BTTheme.flat)
+                Spacer()
+                Text("In tune")
+                    .foregroundStyle(BTTheme.success)
+                Spacer()
+                Label("Sharp", systemImage: "arrow.up")
+                    .foregroundStyle(BTTheme.sharp)
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tuning meter")
+        .accessibilityValue(accessibilityVerdict)
+        .accessibilityIdentifier("tuner.meter")
     }
 }
 
 private struct FloatingPracticeControlBar: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: BTSpacing.sm) {
-            if dynamicTypeSize.isAccessibilitySize {
-                primaryControls
-                secondaryControls
-            } else {
-                primaryControls
-                secondaryControls
-            }
-            statusRow
-        }
-        .padding(BTSpacing.md)
-        .btGlassPanel(cornerRadius: BTTheme.radiusLarge, tint: BTTheme.surfaceWarm, interactive: true)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("practice.floatingBar")
-    }
+            HStack(spacing: BTSpacing.sm) {
+                Button {
+                    model.stopRecording()
+                } label: {
+                    Label("Stop and save", systemImage: "stop.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Stop and save recording")
+                .accessibilityIdentifier("tuner.floating.stop")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.danger))
 
-    private var primaryControls: some View {
-        HStack(spacing: BTSpacing.sm) {
-            Button {
-                model.stopRecording()
-            } label: {
-                Label("Stop", systemImage: "stop.fill")
+                Button {
+                    model.toggleMetronome()
+                } label: {
+                    Label(
+                        model.metronomeRunning ? "Stop metronome" : "Start metronome",
+                        systemImage: model.metronomeRunning ? "pause.fill" : "play.fill"
+                    )
                     .labelStyle(.iconOnly)
-            }
-            .accessibilityLabel("Stop recording")
-            .accessibilityIdentifier("practice.floating.stop")
-            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.danger))
+                }
+                .accessibilityLabel(model.metronomeRunning ? "Stop metronome" : "Start metronome")
+                .accessibilityIdentifier("tuner.floating.metronome")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.warning))
 
-            Button {
-                model.toggleMetronome()
-            } label: {
-                Label(model.metronomeRunning ? "Stop metronome" : "Start metronome", systemImage: model.metronomeRunning ? "pause.fill" : "play.fill")
-                    .labelStyle(.iconOnly)
-            }
-            .accessibilityLabel(model.metronomeRunning ? "Stop metronome" : "Start metronome")
-            .accessibilityIdentifier("practice.floating.metronome")
-            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.warning))
+                VStack(spacing: 0) {
+                    Text("\(model.metronome.bpm)")
+                        .font(.headline.monospacedDigit())
+                    Text("BPM")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(BTTheme.muted)
+                }
+                .frame(minWidth: 52)
+                .accessibilityElement(children: .combine)
 
-            VStack(spacing: 0) {
-                Text("\(model.metronome.bpm)")
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(BTTheme.accentSoft)
-                Text(model.metronome.meterLabel)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(BTTheme.muted)
-            }
-            .frame(minWidth: 54)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Metronome \(model.metronome.bpm) beats per minute, meter \(model.metronome.meterLabel)")
-            .accessibilityIdentifier("practice.floating.bpm")
+                Button {
+                    model.adjustTempo(by: -2)
+                } label: {
+                    Label("Tempo down", systemImage: "minus")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Decrease tempo")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
 
-            Button {
-                model.toggleMetronomeMute()
-            } label: {
-                Label(model.metronome.visualOnly ? "Enable speaker click" : "Use visual-only click", systemImage: model.metronome.visualOnly ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                    .labelStyle(.iconOnly)
+                Button {
+                    model.adjustTempo(by: 2)
+                } label: {
+                    Label("Tempo up", systemImage: "plus")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Increase tempo")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
             }
-            .accessibilityLabel(model.metronome.visualOnly ? "Enable speaker click" : "Use visual-only metronome")
-            .accessibilityHint("Visual-only mode mutes the speaker click to reduce microphone bleed.")
-            .accessibilityIdentifier("practice.floating.mute")
-            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.blue))
-        }
-        .frame(maxWidth: .infinity)
-    }
 
-    private var secondaryControls: some View {
-        HStack(spacing: BTSpacing.sm) {
-            Button {
-                model.adjustTempo(by: -2)
-            } label: {
-                Label("Tempo down", systemImage: "minus")
-                    .labelStyle(.iconOnly)
-            }
-            .accessibilityLabel("Decrease tempo")
-            .accessibilityIdentifier("practice.floating.tempoDown")
-            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
-
-            Button {
-                model.adjustTempo(by: 2)
-            } label: {
-                Label("Tempo up", systemImage: "plus")
-                    .labelStyle(.iconOnly)
-            }
-            .accessibilityLabel("Increase tempo")
-            .accessibilityIdentifier("practice.floating.tempoUp")
-            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
-
-            Button {
-                model.tapTempo()
-            } label: {
-                Label("Tap tempo", systemImage: "hand.tap")
-                    .labelStyle(.iconOnly)
-            }
-            .accessibilityLabel("Tap tempo")
-            .accessibilityIdentifier("practice.floating.tapTempo")
-            .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.secondaryAccent))
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var statusRow: some View {
-        HStack(spacing: BTSpacing.sm) {
-            Text(model.metronomeRunning ? "Beat \(model.metronomeTick + 1)" : "Metronome ready")
+            Text(model.metronomeRunning ? "Visual beat while recording" : "Recording")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(model.metronomeRunning ? BTTheme.warning : BTTheme.muted)
-                .scaleEffect(model.metronomeRunning && !reduceMotion ? 1.03 : 1)
-                .accessibilityLabel(model.metronomeRunning ? "Metronome pulse" : "Metronome ready")
-            Spacer()
-            Text(model.activeScore?.title ?? "No score")
-                .font(.caption)
-                .foregroundStyle(BTTheme.muted)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .scaleEffect(model.metronomeRunning && !reduceMotion ? 1.02 : 1)
         }
+        .padding(BTSpacing.md)
+        .brassGlass(cornerRadius: BTTheme.radiusLarge, interactive: true)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("tuner.floatingBar")
     }
 }
 
@@ -444,134 +693,28 @@ private struct FloatingIconButtonStyle: ButtonStyle {
             .font(.headline.weight(.bold))
             .foregroundStyle(tint)
             .frame(width: 44, height: 44)
-            .background(tint.opacity(configuration.isPressed ? 0.24 : 0.14), in: Circle())
-            .overlay {
-                Circle().stroke(tint.opacity(0.30), lineWidth: 1)
-            }
+            .contentShape(Circle())
+            .opacity(configuration.isPressed ? 0.60 : 1)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
     }
 }
 
-private struct PracticeTunerSection: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var audioEngine: NativeAudioEngine
-
-    var body: some View {
-        let frame = audioEngine.currentFrame
-        let noteLabel = frame?.writtenNoteName.map { "\($0)\(frame?.writtenOctave ?? 0)" } ?? "No lock"
-        let centsLabel = frame?.centsDeviation.map { String(format: "%+.1f cents", $0) } ?? "Silence or no lock"
-        let statusLabel = displayStatus(frame?.tuningStatus.rawValue ?? "ready")
-        let sourceTitle = audioEngine.recording ? audioEngine.activeSource.title : model.recordingSource.title
-
-        VStack(spacing: BTSpacing.md) {
-            Button {
-                if audioEngine.recording {
-                    model.stopRecording()
-                } else {
-                    Task { await model.startRecording() }
-                }
-            } label: {
-                Label(audioEngine.recording ? "Stop \(sourceTitle.lowercased()) take" : "Start \(sourceTitle.lowercased()) take", systemImage: audioEngine.recording ? "stop.fill" : "record.circle")
-            }
-            .buttonStyle(BTPrimaryButtonStyle())
-            .accessibilityIdentifier("practice.recordButton")
-
-            BTCard(tint: BTTheme.surfaceWarm) {
-                HStack {
-                    BTSectionHeader(title: "Practice tuner", subtitle: "\(sourceTitle) source, local-only review")
-                    Spacer()
-                    BTStatusPill(text: statusLabel, tint: statusTint(frame?.tuningStatus.rawValue))
-                        .accessibilityIdentifier("practice.tuningStatus")
-                }
-                Picker("Recording source", selection: Binding(get: { model.recordingSource }, set: { model.recordingSource = $0 })) {
-                    ForEach(PracticeSessionSource.allCases) { source in
-                        Text(source.title).tag(source)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .disabled(audioEngine.recording)
-                .accessibilityIdentifier("practice.recordingSource")
-
-                Text(audioEngine.recording ? "\(sourceTitle) running" : "\(sourceTitle) ready")
-                    .font(.footnote.weight(.bold))
-                    .foregroundStyle(audioEngine.recording ? BTTheme.secondaryAccent : BTTheme.muted)
-                    .padding(.horizontal, BTSpacing.sm)
-                    .padding(.vertical, BTSpacing.xs)
-                    .background((audioEngine.recording ? BTTheme.secondaryAccent : BTTheme.surfaceAlt).opacity(0.14), in: Capsule())
-                    .accessibilityIdentifier("practice.recordingState")
-                    .accessibilityLabel(audioEngine.recording ? "\(sourceTitle) take running" : "\(sourceTitle) take ready")
-                if let notice = audioEngine.audioNotice {
-                    Text(notice)
-                        .font(.footnote)
-                        .foregroundStyle(BTTheme.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("practice.audioNotice")
-                }
-                Text(noteLabel)
-                    .font(.system(size: 82, weight: .bold, design: .rounded))
-                    .foregroundStyle(BTTheme.accentSoft)
-                    .minimumScaleFactor(0.7)
-                    .accessibilityIdentifier("practice.note")
-                ZStack(alignment: .center) {
-                    Capsule()
-                        .fill(BTTheme.surfaceAlt)
-                        .frame(height: 14)
-                    Rectangle()
-                        .fill(LinearGradient(colors: [BTTheme.danger, BTTheme.warning, BTTheme.success, BTTheme.warning, BTTheme.danger], startPoint: .leading, endPoint: .trailing))
-                        .frame(height: 8)
-                        .clipShape(Capsule())
-                    Rectangle()
-                        .fill(BTTheme.accentSoft)
-                        .frame(width: 4, height: 34)
-                        .offset(x: needleOffset(frame?.centsDeviation))
-                        .clipShape(Capsule())
-                }
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("practice.tunerNeedle")
-                Text(centsLabel)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(BTTheme.muted)
-                    .accessibilityIdentifier("practice.cents")
-            }
-        }
-    }
-}
-
-private func needleOffset(_ cents: Double?) -> CGFloat {
-    let clamped = min(max(cents ?? 0, -25), 25)
-    return CGFloat(clamped / 25) * 120
-}
-
-private struct MicrophoneSection: View {
-    @ObservedObject var audioEngine: NativeAudioEngine
-
+private struct MicrophoneRecoveryView: View {
     var body: some View {
         BTCard {
             BTSectionHeader(
-                title: "Microphone",
-                subtitle: "Live acoustic capture uses AVAudioEngine on device. Use headphones or visual-only metronome while validating click bleed."
+                title: "Microphone access is off",
+                subtitle: "Allow microphone access in iOS Settings, then come back and try again."
             )
             Button {
-                Task { _ = await audioEngine.requestMicrophonePermission() }
+                if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsURL)
+                }
             } label: {
-                Label("Request microphone permission", systemImage: "mic")
+                Label("Open iOS Settings", systemImage: "gearshape")
             }
             .buttonStyle(BTSecondaryButtonStyle())
-            .accessibilityIdentifier("practice.microphonePermission")
-            if audioEngine.permissionDenied {
-                Text("Microphone denied. You can still use sample mode, metronome, and score practice, or reopen iOS Settings to allow access.")
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.danger)
-                    .accessibilityIdentifier("practice.microphoneDenied")
-                Button {
-                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(settingsURL)
-                    }
-                } label: {
-                    Label("Open iOS Settings", systemImage: "gearshape")
-                }
-                .buttonStyle(BTSecondaryButtonStyle())
-                .accessibilityIdentifier("practice.openIOSSettings")
-            }
+            .accessibilityIdentifier("microphone.openSettings")
         }
     }
 }
@@ -582,12 +725,17 @@ struct SessionsView: View {
     var body: some View {
         BTScreen {
             BTSectionHeader(
-                title: "Saved sessions",
-                subtitle: "Local live and sample takes are available for review, export, and deletion."
+                title: "Practice history",
+                subtitle: "Your saved recordings, newest first."
             )
+
             if model.sessions.isEmpty {
-                BTEmptyState(title: "No saved sessions", message: "Stop a live or sample take from Practice to create a local review session.", systemImage: "tray")
-                    .accessibilityIdentifier("sessions.empty")
+                BTEmptyState(
+                    title: "No recordings yet",
+                    message: "Use the Tuner or finish a Play-Along exercise to save your first recording.",
+                    systemImage: "waveform"
+                )
+                .accessibilityIdentifier("sessions.empty")
             } else {
                 ForEach(model.sessions) { session in
                     NavigationLink {
@@ -600,7 +748,7 @@ struct SessionsView: View {
                 }
             }
         }
-        .navigationTitle("Sessions")
+        .navigationTitle("Practice history")
         .accessibilityIdentifier("screen.sessions")
     }
 }
@@ -610,24 +758,23 @@ private struct SessionRow: View {
 
     var body: some View {
         BTCard {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: BTSpacing.sm) {
+            HStack(alignment: .top, spacing: BTSpacing.md) {
+                VStack(alignment: .leading, spacing: BTSpacing.xs) {
                     Text(session.name)
                         .font(.headline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(BTTheme.text)
                         .accessibilityIdentifier("sessions.sessionName")
-                    Text("\(instrumentName(session.instrumentId)) - \(session.source.title) - \(session.validFrameCount) valid frames")
+                    Text("\(session.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(instrumentDisplayName(session.instrumentId))")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BTTheme.muted)
                 }
                 Spacer()
+                Text("\(Int(session.inTunePercentage.rounded()))% in tune")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(session.inTunePercentage >= 70 ? BTTheme.success : BTTheme.warning)
                 Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.bold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
-            }
-            HStack(spacing: BTSpacing.md) {
-                BTMetricTile(title: "Avg abs", value: String(format: "%.1f", session.averageAbsCents), detail: "cents")
-                BTMetricTile(title: "In tune", value: "\(String(format: "%.0f", session.inTunePercentage))%", detail: "within 5 cents", tint: BTTheme.success)
             }
         }
     }
@@ -646,52 +793,72 @@ struct SessionDetailView: View {
     var body: some View {
         BTScreen {
             if let session {
+                BTCard(tint: BTTheme.surfaceWarm) {
+                    BTSectionHeader(
+                        title: session.name,
+                        subtitle: session.startedAt.formatted(date: .complete, time: .shortened)
+                    )
+                    Text("\(Int(session.inTunePercentage.rounded()))%")
+                        .font(.system(size: 58, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(session.inTunePercentage >= 70 ? BTTheme.success : BTTheme.warning)
+                        .accessibilityIdentifier("session.score")
+                    Text(session.inTunePercentage >= 70
+                        ? "You found the center often. Keep building that steady sound."
+                        : "Slow down and hold each note steady before moving on.")
+                        .font(.headline)
+                }
+
                 BTCard {
-                    BTSectionHeader(title: session.name, subtitle: "Review and export")
-                    BTStatusPill(text: session.source.title, tint: session.source == .live ? BTTheme.success : BTTheme.warning)
-                        .accessibilityIdentifier("session.source")
+                    BTSectionHeader(
+                        title: "Details",
+                        subtitle: "A cent is a very small pitch step. Smaller numbers are closer to the center."
+                    )
                     HStack(spacing: BTSpacing.md) {
-                        BTMetricTile(title: "Avg abs", value: String(format: "%.1f", session.averageAbsCents), detail: "cents")
-                        BTMetricTile(title: "In tune", value: "\(String(format: "%.0f", session.inTunePercentage))%", detail: "within 5 cents", tint: BTTheme.success)
+                        BTMetricTile(
+                            title: "Average distance",
+                            value: String(format: "%.1f", session.averageAbsCents),
+                            detail: "cents"
+                        )
+                        BTMetricTile(
+                            title: "In tune",
+                            value: "\(Int(session.inTunePercentage.rounded()))%",
+                            detail: "within 5 cents",
+                            tint: BTTheme.success
+                        )
                     }
-                    Text("Pitch coverage: \(session.pitchCoverageLabel)")
+                    Text("Notes heard: \(session.pitchCoverageLabel)")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("session.pitchCoverage")
+                        .foregroundStyle(BTTheme.muted)
                 }
 
                 BTCard {
-                    BTSectionHeader(title: "Relisten", subtitle: session.retainedRecordingURL == nil ? "No playback was saved for this take." : "Playback is ready.")
-                }
-
-                BTCard {
-                    BTSectionHeader(title: "Export", subtitle: "Share a text summary with metrics and a cents preview.")
+                    BTSectionHeader(title: "Share", subtitle: "Send a text summary when you want feedback.")
                     ShareLink(item: session.exportText) {
-                        Label("Share session summary", systemImage: "square.and.arrow.up")
+                        Label("Share recording summary", systemImage: "square.and.arrow.up")
                     }
                     .buttonStyle(BTSecondaryButtonStyle())
                     .accessibilityIdentifier("session.exportButton")
                 }
 
-                BTCard {
-                    BTSectionHeader(title: "Delete", subtitle: "Removes this local session from the native app.")
-                    Button(role: .destructive) {
-                        confirmDelete = true
-                    } label: {
-                        Label("Delete session", systemImage: "trash")
-                    }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .accessibilityIdentifier("session.deleteButton")
+                Button(role: .destructive) {
+                    confirmDelete = true
+                } label: {
+                    Label("Delete recording", systemImage: "trash")
                 }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("session.deleteButton")
             } else {
-                BTEmptyState(title: "Session deleted", message: "This local session is no longer available.", systemImage: "checkmark.circle")
-                    .accessibilityIdentifier("session.deletedState")
+                BTEmptyState(
+                    title: "Recording deleted",
+                    message: "This recording is no longer on this device.",
+                    systemImage: "checkmark.circle"
+                )
             }
         }
-        .navigationTitle("Session review")
+        .navigationTitle("Recording")
         .accessibilityIdentifier("screen.sessionDetail")
-        .confirmationDialog("Delete this local session?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete local session", role: .destructive) {
+        .confirmationDialog("Delete this recording?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete recording", role: .destructive) {
                 if let session {
                     model.deleteSession(id: session.id)
                 }
@@ -699,200 +866,182 @@ struct SessionDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the saved take and its local metrics from this device.")
+            Text("This can't be undone.")
         }
     }
 }
 
-struct AnalyticsView: View {
+struct ProgressTabView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var selectedTab: AppTab
 
     var body: some View {
         let snapshot = model.analyticsSnapshot
         BTScreen {
-            BTSectionHeader(
-                title: "Local analytics",
-                subtitle: "Derived from live and sample takes saved on this device."
-            )
             if snapshot.hasSessions {
-                BTCard {
-                    HStack(spacing: BTSpacing.md) {
-                        BTMetricTile(title: "Sessions", value: "\(snapshot.sessionCount)", detail: "\(snapshot.validFrameCount) valid frames")
-                            .accessibilityIdentifier("analytics.metrics")
-                        BTMetricTile(title: "Avg abs", value: String(format: "%.1f", snapshot.averageAbsCents), detail: "cents", tint: BTTheme.secondaryAccent)
-                    }
-                    HStack(spacing: BTSpacing.md) {
-                        BTMetricTile(title: "In tune", value: "\(String(format: "%.0f", snapshot.averageInTunePercentage))%", detail: "all local frames", tint: BTTheme.success)
-                        BTMetricTile(title: "Practice", value: "\(String(format: "%.0f", snapshot.totalPracticeSeconds))s", detail: "saved duration")
-                    }
+                BTPageHeader(
+                    eyebrow: "Progress",
+                    title: "Your progress",
+                    subtitle: "See how your tuning changes as you practice."
+                )
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 145), spacing: BTSpacing.md)],
+                    spacing: BTSpacing.md
+                ) {
+                    BTMetricTile(
+                        title: "In tune",
+                        value: "\(Int(snapshot.averageInTunePercentage.rounded()))%",
+                        detail: "within 5 cents",
+                        tint: BTTheme.success
+                    )
+                    BTMetricTile(
+                        title: "Average distance",
+                        value: String(format: "%.1f", snapshot.averageAbsCents),
+                        detail: "cents from center",
+                        tint: BTTheme.secondaryAccent
+                    )
+                    BTMetricTile(
+                        title: "Practice time",
+                        value: practiceTimeLabel(snapshot.totalPracticeSeconds),
+                        detail: "saved"
+                    )
+                    BTMetricTile(
+                        title: "Recordings",
+                        value: "\(snapshot.sessionCount)",
+                        detail: "total"
+                    )
                 }
+                .accessibilityIdentifier("progress.metrics")
+
+                Text("A cent is a very small pitch step. Smaller numbers mean you are closer to the center of the note.")
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+
+                BTCard(tint: BTTheme.surfaceWarm) {
+                    BTSectionHeader(title: "Try this next", subtitle: snapshot.recommendation)
+                }
+                .accessibilityIdentifier("progress.recommendation")
 
                 BTCard {
-                    BTSectionHeader(title: "Recommendation", subtitle: snapshot.recommendation)
-                    if let best = snapshot.bestSessionName {
-                        Label("Best local take: \(best)", systemImage: "checkmark.seal")
-                            .font(.subheadline)
-                            .foregroundStyle(BTTheme.success)
-                            .accessibilityIdentifier("analytics.bestSession")
+                    HStack {
+                        BTSectionHeader(title: "Practice history", subtitle: "Your latest recordings.")
+                        Spacer()
+                        NavigationLink {
+                            SessionsView()
+                        } label: {
+                            Text("See all")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .accessibilityIdentifier("progress.allSessions")
                     }
-                    if let latest = snapshot.latestSessionName {
-                        Label("Latest take: \(latest), \(String(format: "%.0f", snapshot.latestSessionInTunePercentage))% in tune", systemImage: "clock")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("analytics.latestSession")
+
+                    ForEach(model.sessions.prefix(3)) { session in
+                        NavigationLink {
+                            SessionDetailView(sessionID: session.id)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                                    Text(session.name)
+                                        .font(.headline)
+                                    Text(session.startedAt.formatted(date: .abbreviated, time: .omitted))
+                                        .font(.caption)
+                                        .foregroundStyle(BTTheme.muted)
+                                }
+                                Spacer()
+                                Text("\(Int(session.inTunePercentage.rounded()))%")
+                                    .font(.headline.monospacedDigit())
+                                    .foregroundStyle(session.inTunePercentage >= 70 ? BTTheme.success : BTTheme.warning)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, BTSpacing.xs)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    NavigationLink {
-                        SessionsView()
-                    } label: {
-                        Label("Review sessions", systemImage: "music.note.list")
-                    }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .accessibilityIdentifier("analytics.reviewSessions")
                 }
             } else {
+                BTPageHeader(
+                    eyebrow: "Progress",
+                    title: "Your progress",
+                    subtitle: "Your practice results will appear here."
+                )
                 BTEmptyState(
-                    title: "Analytics need local sessions",
-                    message: "Record a live or sample take to calculate in-tune percentage, average cents, and practice recommendations on device.",
+                    title: "Ready for your first note?",
+                    message: "Start the tuner and save a short recording.",
                     systemImage: "chart.line.uptrend.xyaxis"
                 )
-                .accessibilityIdentifier("analytics.empty")
+                .accessibilityIdentifier("progress.empty")
+
                 Button {
-                    selectedTab = .practice
+                    selectedTab = .tuner
                 } label: {
-                    Label("Record a take", systemImage: "record.circle")
+                    Label("Record your first note", systemImage: "mic.fill")
                 }
                 .buttonStyle(BTPrimaryButtonStyle())
-                .accessibilityIdentifier("analytics.recordSample")
+                .accessibilityIdentifier("progress.openTuner")
             }
         }
-        .navigationTitle("Analytics")
-        .accessibilityIdentifier("screen.analytics")
+        .navigationTitle("Progress")
+        .accessibilityIdentifier("screen.progress")
     }
 }
 
-struct CoachNativeView: View {
-    @EnvironmentObject private var model: AppModel
-    @Binding var selectedTab: AppTab
+private func playAlongFeedback(_ session: PlayAlongSession) -> String {
+    guard let target = session.currentNoteName else { return "Exercise complete" }
+    guard session.detectedNoteName == target, let cents = session.detectedCents else {
+        return session.detectedNoteName == nil ? "Play \(target)" : "Move to \(target)"
+    }
+    let rounded = Int(cents.rounded())
+    if abs(rounded) <= 5 {
+        return "In tune — hold steady"
+    }
+    return rounded > 0
+        ? "\(abs(rounded)) cents sharp — ease down"
+        : "\(abs(rounded)) cents flat — lift up"
+}
 
-    var body: some View {
-        BTScreen {
-            BTPageHeader(
-                eyebrow: "Coach",
-                title: "Practice plan",
-                subtitle: "Local native guidance uses saved live/sample evidence and stays conservative until account-backed coaching is validated.",
-                trailing: model.authState.usesRemoteAccount ? "Account" : "Local"
-            )
-            if model.analyticsSnapshot.hasUsableEvidence {
-                BTCard(tint: BTTheme.surfaceWarm) {
-                    BTSectionHeader(title: "Next best drill", subtitle: model.analyticsSnapshot.recommendation)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                        BTInsightTile(title: "Long tones", detail: "Hold the focus note for 8 counts at mezzo piano.", systemImage: "wind", tint: BTTheme.secondaryAccent)
-                        BTInsightTile(title: "Drone match", detail: "Match the center before moving to slurs.", systemImage: "waveform.path", tint: BTTheme.accent)
-                        BTInsightTile(title: "Release audit", detail: "Check that the final second stays within 5 cents.", systemImage: "checkmark.seal", tint: BTTheme.success)
-                    }
-                }
-            } else if model.analyticsSnapshot.hasSessions {
-                BTEmptyState(title: "More locked notes needed", message: model.analyticsSnapshot.recommendation, systemImage: "sparkles")
-                Button {
-                    selectedTab = .practice
-                } label: {
-                    Label("Record another take", systemImage: "record.circle")
-                }
-                .buttonStyle(BTPrimaryButtonStyle())
-                .accessibilityIdentifier("coach.recordMore")
-            } else {
-                BTEmptyState(title: "Coach needs a take", message: "Record a live or sample take first so native coaching can use local intonation evidence.", systemImage: "sparkles")
-                Button {
-                    selectedTab = .practice
-                } label: {
-                    Label("Record a take", systemImage: "record.circle")
-                }
-                .buttonStyle(BTPrimaryButtonStyle())
-            }
-        }
-        .navigationTitle("Coach")
-        .accessibilityIdentifier("screen.coach")
+private func playAlongFeedbackTint(_ session: PlayAlongSession) -> Color {
+    guard session.detectedNoteName == session.currentNoteName, let cents = session.detectedCents else {
+        return BTTheme.muted
+    }
+    if abs(cents) <= 5 { return BTTheme.success }
+    return cents > 0 ? BTTheme.sharp : BTTheme.flat
+}
+
+private func playAlongRatingTint(_ rating: PlayAlongNoteRating) -> Color {
+    switch rating {
+    case .excellent: return BTTheme.success
+    case .good: return BTTheme.secondaryAccent
+    case .close: return BTTheme.warning
+    case .off, .missed: return BTTheme.danger
     }
 }
 
-struct MoreHubView: View {
-    @Binding var onboardingPresented: Bool
-    @Binding var selectedTab: AppTab
-
-    var body: some View {
-        BTScreen {
-            BTPageHeader(
-                eyebrow: "Workspace",
-                title: "More",
-                subtitle: "Saved work, practice tools, ensemble, account settings, and release-critical policy surfaces.",
-                trailing: "Bento"
-            )
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                MoreHubLink(title: "Sessions", detail: "Review saved takes and exports.", systemImage: "music.note.list", tint: BTTheme.accent) {
-                    SessionsView()
-                }
-                MoreHubLink(title: "Metronome", detail: "Tempo, tap, meter, mute, visual pulse.", systemImage: "metronome", tint: BTTheme.warning) {
-                    MetronomeView()
-                }
-                MoreHubLink(title: "Score Practice", detail: "Files, Photos, pages, notes.", systemImage: "doc.viewfinder", tint: BTTheme.blue) {
-                    ScorePracticeView()
-                }
-                MoreHubLink(title: "Progress", detail: "Local trend and heatmap.", systemImage: "chart.line.uptrend.xyaxis", tint: BTTheme.success) {
-                    ProgressNativeView()
-                }
-                MoreHubLink(title: "Ensemble", detail: "Demo roster until account services are configured.", systemImage: "person.3", tint: BTTheme.secondaryAccent) {
-                    EnsembleView(selectedTab: $selectedTab)
-                }
-                MoreHubLink(title: "Settings", detail: "Account, tuner, data, legal.", systemImage: "gearshape", tint: BTTheme.muted) {
-                    SettingsView(onboardingPresented: $onboardingPresented)
-                }
-                MoreHubLink(title: "Audio Lab", detail: "Permission and detector state.", systemImage: "waveform", tint: BTTheme.blue) {
-                    AudioLabView()
-                }
-                MoreHubLink(title: "Privacy", detail: "Data use and account lifecycle.", systemImage: "hand.raised", tint: BTTheme.accent) {
-                    LegalDetailView(kind: .privacy)
-                }
-                MoreHubLink(title: "Terms", detail: "Use rules and limitations.", systemImage: "doc.text", tint: BTTheme.accent) {
-                    LegalDetailView(kind: .terms)
-                }
-                MoreHubLink(title: "Support", detail: "Issue reporting guidance.", systemImage: "questionmark.circle", tint: BTTheme.secondaryAccent) {
-                    LegalDetailView(kind: .support)
-                }
-            }
-        }
-        .navigationTitle("More")
-        .accessibilityIdentifier("screen.more")
+private func playAlongScoreTint(_ score: Int) -> Color {
+    switch score {
+    case 85...: return BTTheme.success
+    case 60...: return BTTheme.secondaryAccent
+    default: return BTTheme.warning
     }
 }
 
-private struct MoreHubLink<Destination: View>: View {
-    let title: String
-    let detail: String
-    let systemImage: String
-    let tint: Color
-    let destination: Destination
-
-    init(title: String, detail: String, systemImage: String, tint: Color, @ViewBuilder destination: () -> Destination) {
-        self.title = title
-        self.detail = detail
-        self.systemImage = systemImage
-        self.tint = tint
-        self.destination = destination()
-    }
-
-    var body: some View {
-        NavigationLink {
-            destination
-        } label: {
-            BTInsightTile(title: title, detail: detail, systemImage: systemImage, tint: tint, interactive: true)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("more.\(title.replacingOccurrences(of: " ", with: "").lowercased())")
+private func playAlongScoreMessage(_ grade: PlayAlongGrade) -> String {
+    switch grade.stars {
+    case 3: return "Strong work — try to beat your best."
+    case 2: return "Nice start. One more round can make it steadier."
+    case 1: return "Keep going. Slow, even air will help."
+    default: return "Try again when you're ready."
     }
 }
 
+private func practiceTimeLabel(_ seconds: TimeInterval) -> String {
+    if seconds < 60 {
+        return "\(Int(seconds.rounded()))s"
+    }
+    return "\(Int((seconds / 60).rounded()))m"
+}
 struct MetronomeView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -900,9 +1049,9 @@ struct MetronomeView: View {
     var body: some View {
         BTScreen {
             BTPageHeader(
-                eyebrow: "Practice tool",
+                eyebrow: "Tools",
                 title: "Metronome",
-                subtitle: "Visual-first native metronome controls that can stay running while a live or sample take records.",
+                subtitle: "Keep a steady beat while you practice.",
                 trailing: model.metronomeRunning ? "Running" : "Ready"
             )
 
@@ -910,7 +1059,7 @@ struct MetronomeView: View {
                 HStack(alignment: .center, spacing: BTSpacing.lg) {
                     VStack(alignment: .leading, spacing: BTSpacing.sm) {
                         Text("\(model.metronome.bpm)")
-                            .font(.system(size: 72, weight: .bold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 58, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(BTTheme.accentSoft)
                             .accessibilityIdentifier("metronome.bpm")
                         Text("\(model.metronome.meterLabel) • \(model.metronome.subdivision.title)")
@@ -932,12 +1081,12 @@ struct MetronomeView: View {
                 } label: {
                     Label(model.metronomeRunning ? "Stop metronome" : "Start metronome", systemImage: model.metronomeRunning ? "pause.fill" : "play.fill")
                 }
-                .buttonStyle(BTPrimaryButtonStyle())
+                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
                 .accessibilityIdentifier("metronome.toggle")
             }
 
             BTCard {
-                BTSectionHeader(title: "Tempo", subtitle: "Tap or step tempo. The floating recording controls use the same settings.")
+                BTSectionHeader(title: "Tempo", subtitle: "Tap the beat or adjust it one step at a time.")
                 HStack(spacing: BTSpacing.md) {
                     Button {
                         model.adjustTempo(by: -5)
@@ -968,7 +1117,7 @@ struct MetronomeView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Meter and feel", subtitle: "Speaker click is muted by default to reduce microphone bleed during live capture.")
+                BTSectionHeader(title: "Sound and feel", subtitle: "The click is on by default. Use visual-only mode whenever you want silence.")
                 Picker("Meter", selection: Binding(get: { model.metronome.beatsPerMeasure }, set: { model.setMeter(beats: $0) })) {
                     ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
                         Text("\(beats)/4").tag(beats)
@@ -986,7 +1135,7 @@ struct MetronomeView: View {
 
                 Toggle("Visual-only metronome", isOn: Binding(get: { model.metronome.visualOnly }, set: { model.setMetronomeVisualOnly($0) }))
                 .accessibilityIdentifier("metronome.visualOnly")
-                .accessibilityHint("Visual-only mode mutes the speaker click to reduce microphone bleed.")
+                .accessibilityHint("Visual-only mode gives you a silent beat.")
 
                 Toggle("Haptic pulse", isOn: Binding(get: { model.metronome.hapticsEnabled }, set: { model.metronome.hapticsEnabled = $0 }))
                     .accessibilityIdentifier("metronome.haptics")
@@ -996,10 +1145,6 @@ struct MetronomeView: View {
                     .accessibilityLabel("Metronome volume")
                     .accessibilityIdentifier("metronome.volume")
 
-                Text("For live microphone recording, validate headphones, visual-only mode, route changes, and click bleed on a physical device.")
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .navigationTitle("Metronome")
@@ -1016,14 +1161,13 @@ struct ScorePracticeView: View {
     var body: some View {
         BTScreen {
             BTPageHeader(
-                eyebrow: "Score assist",
+                eyebrow: "Sheet music",
                 title: "Score Practice",
-                subtitle: "Import local PDF or image scores, mark problem passages, and keep metadata on device.",
-                trailing: "\(model.scores.count)"
+                subtitle: "Keep your music and practice notes together."
             )
 
             BTCard {
-                BTSectionHeader(title: "Import", subtitle: "Files and Photos stay local by default. Camera capture is hidden until it has a real native flow and device validation.")
+                BTSectionHeader(title: "Add sheet music", subtitle: "Add sheet music from Files or Photos.")
                 HStack(spacing: BTSpacing.md) {
                     Button {
                         showFileImporter = true
@@ -1039,19 +1183,16 @@ struct ScorePracticeView: View {
                     .buttonStyle(BTSecondaryButtonStyle())
                     .accessibilityIdentifier("score.import.photos")
 
-                    Button {
-                        model.importSampleScore()
-                    } label: {
-                        Label("Sample", systemImage: "music.note")
+                    if NativeTestFixtures.areEnabled {
+                        Button {
+                            model.importSampleScore()
+                        } label: {
+                            Label("Test score", systemImage: "music.note")
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("score.import.testFixture")
                     }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .accessibilityIdentifier("score.import.sample")
                 }
-
-                Text("Score intelligence here means full-resolution page viewing, cleanup controls, OCR-style text suggestions when PDF text is available, and manual annotations. BrassTune does not upload copyrighted scores or claim optical music recognition.")
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 if let importError {
                     Text(importError)
@@ -1062,7 +1203,7 @@ struct ScorePracticeView: View {
             }
 
             if model.scores.isEmpty {
-                BTEmptyState(title: "No score imported", message: "Import a local PDF/image or add the synthetic sample score to rehearse the workflow.", systemImage: "doc.viewfinder")
+                BTEmptyState(title: "No sheet music yet", message: "Add a PDF or photo when you are ready to practice from a score.", systemImage: "doc.viewfinder")
                     .accessibilityIdentifier("score.empty")
             } else {
                 ForEach(model.scores) { score in
@@ -1355,11 +1496,11 @@ private struct ScorePageViewerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(score.title)
                     .font(.headline)
-                    .foregroundStyle(BTTheme.text)
+                    .foregroundStyle(.white)
                     .lineLimit(1)
                 Text(isPDF ? score.pageCountLabel : "Page \(currentPage?.pageNumber ?? pageIndex + 1) of \(score.pages.count)")
                     .font(.caption)
-                    .foregroundStyle(BTTheme.muted)
+                    .foregroundStyle(.white.opacity(0.76))
             }
             Spacer(minLength: BTSpacing.md)
             Button {
@@ -1367,15 +1508,14 @@ private struct ScorePageViewerView: View {
             } label: {
                 Text("Done")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(BTTheme.text)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, BTSpacing.lg)
                     .padding(.vertical, BTSpacing.sm)
-                    .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: true)
             }
             .accessibilityIdentifier("score.viewer.done")
         }
         .padding(BTSpacing.md)
-        .background(.ultraThinMaterial.opacity(0.9))
+        .brassGlass(cornerRadius: 0)
     }
 
     private var pager: some View {
@@ -1390,7 +1530,7 @@ private struct ScorePageViewerView: View {
 
             Text("\(currentPage?.pageNumber ?? pageIndex + 1) / \(score.pages.count)")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(BTTheme.text)
+                .foregroundStyle(.white)
                 .monospacedDigit()
 
             Button {
@@ -1401,10 +1541,10 @@ private struct ScorePageViewerView: View {
             .disabled(pageIndex >= score.pages.count - 1)
             .accessibilityIdentifier("score.viewer.nextPage")
         }
-        .foregroundStyle(BTTheme.text)
+        .foregroundStyle(.white)
         .padding(.horizontal, BTSpacing.xl)
         .padding(.vertical, BTSpacing.md)
-        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: true)
+        .btContentSurface(cornerRadius: BTTheme.radius, tint: Color.black.opacity(0.72), interactive: true)
         .padding(.bottom, BTSpacing.xl)
     }
 
@@ -1412,10 +1552,10 @@ private struct ScorePageViewerView: View {
         VStack(spacing: BTSpacing.md) {
             Image(systemName: "doc.text.image")
                 .font(.largeTitle)
-                .foregroundStyle(BTTheme.muted)
+                .foregroundStyle(.white.opacity(0.72))
             Text("The full-resolution page is unavailable on this device.")
                 .font(.subheadline)
-                .foregroundStyle(BTTheme.muted)
+                .foregroundStyle(.white.opacity(0.76))
                 .multilineTextAlignment(.center)
         }
         .padding(BTSpacing.xl)
@@ -1442,17 +1582,17 @@ private struct ScoreImagePageView: View {
                 VStack(spacing: BTSpacing.md) {
                     Image(systemName: "doc.text.image")
                         .font(.largeTitle)
-                        .foregroundStyle(BTTheme.muted)
+                        .foregroundStyle(.white.opacity(0.72))
                     Text("The full-resolution page is unavailable on this device.")
                         .font(.subheadline)
-                        .foregroundStyle(BTTheme.muted)
+                        .foregroundStyle(.white.opacity(0.76))
                         .multilineTextAlignment(.center)
                 }
                 .padding(BTSpacing.xl)
                 .accessibilityIdentifier("score.viewer.unavailable")
             } else {
                 ProgressView()
-                    .tint(BTTheme.text)
+                    .tint(.white)
             }
         }
         .task(id: page.id) {
@@ -1586,6 +1726,7 @@ private enum ScoreImageLoader {
     /// Longest-edge pixel cap for the decoded viewer image. Generous enough for
     /// crisp zooming but bounded so a high-megapixel scan never expands into an
     /// oversized bitmap in memory.
+    @MainActor
     static func viewerMaxPixelSize() -> CGFloat {
         let screen = UIScreen.main
         let longestEdgePixels = max(screen.bounds.width, screen.bounds.height) * screen.scale
@@ -1658,24 +1799,9 @@ private struct ScorePageControls: View {
             }
             .accessibilityIdentifier("score.enhance")
 
-            if !page.textSuggestions.isEmpty {
-                Text("Text suggestions: \(page.textSuggestions.joined(separator: ", "))")
-                    .font(.caption)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("score.textSuggestions")
-            }
-
-            if !page.suggestedRegions.isEmpty {
-                Text("Suggested regions: \(page.suggestedRegions.map(\.label).joined(separator: ", "))")
-                    .font(.caption)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("score.regions")
-            }
         }
         .padding(BTSpacing.md)
-        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt)
+        .btContentSurface(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt)
     }
 }
 
@@ -1685,7 +1811,7 @@ private struct ScoreAnnotationEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.md) {
-            BTSectionHeader(title: "Practice annotation", subtitle: "Manual notes are the reliable fallback when OMR is not available.")
+            BTSectionHeader(title: "Practice notes", subtitle: "Jot notes for the tricky spots.")
             TextField("Focus measures", text: Binding(get: { score.annotation.focusMeasures }, set: { model.updateScoreAnnotation(scoreID: score.id, focusMeasures: $0) }))
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("score.focusMeasures")
@@ -1700,254 +1826,7 @@ private struct ScoreAnnotationEditor: View {
                 .accessibilityIdentifier("score.notes")
         }
         .padding(BTSpacing.md)
-        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt)
-    }
-}
-
-struct ProgressNativeView: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        let snapshot = model.analyticsSnapshot
-        BTScreen {
-            BTPageHeader(
-                eyebrow: "Local progress",
-                title: "Progress",
-                subtitle: snapshot.hasUsableEvidence ? "Local trend summaries from valid live/sample frames." : "Progress appears after a saved take has valid pitch evidence.",
-                trailing: "\(snapshot.sessionCount)"
-            )
-
-            if snapshot.hasUsableEvidence {
-                BTCard {
-                    BTSectionHeader(title: "Trend", subtitle: snapshot.recommendation)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                        BTMetricTile(title: "Sessions", value: "\(snapshot.sessionCount)", detail: "local")
-                        BTMetricTile(title: "Valid frames", value: "\(snapshot.validFrameCount)", detail: "saved")
-                        BTMetricTile(title: "In tune", value: "\(String(format: "%.0f", snapshot.averageInTunePercentage))%", detail: "within 5 cents", tint: BTTheme.success)
-                    }
-                }
-                BTCard {
-                    BTSectionHeader(title: "Practice heatmap", subtitle: "Each block represents one saved local session.")
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: BTSpacing.xs), count: min(7, max(1, model.sessions.count))), spacing: BTSpacing.xs) {
-                        ForEach(model.sessions.prefix(28)) { session in
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(session.inTunePercentage >= 70 ? BTTheme.success : (session.averageAbsCents > 8 ? BTTheme.warning : BTTheme.blue))
-                                .frame(height: 34)
-                                .accessibilityLabel("\(session.name), \(String(format: "%.0f", session.inTunePercentage)) percent in tune")
-                        }
-                    }
-                    .accessibilityIdentifier("progress.heatmap")
-                }
-            } else {
-                BTEmptyState(title: "More data needed", message: "Record a guided live or sample take with locked notes before BrassTune summarizes progress.", systemImage: "chart.line.uptrend.xyaxis")
-                    .accessibilityIdentifier("progress.empty")
-            }
-        }
-        .navigationTitle("Progress")
-        .accessibilityIdentifier("screen.progress")
-    }
-}
-
-struct AudioLabView: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        BTScreen {
-            BTPageHeader(
-                eyebrow: "Diagnostics",
-                title: "Audio Lab",
-                subtitle: "Native beta diagnostics are local. Live microphone behavior still needs physical-device validation.",
-                trailing: model.audioEngine.permissionDenied ? "Denied" : "Ready"
-            )
-
-            BTCard {
-                BTSectionHeader(title: "Current detector state", subtitle: "Live mode uses AVAudioEngine; sample mode uses deterministic frames for simulator coverage.")
-                let frame = model.audioEngine.currentFrame
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: BTSpacing.md)], spacing: BTSpacing.md) {
-                    BTMetricTile(title: "Frequency", value: frame?.frequencyHz.map { String(format: "%.1f", $0) } ?? "--", detail: "Hz")
-                    BTMetricTile(title: "Confidence", value: frame.map { String(format: "%.2f", $0.confidence) } ?? "--", detail: model.audioEngine.activeSource.title)
-                    BTMetricTile(title: "RMS", value: frame.map { String(format: "%.2f", $0.rms) } ?? "--", detail: "level")
-                    BTMetricTile(title: "Frames", value: "\(model.audioEngine.frames.count)", detail: "buffered")
-                }
-                Button {
-                    Task { _ = await model.audioEngine.requestMicrophonePermission() }
-                } label: {
-                    Label("Check microphone permission", systemImage: "mic")
-                }
-                .buttonStyle(BTSecondaryButtonStyle())
-                .accessibilityIdentifier("audioLab.permission")
-            }
-        }
-        .navigationTitle("Audio Lab")
-        .accessibilityIdentifier("screen.audioLab")
-    }
-}
-
-private struct NativeToolShell: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-
-    var body: some View {
-        BTScreen {
-            BTPageHeader(eyebrow: "Native parity", title: title, subtitle: subtitle, trailing: "Planned")
-            BTCard {
-                BTInsightTile(title: "Current state", detail: "This native surface is intentionally conservative until it matches the web workflow and has simulator plus physical-device evidence.", systemImage: systemImage, tint: BTTheme.warning)
-                BTInsightTile(title: "Guest practice remains available", detail: "Core native tuner, saved sessions, analytics, account settings, and legal surfaces are still usable.", systemImage: "checkmark.circle", tint: BTTheme.success)
-            }
-        }
-        .navigationTitle(title)
-        .accessibilityIdentifier("screen.tool.\(title)")
-    }
-}
-
-struct EnsembleView: View {
-    @EnvironmentObject private var model: AppModel
-    @Binding var selectedTab: AppTab
-
-    var body: some View {
-        BTScreen {
-            BTSectionHeader(
-                title: "Ensemble",
-                subtitle: "Memberships and teacher assignments require an account-backed workspace."
-            )
-            switch model.authState {
-            case .guest:
-                BTCard {
-                    HStack {
-                        BTSectionHeader(title: "Demo preview", subtitle: "This is sample ensemble data, not a live roster.")
-                        Spacer()
-                        BTStatusPill(text: "Demo only", tint: BTTheme.warning)
-                            .accessibilityIdentifier("ensemble.demoBadge")
-                    }
-                    ForEach(model.ensembles) { ensemble in
-                        EnsembleSummaryCard(ensemble: ensemble)
-                    }
-                    Button {
-                        selectedTab = .more
-                    } label: {
-                        Label("Sign in to load real ensemble data", systemImage: "person.crop.circle.badge.checkmark")
-                    }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .accessibilityIdentifier("ensemble.signInPrompt")
-                }
-            case .signedOut:
-                AccountRequiredCard(
-                    title: "Account required",
-                    message: model.accountUnavailableMessage ?? "Sign in to load ensemble memberships from your teacher or organization.",
-                    actionTitle: "Open Settings",
-                    action: { selectedTab = .more }
-                )
-                .accessibilityIdentifier("ensemble.accountRequired")
-            case .emailConfirmationRequired(let email):
-                AccountRequiredCard(
-                    title: "Confirm email",
-                    message: "Confirm \(email) before BrassTune can load account-backed ensemble memberships.",
-                    actionTitle: "Open Settings",
-                    action: { selectedTab = .more }
-                )
-                .accessibilityIdentifier("ensemble.confirmEmail")
-            case .signedIn:
-                if model.ensembles.isEmpty {
-                    BTEmptyState(
-                        title: "No ensemble memberships",
-                        message: "This account is signed in, but no native ensemble memberships are available yet.",
-                        systemImage: "person.3"
-                    )
-                    .accessibilityIdentifier("ensemble.empty")
-                } else {
-                    ForEach(model.ensembles) { ensemble in
-                        EnsembleSummaryCard(ensemble: ensemble)
-                    }
-                }
-            }
-        }
-        .navigationTitle("Ensemble")
-        .accessibilityIdentifier("screen.ensemble")
-    }
-}
-
-private struct EnsembleSummaryCard: View {
-    let ensemble: EnsembleSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: BTSpacing.md) {
-            Text(ensemble.name)
-                .font(.headline)
-            HStack(spacing: BTSpacing.md) {
-                BTMetricTile(title: "Role", value: ensemble.role, detail: nil)
-                BTMetricTile(title: "Members", value: "\(ensemble.activeMembers)", detail: "active", tint: BTTheme.secondaryAccent)
-            }
-            Text(ensemble.focus)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("ensemble.summaryCard")
-    }
-}
-
-private struct LatestSessionSummary: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        if let session = model.sessions.first {
-            BTCard {
-                BTSectionHeader(title: "Latest take", subtitle: session.name)
-                HStack(spacing: BTSpacing.md) {
-                    BTMetricTile(title: "Avg abs", value: String(format: "%.1f", session.averageAbsCents), detail: "cents")
-                    BTMetricTile(title: "In tune", value: "\(String(format: "%.0f", session.inTunePercentage))%", detail: "within 5 cents", tint: BTTheme.success)
-                }
-            }
-            .accessibilityIdentifier("home.latestSession")
-        }
-    }
-}
-
-private struct AccountStateCard: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        BTCard {
-            HStack {
-                BTSectionHeader(title: "Account", subtitle: accountMessage)
-                Spacer()
-                BTStatusPill(text: model.accountFeaturesEnabled ? "Configured" : "Disabled", tint: model.accountFeaturesEnabled ? BTTheme.success : BTTheme.warning)
-                    .accessibilityIdentifier("account.configStatus")
-            }
-        }
-        .accessibilityIdentifier("account.stateCard")
-    }
-
-    private var accountMessage: String {
-        switch model.authState {
-        case .guest:
-            return model.accountUnavailableMessage ?? "Guest practice is active. Sign in to use account services."
-        case .signedOut:
-            return model.accountUnavailableMessage ?? "Signed out. Local practice data stays on this device."
-        case .signedIn(let email):
-            return "Signed in as \(email)."
-        case .emailConfirmationRequired(let email):
-            return "Confirm \(email) to complete account setup."
-        }
-    }
-}
-
-private struct AccountRequiredCard: View {
-    let title: String
-    let message: String
-    let actionTitle: String
-    let action: () -> Void
-
-    var body: some View {
-        BTCard {
-            BTSectionHeader(title: title, subtitle: message)
-            Button(action: action) {
-                Label(actionTitle, systemImage: "gearshape")
-            }
-            .buttonStyle(BTSecondaryButtonStyle())
-        }
+        .btContentSurface(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt)
     }
 }
 
@@ -1958,30 +1837,4 @@ func instrumentPickerOptions() -> some View {
     Text("Trombone").tag("trombone")
     Text("Euphonium").tag("euphonium")
     Text("Tuba").tag("tuba")
-}
-
-private func instrumentName(_ id: String) -> String {
-    switch id {
-    case "trumpet": return "Trumpet"
-    case "horn": return "Horn"
-    case "trombone": return "Trombone"
-    case "euphonium": return "Euphonium"
-    case "tuba": return "Tuba"
-    default: return id.capitalized
-    }
-}
-
-private func displayStatus(_ rawValue: String) -> String {
-    rawValue.replacingOccurrences(of: "_", with: " ").capitalized
-}
-
-private func statusTint(_ rawValue: String?) -> Color {
-    switch rawValue {
-    case "in_tune": return BTTheme.success
-    case "sharp": return BTTheme.sharp
-    case "flat": return BTTheme.flat
-    case "no_lock", "unstable": return BTTheme.warning
-    case "silence": return BTTheme.unstable
-    default: return BTTheme.accent
-    }
 }

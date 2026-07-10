@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum BTSpacing {
     static let xs: CGFloat = 4
@@ -10,27 +11,49 @@ enum BTSpacing {
 }
 
 enum BTTheme {
-    static let background = Color(red: 0.027, green: 0.039, blue: 0.059)
-    static let backgroundTop = Color(red: 0.039, green: 0.059, blue: 0.086)
-    static let surface = Color(red: 0.067, green: 0.098, blue: 0.137)
-    static let surfaceAlt = Color.white.opacity(0.055)
-    static let surfaceWarm = Color(red: 0.14, green: 0.11, blue: 0.06)
-    static let panelLine = Color.white.opacity(0.14)
-    static let strongLine = Color(red: 0.84, green: 0.65, blue: 0.25).opacity(0.34)
-    static let text = Color(red: 0.957, green: 0.973, blue: 0.984)
-    static let muted = Color(red: 0.616, green: 0.671, blue: 0.733)
-    static let accent = Color(red: 0.85, green: 0.65, blue: 0.25)
-    static let accentSoft = Color(red: 0.94, green: 0.79, blue: 0.44)
-    static let secondaryAccent = Color(red: 0.35, green: 0.79, blue: 0.70)
-    static let success = Color(red: 0.42, green: 0.82, blue: 0.53)
-    static let warning = Color(red: 0.90, green: 0.77, blue: 0.36)
-    static let danger = Color(red: 0.89, green: 0.36, blue: 0.36)
-    static let blue = Color(red: 0.46, green: 0.72, blue: 1.0)
-    static let sharp = Color(red: 0.90, green: 0.55, blue: 0.26)
-    static let flat = Color(red: 0.46, green: 0.72, blue: 1.0)
-    static let unstable = Color(red: 0.62, green: 0.67, blue: 0.73)
+    static let background = Color(uiColor: .systemGroupedBackground)
+    static let backgroundTop = Color(uiColor: .systemBackground)
+    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
+    static let surfaceAlt = Color(uiColor: .tertiarySystemGroupedBackground)
+    static let surfaceWarm = adaptive(
+        light: UIColor(red: 1.000, green: 0.980, blue: 0.941, alpha: 1),
+        dark: UIColor(red: 0.133, green: 0.106, blue: 0.059, alpha: 1)
+    )
+    static let panelLine = Color(uiColor: .separator).opacity(0.55)
+    static let strongLine = adaptive(
+        light: UIColor(red: 0.553, green: 0.435, blue: 0.200, alpha: 0.34),
+        dark: UIColor(red: 0.847, green: 0.647, blue: 0.247, alpha: 0.40)
+    )
+    static let text = Color(uiColor: .label)
+    static let muted = Color(uiColor: .secondaryLabel)
+    static let accent = adaptive(
+        light: UIColor(red: 0.553, green: 0.435, blue: 0.200, alpha: 1),
+        dark: UIColor(red: 0.847, green: 0.647, blue: 0.247, alpha: 1)
+    )
+    static let accentSoft = adaptive(
+        light: UIColor(red: 0.553, green: 0.435, blue: 0.200, alpha: 1),
+        dark: UIColor(red: 0.941, green: 0.788, blue: 0.439, alpha: 1)
+    )
+    static let onAccent = adaptive(
+        light: .white,
+        dark: UIColor(red: 0.08, green: 0.07, blue: 0.05, alpha: 1)
+    )
+    static let secondaryAccent = Color(uiColor: .systemTeal)
+    static let success = Color(uiColor: .systemGreen)
+    static let warning = Color(uiColor: .systemOrange)
+    static let danger = Color(uiColor: .systemRed)
+    static let blue = Color(uiColor: .systemBlue)
+    static let sharp = Color(uiColor: .systemOrange)
+    static let flat = Color(uiColor: .systemBlue)
+    static let unstable = Color(uiColor: .secondaryLabel)
     static let radius: CGFloat = 18
     static let radiusLarge: CGFloat = 26
+
+    private static func adaptive(light: UIColor, dark: UIColor) -> Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? dark : light
+        })
+    }
 }
 
 struct BTScreen<Content: View>: View {
@@ -49,20 +72,12 @@ struct BTScreen<Content: View>: View {
             .safeAreaPadding(.bottom, 96)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(
-            LinearGradient(
-                colors: [BTTheme.backgroundTop, BTTheme.background, Color.black],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-        )
+        .background(BTTheme.background.ignoresSafeArea())
         .scrollContentBackground(.hidden)
-        .preferredColorScheme(.dark)
     }
 }
 
-struct BTGlassPanel: ViewModifier {
+struct BTContentSurface: ViewModifier {
     var cornerRadius: CGFloat = BTTheme.radius
     var tint: Color = BTTheme.surface
     var interactive = false
@@ -72,38 +87,87 @@ struct BTGlassPanel: ViewModifier {
         content
             .background {
                 shape
-                    .fill(tint.opacity(0.72))
-                    .background(.ultraThinMaterial, in: shape)
+                    .fill(tint)
             }
             .overlay {
                 shape.stroke(BTTheme.panelLine, lineWidth: 1)
             }
-            .shadow(color: Color.black.opacity(0.32), radius: 24, x: 0, y: 14)
-            .modifier(BTLiquidGlass(cornerRadius: cornerRadius, tint: tint, interactive: interactive))
+            .shadow(
+                color: Color.black.opacity(interactive ? 0.07 : 0.04),
+                radius: interactive ? 4 : 2,
+                x: 0,
+                y: 1
+            )
     }
 }
 
-private struct BTLiquidGlass: ViewModifier {
-    var cornerRadius: CGFloat
-    var tint: Color
+private struct BrassGlassModifier<GlassShape: Shape>: ViewModifier {
+    let shape: GlassShape
+    var tint: Color?
     var interactive: Bool
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(
-                interactive ? .regular.tint(tint.opacity(0.20)).interactive() : .regular.tint(tint.opacity(0.16)),
-                in: .rect(cornerRadius: cornerRadius)
-            )
+            if let tint {
+                GlassEffectContainer {
+                    content.glassEffect(
+                        interactive ? .regular.tint(tint).interactive() : .regular.tint(tint),
+                        in: shape
+                    )
+                }
+            } else {
+                GlassEffectContainer {
+                    content.glassEffect(
+                        interactive ? .regular.interactive() : .regular,
+                        in: shape
+                    )
+                }
+            }
         } else {
             content
+                .background(.ultraThinMaterial, in: shape)
+                .overlay {
+                    shape.stroke(BTTheme.panelLine, lineWidth: 1)
+                }
+                .clipShape(shape)
         }
     }
 }
 
 extension View {
+    func btContentSurface(
+        cornerRadius: CGFloat = BTTheme.radius,
+        tint: Color = BTTheme.surface,
+        interactive: Bool = false
+    ) -> some View {
+        modifier(BTContentSurface(cornerRadius: cornerRadius, tint: tint, interactive: interactive))
+    }
+
+    /// Compatibility spelling for existing call sites. This is intentionally an
+    /// opaque content surface now; Liquid Glass is reserved for floating chrome.
     func btGlassPanel(cornerRadius: CGFloat = BTTheme.radius, tint: Color = BTTheme.surface, interactive: Bool = false) -> some View {
-        modifier(BTGlassPanel(cornerRadius: cornerRadius, tint: tint, interactive: interactive))
+        btContentSurface(cornerRadius: cornerRadius, tint: tint, interactive: interactive)
+    }
+
+    func brassGlass<GlassShape: Shape>(
+        in shape: GlassShape,
+        tint: Color? = nil,
+        interactive: Bool = false
+    ) -> some View {
+        modifier(BrassGlassModifier(shape: shape, tint: tint, interactive: interactive))
+    }
+
+    func brassGlass(
+        cornerRadius: CGFloat = BTTheme.radiusLarge,
+        tint: Color? = nil,
+        interactive: Bool = false
+    ) -> some View {
+        brassGlass(
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
+            tint: tint,
+            interactive: interactive
+        )
     }
 }
 
@@ -123,7 +187,7 @@ struct BTCard<Content: View>: View {
         .padding(BTSpacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(BTTheme.text)
-        .btGlassPanel(tint: tint)
+        .btContentSurface(tint: tint)
     }
 }
 
@@ -204,7 +268,7 @@ struct BTMetricTile: View {
         }
         .padding(BTSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .btGlassPanel(cornerRadius: 14, tint: BTTheme.surfaceAlt, interactive: interactive)
+        .btContentSurface(cornerRadius: 14, tint: BTTheme.surfaceAlt, interactive: interactive)
         .accessibilityElement(children: .combine)
     }
 }
@@ -246,19 +310,68 @@ struct BTEmptyState: View {
     }
 }
 
+struct BrassGlassButtonStyle: PrimitiveButtonStyle {
+    var prominent: Bool
+    var tint: Color?
+
+    init(prominent: Bool = true, tint: Color? = BTTheme.accent) {
+        self.prominent = prominent
+        self.tint = tint
+    }
+
+    @ViewBuilder
+    func makeBody(configuration: Configuration) -> some View {
+        if #available(iOS 26.0, *) {
+            if prominent {
+                button(configuration)
+                    .buttonStyle(.glassProminent)
+                    .tint(tint)
+            } else {
+                button(configuration)
+                    .buttonStyle(.glass)
+                    .tint(tint)
+            }
+        } else {
+            if prominent {
+                button(configuration)
+                    .buttonStyle(.borderedProminent)
+                    .tint(tint)
+            } else {
+                button(configuration)
+                    .buttonStyle(.bordered)
+                    .tint(tint)
+            }
+        }
+    }
+
+    private func button(_ configuration: Configuration) -> some View {
+        Button(role: configuration.role) {
+            configuration.trigger()
+        } label: {
+            configuration.label
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, BTSpacing.xs)
+                .contentShape(Rectangle())
+        }
+        .controlSize(.large)
+        .buttonBorderShape(.roundedRectangle(radius: BTTheme.radius))
+    }
+}
+
 struct BTPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: BTTheme.radius, style: .continuous)
         configuration.label
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, BTSpacing.md)
-            .foregroundStyle(Color(red: 0.07, green: 0.09, blue: 0.12))
-            .background(isEnabled ? BTTheme.accentSoft : Color.gray)
-            .clipShape(RoundedRectangle(cornerRadius: BTTheme.radius, style: .continuous))
+            .foregroundStyle(isEnabled ? BTTheme.onAccent : BTTheme.muted)
+            .background(shape.fill(isEnabled ? BTTheme.accent : BTTheme.surfaceAlt))
+            .contentShape(shape)
             .opacity(configuration.isPressed ? 0.82 : 1)
-            .modifier(BTLiquidGlass(cornerRadius: BTTheme.radius, tint: BTTheme.accent, interactive: true))
     }
 }
 
@@ -266,12 +379,17 @@ struct BTSecondaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: BTTheme.radius, style: .continuous)
         configuration.label
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, BTSpacing.md)
             .foregroundStyle(isEnabled ? BTTheme.text : BTTheme.muted)
-            .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: true)
+            .background(shape.fill(BTTheme.surfaceAlt))
+            .overlay {
+                shape.stroke(BTTheme.panelLine, lineWidth: 1)
+            }
+            .contentShape(shape)
             .opacity(configuration.isPressed ? 0.82 : 1)
     }
 }
@@ -302,7 +420,7 @@ struct BTInsightTile: View {
         }
         .padding(BTSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .btGlassPanel(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: interactive)
+        .btContentSurface(cornerRadius: BTTheme.radius, tint: BTTheme.surfaceAlt, interactive: interactive)
         .accessibilityElement(children: .combine)
     }
 }

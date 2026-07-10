@@ -1,57 +1,61 @@
 # Release Test Matrix
 
-Updated: 2026-07-08
+Updated: 2026-07-10
 
-Current native release boundary: Swift package, design-token verification, app unit tests, and unsigned simulator builds pass, and PR #8 now contains a local AVAudioEngine live microphone capture path with on-device pitch detection. The native app is still not release-complete because current UI smoke execution is blocked before the test body by CoreSimulator runner preflight failures, no physical iPhone/iPad was available for microphone/brass validation, and Apple signing/archive/TestFlight/App Store gates remain unavailable.
+Current native boundary: the redesigned Swift source now implements the four-tab Play-Along/Tuner/Progress/Settings app, live-microphone-only shipping behavior, UI-test-only fixtures, audible metronome defaults, adaptive light/dark surfaces, and scoped iOS 26 Liquid Glass. `BrassTuneCore` executed successfully (`3/3`), and the native design check passed. The `35` app unit tests and `2` UI tests were source/typecheck-validated but were **not executed** here because the sandbox blocks `xcodebuild`/CoreSimulator. No current simulator build or test pass is claimed.
 
 ## Native Swift Local Gates
 
-| Gate | Command | Result | Notes |
+| Gate | Command or evidence | Result | Notes |
 |---|---|---|---|
-| BrassTuneCore Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3` Swift Testing tests | Pitch math, transposition, and confidence semantics. |
-| Native design tokens | `python3 swift/BrassTuneApp/scripts/verify_design_tokens.py` | Passed | Verified `15` Swift theme colors against `design/brasstune-tokens.json`. |
-| Native app unit tests | `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination 'platform=iOS Simulator,id=F05D449A-5102-489A-913A-8CD9BB37EF5E' -only-testing:BrassTuneAppTests CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO` | Passed: `18` tests | Covers local persistence, score cleanup, metronome state, session export, analytics, transposition fixtures, live/sample source separation, and native pitch detector sine/silence/no-lock cases. |
-| Native UI smoke execution | `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneAppUISmoke -destination 'platform=iOS Simulator,id=F05D449A-5102-489A-913A-8CD9BB37EF5E' CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppUITests/BrassTuneAppUITests/testLaunchPracticeAndSettingsSurfaces` | Blocked | The test body was patched for the current live/sample labels, but the runner still blocked before launch with the CoreSimulator `SBMainWorkspace` preflight `Busy` failure. |
-| iPhone Debug simulator build | `xcodebuild build -quiet -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Debug -destination 'platform=iOS Simulator,id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO` | Passed | Simulator build only, unsigned. |
-| iPhone Release simulator build | `xcodebuild build -quiet -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Release -destination 'platform=iOS Simulator,id=4B4489C4-295C-4565-9544-30812B4EA0EB' CODE_SIGNING_ALLOWED=NO` | Passed | Simulator build only, unsigned. |
-| iPad Debug simulator build | `xcodebuild build -quiet -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Debug -destination 'platform=iOS Simulator,id=CEC7E3E1-8B2E-4C6B-8E8E-486657046FCE' CODE_SIGNING_ALLOWED=NO` | Passed | iPad (A16) simulator discovered dynamically. |
-| Live acoustic microphone capture | Static source audit and simulator build | Implemented locally; physical validation blocked | `NativeAudioEngine` now has a live AVAudioEngine input tap, microphone permission handling, PCM buffer capture, RMS/frequency/confidence detection, no-lock/unstable statuses, transposition/reference-pitch handling, and route/interruption notices. Simulator-safe sample mode remains available and clearly labeled. |
-| Physical iPhone/iPad validation | `xcrun devicectl list devices` / `xcrun xctrace list devices` | Blocked | No physical iPhone/iPad was connected; microphone, brass-room acoustics, route changes, haptics, Photos/Files, heat, and click bleed remain untested. |
-| Apple signing/archive/TestFlight | Xcode project/signing audit | Blocked | Bundle ID is still development-scoped, `DEVELOPMENT_TEAM` is empty, signing was disabled for simulator builds, and no App Store Connect/TestFlight authorization was available. |
-| Native launch screenshot | `xcrun simctl io D0C0647A-4B09-41B2-A434-ABB37D8095A5 screenshot /tmp/brasstune-native-launch.png` | Captured | Simulator launch evidence only. |
-| Diff hygiene | `git diff --check` | Passed | No whitespace errors. |
-| Dirty-diff artifact scan | Dirty-file size and high-confidence secret-pattern scan | Passed | No dirty files over 1MiB and no high-confidence secrets observed in the dirty diff. |
+| BrassTuneCore Swift package | `cd swift/BrassTuneCore && swift test` | Passed: `3/3` Swift Testing tests | Pitch math, transposition, and confidence semantics executed locally. |
+| Native design tokens and glass scope | `python3 swift/BrassTuneApp/scripts/verify_design_tokens.py` | Passed | Verified `15` adaptive Swift theme colors, `3` shared brand anchors, and the centralized glass fallback. |
+| Four-tab information architecture | Source/typecheck validation of `AppRootView.swift` | Validated; not simulator-executed | The only tabs are Play-Along, Tuner, Progress, and Settings. Home, Practice, Analytics, Coach, and More are removed from the tab bar. |
+| Native app unit tests | `BrassTuneAppTests/BrassTuneAppTests.swift` test inventory | `35` tests source/typecheck-validated; not executed | Includes live-only shipping defaults, fixture guards/quarantine, audible metronome migration, Play-Along grading, persistence, score cleanup, analytics, transposition, and native pitch detector cases. `xcodebuild test` could not run in this sandbox. |
+| Native UI test suite | `BrassTuneAppUITests/BrassTuneAppUITests.swift` test inventory | `2` tests compiled/source-validated; not executed | Covers beginner onboarding plus the four-tab, Play-Along, Tuner, Progress, Settings, advanced A4, legal, metronome, fixture isolation, and destructive-alert journey. CoreSimulator launch is unavailable in this sandbox. |
+| Play-Along live grader | Source/typecheck validation plus unexecuted unit/UI coverage | Implemented; device execution unverified | Uses `NativeAudioEngine` pitch frames, written-pitch-class matching, sustained holds, median cents, per-note ratings, percentage, and stars. Normal launches use the real microphone; deterministic frames require a UI-test launch flag. |
+| Real-microphone shipping boundary | Source audit of `NativeTestFixtures`, `PracticeSessionSource.allCases`, `NativeAudioEngine`, and restore filtering | Implemented; physical validation blocked | Normal launches expose only `.live`; sample recording/score/ensemble fixtures require `UITEST_FIXTURES` or legacy `UITEST_DEMO`. Legacy sample persistence is filtered from normal restores. |
+| Metronome defaults | Source/typecheck validation plus unexecuted unit coverage | Implemented | Defaults are sound on, not visual-only, volume `0.6`; effective output is muted only during an active live recording. |
+| Adaptive design / Liquid Glass | Source audit plus design verification script | Implemented; visual device QA pending | System light/dark appearance is respected. Content uses solid adaptive surfaces. Custom glass is centralized and limited to floating transports, primary Start/Record actions, and the score viewer top controls, with iOS 17–25 fallbacks. |
+| iPhone/iPad Debug and Release simulator builds | `xcodebuild ... -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO build` | Not executed / blocked | `xcodebuild` and CoreSimulator services are unavailable under the current sandbox. Previous simulator evidence does not validate this redesign. |
+| Physical iPhone/iPad validation | `xcrun devicectl list devices` / `xcrun xctrace list devices` | Blocked | No authorized physical-device run was available. Microphone, real brass input, route changes, interruptions, haptics, Files/Photos, thermals, timing, and speaker/headphone bleed remain unverified. |
+| Apple signing/archive/TestFlight | Xcode project/signing audit | Blocked | The bundle ID remains development-scoped, `DEVELOPMENT_TEAM` is empty, project signing is disabled, and no App Store Connect/TestFlight authorization was available. |
+| Diff hygiene | `git diff --check -- docs/release-readiness/NATIVE_PARITY_SURFACES.md docs/release-readiness/TEST_MATRIX.md docs/release-readiness/APP_STORE_CHECKLIST.md` | Passed | No whitespace errors in the native documentation update. |
+
+## Required Unrestricted-Xcode Rerun
+
+Discover simulator identifiers with `xcrun simctl list devices available`, then run all of the following on the same working-tree revision:
+
+- `xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Debug -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO build`
+- `xcodebuild -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -configuration Release -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO build`
+- `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneApp -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppTests`
+- `xcodebuild test -project swift/BrassTuneApp/BrassTuneApp.xcodeproj -scheme BrassTuneAppUISmoke -destination "id=<dynamic-simulator-id>" CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:BrassTuneAppUITests`
+
+Do not convert source/typecheck validation into a simulator-pass claim until those commands execute successfully on the current revision.
 
 ## Web Production Gates
 
-Web production work is paused by owner direction as of 2026-07-04. The following rows are retained as historical web evidence only and were not rerun during the native-only pass.
+These rows are retained as historical evidence only. They were not rerun for this native redesign and do not validate the current native working tree.
 
-| Gate | Command | Result | Notes |
-|---|---|---|---|
-| Backend full suite | `cd backend && .venv/bin/python -m pytest` | Passed: `77 passed` | Warnings are existing datetime/TestClient deprecations. |
-| Backend hardening | `cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py` | Passed: `61 passed` | Covers WebSocket hardening, audio spoof rejection, JSON limits, headers, account/deletion, ensemble auth. |
-| Backend Bandit | `cd backend && .venv/bin/python -m bandit -r app -x app/tests` | Passed | No issues identified. |
-| Backend direct pip-audit | `cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt` | Blocked | Resolver venv `ensurepip` crashed before vulnerability analysis. |
-| Backend uv pip-audit fallback | clean `uv` Python 3.12 venv, install `requirements-dev.txt`, run `pip_audit -r requirements.txt -r requirements-dev.txt` | Passed | No known vulnerabilities found. |
-| Frontend unit tests | `cd frontend && npm test` | Passed: `9` files, `40` tests | Includes domain/API/theme-adjacent coverage. |
-| Frontend build/typecheck | `cd frontend && npm run build` | Passed | Vite production build completed. |
-| Frontend dependency audit | `cd frontend && npm audit --omit=dev` | Passed | `0 vulnerabilities`. |
-| Local E2E/accessibility | `cd frontend && CI=true npm run e2e:local` | Passed: `80 passed` | Chromium, Firefox, WebKit, mobile Chromium, mobile WebKit. |
-| Device simulation | `cd frontend && npm run simulate:devices` | Passed | Report: `docs/device-simulation-report.md`. |
-| PR #3 CI | GitHub Actions and Vercel for `a642508ab638233e1fe297653147b8ccd3ceaf54` | Passed | Backend, Frontend, Security, and Vercel passed. |
-| PR #4 CI | GitHub Actions and Vercel for `d0cce2614710e17b955ae8f81815141ea6281df5` | Passed | Frontend, Security, and Vercel passed. |
-| Production smoke | `npm run smoke:hosted` | Passed: `7/7` | Root, health, CORS, WebSocket app response, query-token rejection, bad-Origin rejection. |
-| Strict hosted Playwright | `E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted -- --project=chromium` | Passed: `7 passed` | Production browser smoke after final main deploy. |
-| Vercel headers | `curl -I https://brass-tune.vercel.app` | Passed | CSP, HSTS, Permissions-Policy, Referrer-Policy, `X-Content-Type-Options`. |
-| Render headers | `curl -D - -H 'Origin: https://brass-tune.vercel.app' https://brasstune-u8qj.onrender.com/api/health` | Passed | API security headers observed. |
-| Diff hygiene | `git diff --check` | Passed | No whitespace errors. |
+| Gate | Historical result | Notes |
+|---|---|---|
+| Backend full suite | Passed: `77 passed` | Historical web evidence; warnings were existing datetime/TestClient deprecations. |
+| Backend hardening | Passed: `61 passed` | Historical authorization, payload, header, account, and ensemble coverage. |
+| Backend Bandit | Passed | Historical source scan. |
+| Backend dependency audit | Passed via clean `uv` Python 3.12 fallback | Historical; the direct resolver environment had failed before the fallback. |
+| Frontend unit tests | Passed: `9` files, `40` tests | Historical web evidence. |
+| Frontend build/typecheck | Passed | Historical Vite production build. |
+| Frontend production dependency audit | Passed: `0 vulnerabilities` | Historical web evidence. |
+| Local E2E/accessibility | Passed: `80 passed` | Historical browser/device matrix. |
+| Hosted production smoke | Passed: `7/7` | Historical hosted evidence; not a native-app gate. |
 
 ## Remaining External Gates
 
 | Gate | Status | Reason |
 |---|---|---|
-| Live Supabase account lifecycle | Owner-gated | Requires disposable provider credentials/users. |
-| Google/Apple provider lifecycle | Owner-gated | Provider configuration and disposable users are external. |
-| Native Swift physical-device validation | Blocked | Requires real iPhone/iPad for microphone, brass-room acoustics, Photos/Files import, haptics, speaker/headphone click-bleed, and route changes. Local AVAudioEngine implementation is not physical-device proof. |
-| App Store/TestFlight | External | Requires Apple signing, App Store Connect, approved wording, and submission access. |
-| Camera score capture | External/future native feature | Camera import is hidden and no camera permission string is declared until a real native flow is implemented and device-tested. |
+| Native simulator execution on current redesign | Blocked in this environment | Requires unrestricted `xcodebuild` and CoreSimulator access. |
+| Native physical-device validation | Blocked | Requires a real iPhone/iPad and live brass input for microphone quality, acoustics, route/interruption behavior, haptics, timing, bleed, Files/Photos, performance, and accessibility checks. |
+| Live Supabase/account lifecycle | Owner-gated | Requires production native configuration and disposable provider users; no provider behavior is inferred from local guest mode. |
+| Google/Apple provider lifecycle | Owner-gated | Provider configuration, redirects, entitlements, and disposable users are external. |
+| Signed archive/TestFlight/App Store | External | Requires Apple Team/signing assets, App Store Connect authorization, a successful archive/export/upload, TestFlight validation, approved metadata, and App Review. |
+| Camera score capture | Future native feature | Camera import remains absent and no camera permission is declared until a real flow is implemented and device-tested. |

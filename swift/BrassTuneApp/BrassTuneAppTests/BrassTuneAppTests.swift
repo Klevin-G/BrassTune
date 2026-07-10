@@ -4,28 +4,45 @@ import BrassTuneCore
 import UIKit
 
 final class BrassTuneAppTests: XCTestCase {
+    // MARK: - Shipping defaults and local model behavior
+
     @MainActor
-    func testFixtureRecordingCreatesDeterministicSession() {
-        let model = makeModel()
-        model.startDemoRecording()
-        model.stopDemoRecording()
-        XCTAssertEqual(model.sessions.count, 1)
-        XCTAssertGreaterThanOrEqual(model.sessions[0].frames.count, 12)
-        XCTAssertGreaterThan(model.sessions[0].inTunePercentage, 0)
+    func testShippingDefaultsUseLiveMicrophoneAndAudibleMetronome() {
+        XCTAssertFalse(NativeTestFixtures.areEnabled)
+        XCTAssertEqual(NativeAudioEngine.defaultRecordingSource, .live)
+        XCTAssertEqual(PracticeSessionSource.allCases, [.live])
+        XCTAssertFalse(ScoreSourceKind.allCases.contains(.sample))
+
+        let settings = MetronomeSettings()
+        XCTAssertFalse(settings.muted)
+        XCTAssertFalse(settings.visualOnly)
+        XCTAssertEqual(settings.volume, 0.6, accuracy: 0.001)
     }
 
     @MainActor
-    func testAccountDeletionRequiresConfirmation() async {
+    func testFixtureEntryPointsDoNothingWithoutUITestLaunchFlag() {
         let model = makeModel()
-        model.sessions = [
-            PracticeSession(id: UUID(), name: "Test", instrumentId: "trumpet", startedAt: Date(), endedAt: Date(), frames: [.fixture(index: 0)], retainedRecordingURL: nil)
-        ]
-        await model.deleteAccount(confirmation: "delete")
-        XCTAssertEqual(model.sessions.count, 1)
-        XCTAssertEqual(model.lastError, .accountDeletionRequiresConfirmation)
-        await model.deleteAccount(confirmation: "delete my account")
+
+        model.startDemoRecording()
+        model.stopDemoRecording()
+        model.importSampleScore()
+
+        XCTAssertEqual(model.recordingSource, .live)
+        XCTAssertFalse(model.audioEngine.recording)
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertTrue(model.scores.isEmpty)
+    }
+
+    @MainActor
+    func testNoArgumentAccountDeletionClearsLocalState() async {
+        let model = makeModel()
+        model.sessions = [makeSession(name: "Test recording", cents: [-2, 0, 3])]
+
+        await model.deleteAccount()
+
         XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNil(model.lastError)
     }
 
     @MainActor
@@ -41,20 +58,20 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testLocalExportIncludesPracticeMetrics() {
+    func testLocalExportIncludesPracticeMetricsAndImportedScore() throws {
         let model = makeModel()
-        model.sessions = [makeSession(name: "Exportable take", cents: [-4, 0, 7])]
-        model.importSampleScore()
+        model.sessions = [makeSession(name: "Exportable recording", cents: [-4, 0, 7])]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Warm-up score")
 
         let export = model.exportDataText()
 
         XCTAssertTrue(export.contains("BrassTune local data export"))
         XCTAssertTrue(export.contains("Sessions: 1"))
-        XCTAssertTrue(export.contains("Exportable take"))
+        XCTAssertTrue(export.contains("Exportable recording"))
         XCTAssertTrue(export.contains("Average absolute cents"))
         XCTAssertTrue(export.contains("Cents preview"))
         XCTAssertTrue(export.contains("Scores: 1"))
-        XCTAssertTrue(export.contains("Long-tone study"))
+        XCTAssertTrue(export.contains("Warm-up score"))
     }
 
     @MainActor
@@ -83,60 +100,17 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testMetronomeStateSurvivesRecordingFlow() {
+    func testMetronomeUserSettingsRemainAudibleAndPersistable() {
         let model = makeModel()
 
-        model.startMetronome()
-        model.adjustTempo(by: 8)
-        model.startDemoRecording()
-        model.toggleMetronomeMute()
-        model.stopDemoRecording()
+        XCTAssertFalse(model.metronomeTemporarilyMutedForRecording)
+        model.setTempo(100)
+        model.setMetronomeVolume(0.72)
 
-        XCTAssertTrue(model.metronomeRunning)
         XCTAssertEqual(model.metronome.bpm, 100)
         XCTAssertFalse(model.metronome.muted)
-        XCTAssertEqual(model.sessions.count, 1)
-        model.stopMetronome()
-    }
-
-    @MainActor
-    func testRecordingSourceCreatesDistinctLiveAndSampleSessions() async {
-        let model = makeModel()
-
-        model.startDemoRecording()
-        model.stopDemoRecording()
-        let liveFrames = (0..<16).map { index in
-            PitchFrame.detected(
-                timestampMs: index * 100,
-                frequencyHz: 440,
-                confidence: 0.99,
-                rms: 0.08,
-                instrumentId: "trombone",
-                referencePitchHz: 440
-            )
-        }
-        model.selectedInstrumentId = "trombone"
-        model.recordingSource = .live
-        model.audioEngine.startFixtureRecording(instrumentId: "trombone", referencePitchHz: 440)
-        model.audioEngine.stopAndResetAudioEngine()
-        model.sessions.insert(
-            PracticeSession(
-                id: UUID(),
-                name: PracticeSessionSource.live.sessionTitle,
-                instrumentId: "trombone",
-                startedAt: Date(),
-                endedAt: Date().addingTimeInterval(1.6),
-                frames: liveFrames,
-                retainedRecordingURL: nil,
-                source: .live
-            ),
-            at: 0
-        )
-
-        XCTAssertEqual(model.sessions[0].source, .live)
-        XCTAssertEqual(model.sessions[1].source, .sample)
-        XCTAssertTrue(model.sessions[0].exportText.contains("Source: live microphone"))
-        XCTAssertTrue(model.sessions[1].exportText.contains("Source: deterministic sample"))
+        XCTAssertFalse(model.metronome.visualOnly)
+        XCTAssertEqual(model.metronome.volume, 0.72, accuracy: 0.001)
     }
 
     @MainActor
@@ -156,14 +130,19 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testScoreSampleAnnotationAttachAndDelete() throws {
+    func testScoreAnnotationAttachAndDelete() throws {
         let model = makeModel()
-        model.importSampleScore()
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Local score")
         let score = try XCTUnwrap(model.scores.first)
+        model.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
 
-        model.updateScoreAnnotation(scoreID: score.id, focusMeasures: "9-16", notes: "Tune releases", tempoTarget: 104, problemPassage: "second phrase")
-        model.startDemoRecording()
-        model.stopDemoRecording()
+        model.updateScoreAnnotation(
+            scoreID: score.id,
+            focusMeasures: "9-16",
+            notes: "Tune releases",
+            tempoTarget: 104,
+            problemPassage: "second phrase"
+        )
         model.attachScoreToLatestSession(scoreID: score.id)
 
         XCTAssertEqual(model.activeScoreID, score.id)
@@ -174,7 +153,7 @@ final class BrassTuneAppTests: XCTestCase {
 
         XCTAssertTrue(model.scores.isEmpty)
         XCTAssertNil(model.sessions[0].attachedScoreID)
-        XCTAssertFalse(model.sessions[0].practiceNotes.contains("Long-tone study"))
+        XCTAssertFalse(model.sessions[0].practiceNotes.contains("Local score"))
         XCTAssertFalse(model.sessions[0].practiceNotes.contains("9-16"))
     }
 
@@ -220,7 +199,7 @@ final class BrassTuneAppTests: XCTestCase {
         let storedURL = scoreDirectory.appendingPathComponent(fileName)
         XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
 
-        await model.deleteAccount(confirmation: "delete my account")
+        await model.deleteAccount()
 
         XCTAssertTrue(model.scores.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: storedURL.path))
@@ -228,7 +207,7 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testLocalPersistenceRestoresSessionsSettingsScoresAndMetronome() {
+    func testLocalPersistenceRestoresLiveSessionsSettingsScoresAndMetronome() throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
         let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
@@ -237,19 +216,304 @@ final class BrassTuneAppTests: XCTestCase {
         model.selectedInstrumentId = "horn"
         model.referencePitchHz = 442.0
         model.setTempo(108)
-        model.importSampleScore()
-        model.startDemoRecording()
-        model.stopDemoRecording()
+        model.setMetronomeVolume(0.7)
+        model.sessions = [makeSession(name: "Saved recording", cents: [-2, 0, 3])]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Saved score")
 
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
 
         XCTAssertEqual(restored.selectedInstrumentId, "horn")
         XCTAssertEqual(restored.referencePitchHz, 442.0)
         XCTAssertEqual(restored.metronome.bpm, 108)
+        XCTAssertEqual(restored.metronome.volume, 0.7, accuracy: 0.001)
+        XCTAssertFalse(restored.metronome.muted)
+        XCTAssertFalse(restored.metronome.visualOnly)
         XCTAssertEqual(restored.sessions.count, 1)
+        XCTAssertEqual(restored.sessions.first?.source, .live)
         XCTAssertEqual(restored.scores.count, 1)
+        XCTAssertEqual(restored.scores.first?.sourceKind, .photos)
         XCTAssertEqual(restored.activeScoreID, restored.scores.first?.id)
     }
+
+    @MainActor
+    func testLegacySilentMetronomeDefaultsMigrateToAudibleDefaults() {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        var legacyMetronome = MetronomeSettings()
+        legacyMetronome.muted = true
+        legacyMetronome.visualOnly = true
+        legacyMetronome.volume = 0
+        store.save(
+            NativeLocalSnapshot(
+                selectedInstrumentId: "trumpet",
+                referencePitchHz: 440,
+                sessions: [],
+                scores: [],
+                activeScoreID: nil,
+                metronome: legacyMetronome,
+                metronomeDefaultsVersion: 1
+            )
+        )
+
+        let restored = AppModel(persistenceStore: store)
+
+        XCTAssertFalse(restored.metronome.muted)
+        XCTAssertFalse(restored.metronome.visualOnly)
+        XCTAssertEqual(restored.metronome.volume, 0.6, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testShippingRestoreQuarantinesLegacyFixtureSessionsAndScores() {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let sampleSession = makeSession(name: "Old test recording", cents: [0], source: .sample)
+        let sampleScore = makeSampleScore()
+        store.save(
+            NativeLocalSnapshot(
+                selectedInstrumentId: "trumpet",
+                referencePitchHz: 440,
+                sessions: [sampleSession],
+                scores: [sampleScore],
+                activeScoreID: sampleScore.id,
+                metronome: MetronomeSettings(),
+                metronomeDefaultsVersion: 2
+            )
+        )
+
+        let restored = AppModel(persistenceStore: store)
+
+        XCTAssertTrue(restored.sessions.isEmpty)
+        XCTAssertTrue(restored.scores.isEmpty)
+        XCTAssertNil(restored.activeScoreID)
+    }
+
+    // MARK: - Play-Along web parity
+
+    func testPlayAlongRatingUsesWebCentsThresholds() {
+        XCTAssertEqual(PlayAlongNoteRating(cents: 5), .excellent)
+        XCTAssertEqual(PlayAlongNoteRating(cents: -5), .excellent)
+        XCTAssertEqual(PlayAlongNoteRating(cents: 15), .good)
+        XCTAssertEqual(PlayAlongNoteRating(cents: -15), .good)
+        XCTAssertEqual(PlayAlongNoteRating(cents: 30), .close)
+        XCTAssertEqual(PlayAlongNoteRating(cents: -30), .close)
+        XCTAssertEqual(PlayAlongNoteRating(cents: 30.1), .off)
+        XCTAssertEqual(PlayAlongNoteRating(cents: nil), .missed)
+        XCTAssertEqual(PlayAlongNoteRating(cents: .nan), .missed)
+    }
+
+    func testPlayAlongExerciseCatalogUsesDetectorPitchSpellings() {
+        let detectorSpellings = Set(["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"])
+        let exerciseNotes = Set(PlayAlongExercise.library.flatMap(\.writtenNotes))
+
+        XCTAssertEqual(PlayAlongExercise.defaultExercise.id, "cmaj")
+        XCTAssertEqual(PlayAlongExercise.library.count, 6)
+        XCTAssertTrue(exerciseNotes.isSubset(of: detectorSpellings))
+        XCTAssertFalse(PlayAlongExercise.library.contains { $0.writtenNotes.isEmpty })
+    }
+
+    func testPlayAlongAdvancesAfterSustainedCorrectWrittenPitchClass() {
+        var grader = PlayAlongGrader(writtenNotes: ["C", "D"], holdDurationMs: 400, minimumSamples: 3, attackTrimMs: 0)
+
+        for timestamp in stride(from: 0, through: 500, by: 100) {
+            grader.feed(makePlayAlongFrame(note: "C", cents: 10, timestampMs: timestamp))
+        }
+
+        XCTAssertEqual(grader.noteGrades.count, 1)
+        XCTAssertEqual(grader.noteGrades[0].writtenNoteName, "C")
+        XCTAssertEqual(grader.noteGrades[0].medianCents ?? .nan, 10, accuracy: 0.001)
+        XCTAssertEqual(grader.noteGrades[0].rating, .good)
+        XCTAssertEqual(grader.currentNoteName, "D")
+    }
+
+    func testPlayAlongDoesNotAdvanceOnBriefTouch() {
+        var grader = PlayAlongGrader(writtenNotes: ["C"], holdDurationMs: 400, minimumSamples: 3)
+
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 0))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 100))
+
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+        XCTAssertEqual(grader.currentNoteName, "C")
+        XCTAssertEqual(grader.heldFraction, 0.25, accuracy: 0.001)
+    }
+
+    func testPlayAlongWrongConfidentNoteResetsHold() {
+        var grader = PlayAlongGrader(writtenNotes: ["C"], holdDurationMs: 400, minimumSamples: 3)
+
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 0))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 100))
+        grader.feed(makePlayAlongFrame(note: "E", cents: 5, timestampMs: 200))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 300))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 400))
+
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+        XCTAssertEqual(grader.currentNoteName, "C")
+        XCTAssertEqual(grader.heldFraction, 0.25, accuracy: 0.001)
+    }
+
+    func testPlayAlongToleratesBriefLowConfidenceSilence() {
+        var grader = PlayAlongGrader(writtenNotes: ["C"], holdDurationMs: 400, minimumSamples: 3)
+
+        grader.feed(makePlayAlongFrame(note: "C", cents: 8, timestampMs: 0))
+        grader.feed(makePlayAlongFrame(note: nil, cents: nil, timestampMs: 100, confidence: 0.1, frequencyHz: nil))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 8, timestampMs: 200))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 8, timestampMs: 440))
+
+        XCTAssertTrue(grader.isComplete)
+        XCTAssertEqual(grader.noteGrades.first?.rating, .good)
+    }
+
+    func testPlayAlongLongSilenceResetsHoldAfterDropoutGrace() {
+        var grader = PlayAlongGrader(
+            writtenNotes: ["C"],
+            holdDurationMs: 400,
+            minimumSamples: 3,
+            maximumDropoutMs: 250
+        )
+
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 0))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 100))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 500))
+
+        XCTAssertEqual(grader.heldFraction, 0, accuracy: 0.001)
+
+        for timestamp in stride(from: 600, through: 800, by: 100) {
+            grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: timestamp))
+        }
+
+        XCTAssertFalse(grader.isComplete)
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+        XCTAssertEqual(grader.currentNoteName, "C")
+    }
+
+    func testPlayAlongTrimsBrassAttackTransient() {
+        var grader = PlayAlongGrader(
+            writtenNotes: ["C"],
+            holdDurationMs: 400,
+            minimumSamples: 3,
+            attackTrimMs: 120
+        )
+
+        grader.feed(makePlayAlongFrame(note: "C", cents: 45, timestampMs: 0))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 30, timestampMs: 80))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 200))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 320))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 450))
+
+        XCTAssertEqual(grader.noteGrades.first?.medianCents ?? .nan, 4, accuracy: 0.001)
+        XCTAssertEqual(grader.noteGrades.first?.rating, .excellent)
+    }
+
+    func testPlayAlongMedianRejectsSingleDetectorOutlier() {
+        var grader = PlayAlongGrader(writtenNotes: ["C"], holdDurationMs: 400, minimumSamples: 3, attackTrimMs: 0)
+
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 0))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 120))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 60, timestampMs: 240))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 360))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 480))
+
+        XCTAssertEqual(grader.noteGrades.first?.medianCents ?? .nan, 5, accuracy: 0.001)
+        XCTAssertEqual(grader.noteGrades.first?.rating, .excellent)
+    }
+
+    func testPlayAlongIgnoresFramesBelowConfidenceGate() {
+        var grader = PlayAlongGrader(writtenNotes: ["C"], holdDurationMs: 300, minimumSamples: 3)
+
+        for timestamp in stride(from: 0, through: 600, by: 100) {
+            grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: timestamp, confidence: 0.4))
+        }
+
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+        XCTAssertEqual(grader.currentNoteName, "C")
+    }
+
+    func testPlayAlongAcceptsIntermediateConfidenceWithoutRecordingValidity() {
+        var grader = PlayAlongGrader(writtenNotes: ["C"], holdDurationMs: 300, minimumSamples: 3)
+
+        for timestamp in stride(from: 0, through: 300, by: 100) {
+            let frame = makePlayAlongFrame(
+                note: "C",
+                cents: 3,
+                timestampMs: timestamp,
+                confidence: 0.7,
+                isValidForRecording: false
+            )
+            XCTAssertFalse(frame.isValidForRecording)
+            grader.feed(frame)
+        }
+
+        XCTAssertTrue(grader.isComplete)
+        XCTAssertEqual(grader.noteGrades.first?.rating, .excellent)
+    }
+
+    func testPlayAlongSkipMarksMissedAndAdvances() {
+        var grader = PlayAlongGrader(writtenNotes: ["C", "D"])
+
+        grader.skipCurrentNote()
+
+        XCTAssertEqual(grader.noteGrades.count, 1)
+        XCTAssertEqual(grader.noteGrades[0].rating, .missed)
+        XCTAssertNil(grader.noteGrades[0].medianCents)
+        XCTAssertEqual(grader.currentNoteName, "D")
+    }
+
+    func testPlayAlongCompletesAndSummarizesLikeWebGrader() {
+        var grader = PlayAlongGrader(writtenNotes: ["C", "D"], holdDurationMs: 300, minimumSamples: 3, attackTrimMs: 0)
+
+        for timestamp in stride(from: 0, through: 400, by: 100) {
+            grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: timestamp))
+        }
+        for timestamp in stride(from: 1_000, through: 1_400, by: 100) {
+            grader.feed(makePlayAlongFrame(note: "D", cents: 12, timestampMs: timestamp))
+        }
+
+        XCTAssertTrue(grader.isComplete)
+        let summary = PlayAlongGrade(expectedNoteCount: 2, noteGrades: grader.noteGrades)
+        XCTAssertEqual(summary.totalNotes, 2)
+        XCTAssertEqual(summary.notesPlayed, 2)
+        XCTAssertEqual(summary.inTuneNotes, 2)
+        XCTAssertEqual(summary.inTunePercentage, 100)
+        XCTAssertEqual(summary.averageAbsoluteCents ?? .nan, 8, accuracy: 0.001)
+        XCTAssertEqual(summary.stars, 3)
+    }
+
+    func testPlayAlongMatchesWrittenPitchClassAcrossEnharmonicSpellingAndOctave() {
+        var grader = PlayAlongGrader(writtenNotes: ["Bb"], holdDurationMs: 300, minimumSamples: 3, attackTrimMs: 0)
+
+        for timestamp in stride(from: 0, through: 300, by: 100) {
+            grader.feed(makePlayAlongFrame(note: "A#", cents: 2, timestampMs: timestamp, writtenOctave: 6))
+        }
+
+        XCTAssertTrue(grader.isComplete)
+        XCTAssertEqual(grader.noteGrades.first?.writtenNoteName, "Bb")
+        XCTAssertEqual(grader.noteGrades.first?.rating, .excellent)
+    }
+
+    func testDetectedFramesApplyWrittenPitchTranspositionForTrumpetAndHorn() {
+        let trumpet = PitchFrame.detected(
+            timestampMs: 0,
+            frequencyHz: 233.081_880_8,
+            confidence: 0.99,
+            rms: 0.08,
+            instrumentId: "trumpet",
+            referencePitchHz: 440
+        )
+        let horn = PitchFrame.detected(
+            timestampMs: 0,
+            frequencyHz: 174.614_115_7,
+            confidence: 0.99,
+            rms: 0.08,
+            instrumentId: "horn",
+            referencePitchHz: 440
+        )
+
+        XCTAssertEqual(trumpet.writtenNoteName, "C")
+        XCTAssertEqual(trumpet.writtenOctave, 4)
+        XCTAssertEqual(horn.writtenNoteName, "C")
+        XCTAssertEqual(horn.writtenOctave, 4)
+    }
+
+    // MARK: - Pitch detector and BrassTuneCore integration
 
     func testFixtureFramesReflectInstrumentTransposition() {
         let trumpet = PitchFrame.fixture(index: 0, instrumentId: "trumpet")
@@ -317,6 +581,8 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertFalse(noLock.isValidForRecording)
     }
 
+    // MARK: - Helpers
+
     @MainActor
     private func makeModel() -> AppModel {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
@@ -324,7 +590,11 @@ final class BrassTuneAppTests: XCTestCase {
         return AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
     }
 
-    private func makeSession(name: String, cents: [Double]) -> PracticeSession {
+    private func makeSession(
+        name: String,
+        cents: [Double],
+        source: PracticeSessionSource = .live
+    ) -> PracticeSession {
         let frames = cents.enumerated().map { index, centsValue in
             PitchFrame(
                 timestampMs: index * 110,
@@ -346,7 +616,51 @@ final class BrassTuneAppTests: XCTestCase {
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(Double(frames.count) * 0.11),
             frames: frames,
-            retainedRecordingURL: nil
+            retainedRecordingURL: nil,
+            source: source
+        )
+    }
+
+    private func makeSampleScore() -> ImportedScore {
+        let page = ScorePage(
+            id: UUID(),
+            pageNumber: 1,
+            titleSuggestion: nil,
+            textSuggestions: [],
+            thumbnailPNGData: nil
+        )
+        return ImportedScore(
+            id: UUID(),
+            title: "Old test score",
+            composer: nil,
+            sourceKind: .sample,
+            localFileName: nil,
+            importedAt: Date(timeIntervalSince1970: 1_000),
+            pages: [page],
+            selectedPageID: page.id
+        )
+    }
+
+    private func makePlayAlongFrame(
+        note: String?,
+        cents: Double?,
+        timestampMs: Int,
+        confidence: Double = 0.9,
+        frequencyHz: Double? = 440,
+        writtenOctave: Int = 4,
+        isValidForRecording: Bool? = nil
+    ) -> PitchFrame {
+        let rms = note == nil ? 0 : 0.08
+        return PitchFrame(
+            timestampMs: timestampMs,
+            frequencyHz: frequencyHz,
+            confidence: confidence,
+            rms: rms,
+            centsDeviation: cents,
+            tuningStatus: BrassTuneCore.tuningStatus(cents: cents, confidence: confidence, rms: rms),
+            writtenNoteName: note,
+            writtenOctave: note == nil ? nil : writtenOctave,
+            isValidForRecording: isValidForRecording ?? (note != nil && cents != nil && confidence >= 0.95)
         )
     }
 

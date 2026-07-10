@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import ImageIO
 import PDFKit
@@ -17,7 +18,13 @@ final class AppModel: ObservableObject {
     @Published var metronome = MetronomeSettings() { didSet { persistLocalData(); restartMetronomeIfNeeded() } }
     @Published private(set) var metronomeRunning = false
     @Published private(set) var metronomeTick = 0
-    @Published var ensembles: [EnsembleSummary] = AppModel.demoEnsembles
+    @Published private(set) var recordingStartInProgress = false
+    @Published var selectedPlayAlongExerciseID = PlayAlongExercise.defaultExercise.id
+    @Published private(set) var playAlongPhase: PlayAlongPhase = .idle
+    @Published private(set) var playAlongStartInProgress = false
+    @Published private(set) var playAlongSession: PlayAlongSession?
+    @Published private(set) var playAlongGrade: PlayAlongGrade?
+    @Published var ensembles: [EnsembleSummary] = []
     @Published var lastError: UserVisibleError?
 
     let audioEngine = NativeAudioEngine()
@@ -29,6 +36,12 @@ final class AppModel: ObservableObject {
     private var isRestoringLocalState = false
     private var metronomeTimer: Timer?
     private var tapTempoEvents: [Date] = []
+    private var audioFrameCancellable: AnyCancellable?
+    private var audioRecordingCancellable: AnyCancellable?
+    private var playAlongFixtureTask: Task<Void, Never>?
+    private var playAlongUsesFixture = false
+    private var playAlongStartToken: UUID?
+    private var recordingStartToken: UUID?
 
     init(
         persistenceStore: NativePersistenceStore = .live(),
@@ -37,6 +50,7 @@ final class AppModel: ObservableObject {
         self.persistenceStore = persistenceStore
         self.scoreImporter = NativeScoreImportService(storageDirectory: scoreStorageDirectory ?? NativeScoreImportService.defaultStorageDirectory)
         restoreLocalData()
+        observeAudioFrames()
     }
 
     static let demoEnsembles = [
@@ -51,6 +65,22 @@ final class AppModel: ObservableObject {
 
     var analyticsSnapshot: AnalyticsSnapshot {
         AnalyticsSnapshot(sessions: sessions)
+    }
+
+    var playAlongExercises: [PlayAlongExercise] {
+        PlayAlongExercise.library
+    }
+
+    var selectedPlayAlongExercise: PlayAlongExercise {
+        PlayAlongExercise.library.first { $0.id == selectedPlayAlongExerciseID } ?? .defaultExercise
+    }
+
+    var metronomeTemporarilyMutedForRecording: Bool {
+        audioEngine.recording && audioEngine.activeSource == .live
+    }
+
+    var testFixturesEnabled: Bool {
+        NativeAudioEngine.testFixturesEnabled
     }
 
     var activeScore: ImportedScore? {
@@ -69,7 +99,7 @@ final class AppModel: ObservableObject {
     }
 
     var accountUnavailableMessage: String? {
-        accountFeaturesEnabled ? nil : "Accounts are not enabled in this beta build yet. Guest practice still works on this device."
+        accountFeaturesEnabled ? nil : "You're practicing as a guest. Your data stays on this device."
     }
 
     func resetForUITesting() {
@@ -78,17 +108,17 @@ final class AppModel: ObservableObject {
         selectedInstrumentId = "trumpet"
         referencePitchHz = 440.0
         clearLocalPracticeArtifacts()
+        resetPlayAlong()
+        recordingSource = NativeAudioEngine.defaultRecordingSource
         metronome = MetronomeSettings()
         stopMetronome()
-        ensembles = Self.demoEnsembles
+        ensembles = NativeAudioEngine.testFixturesEnabled ? Self.demoEnsembles : []
         lastError = nil
     }
 
     func enterGuestDemo() {
         authState = .guest
-        if ensembles.isEmpty {
-            ensembles = Self.demoEnsembles
-        }
+        ensembles.removeAll()
         lastError = nil
     }
 
@@ -156,13 +186,11 @@ final class AppModel: ObservableObject {
         var lines = [
             "BrassTune local data export",
             "Account state: \(authState.displayTitle)",
-            "Environment: \(config.environment.rawValue)",
-            "Instrument: \(selectedInstrumentId)",
+            "Instrument: \(instrumentDisplayName(selectedInstrumentId))",
             "Reference pitch: \(String(format: "%.1f", referencePitchHz)) Hz",
             "Sessions: \(sessions.count)",
             "Scores: \(scores.count)",
-            "Metronome: \(metronome.bpm) BPM, \(metronome.meterLabel), \(metronome.subdivision.title), \(metronome.visualOnly ? "visual only" : "speaker eligible")",
-            "Account features: \(accountFeaturesEnabled ? "configured" : "disabled")",
+            "Metronome: \(metronome.bpm) BPM, \(metronome.meterLabel), sound \(metronome.visualOnly ? "off" : "on")",
         ]
         let analytics = analyticsSnapshot
         if analytics.hasSessions {
@@ -187,6 +215,10 @@ final class AppModel: ObservableObject {
             lastError = .accountDeletionRequiresConfirmation
             return
         }
+        await deleteAccount()
+    }
+
+    func deleteAccount() async {
         if let token = authService.accessToken() {
             do {
                 let body = try JSONSerialization.data(withJSONObject: ["confirmation": "delete my account"])
@@ -203,6 +235,7 @@ final class AppModel: ObservableObject {
                 return
             }
         }
+        resetPlayAlong()
         clearLocalPracticeArtifacts()
         stopMetronome()
         ensembles.removeAll()
@@ -212,30 +245,64 @@ final class AppModel: ObservableObject {
     }
 
     func startDemoRecording() {
+        guard NativeAudioEngine.testFixturesEnabled else {
+            recordingSource = .live
+            return
+        }
         recordingSource = .sample
         audioEngine.startFixtureRecording(instrumentId: selectedInstrumentId, referencePitchHz: referencePitchHz)
     }
 
     func stopDemoRecording() {
+        guard NativeAudioEngine.testFixturesEnabled else { return }
         let frames = audioEngine.stopFixtureRecording()
         saveRecordedSession(frames: frames, source: .sample)
     }
 
     func startRecording() async {
+        guard !recordingStartInProgress, !audioEngine.recording else { return }
+        if playAlongStartInProgress || playAlongPhase == .running {
+            stopPlayAlong()
+        }
+        let startToken = UUID()
+        recordingStartToken = startToken
+        recordingStartInProgress = true
+        defer {
+            if recordingStartToken == startToken {
+                recordingStartToken = nil
+                recordingStartInProgress = false
+            }
+        }
         lastError = nil
-        switch recordingSource {
+        let allowedSource: PracticeSessionSource = recordingSource == .sample && NativeAudioEngine.testFixturesEnabled ? .sample : .live
+        recordingSource = allowedSource
+        switch allowedSource {
         case .sample:
             startDemoRecording()
         case .live:
             do {
                 let started = try await audioEngine.startLiveRecording(instrumentId: selectedInstrumentId, referencePitchHz: referencePitchHz)
+                guard recordingStartToken == startToken else {
+                    if started {
+                        _ = audioEngine.stopLiveRecording()
+                    }
+                    return
+                }
                 if !started {
                     lastError = .microphoneDenied
+                } else if metronomeRunning {
+                    metronomeOutput.stop()
                 }
             } catch {
                 lastError = .microphoneUnavailable
             }
         }
+    }
+
+    func cancelRecordingStart() {
+        recordingStartToken = nil
+        recordingStartInProgress = false
+        audioEngine.cancelPendingLiveStart()
     }
 
     func stopRecording() {
@@ -246,13 +313,106 @@ final class AppModel: ObservableObject {
         case .sample:
             stopDemoRecording()
         }
-        // Stopping a take also stops the metronome so it never keeps ticking
-        // without an inline control. It stays independently usable from the
-        // Metronome screen and floating controls via startMetronome().
-        stopMetronome()
+    }
+
+    func startPlayAlong(exerciseID: String? = nil) async {
+        guard !playAlongStartInProgress, playAlongPhase != .running else { return }
+        cancelRecordingStart()
+        let startToken = UUID()
+        playAlongStartToken = startToken
+        playAlongStartInProgress = true
+        defer {
+            if playAlongStartToken == startToken {
+                playAlongStartToken = nil
+            }
+            playAlongStartInProgress = false
+        }
+        lastError = nil
+        if let exerciseID,
+           PlayAlongExercise.library.contains(where: { $0.id == exerciseID }) {
+            selectedPlayAlongExerciseID = exerciseID
+        }
+        if audioEngine.recording {
+            stopRecording()
+        }
+
+        playAlongSession = nil
+        playAlongGrade = nil
+        playAlongPhase = .idle
+        recordingSource = .live
+        if NativeAudioEngine.testFixturesEnabled {
+            playAlongSession = PlayAlongSession(exercise: selectedPlayAlongExercise)
+            playAlongPhase = .running
+            startPlayAlongFixture(exercise: selectedPlayAlongExercise)
+            return
+        }
+        do {
+            let started = try await audioEngine.startLiveRecording(
+                instrumentId: selectedInstrumentId,
+                referencePitchHz: referencePitchHz
+            )
+            guard playAlongStartToken == startToken else {
+                if started {
+                    _ = audioEngine.stopLiveRecording()
+                }
+                return
+            }
+            guard started else {
+                lastError = .microphoneDenied
+                return
+            }
+            playAlongSession = PlayAlongSession(exercise: selectedPlayAlongExercise)
+            playAlongPhase = .running
+            if metronomeRunning {
+                metronomeOutput.stop()
+            }
+        } catch {
+            guard playAlongStartToken == startToken else { return }
+            playAlongPhase = .idle
+            playAlongSession = nil
+            lastError = .microphoneUnavailable
+        }
+    }
+
+    func skipPlayAlongNote() {
+        guard playAlongPhase == .running, var session = playAlongSession else { return }
+        session.skipCurrentNote()
+        playAlongSession = session
+        if session.isComplete {
+            finishPlayAlong(session: session)
+        }
+    }
+
+    func stopPlayAlong() {
+        playAlongStartToken = nil
+        audioEngine.cancelPendingLiveStart()
+        playAlongPhase = .idle
+        playAlongFixtureTask?.cancel()
+        playAlongFixtureTask = nil
+        playAlongUsesFixture = false
+        if audioEngine.recording, audioEngine.activeSource == .live {
+            _ = audioEngine.stopLiveRecording()
+        }
+        playAlongSession = nil
+        playAlongGrade = nil
+    }
+
+    func resetPlayAlong() {
+        playAlongStartToken = nil
+        audioEngine.cancelPendingLiveStart()
+        playAlongFixtureTask?.cancel()
+        playAlongFixtureTask = nil
+        playAlongUsesFixture = false
+        if playAlongPhase == .running, audioEngine.recording, audioEngine.activeSource == .live {
+            _ = audioEngine.stopLiveRecording()
+        }
+        playAlongPhase = .idle
+        playAlongSession = nil
+        playAlongGrade = nil
     }
 
     func clearLocalPracticeData() {
+        resetPlayAlong()
         clearLocalPracticeArtifacts()
     }
 
@@ -260,7 +420,7 @@ final class AppModel: ObservableObject {
         guard !metronomeRunning else { return }
         metronomeRunning = true
         metronomeTick = 0
-        metronomeOutput.playTick(settings: metronome, accent: true)
+        metronomeOutput.playTick(settings: effectiveMetronomeSettings, accent: true)
         scheduleMetronomeTimer()
     }
 
@@ -308,10 +468,9 @@ final class AppModel: ObservableObject {
         metronome.visualOnly = visualOnly
         if visualOnly {
             metronome.muted = true
-            metronome.volume = 0
         } else {
             metronome.muted = false
-            metronome.volume = max(0.35, metronome.volume)
+            metronome.volume = max(0.6, metronome.volume)
         }
     }
 
@@ -323,6 +482,7 @@ final class AppModel: ObservableObject {
     }
 
     func importSampleScore() {
+        guard NativeAudioEngine.testFixturesEnabled else { return }
         let score = scoreImporter.makeSampleScore()
         scores.insert(score, at: 0)
         activeScoreID = score.id
@@ -435,7 +595,7 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self, self.metronomeRunning else { return }
                 self.metronomeTick = (self.metronomeTick + 1) % max(1, self.metronome.beatsPerMeasure * self.metronome.subdivision.ticksPerBeat)
-                self.metronomeOutput.playTick(settings: self.metronome, accent: self.metronomeTick == 0)
+                self.metronomeOutput.playTick(settings: self.effectiveMetronomeSettings, accent: self.metronomeTick == 0)
             }
         }
     }
@@ -445,7 +605,104 @@ final class AppModel: ObservableObject {
         scheduleMetronomeTimer()
     }
 
-    private func saveRecordedSession(frames: [PitchFrame], source: PracticeSessionSource) {
+    private var effectiveMetronomeSettings: MetronomeSettings {
+        guard metronomeTemporarilyMutedForRecording else { return metronome }
+        var mutedSettings = metronome
+        mutedSettings.muted = true
+        mutedSettings.visualOnly = true
+        mutedSettings.volume = 0
+        return mutedSettings
+    }
+
+    private func observeAudioFrames() {
+        audioFrameCancellable = audioEngine.$currentFrame
+            .compactMap { $0 }
+            .sink { [weak self] frame in
+                Task { @MainActor [weak self] in
+                    self?.consumePlayAlongFrame(frame)
+                }
+            }
+        audioRecordingCancellable = audioEngine.$recording
+            .removeDuplicates()
+            .sink { [weak self] isRecording in
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          !isRecording,
+                          self.playAlongPhase == .running,
+                          !self.playAlongUsesFixture else { return }
+                    self.playAlongStartToken = nil
+                    self.playAlongSession = nil
+                    self.playAlongGrade = nil
+                    self.playAlongPhase = .idle
+                    self.lastError = .microphoneUnavailable
+                }
+            }
+    }
+
+    private func consumePlayAlongFrame(_ frame: PitchFrame) {
+        guard playAlongPhase == .running, var session = playAlongSession else { return }
+        session.feed(frame)
+        playAlongSession = session
+        if session.isComplete {
+            finishPlayAlong(session: session)
+        }
+    }
+
+    private func startPlayAlongFixture(exercise: PlayAlongExercise) {
+        playAlongFixtureTask?.cancel()
+        playAlongUsesFixture = true
+        playAlongFixtureTask = Task { [weak self] in
+            for (noteIndex, note) in exercise.writtenNotes.enumerated() {
+                for frameIndex in 0...5 {
+                    guard !Task.isCancelled else { return }
+                    let frame = PitchFrame(
+                        timestampMs: noteIndex * 1_000 + frameIndex * 100,
+                        frequencyHz: 440,
+                        confidence: 0.98,
+                        rms: 0.08,
+                        centsDeviation: 0,
+                        tuningStatus: .inTune,
+                        writtenNoteName: note,
+                        writtenOctave: 4,
+                        isValidForRecording: true
+                    )
+                    self?.consumePlayAlongFrame(frame)
+                    try? await Task.sleep(nanoseconds: 35_000_000)
+                }
+            }
+        }
+    }
+
+    private func finishPlayAlong(session: PlayAlongSession) {
+        guard playAlongPhase == .running, session.isComplete else { return }
+        playAlongSession = session
+        playAlongGrade = session.grade
+        // Complete the state transition before stopping capture because the
+        // engine republishes its last real frame as it closes.
+        playAlongPhase = .completed
+        if playAlongUsesFixture {
+            playAlongFixtureTask?.cancel()
+            playAlongFixtureTask = nil
+            playAlongUsesFixture = false
+            return
+        }
+        let capturedFrames = audioEngine.stopLiveRecording()
+        if !capturedFrames.isEmpty {
+            saveRecordedSession(
+                frames: capturedFrames,
+                source: .live,
+                preferredName: session.exercise.title,
+                practiceNotes: "Play-Along: \(session.exercise.title)."
+            )
+        }
+    }
+
+    private func saveRecordedSession(
+        frames: [PitchFrame],
+        source: PracticeSessionSource,
+        preferredName: String? = nil,
+        practiceNotes: String? = nil
+    ) {
         guard !frames.isEmpty else {
             lastError = .microphoneUnavailable
             return
@@ -456,14 +713,14 @@ final class AppModel: ObservableObject {
         let matchingSourceCount = sessions.filter { $0.source == source }.count + 1
         let session = PracticeSession(
             id: UUID(),
-            name: matchingSourceCount == 1 ? source.sessionTitle : "\(source.sessionTitle) \(matchingSourceCount)",
+            name: preferredName ?? (matchingSourceCount == 1 ? source.sessionTitle : "\(source.sessionTitle) \(matchingSourceCount)"),
             instrumentId: selectedInstrumentId,
             startedAt: startedAt,
             endedAt: endedAt,
             frames: frames,
             retainedRecordingURL: nil,
             attachedScoreID: activeScore?.id,
-            practiceNotes: activeScore.map { "Practiced with \($0.title)." } ?? "",
+            practiceNotes: practiceNotes ?? activeScore.map { "Practiced with \($0.title)." } ?? "",
             source: source
         )
         sessions.insert(session, at: 0)
@@ -479,14 +736,28 @@ final class AppModel: ObservableObject {
 
     private func restoreLocalData() {
         guard let snapshot = persistenceStore.load() else { return }
+        let needsMetronomeDefaultMigration = (snapshot.metronomeDefaultsVersion ?? 1) < 2
+            && snapshot.metronome.muted
+            && snapshot.metronome.visualOnly
+            && snapshot.metronome.volume == 0
         isRestoringLocalState = true
         selectedInstrumentId = snapshot.selectedInstrumentId
         referencePitchHz = snapshot.referencePitchHz
-        sessions = snapshot.sessions
-        scores = snapshot.scores
-        activeScoreID = snapshot.activeScoreID ?? snapshot.scores.first?.id
-        metronome = snapshot.metronome
+        sessions = NativeAudioEngine.testFixturesEnabled
+            ? snapshot.sessions
+            : snapshot.sessions.filter { $0.source == .live }
+        scores = NativeAudioEngine.testFixturesEnabled
+            ? snapshot.scores
+            : snapshot.scores.filter { $0.sourceKind != .sample }
+        activeScoreID = scores.contains(where: { $0.id == snapshot.activeScoreID })
+            ? snapshot.activeScoreID
+            : scores.first?.id
+        metronome = needsMetronomeDefaultMigration ? MetronomeSettings() : snapshot.metronome
         isRestoringLocalState = false
+        let removedFixtures = sessions.count != snapshot.sessions.count || scores.count != snapshot.scores.count
+        if needsMetronomeDefaultMigration || removedFixtures || snapshot.metronomeDefaultsVersion != 2 {
+            persistLocalData()
+        }
     }
 
     private func persistLocalData() {
@@ -497,7 +768,8 @@ final class AppModel: ObservableObject {
             sessions: sessions,
             scores: scores,
             activeScoreID: activeScoreID,
-            metronome: metronome
+            metronome: metronome,
+            metronomeDefaultsVersion: 2
         )
         persistenceStore.save(snapshot)
     }
@@ -552,6 +824,7 @@ struct NativeLocalSnapshot: Codable, Equatable {
     var scores: [ImportedScore]
     var activeScoreID: ImportedScore.ID?
     var metronome: MetronomeSettings
+    var metronomeDefaultsVersion: Int? = nil
 }
 
 struct NativeScoreImportService {
@@ -565,7 +838,7 @@ struct NativeScoreImportService {
             switch self {
             case .unsupportedType: return "BrassTune can import PDF, JPEG, PNG, and HEIC score files."
             case .unreadableFile: return "BrassTune could not read that score file."
-            case .fileTooLarge: return "This score is too large for the native beta importer."
+            case .fileTooLarge: return "This file is too large to import."
             case .noPages: return "No score pages were found in that file."
             }
         }
