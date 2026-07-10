@@ -21,13 +21,17 @@ const AppSettingsContext = createContext<AppSettings | null>(null);
 export function AppSettingsProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   const [instrumentId, setInstrumentId] = useState(() => localStorage.getItem('brasstune.instrument') ?? 'trumpet');
-  const [referencePitch, setReferencePitchState] = useState(() => Number(localStorage.getItem('brasstune.referencePitch') ?? 440));
+  const [referencePitch, setReferencePitchState] = useState(() => {
+    const stored = Number(localStorage.getItem('brasstune.referencePitch') ?? 440);
+    return Number.isFinite(stored) && stored > 0 ? stored : 440;
+  });
   // Real microphone by default; the guided-audio demo is an explicit opt-in.
   const [demoMode, setDemoModeState] = useState(() => localStorage.getItem('brasstune.demoMode') === 'true');
   const [onboardingComplete, setOnboardingComplete] = useState(() => localStorage.getItem('brasstune.onboardingComplete') === 'true');
   const [onboardingOpen, setOnboardingOpen] = useState(() => localStorage.getItem('brasstune.onboardingComplete') !== 'true');
 
   const setReferencePitch = (value: number) => {
+    if (!Number.isFinite(value) || value <= 0) return;
     setReferencePitchState(value);
     localStorage.setItem('brasstune.referencePitch', String(value));
   };

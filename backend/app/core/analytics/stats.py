@@ -55,6 +55,7 @@ def calculate_note_stats(events: Iterable[object]) -> List[Dict[str, object]]:
         row["trend"] = classify_note_trend(row)
         row["severity"] = classify_note_problem(row)
         row["problem_severity"] = problem_score(row)
+        row["severity_color"] = heatmap_severity(row)
         stats.append(row)
     return sorted(stats, key=lambda row: (int(row["written_octave"]), str(row["written_note"])))
 

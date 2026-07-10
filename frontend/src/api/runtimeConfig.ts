@@ -17,11 +17,12 @@ function currentHostname() {
 }
 
 export function isKnownBrassTuneHostedOrigin(hostname = currentHostname()) {
+  // brasstune.vercel.app is the one canonical production domain. Vercel preview
+  // deploys are auto-named from the project (brass-tune-*-kelvis-prject.vercel.app);
+  // they still resolve to the backend via isVercelHostedOrigin() below.
   return (
-    hostname === 'brass-tune.vercel.app' ||
-    hostname === 'brass-tune-aryaswebsites.vercel.app' ||
-    /^brass-tune-git-[a-z0-9-]+-aryaswebsites\.vercel\.app$/i.test(hostname) ||
-    /^brass-tune-[a-z0-9]+-aryaswebsites\.vercel\.app$/i.test(hostname)
+    hostname === 'brasstune.vercel.app' ||
+    /^brass-tune-[a-z0-9-]+-kelvis-prject\.vercel\.app$/i.test(hostname)
   );
 }
 

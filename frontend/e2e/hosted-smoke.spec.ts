@@ -61,7 +61,7 @@ if (hostedMode && vercelBypassSecret) {
 async function assertNotProtectedPreview(response: Response | null, page: Page, route: string) {
   if (response?.status() !== 401 && response?.status() !== 403) return;
   const baseHostname = webBaseURL ? new URL(webBaseURL).hostname : '';
-  const unauthenticatedVercelPreview = baseHostname.endsWith('.vercel.app') && baseHostname !== 'brass-tune.vercel.app' && !vercelShareURL && !vercelBypassSecret;
+  const unauthenticatedVercelPreview = baseHostname.endsWith('.vercel.app') && baseHostname !== 'brasstune.vercel.app' && !vercelShareURL && !vercelBypassSecret;
   if (unauthenticatedVercelPreview) {
     throw new Error(`Protected Vercel preview returned ${response?.status()} for ${route}; provide E2E_VERCEL_SHARE_URL or an automation bypass for page journeys.`);
   }

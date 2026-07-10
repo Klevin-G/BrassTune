@@ -156,8 +156,8 @@ function practiceStreakDays(sessions: GuestSessionDetail[]) {
   return streak;
 }
 
-export function buildGuestProgress(instrumentId: string, stats: NoteStats[]): ProgressMetrics {
-  const sessions = sessionsForInstrument(instrumentId);
+export function buildGuestProgress(instrumentId: string, stats: NoteStats[], range?: GuestInsightRange): ProgressMetrics {
+  const sessions = sessionsForInstrument(instrumentId, range);
   const sorted = [...sessions].sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
   const currentWeekStart = startOfDay(new Date());
   currentWeekStart.setDate(currentWeekStart.getDate() - 6);

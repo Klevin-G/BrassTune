@@ -65,7 +65,7 @@ export function useSessionRecorder(instrumentId: string, referencePitch: number,
     if (!session) return null;
     setError(null);
     setState('stopping');
-    const promise = (cloudEnabled ? stopSession(session.id) : Promise.resolve(saveGuestSessionFromFrames(session as GuestSessionDraft, capturedFramesRef.current, guestAudio)))
+    const promise = (cloudEnabled ? stopSession(session.id) : Promise.resolve().then(() => saveGuestSessionFromFrames(session as GuestSessionDraft, capturedFramesRef.current, guestAudio)))
       .then((summary) => {
         setLastSummary(summary);
         activeSessionRef.current = null;

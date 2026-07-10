@@ -107,6 +107,10 @@ export function OnboardingFlow() {
   const lastStep = STEPS.length - 1;
 
   useEffect(() => {
+    if (onboardingOpen) setStep(0);
+  }, [onboardingOpen]);
+
+  useEffect(() => {
     if (!onboardingOpen) return undefined;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButtonRef.current?.focus();

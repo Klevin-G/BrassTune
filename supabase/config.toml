@@ -6,10 +6,10 @@ project_id = "yznziwewxrlwnwiynlvl"
 
 [auth]
 enable_signup = true
-site_url = "https://brass-tune.vercel.app"
+site_url = "https://brasstune.vercel.app"
 additional_redirect_urls = [
-  "https://brass-tune.vercel.app/auth/callback",
-  "https://brass-tune.vercel.app/auth/reset-password",
+  "https://brasstune.vercel.app/auth/callback",
+  "https://brasstune.vercel.app/auth/reset-password",
   "https://*.vercel.app/auth/callback",
   "http://localhost:5173/auth/callback",
 ]

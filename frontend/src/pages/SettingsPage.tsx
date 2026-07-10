@@ -91,6 +91,7 @@ export function SettingsPage() {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       audioContext = new AudioCtx();
+      if (audioContext.state === 'suspended') await audioContext.resume().catch(() => undefined);
       const source = audioContext.createMediaStreamSource(mediaStream);
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 2048;
@@ -140,7 +141,7 @@ export function SettingsPage() {
           <div className="set-choice">
             <label className="field">
               <span>Tuning reference (A4)</span>
-              <input type="number" min={430} max={450} step={0.5} value={referencePitch} onChange={(event) => setReferencePitch(Number(event.target.value))} />
+              <input type="number" min={430} max={450} step={0.5} value={referencePitch} onChange={(event) => { const next = Number(event.target.value); if (Number.isFinite(next) && next > 0) setReferencePitch(next); }} />
             </label>
             <p className="set-hint">Most bands tune to 440 Hz. Leave this at 440 unless your director asks for a different number.</p>
             {referencePitch !== 440 && (

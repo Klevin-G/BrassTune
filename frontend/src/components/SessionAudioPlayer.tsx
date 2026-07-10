@@ -33,6 +33,14 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
     }
   };
 
+  // Load as soon as the player is shown — it is only mounted when the user has
+  // asked to listen, so the click on "Listen back" should surface a ready
+  // player rather than a second "Load playback" button.
+  useEffect(() => {
+    if (session.audio_available) void loadAudio();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id]);
+
   if (!session.audio_available) {
     return (
       <div className={`audio-player-card ${compact ? 'compact' : ''} unavailable`}>

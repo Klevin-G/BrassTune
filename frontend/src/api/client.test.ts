@@ -65,8 +65,8 @@ describe('API client runtime URLs', () => {
     vi.stubGlobal('window', {
       location: {
         protocol: 'https:',
-        host: 'brass-tune.vercel.app',
-        hostname: 'brass-tune.vercel.app',
+        host: 'brasstune.vercel.app',
+        hostname: 'brasstune.vercel.app',
       },
     });
     expect(exportUrl('/api/health')).toBe('https://brasstune-u8qj.onrender.com/api/health');
@@ -78,8 +78,8 @@ describe('API client runtime URLs', () => {
     vi.stubGlobal('window', {
       location: {
         protocol: 'https:',
-        host: 'brass-tune.vercel.app',
-        hostname: 'brass-tune.vercel.app',
+        host: 'brasstune.vercel.app',
+        hostname: 'brasstune.vercel.app',
       },
     });
     expect(exportUrl('/api/ready')).toBe('https://brasstune-u8qj.onrender.com/api/ready');

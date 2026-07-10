@@ -114,6 +114,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [guestMode, setGuestMode] = useState(() => localStorage.getItem(guestAccessKey) === 'true');
   const profileRequestId = useRef(0);
+  const profileRef = useRef(profile);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   const resetAccountState = useCallback(() => {
     profileRequestId.current += 1;
@@ -155,9 +160,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (requestId !== profileRequestId.current) {
         return null;
       }
-      setProfile(null);
       const message = friendlyAuthError(error);
       setProfileError(message);
+      if (options.required || !profileRef.current) {
+        setProfile(null);
+      }
       if (options.required) {
         throw new Error(message);
       }

@@ -589,8 +589,9 @@ export function ScorePracticePage() {
         accept={acceptAttribute}
         multiple
         onChange={(event) => {
-          void importFiles(Array.from(event.target.files ?? []), 'photos').finally(() => {
-            event.currentTarget.value = '';
+          const input = event.currentTarget;
+          void importFiles(Array.from(input.files ?? []), 'photos').finally(() => {
+            input.value = '';
           });
         }}
         aria-label="Choose sheet music from Photos"
@@ -602,8 +603,9 @@ export function ScorePracticePage() {
         accept={acceptAttribute}
         multiple
         onChange={(event) => {
-          void importFiles(Array.from(event.target.files ?? []), 'files').finally(() => {
-            event.currentTarget.value = '';
+          const input = event.currentTarget;
+          void importFiles(Array.from(input.files ?? []), 'files').finally(() => {
+            input.value = '';
           });
         }}
         aria-label="Choose sheet music files"

@@ -88,7 +88,7 @@ def _set_production_auth_env(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
     monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-service-key-placeholder")
-    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brasstune.vercel.app")
     monkeypatch.setenv("BRASSTUNE_DATABASE_URL", "postgresql://postgres@example.supabase.co:5432/postgres")
 
 
@@ -184,12 +184,12 @@ def test_deployed_cors_origins_reject_wildcards_and_insecure_values(monkeypatch)
     monkeypatch.delenv("FRONTEND_ORIGIN", raising=False)
     with pytest.raises(RuntimeError):
         allowed_origins()
-    for origin in ["*", "https://*.vercel.app", "http://brass-tune.vercel.app", "https://brass-tune.vercel.app/callback"]:
+    for origin in ["*", "https://*.vercel.app", "http://brasstune.vercel.app", "https://brasstune.vercel.app/callback"]:
         monkeypatch.setenv("CORS_ALLOWED_ORIGINS", origin)
         with pytest.raises(RuntimeError):
             allowed_origins()
-    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app/")
-    assert allowed_origins() == ["https://brass-tune.vercel.app"]
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brasstune.vercel.app/")
+    assert allowed_origins() == ["https://brasstune.vercel.app"]
 
 
 def test_default_deployed_environment_requires_explicit_cors_origins(monkeypatch):
@@ -529,7 +529,7 @@ def test_production_startup_does_not_seed_demo_data_by_default(monkeypatch):
 def test_explicit_demo_seed_override_still_works_in_non_release_envs(monkeypatch):
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
-    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brasstune.vercel.app")
     monkeypatch.setenv("BRASSTUNE_SEED_DEMO_DATA", "1")
     calls = []
 
@@ -575,7 +575,7 @@ def test_deployed_staging_requires_explicit_auth_mode(monkeypatch):
 def test_production_disabled_auth_mode_fails_startup(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
-    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brasstune.vercel.app")
     monkeypatch.setenv("BRASSTUNE_DATABASE_URL", "postgresql://postgres@example.supabase.co:5432/postgres")
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
@@ -856,7 +856,7 @@ def test_websocket_accepts_regex_matched_origin_not_in_exact_list(monkeypatch):
     (but absent from the exact CORS_ALLOWED_ORIGINS list) must also be accepted on
     the pitch WebSocket — otherwise 'cloud practice' silently breaks for that host."""
     _set_production_auth_env(monkeypatch)
-    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brasstune.vercel.app")
     monkeypatch.setenv("CORS_ALLOWED_ORIGIN_REGEX", r"https://.*\.vercel\.app")
     monkeypatch.setenv("BRASSTUNE_ALLOW_CORS_REGEX", "1")
     with TestClient(app) as client:
@@ -874,7 +874,7 @@ def test_origin_is_allowed_matches_http_cors_policy(monkeypatch):
     monkeypatch.setenv("CORS_ALLOWED_ORIGIN_REGEX", r"https://.*\.vercel\.app")
     monkeypatch.setenv("BRASSTUNE_ALLOW_CORS_REGEX", "1")
     assert origin_is_allowed("https://brasstune.vercel.app") is True
-    assert origin_is_allowed("https://brass-tune.vercel.app") is True
+    assert origin_is_allowed("https://brasstune.vercel.app") is True
     assert origin_is_allowed("https://evil.example.com") is False
     # fullmatch prevents subdomain-suffix spoofing
     assert origin_is_allowed("https://brasstune.vercel.app.evil.com") is False
@@ -888,7 +888,7 @@ def test_deployed_websocket_rejects_missing_origin(monkeypatch):
     monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
     monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-service-key-placeholder")
     monkeypatch.setenv("BRASSTUNE_DATABASE_URL", "postgresql://postgres@example.supabase.co:5432/postgres")
-    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brass-tune.vercel.app")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://brasstune.vercel.app")
     with TestClient(app) as client:
         with client.websocket_connect("/ws/pitch") as websocket:
             message = websocket.receive_json()
@@ -898,7 +898,7 @@ def test_deployed_websocket_rejects_missing_origin(monkeypatch):
 def test_websocket_closes_after_repeated_unauthenticated_frames(monkeypatch):
     _set_production_auth_env(monkeypatch)
     with TestClient(app) as client:
-        with client.websocket_connect("/ws/pitch", headers={"Origin": "https://brass-tune.vercel.app"}) as websocket:
+        with client.websocket_connect("/ws/pitch", headers={"Origin": "https://brasstune.vercel.app"}) as websocket:
             for _ in range(3):
                 websocket.send_json({"type": "ping"})
                 message = websocket.receive_json()
@@ -1163,7 +1163,7 @@ def test_websocket_accepts_first_message_auth_without_token_query(monkeypatch):
 
     monkeypatch.setattr("app.api.websocket.auth_context_from_token", fake_auth_context)
     with TestClient(app) as client:
-        with client.websocket_connect("/ws/pitch", headers={"Origin": "https://brass-tune.vercel.app"}) as websocket:
+        with client.websocket_connect("/ws/pitch", headers={"Origin": "https://brasstune.vercel.app"}) as websocket:
             websocket.send_json({"type": "ping"})
             assert websocket.receive_json()["message"].lower().startswith("authenticate")
             websocket.send_json({"type": "authenticate", "token": "dev-ws-token"})

@@ -78,8 +78,8 @@ export function PracticePage() {
     setTransitionBusy(true);
     let openedMicrophone = false;
     try {
-      const inputStream = demoMode ? null : stream.micActive ? null : await stream.startMicrophone();
-      openedMicrophone = !demoMode && Boolean(inputStream);
+      const inputStream = demoMode ? null : stream.micActive ? stream.mediaStream : await stream.startMicrophone();
+      openedMicrophone = !demoMode && !stream.micActive && Boolean(inputStream);
       if (!demoMode && !stream.micActive && !inputStream) {
         recorder.setError('We need your microphone to record. Turn it on, or switch to Demo above.');
         return;
@@ -111,15 +111,18 @@ export function PracticePage() {
         }
       }
       if (sessionId && demoMode) {
+        let demoUploadFailed = false;
         const uploadPromise = audioRecorder.stopAndUpload(sessionId, true);
         const flush = await stream.finishPersistingFrames();
+        try {
+          const uploaded = await uploadPromise;
+          if (!uploaded) demoUploadFailed = true;
+        } catch {
+          demoUploadFailed = true;
+        }
         const summary = await recorder.stop();
-        uploadPromise
-          .then((audio) => {
-            if (!audio) recorder.setError('Take saved, but the audio upload failed. Your results are still here.');
-          })
-          .catch(() => recorder.setError('Take saved, but the audio upload failed. Your results are still here.'));
         if (flush.failed > 0) recorder.setError('Take saved, but the last few notes may not have synced. Record again if the summary looks short.');
+        if (demoUploadFailed) recorder.setError('Take saved, but the audio upload failed. Your results are still here.');
         return summary;
       }
       let uploadFailed = false;

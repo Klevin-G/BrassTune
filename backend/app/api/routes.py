@@ -1082,7 +1082,10 @@ def list_ensemble_groups(db: Session = Depends(get_db), auth: AuthContext = Depe
     if auth.user.role == "admin":
         groups = db.query(Group).order_by(Group.name.asc()).all()
     elif auth.user.role == "director":
-        groups = db.query(Group).filter(Group.director_user_id == auth.user.id).order_by(Group.name.asc()).all()
+        owned_ids = {g.id for g in db.query(Group).filter(Group.director_user_id == auth.user.id).all()}
+        member_ids = {r.group_id for r in db.query(GroupMember).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").all()}
+        ids = owned_ids | member_ids
+        groups = db.query(Group).filter(Group.id.in_(ids)).order_by(Group.name.asc()).all() if ids else []
     else:
         group_ids = [row.group_id for row in db.query(GroupMember).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").all()]
         groups = db.query(Group).filter(Group.id.in_(group_ids)).order_by(Group.name.asc()).all() if group_ids else []

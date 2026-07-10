@@ -59,7 +59,7 @@ export function ProgressPage() {
       const guestStats = buildGuestNoteStats(instrumentId, range);
       setStats(guestStats);
       setHeatmap(buildGuestHeatmap(instrumentId, guestStats));
-      setProgress(buildGuestProgress(instrumentId, guestStats));
+      setProgress(buildGuestProgress(instrumentId, guestStats, range));
       setPlan(buildGuestPracticePlan(guestStats, instrumentId));
       setRecommendations(buildGuestRecommendations(guestStats));
       setLoadError(false);

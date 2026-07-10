@@ -74,6 +74,7 @@ export function MetronomePage() {
   const signatureRef = useRef(normalizeTimeSignature(4, 4));
   const holdRef = useRef<{ timeout?: number; interval?: number }>({});
   const scrubRef = useRef({ active: false, startX: 0, startBpm: 0, moved: false });
+  const runningRef = useRef(false);
 
   const signature = signaturePreset === 'custom' ? normalizeTimeSignature(customNumerator, customDenominator) : signaturePresets[signaturePreset];
 
@@ -93,6 +94,7 @@ export function MetronomePage() {
   }, [accentDownbeat, barsPerStep, bpm, muted, rampEnabled, rampStep, signature, subdivision, targetBpm, volume]);
 
   const scheduleClick = (context: AudioContext, time: number, accented: boolean, subdivisionHit: boolean) => {
+    if (!runningRef.current) return;
     if (mutedRef.current) return;
     const oscillator = context.createOscillator();
     const gain = context.createGain();
@@ -118,6 +120,7 @@ export function MetronomePage() {
       const visualDelayMs = Math.max(0, (nextTickTimeRef.current - context.currentTime) * 1000);
       if (subdivisionIndex === 0) {
         window.setTimeout(() => {
+          if (!runningRef.current) return;
           setBeat(beatIndex);
           setBeatOn(true);
           setStatus('Playing');
@@ -155,6 +158,7 @@ export function MetronomePage() {
     barCountRef.current = 0;
     setBeat(0);
     setBeatOn(false);
+    runningRef.current = true;
     for (const tick of countInTicks) {
       scheduleClick(context, tick.time, tick.accented, tick.subdivisionIndex > 0);
     }
@@ -164,6 +168,7 @@ export function MetronomePage() {
   };
 
   const stop = () => {
+    runningRef.current = false;
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = null;
     setRunning(false);

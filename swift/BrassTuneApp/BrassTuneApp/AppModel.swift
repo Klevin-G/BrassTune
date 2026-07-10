@@ -38,6 +38,10 @@ final class AppModel: ObservableObject {
     private var tapTempoEvents: [Date] = []
     private var audioFrameCancellable: AnyCancellable?
     private var audioRecordingCancellable: AnyCancellable?
+    // SwiftUI does not auto-subscribe to a nested ObservableObject, so views that
+    // observe AppModel (e.g. the live Tuner) never see per-frame changes on the
+    // engine. Forward the engine's objectWillChange into AppModel to fix that.
+    private var engineChangeCancellable: AnyCancellable?
     private var playAlongFixtureTask: Task<Void, Never>?
     private var playAlongUsesFixture = false
     private var playAlongStartToken: UUID?
@@ -591,13 +595,18 @@ final class AppModel: ObservableObject {
     private func scheduleMetronomeTimer() {
         metronomeTimer?.invalidate()
         guard metronomeRunning else { return }
-        metronomeTimer = Timer.scheduledTimer(withTimeInterval: metronome.intervalSeconds, repeats: true) { [weak self] _ in
+        // Schedule in .common modes so the beat does not pause while the user
+        // scrolls a list (the main run loop switches to .tracking during scroll,
+        // and a .default-only timer stops firing there).
+        let timer = Timer(timeInterval: metronome.intervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.metronomeRunning else { return }
                 self.metronomeTick = (self.metronomeTick + 1) % max(1, self.metronome.beatsPerMeasure * self.metronome.subdivision.ticksPerBeat)
                 self.metronomeOutput.playTick(settings: self.effectiveMetronomeSettings, accent: self.metronomeTick == 0)
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        metronomeTimer = timer
     }
 
     private func restartMetronomeIfNeeded() {
@@ -615,6 +624,14 @@ final class AppModel: ObservableObject {
     }
 
     private func observeAudioFrames() {
+        // Re-render AppModel-observing views (the live Tuner, permission/route
+        // notices) whenever the engine publishes — currentFrame, recording, etc.
+        engineChangeCancellable = audioEngine.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.objectWillChange.send()
+                }
+            }
         audioFrameCancellable = audioEngine.$currentFrame
             .compactMap { $0 }
             .sink { [weak self] frame in

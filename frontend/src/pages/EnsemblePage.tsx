@@ -26,7 +26,7 @@ import { useAuth } from '../state/AuthContext';
 import './EnsemblePage.css';
 
 // Instruments a student can be tagged with. Kept in sync with the display-name catalog.
-const INSTRUMENT_OPTIONS = ['trumpet', 'cornet', 'flugelhorn', 'horn', 'trombone', 'bass-trombone', 'euphonium', 'baritone', 'tuba'];
+const INSTRUMENT_OPTIONS = ['trumpet', 'horn', 'trombone', 'euphonium', 'tuba'];
 const isKnownInstrument = (id: string | null | undefined) => Boolean(id && INSTRUMENT_OPTIONS.includes(id.trim().toLowerCase()));
 
 function relativeWhen(value: string | null): string {
@@ -91,7 +91,7 @@ export function EnsemblePage() {
   const myId = auth.profile?.id;
 
   const managesGroup = (group: any): boolean => {
-    if (auth.profile?.role === 'director' || auth.profile?.role === 'admin') return true;
+    if (auth.profile?.role === 'admin') return true;
     return group?.director_user_id != null && group.director_user_id === myId;
   };
   const managesSelected = managesGroup(selectedGroup);

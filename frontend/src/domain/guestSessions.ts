@@ -70,7 +70,40 @@ function writeStored(sessions: GuestSessionDetail[]) {
     memoryGuestSessions = next;
     return;
   }
-  localStorage.setItem(GUEST_SESSIONS_KEY, JSON.stringify(next));
+  const isQuotaError = (error: unknown) =>
+    error instanceof Error && (error.name === 'QuotaExceededError' || error.name.includes('Quota'));
+  const trySet = (value: GuestSessionDetail[]) => localStorage.setItem(GUEST_SESSIONS_KEY, JSON.stringify(value));
+  try {
+    trySet(next);
+    return;
+  } catch (error) {
+    if (!isQuotaError(error)) throw error;
+  }
+  // Recovery step 1: drop the oldest sessions' inline audio first (newest last), retrying after each.
+  const working = next.map((session) => ({ ...session }));
+  for (let i = working.length - 1; i >= 0; i -= 1) {
+    if (!working[i].guest_audio_data_url) continue;
+    working[i] = { ...working[i], guest_audio_data_url: null, audio_available: false };
+    try {
+      trySet(working);
+      return;
+    } catch (error) {
+      if (!isQuotaError(error)) throw error;
+    }
+  }
+  // Recovery step 2: evict the oldest sessions entirely, one at a time, keeping the newest.
+  const evicting = working.slice();
+  while (evicting.length > 1) {
+    evicting.pop();
+    try {
+      trySet(evicting);
+      return;
+    } catch (error) {
+      if (!isQuotaError(error)) throw error;
+    }
+  }
+  // Last resort: persist just the newest session; rethrow if even that fails.
+  trySet(evicting);
 }
 
 function guestId() {
