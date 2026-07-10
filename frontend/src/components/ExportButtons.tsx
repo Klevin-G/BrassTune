@@ -70,20 +70,20 @@ export function ExportButtons({ sessionId, guestSession }: { sessionId: number; 
       <div className="export-buttons">
         <button className="ghost-button" type="button" onClick={() => downloadBlob(guestSamplesCsv(guestSession), `guest-session-${Math.abs(sessionId)}-samples.csv`, 'text/csv')}>
           <Download size={17} />
-          Samples CSV
+          Pitch data (CSV)
         </button>
         <button className="ghost-button" type="button" onClick={() => downloadBlob(guestEventsCsv(guestSession), `guest-session-${Math.abs(sessionId)}-note-events.csv`, 'text/csv')}>
           <Download size={17} />
-          Events CSV
+          Notes (CSV)
         </button>
         <button className="ghost-button" type="button" onClick={() => downloadBlob(JSON.stringify(guestSession, null, 2), `guest-session-${Math.abs(sessionId)}.json`)}>
           <Download size={17} />
-          JSON
+          All data (JSON)
         </button>
         {guestSession.guest_audio_data_url && (
           <a className="ghost-button" href={guestSession.guest_audio_data_url} download={`guest-session-${Math.abs(sessionId)}-audio.${audioExtension(guestSession.audio_mime_type)}`}>
             <Download size={17} />
-            Audio
+            Audio file
           </a>
         )}
         {status && <p className="settings-status" aria-live="polite">{status}</p>}
@@ -95,23 +95,23 @@ export function ExportButtons({ sessionId, guestSession }: { sessionId: number; 
     <div className="export-buttons">
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}.csv`, `session-${sessionId}-samples.csv`)}>
         <Download size={17} />
-        Samples CSV
+        Pitch data (CSV)
       </button>
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/note-events/${sessionId}.csv`, `session-${sessionId}-note-events.csv`)}>
         <Download size={17} />
-        Events CSV
+        Notes (CSV)
       </button>
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}.json`, `session-${sessionId}.json`)}>
         <Download size={17} />
-        JSON
+        All data (JSON)
       </button>
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}.zip`, `session-${sessionId}-export.zip`)}>
         <Download size={17} />
-        ZIP
+        Everything (ZIP)
       </button>
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}/audio`, `session-${sessionId}-audio`)}>
         <Download size={17} />
-        Audio
+        Audio file
       </button>
       {status && <p className="settings-status" aria-live="polite">{status}</p>}
     </div>

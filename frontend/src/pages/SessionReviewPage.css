@@ -1,0 +1,177 @@
+/* Session review — page-scoped styles (prefix: sr-) */
+
+.sr-screen {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.sr-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1.25rem 1.35rem;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
+}
+
+.sr-hero.tone-green {
+  border-left-color: var(--green);
+}
+.sr-hero.tone-amber {
+  border-left-color: var(--amber);
+}
+.sr-hero.tone-red {
+  border-left-color: var(--red);
+}
+.sr-hero.tone-muted {
+  border-left-color: var(--line-strong);
+}
+
+.sr-hero-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 6.5rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.sr-hero-score strong {
+  font-size: 2.7rem;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sr-hero-score span {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.sr-hero.tone-green .sr-hero-score strong {
+  color: var(--green);
+}
+.sr-hero.tone-amber .sr-hero-score strong {
+  color: var(--amber);
+}
+.sr-hero.tone-red .sr-hero-score strong {
+  color: var(--red);
+}
+
+.sr-hero-copy {
+  flex: 1;
+  min-width: 12rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+
+.sr-hero-copy p {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.02rem;
+  line-height: 1.55;
+}
+
+.sr-hero-audio {
+  flex-basis: 100%;
+}
+
+.sr-cents-note {
+  margin: 0.65rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* heat-map legend */
+.sr-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 0.9rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.sr-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.sr-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.sr-swatch-green {
+  background: var(--green);
+}
+.sr-swatch-amber {
+  background: var(--amber);
+}
+.sr-swatch-red {
+  background: var(--red);
+}
+
+.sr-legend-note {
+  flex-basis: 100%;
+  color: var(--muted-2);
+}
+
+/* advanced / for teachers */
+.sr-advanced {
+  margin-top: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.sr-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.9rem 1.05rem;
+  font-weight: 600;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sr-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sr-advanced > summary:hover,
+.sr-advanced[open] > summary {
+  color: var(--text);
+}
+
+.sr-advanced[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.sr-advanced-body {
+  padding: 1.05rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.35rem;
+}
+
+.sr-advanced-heading {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+  color: var(--text);
+}

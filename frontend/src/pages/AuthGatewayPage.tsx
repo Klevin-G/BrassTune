@@ -1,10 +1,10 @@
-import { ArrowRight, KeyRound, LogIn, Mail, Music2, ShieldCheck, UserPlus } from 'lucide-react';
+import { ArrowRight, CheckCircle2, ChevronDown, KeyRound, LogIn, Mail, Music2, ShieldCheck, UserPlus } from 'lucide-react';
 import { GoogleIcon } from '../components/GoogleIcon';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ThemeSelector } from '../components/ThemeSelector';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
+import './AuthGatewayPage.css';
 
 function safeNext(value: string | null) {
   if (!value || !value.startsWith('/') || value.startsWith('//')) return '/home';
@@ -21,6 +21,7 @@ export function AuthGatewayPage() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showEmail, setShowEmail] = useState(false);
 
   useEffect(() => {
     if (!auth.loading && auth.isSignedIn) {
@@ -36,7 +37,7 @@ export function AuthGatewayPage() {
       await auth.signIn(email, password);
       navigate(next, { replace: true });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Account access is unavailable right now. You can still use guest practice.');
+      setMessage(error instanceof Error ? error.message : 'Couldn’t sign in right now. You can start as a guest instead.');
     } finally {
       setBusy(false);
     }
@@ -48,6 +49,7 @@ export function AuthGatewayPage() {
   }
 
   const callbackNext = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+  const hasProviders = auth.providers.google || auth.providers.apple;
 
   return (
     <ScreenContainer>
@@ -59,32 +61,31 @@ export function AuthGatewayPage() {
             </span>
             <span>
               <strong>BrassTune</strong>
-              <small>Practice gateway</small>
             </span>
           </div>
-          <h1>Sign in or start a guest practice session.</h1>
-          <p>
-            Keep your warmups, recordings, score practice, and ensemble work in one focused brass cockpit. Guest practice stays on this device.
+          <h1>Tune up, play along, and see how you sound.</h1>
+          <p className="ag-lead">
+            A tuner, metronome, and play-along grader for brass players — solo or with your band. Guest mode saves your work on this device only.
           </p>
-          <div className="gateway-links" aria-label="Legal and support links">
-            <Link to="/privacy">Privacy</Link>
-            <Link to="/terms">Terms</Link>
-            <Link to="/support">Support</Link>
-          </div>
+          <span className="ag-noaccount">
+            <CheckCircle2 size={16} />
+            No account needed to start.
+          </span>
         </section>
 
         <div className="gateway-stack">
-          <SectionCard title={auth.configured ? 'Sign in' : 'Continue as guest'} eyebrow={auth.configured ? 'Account access' : 'Guest-first release'}>
-            {auth.loading && <p className="muted-copy" role="status">Restoring your session...</p>}
+          <SectionCard>
+            {auth.loading && <p className="muted-copy" role="status">Restoring your session…</p>}
+
             {!auth.loading && !auth.configured && (
               <>
                 <EmptyActionState
-                  title="Accounts are not enabled in this release yet"
-                  body="Accounts aren’t enabled in this release yet. Guest practice is fully available."
-                  icon={Mail}
+                  title="Ready when you are"
+                  body="Just start practicing — no sign-in needed."
+                  icon={Music2}
                 />
-                <button className="primary-button full-width-action" type="button" onClick={continueAsGuest}>
-                  Continue as guest
+                <button className="primary-button ag-block ag-guest" type="button" onClick={continueAsGuest}>
+                  Start practicing
                   <ArrowRight size={18} />
                 </button>
               </>
@@ -92,60 +93,86 @@ export function AuthGatewayPage() {
 
             {!auth.loading && auth.configured && (
               <>
-                {auth.providers.google && (
+                {hasProviders && (
                   <>
-                    <button className="google-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.'))}>
-                      <GoogleIcon size={18} />
-                      Continue with Google
-                    </button>
-                    <div className="auth-divider" aria-hidden="true"><span>or use your email</span></div>
+                    <div className="ag-providers">
+                      {auth.providers.google && (
+                        <button className="google-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.'))}>
+                          <GoogleIcon size={18} />
+                          Continue with Google
+                        </button>
+                      )}
+                      {auth.providers.apple && (
+                        <button className="ghost-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithApple(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in could not start. Try again later.'))}>
+                          <ShieldCheck size={18} />
+                          Continue with Apple
+                        </button>
+                      )}
+                    </div>
+                    <div className="auth-divider" aria-hidden="true"><span>or</span></div>
                   </>
                 )}
-                <form className="auth-form" onSubmit={signIn}>
-                  <label>
-                    Email
-                    <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="you@example.com" />
-                  </label>
-                  <label>
-                    Password
-                    <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder="Password" />
-                  </label>
-                  <button className="primary-button" disabled={busy} type="submit">
-                    <LogIn size={18} />
-                    {busy ? 'Signing in...' : 'Sign in'}
-                  </button>
-                </form>
-                <div className="provider-button-stack">
-                  {auth.providers.apple && (
-                    <button className="ghost-button full-width-action" disabled={busy} type="button" onClick={() => auth.signInWithApple(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in could not start. Try again later.'))}>
-                      <ShieldCheck size={18} />
-                      Continue with Apple
-                    </button>
-                  )}
-                  <button className="ghost-button full-width-action" type="button" onClick={continueAsGuest}>
-                    Continue as guest
-                  </button>
-                </div>
-                <div className="auth-switcher">
-                  <Link to="/auth/sign-up">
-                    <UserPlus size={16} />
-                    Create account
-                  </Link>
-                  <Link to="/auth/reset-password">
-                    <KeyRound size={16} />
-                    Forgot password
-                  </Link>
-                </div>
+
+                <button className="primary-button ag-block ag-guest" type="button" onClick={continueAsGuest}>
+                  Start practicing
+                  <ArrowRight size={18} />
+                </button>
+                <p className="ag-nudge">New here? Jump right in — no account needed.</p>
+
+                <button
+                  type="button"
+                  className="ghost-button ag-block ag-email-toggle"
+                  aria-expanded={showEmail}
+                  aria-controls="ag-email-region"
+                  onClick={() => setShowEmail((open) => !open)}
+                >
+                  <span className="ag-email-toggle-label">
+                    <Mail size={16} />
+                    Sign in with email
+                  </span>
+                  <ChevronDown className="ag-chevron" size={16} />
+                </button>
+
+                {showEmail && (
+                  <div className="ag-email-region" id="ag-email-region">
+                    <form className="auth-form" onSubmit={signIn}>
+                      <label>
+                        Email
+                        <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="you@example.com" />
+                      </label>
+                      <label>
+                        Password
+                        <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder="At least 6 characters" />
+                      </label>
+                      <button className="primary-button ag-block" disabled={busy} type="submit">
+                        <LogIn size={18} />
+                        {busy ? 'Signing in…' : 'Sign in'}
+                      </button>
+                    </form>
+                    <div className="auth-switcher">
+                      <Link to="/auth/sign-up">
+                        <UserPlus size={16} />
+                        Create account
+                      </Link>
+                      <Link to="/auth/reset-password">
+                        <KeyRound size={16} />
+                        Forgot password
+                      </Link>
+                    </div>
+                  </div>
+                )}
               </>
             )}
             {(message || auth.profileError) && <div className="alert" role="status">{message ?? auth.profileError}</div>}
           </SectionCard>
-
-          <SectionCard title="Appearance" eyebrow="Theme">
-            <ThemeSelector />
-          </SectionCard>
         </div>
       </div>
+
+      <footer className="ag-footer" aria-label="Legal and support links">
+        <Link to="/privacy">Privacy</Link>
+        <Link to="/terms">Terms</Link>
+        <Link to="/support">Support</Link>
+      </footer>
     </ScreenContainer>
   );
 }

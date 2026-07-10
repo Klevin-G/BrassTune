@@ -1,0 +1,190 @@
+/* SettingsPage — co-located styles. Prefix: .set- to avoid collisions. */
+
+.set-group {
+  display: grid;
+  gap: 14px;
+}
+
+/* The card heading already has bottom margin; grid gap handles spacing here. */
+.section-card.set-group .section-card-heading {
+  margin-bottom: 0;
+}
+
+.set-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.set-hint a {
+  color: var(--muted);
+  text-decoration: underline;
+}
+
+/* Plain static footnote (replaces the fake-editable "In-tune threshold" box) */
+.set-field-note {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.set-field-note strong {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.set-choice {
+  display: grid;
+  gap: 8px;
+}
+
+.set-choice .segmented-control {
+  width: 100%;
+}
+
+.set-reset {
+  align-self: flex-start;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.8rem;
+}
+
+/* Mic check */
+.set-miccheck {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.set-miccheck-head {
+  display: grid;
+  gap: 3px;
+}
+
+.set-miccheck-head strong {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.set-miccheck-head span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.set-miccheck-btn {
+  justify-self: start;
+}
+
+.set-miccheck-result {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 14px;
+  font-weight: 800;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.set-miccheck-result svg {
+  flex-shrink: 0;
+}
+
+.set-miccheck-result span {
+  display: block;
+  margin-top: 2px;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* Light theme (brass-white) gets a dark-green ink for contrast on the pale fill. */
+.set-miccheck-result.is-pass {
+  color: #1c7a3f;
+  border-color: rgba(107, 210, 135, 0.5);
+  background: rgba(107, 210, 135, 0.16);
+}
+
+.set-miccheck-result.is-fail {
+  color: var(--red);
+  border-color: rgba(226, 93, 93, 0.5);
+  background: rgba(226, 93, 93, 0.12);
+}
+
+/* Dark themes flip to a light-green ink. data-theme is always a resolved value. */
+:root[data-theme='brass-night'] .set-miccheck-result.is-pass,
+:root[data-theme='high-contrast'] .set-miccheck-result.is-pass {
+  color: #dfffe8;
+}
+
+/* Danger zone */
+.section-card.set-danger {
+  border-color: rgba(226, 93, 93, 0.42);
+  box-shadow: var(--shadow-soft), inset 0 0 0 1px rgba(226, 93, 93, 0.12);
+}
+
+.section-card.set-danger .section-card-heading h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--red);
+}
+
+.set-danger-row {
+  display: grid;
+  gap: 6px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.set-danger-row:first-of-type {
+  padding-top: 4px;
+  border-top: 0;
+}
+
+.set-danger-row strong {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.set-danger-row p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.set-danger-row .settings-actions {
+  margin-top: 4px;
+}
+
+.set-confirm-field {
+  margin-top: 4px;
+}
+
+/* Legal footer links */
+.set-legal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 8px 4px 0;
+}
+
+.set-legal a {
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.set-legal a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}

@@ -1,0 +1,232 @@
+/* Tuner-first practice screen: one hero readout + one big horizontal meter. */
+.tuner-page {
+  display: grid;
+  gap: 20px;
+  max-width: 760px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.tuner-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tuner-ref {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.tuner-banner {
+  padding: 12px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gold);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tuner-stage {
+  display: grid;
+  gap: 26px;
+  padding: 32px 24px 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  place-items: center;
+  text-align: center;
+}
+
+/* --- Hero note readout --- */
+.note-display {
+  display: grid;
+  gap: 4px;
+  place-items: center;
+}
+
+.note-display-note {
+  font-size: clamp(5.5rem, 22vw, 10rem);
+  font-weight: 800;
+  line-height: 0.92;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.note-display-verdict {
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.note-display-verdict.tone-green,
+.tuning-meter.tone-green .tuning-meter-indicator {
+  color: var(--green);
+}
+.note-display-verdict.tone-amber { color: var(--amber); }
+.note-display-verdict.tone-red { color: var(--red); }
+.note-display-verdict.tone-muted { color: var(--muted-2); }
+
+.note-display-detail {
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.note-display-concert {
+  margin-top: 2px;
+  color: var(--muted-2);
+  font-size: 0.82rem;
+}
+
+/* --- Horizontal tuning meter --- */
+.tuning-meter {
+  width: 100%;
+  max-width: 620px;
+  display: grid;
+  gap: 8px;
+}
+
+.tuning-meter-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted-2);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tuning-meter-labels span:nth-child(2) { color: var(--green); }
+
+.tuning-meter-track {
+  position: relative;
+  height: 56px;
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--red) 34%, transparent) 0%,
+    color-mix(in srgb, var(--amber) 26%, transparent) 30%,
+    color-mix(in srgb, var(--green) 34%, transparent) 50%,
+    color-mix(in srgb, var(--amber) 26%, transparent) 70%,
+    color-mix(in srgb, var(--red) 34%, transparent) 100%);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.tuning-meter-zone-center {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 44%;
+  width: 12%;
+  background: color-mix(in srgb, var(--green) 22%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--green) 55%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--green) 55%, transparent);
+}
+
+.tuning-meter-tick {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--green) 70%, transparent);
+}
+
+.tuning-meter-reward {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 90px;
+  height: 90px;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--green) 60%, transparent), transparent 70%);
+  pointer-events: none;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.tuning-meter-indicator {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 74%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: var(--text);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  transition: left 90ms linear, background 160ms ease;
+}
+
+.tuning-meter.active.centered .tuning-meter-indicator { background: var(--green); }
+.tuning-meter.tone-amber.active .tuning-meter-indicator { background: var(--amber); }
+.tuning-meter.tone-red.active .tuning-meter-indicator { background: var(--red); }
+.tuning-meter:not(.active) .tuning-meter-indicator { background: var(--muted-2); opacity: 0.6; }
+
+/* --- Controls + tools --- */
+.tuner-stage .session-controls {
+  justify-content: center;
+}
+
+.tuner-tools {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.tuner-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tuner-tool:hover {
+  border-color: var(--line-strong);
+}
+
+.tuner-signin-note {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.tuner-signin-note a { color: var(--gold); font-weight: 700; }
+
+.tuner-saved {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.tuner-saved strong { display: block; font-size: 1.1rem; }
+.tuner-saved span { color: var(--muted); font-size: 0.85rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tuning-meter-indicator,
+  .tuning-meter-reward { transition: none; }
+}

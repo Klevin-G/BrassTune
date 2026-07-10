@@ -1,6 +1,6 @@
-import { Activity, BarChart3, Users } from 'lucide-react';
+import { Activity } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { friendlyUserFacingError, getAdminMetrics, type AdminMetrics } from '../api/client';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
@@ -24,31 +24,24 @@ const EVENT_LABELS: Record<string, string> = {
 
 export function AdminMetricsPage() {
   const auth = useAuth();
+  const isAdmin = auth.profile?.role === 'admin';
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!auth.isSignedIn) {
+    if (!isAdmin) {
       setLoading(false);
       return;
     }
     getAdminMetrics()
       .then(setMetrics)
-      .catch((err) => setError(friendlyUserFacingError(err, 'This dashboard is only available to admins.')))
+      .catch((err) => setError(friendlyUserFacingError(err, 'Could not load the dashboard right now.')))
       .finally(() => setLoading(false));
-  }, [auth.isSignedIn]);
+  }, [isAdmin]);
 
-  if (!auth.isSignedIn || (!metrics && !loading)) {
-    return (
-      <ScreenContainer>
-        <PageHeader eyebrow="Admin" title="Usage dashboard" description="Private product metrics for BrassTune admins." />
-        <SectionCard title="Admins only" eyebrow="Restricted">
-          <p className="muted-copy">{error || 'This dashboard is only available to admin accounts.'}</p>
-          <Link to="/settings" className="ghost-button">Back to Settings</Link>
-        </SectionCard>
-      </ScreenContainer>
-    );
+  if (!isAdmin) {
+    return <Navigate to="/practice" replace />;
   }
 
   const maxSignups = Math.max(1, ...(metrics?.signups_by_day ?? []).map((row) => row.count));
@@ -58,10 +51,15 @@ export function AdminMetricsPage() {
       <PageHeader
         eyebrow="Admin"
         title="Usage dashboard"
-        description="How many people are using BrassTune, how active they are, and what they use. Private to admins."
+        description="Who's using BrassTune and how active they are."
         meta={metrics ? <span className="muted-copy">as of {new Date(metrics.generated_at).toLocaleString()}</span> : undefined}
       />
       {loading && <p className="settings-status" role="status">Loading metrics…</p>}
+      {!loading && error && (
+        <SectionCard title="Couldn't load metrics">
+          <p className="muted-copy">{error}</p>
+        </SectionCard>
+      )}
       {metrics && (
         <>
           <SectionCard title="At a glance" eyebrow="Totals">
@@ -99,23 +97,8 @@ export function AdminMetricsPage() {
             </div>
             <p className="muted-copy" style={{ marginTop: '12px' }}>
               <Activity size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-              Counts come from lightweight in-app events. Sign-ins refresh the “active” numbers above.
+              Basic in-app counts only. No third-party trackers. Activity is based on each account's last sign-in.
             </p>
-          </SectionCard>
-
-          <SectionCard title="Where this comes from" eyebrow="How it works">
-            <div className="insight-grid">
-              <article className="insight-card">
-                <span className="insight-icon"><Users size={18} /></span>
-                <h3>Users &amp; activity</h3>
-                <p>Counted from the users table; “active” uses each account’s last sign-in timestamp.</p>
-              </article>
-              <article className="insight-card tone-gold">
-                <span className="insight-icon"><BarChart3 size={18} /></span>
-                <h3>Feature events</h3>
-                <p>Coarse server-side events (sign-up, sessions, ensembles). No third-party tracker, no per-note logging.</p>
-              </article>
-            </div>
           </SectionCard>
         </>
       )}

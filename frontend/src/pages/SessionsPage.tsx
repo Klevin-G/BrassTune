@@ -1,22 +1,24 @@
-import { CalendarDays, Download, Gauge, Music2, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Mic, MoreHorizontal, Music2, Play, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listSessions } from '../api/client';
 import { ExportButtons } from '../components/ExportButtons';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
-import { EmptyActionState, PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
+import { EmptyActionState, PageHeader, ScreenContainer, SectionCard, SelectionChip, StatusBadge } from '../components/ui/AppPrimitives';
+import { instrumentDisplayName } from '../domain/instrumentNames';
+import { describeInTunePercent } from '../domain/tuningLanguage';
 import { deleteGuestSession, listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
 import type { PracticeSession } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
+import './SessionsPage.css';
 
-type SessionFilter = 'all' | 'week' | 'audio' | 'best' | 'work';
+type SessionFilter = 'all' | 'audio';
 
-function isThisWeek(dateText: string) {
+function formatWhen(dateText: string) {
   const date = new Date(dateText);
-  const now = new Date();
-  const start = new Date(now);
-  start.setDate(now.getDate() - 7);
-  return date >= start;
+  const day = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${day} · ${time}`;
 }
 
 export function SessionsPage() {
@@ -24,6 +26,8 @@ export function SessionsPage() {
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   const [filter, setFilter] = useState<SessionFilter>('all');
   const [status, setStatus] = useState('');
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PracticeSession | null>(null);
 
   useEffect(() => {
     const guestSessions = listGuestSessions();
@@ -36,111 +40,169 @@ export function SessionsPage() {
       .catch(() => setSessions(guestSessions));
   }, [auth.isSignedIn]);
 
-  const deleteGuest = (session: PracticeSession) => {
-    if (!session.guest_session) return;
-    if (!window.confirm('Delete this guest session and its local audio from this device?')) return;
+  const confirmDelete = () => {
+    const session = pendingDelete;
+    if (!session || !session.guest_session) {
+      setPendingDelete(null);
+      return;
+    }
     deleteGuestSession(session.id);
     setSessions((current) => current.filter((item) => item.id !== session.id));
-    setStatus('Guest session deleted from this device.');
+    setStatus('Recording deleted.');
+    setPendingDelete(null);
   };
 
   const filtered = useMemo(() => {
-    if (filter === 'week') return sessions.filter((session) => isThisWeek(session.started_at));
     if (filter === 'audio') return sessions.filter((session) => session.audio_available);
-    if (filter === 'best') return sessions.filter((session) => session.in_tune_percentage >= 75);
-    if (filter === 'work') return sessions.filter((session) => session.average_abs_cents >= 12 || session.in_tune_percentage < 55);
     return sessions;
   }, [filter, sessions]);
 
+  const hasSessions = sessions.length > 0;
+
   return (
-    <ScreenContainer>
+    <ScreenContainer className="ps-screen">
       <PageHeader
         eyebrow="Sessions"
-        title="Practice timeline"
-        description="Review saved takes as evidence cards. Guest sessions stay on this device; sign in to sync sessions across devices and ensembles."
+        title="Your recordings"
+        description="Every practice recording you make shows up here so you can listen back and see how in-tune you were."
         action={
-          <Link to="/practice" className="primary-button">
-            <Plus size={18} />
-            New session
-          </Link>
+          hasSessions ? (
+            <Link to="/practice" className="primary-button">
+              <Mic size={18} />
+              New recording
+            </Link>
+          ) : undefined
         }
       />
-      <SectionCard title="Saved takes" eyebrow={`${filtered.length} visible`}>
-        {status && <p className="settings-status" aria-live="polite">{status}</p>}
-        <div className="chip-row">
-          <SelectionChip active={filter === 'all'} onClick={() => setFilter('all')}>All</SelectionChip>
-          <SelectionChip active={filter === 'week'} onClick={() => setFilter('week')}>This week</SelectionChip>
-          <SelectionChip active={filter === 'audio'} onClick={() => setFilter('audio')} tone="green">With audio</SelectionChip>
-          <SelectionChip active={filter === 'best'} onClick={() => setFilter('best')} tone="green">Best</SelectionChip>
-          <SelectionChip active={filter === 'work'} onClick={() => setFilter('work')} tone="red">Needs work</SelectionChip>
+
+      {!hasSessions ? (
+        <EmptyActionState
+          icon={Music2}
+          title="No recordings yet"
+          body="Record your first practice session and it will appear here."
+          action={
+            <Link to="/practice" className="primary-button">
+              <Mic size={18} />
+              Start practicing
+            </Link>
+          }
+        />
+      ) : (
+        <SectionCard title="Your recordings" eyebrow={`${sessions.length} ${sessions.length === 1 ? 'recording' : 'recordings'}`}>
+          {status && <p className="settings-status" aria-live="polite">{status}</p>}
+          <div className="ps-filter-row">
+            <SelectionChip active={filter === 'all'} onClick={() => setFilter('all')}>All</SelectionChip>
+            <SelectionChip active={filter === 'audio'} onClick={() => setFilter('audio')} tone="green">With audio</SelectionChip>
+          </div>
+
+          {filtered.length === 0 ? (
+            <EmptyActionState
+              icon={Play}
+              title="No recordings with audio yet"
+              body="Recordings you save with sound will show up here."
+              action={
+                <button className="ghost-button" type="button" onClick={() => setFilter('all')}>
+                  Show all recordings
+                </button>
+              }
+            />
+          ) : (
+            <ul className="ps-list">
+              {filtered.map((session) => {
+                const verdict = describeInTunePercent(session.in_tune_percentage);
+                const isGuest = Boolean(session.guest_session);
+                const expanded = expandedId === session.id;
+                return (
+                  <li className="ps-item" key={session.id}>
+                    <div className="ps-item-row">
+                      <Link to={`/sessions/${session.id}`} className="ps-item-main">
+                        <span className="ps-item-icon">
+                          <Music2 size={18} />
+                        </span>
+                        <span className="ps-item-text">
+                          <span className="ps-instrument">{instrumentDisplayName(session.instrument_id)}</span>
+                          <span className="ps-date">
+                            {formatWhen(session.started_at)}
+                            {isGuest ? ' · Saved on this device' : ''}
+                          </span>
+                        </span>
+                        <span className="ps-badge-slot">
+                          <StatusBadge tone={verdict.tone}>{verdict.label}</StatusBadge>
+                        </span>
+                      </Link>
+
+                      <div className="ps-item-actions">
+                        {session.audio_available && (
+                          <button
+                            type="button"
+                            className="ps-icon-btn"
+                            aria-pressed={expanded}
+                            aria-label={expanded ? 'Hide playback' : 'Listen back'}
+                            onClick={() => setExpandedId(expanded ? null : session.id)}
+                          >
+                            <Play size={17} />
+                          </button>
+                        )}
+                        <details className="ps-overflow">
+                          <summary aria-label="More options">
+                            <MoreHorizontal size={18} />
+                          </summary>
+                          <div className="ps-overflow-menu">
+                            <p className="ps-overflow-label">Download · for teachers</p>
+                            <ExportButtons sessionId={session.id} guestSession={isGuest ? (session as GuestSessionDetail) : null} />
+                            {isGuest && (
+                              <button
+                                type="button"
+                                className="ps-overflow-delete"
+                                onClick={(event) => {
+                                  event.currentTarget.closest('details')?.removeAttribute('open');
+                                  setPendingDelete(session);
+                                }}
+                              >
+                                <Trash2 size={16} />
+                                Delete recording
+                              </button>
+                            )}
+                          </div>
+                        </details>
+                      </div>
+                    </div>
+
+                    {expanded && session.audio_available && (
+                      <div className="ps-item-audio">
+                        <SessionAudioPlayer session={session} compact />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </SectionCard>
+      )}
+
+      {pendingDelete && (
+        <div className="ps-dialog-backdrop" role="presentation" onClick={() => setPendingDelete(null)}>
+          <div
+            className="ps-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ps-delete-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="ps-delete-title">Delete this recording?</h2>
+            <p>This can&apos;t be undone.</p>
+            <div className="ps-dialog-actions">
+              <button className="ghost-button" type="button" onClick={() => setPendingDelete(null)}>
+                Keep it
+              </button>
+              <button className="ps-dialog-delete" type="button" onClick={confirmDelete}>
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
-        {filtered.length === 0 && (
-          <EmptyActionState title="No matching sessions" body="Try another filter or record a short practice take." icon={Music2} />
-        )}
-        <div className="session-card-grid">
-          {filtered.map((session) => (
-            <article className="session-timeline-card" key={session.id}>
-              <div className="timeline-heading">
-                <span className="insight-icon">
-                  <Music2 size={18} />
-                </span>
-                <div>
-                  <strong>{session.name}</strong>
-                  <span>{new Date(session.started_at).toLocaleString()}</span>
-                </div>
-              </div>
-              <div className="mini-stat-list">
-                <div className="mini-stat-row">
-                  <span>Instrument</span>
-                  <strong>{session.guest_session ? `${session.instrument_id} · guest` : session.instrument_id}</strong>
-                </div>
-                <div className="mini-stat-row">
-                  <span>Notes</span>
-                  <strong>{session.notes_count}</strong>
-                </div>
-                <div className="mini-stat-row">
-                  <span>Avg abs</span>
-                  <strong>{session.average_abs_cents.toFixed(1)}c</strong>
-                </div>
-              </div>
-              <div className="timeline-row">
-                <span>
-                  <Gauge size={16} /> {Math.round(session.in_tune_percentage)}% in tune
-                </span>
-                <em>
-                  <CalendarDays size={15} /> {Math.round(session.duration_seconds)}s
-                </em>
-              </div>
-              <div className="timeline-row">
-                <span>
-                  <Sparkles size={16} /> Review analytics
-                </span>
-                <Link to={`/sessions/${session.id}`}>Open</Link>
-              </div>
-              <SessionAudioPlayer session={session} compact />
-              <div className="session-card-actions">
-                <Link to={`/sessions/${session.id}`} className="ghost-button">
-                  <Sparkles size={16} />
-                  Review
-                </Link>
-                <details className="export-menu">
-                  <summary>
-                    <Download size={16} />
-                    Export
-                  </summary>
-                  <ExportButtons sessionId={session.id} guestSession={session.guest_session ? session as GuestSessionDetail : null} />
-                </details>
-                {session.guest_session && (
-                  <button className="ghost-button danger-action" type="button" onClick={() => deleteGuest(session)}>
-                    <Trash2 size={16} />
-                    Delete
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      </SectionCard>
+      )}
     </ScreenContainer>
   );
 }

@@ -40,8 +40,8 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
           <Volume2 size={17} />
         </span>
         <div>
-          <strong>No audio saved</strong>
-          <em>Future recordings can include playback.</em>
+          <strong>No audio</strong>
+          <em>This session was saved without audio.</em>
         </div>
       </div>
     );
@@ -53,7 +53,7 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
           <Play size={17} />
         </span>
         <div>
-          <strong>Relisten</strong>
+          <strong>Listen back</strong>
           <em>
             {Math.round(session.audio_duration_seconds ?? session.duration_seconds)}s · {formatBytes(session.audio_size_bytes)}
           </em>

@@ -1,0 +1,581 @@
+/* Class (Ensemble) page — co-located styles. All classes are prefixed `.ec-`
+   to avoid collisions with shared component styles. */
+
+/* ---- shared field primitives ------------------------------------------- */
+.ec-input,
+.ec-select select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  transition: border-color 150ms ease;
+}
+.ec-input:focus,
+.ec-select select:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.ec-select,
+.ec-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.ec-select > span,
+.ec-field > span {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+/* ---- signed-out sign-in + preview -------------------------------------- */
+.ec-signin-btn {
+  display: inline-flex;
+  margin-top: 14px;
+  text-decoration: none;
+}
+.ec-preview {
+  margin-top: 22px;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+  opacity: 0.92;
+}
+.ec-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.ec-preview-tag {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.ec-preview-title {
+  font-weight: 800;
+  color: var(--text);
+}
+
+/* ---- roster cards ------------------------------------------------------ */
+.ec-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ec-student-card {
+  padding: 14px 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+}
+.ec-student-card.ec-invited {
+  opacity: 0.85;
+  border-style: dashed;
+}
+.ec-student-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ec-student-name {
+  font-weight: 800;
+  font-size: 1.02rem;
+  color: var(--text);
+}
+.ec-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.ec-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.ec-remove:hover {
+  color: var(--red);
+  border-color: var(--red);
+}
+.ec-invited-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.ec-student-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 10px;
+}
+.ec-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-weight: 700;
+  color: var(--text);
+  font-size: 0.94rem;
+}
+.ec-meta em {
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.ec-advanced {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ec-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ec-stat em {
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.ec-stat strong {
+  font-size: 0.98rem;
+}
+.ec-stat small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* tone colours (green = in tune, amber = a little off, red = off) */
+.ec-tone-green { color: var(--green); }
+.ec-tone-amber { color: var(--amber); }
+.ec-tone-red { color: var(--red); }
+.ec-tone-muted { color: var(--muted); }
+
+/* ---- invitations ------------------------------------------------------- */
+.ec-invite-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ec-invite-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.ec-invite-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  color: var(--gold-soft);
+  background: rgba(216, 165, 63, 0.14);
+  border: 1px solid var(--line);
+}
+.ec-invite-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+}
+.ec-invite-copy strong {
+  font-size: 1rem;
+  color: var(--text);
+}
+.ec-invite-copy em {
+  font-style: normal;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.ec-accept-select {
+  margin-left: auto;
+  min-width: 190px;
+}
+.ec-invite-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---- empty / onboarding ------------------------------------------------ */
+.ec-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 14px 4px 4px;
+}
+.ec-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 4px;
+  border-radius: 18px;
+  color: var(--gold-soft);
+  background: rgba(216, 165, 63, 0.12);
+  border: 1px solid var(--line);
+}
+.ec-empty h3 {
+  margin: 0;
+  font-size: 1.18rem;
+}
+.ec-create-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+  max-width: 460px;
+  margin-top: 12px;
+}
+.ec-create-row .ec-input {
+  flex: 1 1 200px;
+}
+.ec-username-hint {
+  margin-top: 14px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.ec-username-hint strong {
+  color: var(--text);
+}
+
+/* ---- class switcher bar ------------------------------------------------ */
+.ec-classbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ec-class-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+}
+.ec-newclass-btn {
+  margin-left: auto;
+}
+
+/* ---- join code panel --------------------------------------------------- */
+.ec-join {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius);
+}
+.ec-join-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+}
+.ec-join-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ec-join-code {
+  font-size: 1.9rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  line-height: 1.1;
+}
+.ec-join-help {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.ec-join-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- invite row -------------------------------------------------------- */
+.ec-invite-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.ec-invite-row .ec-select {
+  flex: 0 0 auto;
+  min-width: 160px;
+}
+.ec-invite-row .ec-field {
+  flex: 1 1 180px;
+}
+.ec-send-invite {
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+
+/* ---- roster head + advanced toggle ------------------------------------- */
+.ec-roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.ec-roster-count {
+  font-weight: 800;
+  color: var(--text);
+}
+.ec-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.ec-advanced-toggle:hover {
+  color: var(--text);
+}
+.ec-advanced-toggle.open {
+  color: var(--text);
+  border-color: var(--gold);
+}
+.ec-advanced-toggle .ec-caret {
+  transition: transform 180ms ease;
+}
+.ec-advanced-toggle.open .ec-caret {
+  transform: rotate(180deg);
+}
+.ec-cents-note {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* ---- section trends + focus ------------------------------------------- */
+.ec-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+.ec-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.ec-section-name {
+  font-weight: 800;
+  color: var(--text);
+}
+.ec-section strong {
+  font-size: 1.05rem;
+}
+.ec-section p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.ec-focus-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ec-focus-steps article {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.ec-focus-steps article span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  font-weight: 800;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.ec-focus-steps article p {
+  margin: 0;
+  color: var(--text);
+}
+
+/* ---- remove-confirm modal ---------------------------------------------- */
+.ec-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(4, 8, 12, 0.55);
+  backdrop-filter: blur(2px);
+}
+.ec-modal {
+  width: 100%;
+  max-width: 380px;
+  padding: 22px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.ec-modal h3 {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+}
+.ec-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+.ec-danger-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap, 44px);
+  padding: 0 16px;
+  font-weight: 800;
+  color: #fff;
+  background: var(--red);
+  border: 1px solid var(--red);
+  border-radius: 16px;
+  cursor: pointer;
+}
+.ec-danger-btn:hover {
+  filter: brightness(1.05);
+}
+
+/* ---- print-only report head (hidden on screen) ------------------------- */
+.ec-print-only {
+  display: none;
+}
+.ec-print-head h2 {
+  margin: 0;
+}
+.ec-print-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+/* ---- narrow screens ---------------------------------------------------- */
+@media (max-width: 560px) {
+  .ec-accept-select {
+    margin-left: 0;
+    width: 100%;
+  }
+  .ec-invite-actions {
+    width: 100%;
+  }
+  .ec-invite-actions .primary-button,
+  .ec-invite-actions .ghost-button {
+    flex: 1 1 0;
+  }
+  .ec-invite-row .ec-select,
+  .ec-invite-row .ec-field {
+    flex: 1 1 100%;
+  }
+  .ec-send-invite {
+    width: 100%;
+  }
+  .ec-join-code {
+    font-size: 1.6rem;
+  }
+}
+
+/* ---- print: isolate the class report, drop app chrome ------------------ */
+@media print {
+  body.ec-printing * {
+    visibility: hidden !important;
+  }
+  body.ec-printing .ec-print-area,
+  body.ec-printing .ec-print-area * {
+    visibility: visible !important;
+  }
+  body.ec-printing .ec-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  body.ec-printing .ec-no-print {
+    display: none !important;
+  }
+  body.ec-printing .ec-print-only {
+    display: block;
+  }
+  body.ec-printing .ec-student-card,
+  body.ec-printing .ec-section,
+  body.ec-printing .ec-focus-steps article {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+}

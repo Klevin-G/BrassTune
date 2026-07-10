@@ -1,0 +1,73 @@
+/* Support / Privacy / Terms — help + legal pages */
+
+.lg-faq-list {
+  display: grid;
+  gap: 12px;
+}
+
+.lg-faq {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.lg-faq-icon {
+  grid-row: 1 / span 3;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--gold-soft);
+  border: 1px solid var(--line);
+}
+
+.lg-faq h3 {
+  margin: 2px 0 0;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.lg-faq p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.lg-faq-link {
+  justify-self: start;
+  margin-top: 8px;
+  color: var(--gold-soft);
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lg-faq-link:hover {
+  text-decoration: underline;
+}
+
+.lg-contact {
+  display: grid;
+  gap: 10px;
+}
+
+.lg-address {
+  margin: 0;
+  font-size: 0.9rem;
+  letter-spacing: 0.01em;
+}
+
+.lg-lead {
+  margin: 0 0 4px;
+}

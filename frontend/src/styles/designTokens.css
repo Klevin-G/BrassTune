@@ -37,6 +37,7 @@
   --radius: 18px;
   --radius-lg: 24px;
   --radius-xl: 28px;
+  --radius-pill: 999px;
   --tap: 44px;
   --content-max: 1480px;
   /* Theme-driven surfaces so light themes render light cards (see brass-day/brass-white). */

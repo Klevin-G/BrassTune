@@ -1,0 +1,314 @@
+/* Onboarding orientation tour — 3 fun steps. All classes are ob- prefixed to
+   avoid collisions with the shared components.css. */
+
+.ob-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(3, 6, 10, 0.76);
+  backdrop-filter: blur(18px);
+}
+
+.ob-panel {
+  position: relative;
+  display: grid;
+  width: min(560px, 100%);
+  max-height: min(94vh, 760px);
+  overflow-y: auto;
+  gap: 18px;
+  padding: 26px 24px 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(120% 90% at 15% -10%, rgba(216, 165, 63, 0.22), transparent 60%),
+    radial-gradient(120% 90% at 100% 0%, rgba(117, 183, 255, 0.1), transparent 55%),
+    var(--surface-menu);
+  box-shadow: var(--shadow);
+}
+
+.ob-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+}
+
+.ob-progress {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 8px;
+  padding-right: 48px;
+}
+
+.ob-progress span {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.25s ease;
+}
+
+.ob-progress span.active {
+  background: linear-gradient(90deg, var(--gold), var(--gold-soft));
+}
+
+.ob-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ob-heading-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 12px;
+  color: var(--gold-soft);
+  background: rgba(216, 165, 63, 0.14);
+  border: 1px solid var(--line-strong);
+}
+
+.ob-eyebrow {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ob-heading h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  line-height: 1.15;
+}
+
+.ob-step {
+  display: grid;
+  gap: 16px;
+}
+
+.ob-lead {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+
+/* Animated tuner hero */
+.ob-hero {
+  --hero-accent: var(--green);
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 18px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 50% 130%, rgba(216, 165, 63, 0.2), transparent 62%),
+    var(--surface-sunken);
+  overflow: hidden;
+}
+
+.ob-hero--in-tune { --hero-accent: var(--green); }
+.ob-hero--close { --hero-accent: var(--amber); }
+.ob-hero--off { --hero-accent: var(--orange); }
+
+.ob-gauge {
+  width: min(260px, 82%);
+  height: auto;
+}
+
+.ob-needle {
+  color: var(--hero-accent);
+  transition: transform 0.55s cubic-bezier(0.34, 1.4, 0.5, 1), color 0.35s ease;
+}
+
+.ob-reward {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ob-reward-pulse 1.1s ease-out infinite;
+}
+
+@keyframes ob-reward-pulse {
+  0% { transform: scale(0.7); opacity: 0.75; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+
+.ob-hero-readout {
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  text-align: center;
+}
+
+.ob-hero-note {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text);
+}
+
+.ob-hero-words {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--hero-accent);
+}
+
+.ob-hero-cents {
+  font-size: 0.74rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+/* Welcome fact chips */
+.ob-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ob-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ob-facts span svg {
+  color: var(--gold-soft);
+  flex: none;
+}
+
+/* Step 3 — where things live */
+.ob-nav-guide {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ob-nav-guide li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.ob-nav-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  color: var(--gold-soft);
+  background: rgba(216, 165, 63, 0.12);
+}
+
+.ob-nav-guide li > div {
+  display: grid;
+  gap: 1px;
+}
+
+.ob-nav-guide strong {
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.ob-nav-guide li span:last-child {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ob-first-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(216, 165, 63, 0.1);
+}
+
+.ob-first-action p {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.ob-rec-dot {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--red);
+  box-shadow: 0 0 0 4px rgba(226, 93, 93, 0.25);
+  animation: ob-rec-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ob-rec-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(226, 93, 93, 0.25); }
+  50% { box-shadow: 0 0 0 8px rgba(226, 93, 93, 0.08); }
+}
+
+.ob-setup-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.ob-setup-note strong {
+  color: var(--text);
+}
+
+/* Actions */
+.ob-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.ob-actions > div {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-needle,
+  .ob-reward,
+  .ob-rec-dot {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .ob-panel {
+    padding: 22px 16px 18px;
+  }
+  .ob-heading h2 {
+    font-size: 1.24rem;
+  }
+}

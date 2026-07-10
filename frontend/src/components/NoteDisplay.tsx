@@ -1,23 +1,27 @@
 import type { PitchFrame } from '../domain/types';
+import { describeCents } from '../domain/tuningLanguage';
 
-function signedCents(value: number | null | undefined) {
-  if (value === null || value === undefined) return '--';
-  return `${value > 0 ? '+' : ''}${Math.round(value)} cents`;
-}
-
+/**
+ * The single, unmissable tuner readout: one big note name, a plain-language
+ * verdict ("In tune" / "A little sharp"), and the cents number as a quiet
+ * secondary detail. Concert pitch is available but de-emphasized.
+ */
 export function NoteDisplay({ frame }: { frame: PitchFrame | null }) {
-  const note = frame?.written_note_name ? `${frame.written_note_name}${frame.written_octave}` : '--';
-  const concert = frame?.concert_note_name ? `${frame.concert_note_name}${frame.concert_octave}` : '--';
-  const cents = signedCents(frame?.cents_deviation);
+  const hasPitch = Boolean(frame?.written_note_name) && frame?.tuning_status !== 'silence';
+  const note = hasPitch ? `${frame!.written_note_name}${frame!.written_octave}` : '—';
+  const concert = frame?.concert_note_name ? `${frame.concert_note_name}${frame.concert_octave}` : null;
+  const verdict = describeCents(hasPitch ? frame?.cents_deviation : null);
+
   return (
-    <section className={`note-display ${frame?.tuning_status ?? 'silence'}`} aria-live="polite" aria-label={`Written note ${note}, ${cents}, status ${frame?.tuning_status ?? 'no lock'}`}>
-      <p>Written note</p>
-      <strong>{note}</strong>
-      <span>{cents}</span>
-      <div className="note-meta">
-        <span>Concert {concert}</span>
-        <span>{frame?.frequency_hz ? `${frame.frequency_hz.toFixed(1)} Hz` : 'No clear pitch'}</span>
-      </div>
+    <section
+      className={`note-display tone-${verdict.tone}`}
+      aria-live="polite"
+      aria-label={hasPitch ? `${note}, ${verdict.label}` : 'Play a note'}
+    >
+      <strong className="note-display-note">{note}</strong>
+      <span className={`note-display-verdict tone-${verdict.tone}`}>{hasPitch ? verdict.label : 'Play a note'}</span>
+      {hasPitch && verdict.detail && <span className="note-display-detail">{verdict.detail}</span>}
+      {hasPitch && concert && <span className="note-display-concert">Concert {concert}</span>}
     </section>
   );
 }

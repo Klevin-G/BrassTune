@@ -1,0 +1,377 @@
+/* Sheet Music viewer — page-scoped styles (prefix: sm-) */
+
+.sm-viewer-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.sm-viewer {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+/* Slim, labeled toolbar */
+.sm-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sm-toolbar .icon-button.labeled {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.sm-toolbar .icon-button.labeled[aria-pressed='true'] {
+  color: #111820;
+  border-color: rgba(240, 201, 112, 0.6);
+  background: var(--gold-soft);
+}
+
+.sm-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.sm-pager-label {
+  min-width: 96px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.sm-menu-wrap {
+  position: relative;
+  margin-left: 4px;
+}
+
+.sm-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+.sm-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 21;
+  display: grid;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-raised, var(--surface));
+  box-shadow: var(--shadow);
+}
+
+.sm-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 11px;
+  color: var(--text);
+  font-weight: 700;
+  text-align: left;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sm-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sm-menu-danger {
+  color: var(--red);
+}
+
+.sm-menu-danger:hover {
+  background: rgba(226, 93, 93, 0.1);
+}
+
+/* Body: filmstrip + big page */
+.sm-viewer-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.sm-viewer-body.has-strip {
+  grid-template-columns: 128px minmax(0, 1fr);
+}
+
+.sm-filmstrip {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  max-height: min(72vh, 760px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.sm-thumb {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  color: var(--text);
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.sm-thumb.is-active {
+  border-color: rgba(240, 201, 112, 0.5);
+  background: rgba(216, 165, 63, 0.12);
+}
+
+.sm-thumb-img {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  color: var(--muted);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+}
+
+.sm-thumb-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sm-thumb-meta {
+  display: grid;
+  gap: 3px;
+}
+
+.sm-thumb-meta strong {
+  font-size: 0.86rem;
+}
+
+.sm-thumb-name {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Reading surface */
+.sm-stage {
+  min-width: 0;
+}
+
+.sm-frame {
+  display: grid;
+  place-items: center;
+  min-height: 440px;
+  max-height: min(78vh, 820px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+
+.sm-frame .sm-page {
+  display: block;
+  max-width: 96%;
+  max-height: 760px;
+  object-fit: contain;
+  transition: transform 160ms ease;
+}
+
+.sm-frame.is-fit .sm-page.sm-page-fit {
+  width: 100%;
+  max-width: 100%;
+  max-height: none;
+  height: auto;
+}
+
+.sm-frame canvas {
+  display: block;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.sm-frame.is-fit canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+.sm-render-status {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin: 0 0 10px 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* Real fullscreen + fallback focus mode */
+.sm-viewer.is-focus,
+.sm-viewer:fullscreen {
+  padding: 16px;
+  background: var(--surface);
+}
+
+.sm-viewer.is-focus .sm-filmstrip,
+.sm-viewer:fullscreen .sm-filmstrip {
+  display: none;
+}
+
+.sm-viewer.is-focus .sm-viewer-body.has-strip,
+.sm-viewer:fullscreen .sm-viewer-body.has-strip {
+  grid-template-columns: 1fr;
+}
+
+.sm-viewer.is-focus .sm-frame,
+.sm-viewer:fullscreen .sm-frame {
+  min-height: 78vh;
+  max-height: none;
+}
+
+.sm-viewer:fullscreen {
+  overflow: auto;
+}
+
+/* Import panel */
+.sm-import {
+  display: grid;
+  gap: 12px;
+}
+
+.sm-import-lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.sm-import-lead svg {
+  flex: none;
+  color: var(--gold);
+}
+
+.sm-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sm-import-dropzone {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px dashed rgba(240, 201, 112, 0.34);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.sm-import-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sm-import-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.sm-status {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+/* Confirm-delete dialog */
+.sm-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(3, 6, 10, 0.72);
+}
+
+.sm-confirm {
+  display: grid;
+  gap: 10px;
+  width: min(380px, 100%);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised, var(--surface));
+  box-shadow: var(--shadow);
+}
+
+.sm-confirm h3 {
+  margin: 0;
+  font-size: 1.12rem;
+}
+
+.sm-confirm p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.sm-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.sm-danger-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 0 15px;
+  color: #fff;
+  font-weight: 800;
+  border: 1px solid rgba(226, 93, 93, 0.5);
+  border-radius: 16px;
+  background: var(--red);
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .sm-viewer-body.has-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .sm-filmstrip {
+    grid-auto-flow: column;
+    grid-auto-columns: 92px;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+  }
+
+  .sm-thumb {
+    min-width: 92px;
+  }
+
+  .sm-pager {
+    margin-left: 0;
+  }
+}

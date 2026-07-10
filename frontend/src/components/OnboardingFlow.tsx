@@ -1,79 +1,113 @@
-import { ArrowRight, CheckCircle2, Gauge, Mic, Music2, Palette, SlidersHorizontal, Sparkles, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, Gauge, Mic, Music2, Sparkles, TrendingUp, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { instrumentDisplayName } from '../domain/instrumentNames';
 import { InstrumentSelector } from './InstrumentSelector';
-import { ThemeSelector } from './ThemeSelector';
-import { SelectionChip } from './ui/AppPrimitives';
+import './OnboardingFlow.css';
 
-const steps = [
+const STEPS = [
   { title: 'Welcome to BrassTune', icon: Sparkles },
-  { title: 'Choose your brass voice', icon: Music2 },
-  { title: 'Set the reference pitch', icon: SlidersHorizontal },
-  { title: 'Pick the input mode', icon: Mic },
-  { title: 'Read the lock status', icon: Gauge },
-  { title: 'Make it yours', icon: Palette },
-  { title: 'Record the first take', icon: CheckCircle2 },
-];
+  { title: 'Pick your instrument', icon: Music2 },
+  { title: 'Record your first note', icon: Mic },
+] as const;
 
-/** A small animated tuner gauge shown on the welcome step. */
-function TunerPreview() {
+// A short, looping demo where a played note pushes the needle sharp/flat and
+// finally settles in tune — the core loop, shown not told.
+const HERO_FRAMES = [
+  { note: 'C', cents: 26 },
+  { note: 'C', cents: 9 },
+  { note: 'C', cents: 1 },
+  { note: 'G', cents: -24 },
+  { note: 'G', cents: -7 },
+  { note: 'G', cents: 0 },
+  { note: 'A', cents: 15 },
+  { note: 'A', cents: 3 },
+  { note: 'A', cents: 0 },
+] as const;
+
+function toneFor(cents: number): 'in-tune' | 'close' | 'off' {
+  const off = Math.abs(cents);
+  if (off <= 5) return 'in-tune';
+  if (off <= 15) return 'close';
+  return 'off';
+}
+
+function centsWords(cents: number): string {
+  if (Math.abs(cents) <= 5) return 'In tune';
+  return cents > 0 ? 'A little sharp' : 'A little flat';
+}
+
+/** Animated brass tuner hero for the welcome step. */
+function TunerHero() {
+  const [reduced] = useState(
+    () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+  );
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (reduced) return undefined;
+    const id = window.setInterval(() => setIndex((value) => (value + 1) % HERO_FRAMES.length), 950);
+    return () => window.clearInterval(id);
+  }, [reduced]);
+
+  const frame = reduced ? { note: 'A', cents: 0 } : HERO_FRAMES[index];
+  const clamped = Math.max(-50, Math.min(50, frame.cents));
+  const angle = (clamped / 50) * 48;
+  const tone = toneFor(frame.cents);
+
   return (
-    <div className="onboarding-hero" aria-hidden="true">
-      <svg viewBox="0 0 240 140" className="onboarding-gauge" role="presentation">
-        <defs>
-          <linearGradient id="ob-arc" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stopColor="var(--red)" />
-            <stop offset="0.5" stopColor="var(--green)" />
-            <stop offset="1" stopColor="var(--red)" />
-          </linearGradient>
-        </defs>
+    <div className={`ob-hero ob-hero--${tone}`}>
+      <svg viewBox="0 0 240 154" className="ob-gauge" role="img" aria-label="Live tuner showing a note in tune">
         <path d="M24 122 A96 96 0 0 1 216 122" fill="none" stroke="var(--line)" strokeWidth="14" strokeLinecap="round" />
-        <path d="M24 122 A96 96 0 0 1 216 122" fill="none" stroke="url(#ob-arc)" strokeWidth="4" strokeLinecap="round" opacity="0.85" />
-        {[-60, -40, -20, 0, 20, 40, 60].map((deg) => (
+        <path
+          d="M24 122 A96 96 0 0 1 216 122"
+          fill="none"
+          stroke="var(--green)"
+          strokeWidth="14"
+          strokeLinecap="round"
+          strokeDasharray="34 400"
+          strokeDashoffset="-137"
+          opacity="0.9"
+        />
+        {[-48, -32, -16, 0, 16, 32, 48].map((deg) => (
           <line
             key={deg}
             x1="120"
             y1="34"
             x2="120"
-            y2={deg === 0 ? '20' : '26'}
+            y2={deg === 0 ? '18' : '26'}
             stroke={deg === 0 ? 'var(--green)' : 'var(--muted-2)'}
             strokeWidth={deg === 0 ? 3 : 2}
             transform={`rotate(${deg} 120 122)`}
           />
         ))}
-        <g className="onboarding-needle">
-          <line x1="120" y1="122" x2="120" y2="40" stroke="var(--gold-soft)" strokeWidth="4" strokeLinecap="round" />
-          <circle cx="120" cy="122" r="8" fill="var(--gold)" />
+        {tone === 'in-tune' && <circle className="ob-reward" cx="120" cy="122" r="26" fill="none" stroke="var(--green)" strokeWidth="3" />}
+        <g className="ob-needle" transform={`rotate(${angle} 120 122)`}>
+          <line x1="120" y1="122" x2="120" y2="38" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+          <circle cx="120" cy="122" r="9" fill="currentColor" />
         </g>
       </svg>
-      <span className="onboarding-hero-note">A4 · 440 Hz</span>
+      <div className="ob-hero-readout">
+        <span className="ob-hero-note">{frame.note}</span>
+        <span className="ob-hero-words">{centsWords(frame.cents)}</span>
+        <span className="ob-hero-cents">{frame.cents > 0 ? `+${frame.cents}` : frame.cents} cents</span>
+      </div>
     </div>
   );
 }
 
 export function OnboardingFlow() {
-  const {
-    instrumentId,
-    setInstrumentId,
-    referencePitch,
-    setReferencePitch,
-    demoMode,
-    setDemoMode,
-    onboardingOpen,
-    completeOnboarding,
-    closeOnboarding,
-  } = useAppSettings();
+  const { instrumentId, setInstrumentId, onboardingOpen, completeOnboarding, closeOnboarding } = useAppSettings();
   const [step, setStep] = useState(0);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const navigate = useNavigate();
-  const CurrentIcon = steps[step].icon;
-  const progress = useMemo(() => `${step + 1} / ${steps.length}`, [step]);
+  const CurrentIcon = STEPS[step].icon;
+  const lastStep = STEPS.length - 1;
 
   useEffect(() => {
-    if (!onboardingOpen) return;
+    if (!onboardingOpen) return undefined;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButtonRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
@@ -83,7 +117,11 @@ export function OnboardingFlow() {
         return;
       }
       if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -109,112 +147,96 @@ export function OnboardingFlow() {
     navigate('/practice');
   };
 
-  const skip = () => {
-    completeOnboarding();
-  };
-
-  const lastStep = steps.length - 1;
+  const primaryLabel = step === 0 ? 'Take the tour' : step === lastStep ? 'Start playing' : 'Next';
 
   return (
-    <div className="onboarding-backdrop" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" ref={dialogRef}>
-      <section className="onboarding-panel">
-        <button className="icon-button onboarding-close" type="button" aria-label="Close onboarding" onClick={closeOnboarding} ref={closeButtonRef}>
+    <div className="ob-backdrop" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" ref={dialogRef}>
+      <section className="ob-panel">
+        <button
+          className="icon-button ob-close"
+          type="button"
+          aria-label="Close for now"
+          onClick={closeOnboarding}
+          ref={closeButtonRef}
+        >
           <X size={18} />
         </button>
-        <div className="onboarding-progress">
-          {steps.map((item, index) => (
+
+        <div className="ob-progress" aria-hidden="true">
+          {STEPS.map((item, index) => (
             <span className={index <= step ? 'active' : ''} key={item.title} />
           ))}
         </div>
-        <div className="onboarding-heading">
-          <span className="insight-icon">
+
+        <div className="ob-heading">
+          <span className="ob-heading-icon">
             <CurrentIcon size={20} />
           </span>
           <div>
-            <p className="eyebrow">{step === 0 ? 'Quick tour' : 'First-run setup'} {progress}</p>
-            <h2 id="onboarding-title">{steps[step].title}</h2>
+            <p className="ob-eyebrow">Getting started · Step {step + 1} of {STEPS.length}</p>
+            <h2 id="onboarding-title">{STEPS[step].title}</h2>
           </div>
         </div>
 
         {step === 0 && (
-          <div className="onboarding-step">
-            <div className="onboarding-brand">
-              <span className="brand-mark"><Music2 size={22} /></span>
-              <strong>BrassTune</strong>
-            </div>
-            <TunerPreview />
-            <p>BrassTune listens as you play, shows how sharp or flat each note is in real time, and remembers the notes you keep missing so your practice actually improves. This 60-second tour gets you set up.</p>
-            <div className="onboarding-facts">
-              <span><Music2 size={15} /> Live tuner</span>
-              <span><Gauge size={15} /> Note-by-note accuracy</span>
-              <span><Sparkles size={15} /> Progress that sticks</span>
+          <div className="ob-step">
+            <TunerHero />
+            <p className="ob-lead">
+              Play along with an exercise and BrassTune scores how in-tune and in-time you were, and shows exactly which
+              notes to fix. Let's get you playing in under a minute.
+            </p>
+            <div className="ob-facts">
+              <span><Sparkles size={15} /> AI Play-Along score</span>
+              <span><Gauge size={15} /> Live tuner</span>
+              <span><TrendingUp size={15} /> Tracks your progress</span>
             </div>
           </div>
         )}
 
         {step === 1 && (
-          <div className="onboarding-step">
-            <p>Pick your instrument so BrassTune transposes concert pitch into the notes you actually read, and ignores pitches outside its range.</p>
+          <div className="ob-step">
+            <p className="ob-lead">Pick your instrument so we show the note names you actually read.</p>
             <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
           </div>
         )}
 
-        {step === 2 && (
-          <div className="onboarding-step">
-            <p>A4 defaults to 440 Hz. Only change it if your ensemble or drone tunes to a different reference.</p>
-            <label className="field">
-              <span>A4 reference</span>
-              <input type="number" min={430} max={450} step={0.5} value={referencePitch} onChange={(event) => setReferencePitch(Number(event.target.value))} />
-            </label>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div className="onboarding-step">
-            <p>Guided audio plays repeatable practice tones. Microphone listens to you live as you play.</p>
-            <div className="chip-row">
-              <SelectionChip active={demoMode} onClick={() => setDemoMode(true)} tone="gold">Guided audio</SelectionChip>
-              <SelectionChip active={!demoMode} onClick={() => setDemoMode(false)} tone="green">Microphone</SelectionChip>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="onboarding-step">
-            <p>Two labels tell you what the tuner is doing so you can trust every reading:</p>
-            <div className="insight-grid">
-              <article className="insight-card tone-amber">
-                <h3>No lock</h3>
-                <p>Confidence is too low to trust the note, so that frame is left out of your analytics.</p>
-              </article>
-              <article className="insight-card tone-green">
-                <h3>Unstable pitch</h3>
-                <p>The note is locked in, but your cents wander enough to flag as stability work.</p>
-              </article>
-            </div>
-          </div>
-        )}
-
-        {step === 5 && (
-          <div className="onboarding-step">
-            <p>Choose a look that's easy on your eyes -- bright white, warm daylight, or a dark studio. You can change it anytime in Settings.</p>
-            <ThemeSelector />
-          </div>
-        )}
-
         {step === lastStep && (
-          <div className="onboarding-step">
-            <p>You're set. Start with a 30-second long tone -- the tuner helps right away, and the real payoff is seeing which notes you consistently miss.</p>
-            <div className="onboarding-callout">
-              <strong>{instrumentId}</strong>
-              <span>A4 {referencePitch} Hz · {demoMode ? 'Guided audio' : 'Microphone'}</span>
+          <div className="ob-step">
+            <p className="ob-lead">Here's where everything lives — you can reach these anytime from the menu.</p>
+            <ul className="ob-nav-guide">
+              <li>
+                <span className="ob-nav-icon"><Gauge size={17} /></span>
+                <div>
+                  <strong>Tuner</strong>
+                  <span>See instantly if you're sharp or flat.</span>
+                </div>
+              </li>
+              <li>
+                <span className="ob-nav-icon"><Sparkles size={17} /></span>
+                <div>
+                  <strong>Play-Along</strong>
+                  <span>Play an exercise and get a score.</span>
+                </div>
+              </li>
+              <li>
+                <span className="ob-nav-icon"><TrendingUp size={17} /></span>
+                <div>
+                  <strong>Progress</strong>
+                  <span>Watch your tuning improve over time.</span>
+                </div>
+              </li>
+            </ul>
+            <div className="ob-first-action">
+              <span className="ob-rec-dot" aria-hidden="true" />
+              <p>You're ready. Press Record and play any note — you'll see instantly if you're sharp or flat.</p>
             </div>
+            <p className="ob-setup-note">Your instrument: <strong>{instrumentDisplayName(instrumentId)}</strong></p>
           </div>
         )}
 
-        <div className="onboarding-actions">
-          <button className="ghost-button" type="button" onClick={skip}>
-            Skip tour
+        <div className="ob-actions">
+          <button className="ghost-button" type="button" onClick={completeOnboarding}>
+            Skip
           </button>
           <div>
             {step > 0 && (
@@ -224,12 +246,12 @@ export function OnboardingFlow() {
             )}
             {step < lastStep ? (
               <button className="primary-button" type="button" onClick={() => setStep((value) => value + 1)}>
-                {step === 0 ? 'Start tour' : 'Next'}
+                {primaryLabel}
                 <ArrowRight size={18} />
               </button>
             ) : (
               <button className="primary-button" type="button" onClick={finish}>
-                Start practice take
+                {primaryLabel}
                 <ArrowRight size={18} />
               </button>
             )}

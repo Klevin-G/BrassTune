@@ -1,0 +1,124 @@
+/* Auth gateway (landing) — page-scoped styles. Prefix: .ag- */
+
+.auth-layout.gateway-layout {
+  min-height: calc(100vh - 120px);
+  align-items: center;
+}
+
+/* Hero panel: calmer, value-first. */
+.gateway-panel {
+  min-height: auto;
+  gap: 0;
+}
+
+.gateway-panel h1 {
+  max-width: 15ch;
+  margin-top: 22px;
+  margin-bottom: 14px;
+  font-size: clamp(2rem, 4.6vw, 3.3rem);
+  line-height: 1.03;
+  letter-spacing: -0.01em;
+}
+
+.ag-lead {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.55;
+}
+
+.ag-noaccount {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  margin-top: 20px;
+  padding: 7px 14px;
+  border: 1px solid rgba(240, 201, 112, 0.32);
+  border-radius: var(--radius-pill, 999px);
+  background: rgba(240, 201, 112, 0.12);
+  color: var(--gold-soft);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+/* Auth card */
+.ag-block {
+  width: 100%;
+}
+
+.ag-providers {
+  display: grid;
+  gap: 10px;
+}
+
+.ag-guest {
+  min-height: calc(var(--tap) + 4px);
+  font-size: 1rem;
+}
+
+.ag-nudge {
+  margin: 10px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.ag-email-toggle {
+  justify-content: space-between;
+  margin-top: 14px;
+  font-weight: 800;
+}
+
+.ag-email-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ag-chevron {
+  transition: transform 160ms ease;
+  opacity: 0.7;
+}
+
+.ag-email-toggle[aria-expanded='true'] .ag-chevron {
+  transform: rotate(180deg);
+}
+
+.ag-email-region {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* Quiet footer for legal + support. */
+.ag-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 4px 16px;
+  margin: 24px auto 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.ag-footer a {
+  color: var(--muted);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ag-footer a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ag-chevron {
+    transition: none;
+  }
+}

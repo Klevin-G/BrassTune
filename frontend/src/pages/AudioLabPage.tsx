@@ -1,5 +1,6 @@
 import { Activity, Bug, Clipboard, Gauge, Mic, Radio, Save, Settings2, Waves } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { friendlyUserFacingError, getInstruments, pitchWebSocketUrl } from '../api/client';
 import { apiBase as runtimeApiBase, UNRESOLVED_BASE } from '../api/runtimeConfig';
 import { SessionControls } from '../components/SessionControls';
@@ -23,6 +24,10 @@ function centsLabel(value?: number | null) {
 }
 
 export function AudioLabPage() {
+  // Audio Lab is an internal diagnostics tool. It is gated behind the same
+  // VITE_ENABLE_INTERNAL_TOOLS flag as the other maintenance controls so normal
+  // users never land on the engineer-facing readouts.
+  const internalToolsEnabled = import.meta.env.VITE_ENABLE_INTERNAL_TOOLS === 'true';
   const { instrumentId, referencePitch, demoMode } = useAppSettings();
   const auth = useAuth();
   const [profiles, setProfiles] = useState<InstrumentProfile[]>([]);
@@ -36,7 +41,7 @@ export function AudioLabPage() {
   const apiBase = apiConfigured ? rawApiBase : rawApiBase === UNRESOLVED_BASE ? 'unavailable' : 'Not configured';
   const recorder = useSessionRecorder(instrumentId, referencePitch, { cloudEnabled: auth.isSignedIn });
   const stream = usePitchStream({
-    enabled: true,
+    enabled: internalToolsEnabled,
     demoMode,
     instrumentId,
     referencePitch,
@@ -102,6 +107,10 @@ export function AudioLabPage() {
       .then(() => setCopyStatus('Diagnostics copied.'))
       .catch(() => setCopyStatus('Clipboard permission blocked the diagnostics copy.'));
   };
+
+  if (!internalToolsEnabled) {
+    return <Navigate to="/settings" replace />;
+  }
 
   return (
     <ScreenContainer>

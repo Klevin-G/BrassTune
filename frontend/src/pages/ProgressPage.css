@@ -1,0 +1,229 @@
+/* Progress page (merged Analytics + Progress + Coach). All classes are prefixed
+   with .pg- to avoid collisions with shared component styles. */
+
+.pg-note {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.pg-cents-hint {
+  margin: 4px 2px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.pg-tabpanel {
+  display: grid;
+  gap: 20px;
+}
+
+.pg-empty-line {
+  margin: 0;
+  padding: 22px 18px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+/* Chart caption + line legend */
+.pg-chart-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.pg-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 4px;
+  border-radius: 999px;
+  margin-left: 6px;
+}
+.pg-chart-caption .pg-swatch:first-child {
+  margin-left: 0;
+}
+
+/* Heat-map legend */
+.pg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.pg-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pg-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: none;
+  background: var(--muted-2);
+}
+.pg-dot.tone-green {
+  background: var(--green);
+}
+.pg-dot.tone-amber {
+  background: var(--amber);
+}
+.pg-dot.tone-red {
+  background: var(--red);
+}
+.pg-dot.tone-muted {
+  background: var(--muted-2);
+}
+
+/* Selected note detail */
+.pg-selected {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted-2);
+  background: var(--surface-sunken);
+}
+.pg-selected.tone-green {
+  border-left-color: var(--green);
+}
+.pg-selected.tone-amber {
+  border-left-color: var(--amber);
+}
+.pg-selected.tone-red {
+  border-left-color: var(--red);
+}
+
+.pg-selected-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pg-selected-head strong {
+  font-size: 1.15rem;
+  color: var(--text);
+}
+.pg-selected p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+/* Plain "All notes" list */
+.pg-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.pg-note-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.pg-note-row:last-child {
+  border-bottom: none;
+}
+
+.pg-note-name {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.pg-note-verdict {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.pg-note-pct {
+  grid-column: 3;
+  justify-self: end;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+/* Advanced disclosure */
+.pg-advanced {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  padding: 0 18px;
+}
+
+.pg-advanced > summary {
+  cursor: pointer;
+  padding: 16px 0;
+  font-weight: 600;
+  color: var(--muted);
+  list-style: none;
+}
+.pg-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.pg-advanced > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 10px;
+  color: var(--muted-2);
+  transition: transform 0.15s ease;
+}
+.pg-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.pg-advanced-body {
+  display: grid;
+  gap: 24px;
+  padding: 4px 0 22px;
+}
+
+.pg-advanced-block {
+  display: grid;
+  gap: 12px;
+}
+.pg-advanced-block h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+@media (max-width: 640px) {
+  .pg-note-row {
+    grid-template-columns: auto 1fr;
+    row-gap: 2px;
+  }
+  .pg-note-pct {
+    grid-column: 2;
+    justify-self: end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pg-advanced > summary::before {
+    transition: none;
+  }
+}

@@ -1,0 +1,298 @@
+/* Play-Along page — co-located styles. All classes are prefixed .pa- to avoid
+   collisions with the shared .playalong-* rules in components.css, which this
+   page still reuses for the live view, ring, sequence and result rows. */
+
+/* --- Exercise chips ------------------------------------------------------- */
+.pa-chips {
+  margin-bottom: 16px;
+}
+
+.pa-chip-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.pa-chip-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--muted);
+  border: 1px solid transparent;
+}
+
+.pa-chip-tag.pa-tag-start {
+  background: rgba(107, 210, 135, 0.18);
+  color: var(--green);
+}
+
+.pa-chip-tag.pa-tag-hard {
+  background: rgba(229, 139, 67, 0.18);
+  color: var(--orange);
+}
+
+/* Keep the difficulty tag readable when the chip itself is gold/active. */
+.selection-chip.active .pa-chip-tag {
+  background: rgba(17, 24, 32, 0.16);
+  color: #111820;
+}
+
+/* --- Selected exercise summary + Hear it ---------------------------------- */
+.pa-selected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.pa-selected-info {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pa-selected-detail {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.pa-selected-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.pa-hear {
+  flex: 0 0 auto;
+}
+
+/* --- Start button + mic heads-up ------------------------------------------ */
+.pa-start {
+  width: 100%;
+  min-height: 54px;
+  font-size: 1.05rem;
+}
+
+.pa-mic-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 2px 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.pa-mic-note svg {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+}
+
+.pa-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(226, 93, 93, 0.4);
+  border-radius: var(--radius-sm);
+  background: rgba(226, 93, 93, 0.1);
+  color: var(--red);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pa-error svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+/* --- Running phase: plain-language live feedback -------------------------- */
+.pa-target-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.pa-live-verdict {
+  font-weight: 800;
+  font-size: 1.02rem;
+  color: var(--muted);
+}
+
+.pa-live-verdict.tone-green {
+  color: var(--green);
+}
+
+.pa-live-verdict.tone-amber {
+  color: var(--amber);
+}
+
+.pa-live-verdict.tone-red {
+  color: var(--red);
+}
+
+.pa-live-cents {
+  color: var(--muted-2);
+  font-size: 0.78rem;
+  font-style: normal;
+}
+
+.pa-hold-caption {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0 16px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.pa-hold-caption svg {
+  flex: 0 0 auto;
+  color: var(--gold-soft);
+}
+
+/* --- Results: verdict + stars + personal best ----------------------------- */
+.pa-verdict {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 6px 0 18px;
+}
+
+.pa-stars {
+  display: inline-flex;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.pa-star {
+  color: var(--line-strong);
+}
+
+.pa-star.on {
+  color: var(--gold-soft);
+}
+
+.pa-verdict-title {
+  font-size: 1.55rem;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.pa-verdict-title.tone-green {
+  color: var(--green);
+}
+
+.pa-verdict-title.tone-amber {
+  color: var(--amber);
+}
+
+.pa-verdict-title.tone-red {
+  color: var(--text);
+}
+
+.pa-verdict-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.pa-best {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 0 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.pa-best svg {
+  color: var(--muted-2);
+}
+
+.pa-best.pa-best-new {
+  border-color: rgba(240, 201, 112, 0.5);
+  background: rgba(240, 201, 112, 0.14);
+  color: var(--gold-soft);
+}
+
+.pa-best.pa-best-new svg {
+  color: var(--gold-soft);
+}
+
+/* --- Note-by-note disclosure --------------------------------------------- */
+.pa-details {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.pa-details > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 4px 0;
+}
+
+.pa-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pa-details > summary::after {
+  content: 'Show';
+  float: right;
+  color: var(--muted-2);
+  font-weight: 600;
+}
+
+.pa-details[open] > summary::after {
+  content: 'Hide';
+}
+
+.pa-details .playalong-results {
+  margin-top: 12px;
+}
+
+.pa-grade-word {
+  font-weight: 800;
+}
+
+.pa-grade-cents {
+  color: var(--muted-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .pa-selected {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pa-hear {
+    width: 100%;
+  }
+}

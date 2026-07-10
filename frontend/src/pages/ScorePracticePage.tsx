@@ -1,10 +1,10 @@
-import { Camera, CheckCircle2, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Maximize2, Music2, RotateCw, Target, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react';
+import { Camera, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Maximize2, Minimize2, MoreVertical, MoveHorizontal, Music2, Plus, RotateCw, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
-import { InsightCard, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import { PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
+import './ScorePracticePage.css';
 import { SCORE_DOCUMENTS_DB_NAME, SCORE_DOCUMENTS_STORE_NAME } from '../domain/scoreDocuments';
-import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, sheetMusicNameHint, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
+import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
 
 interface ImportedScorePage {
   id: string;
@@ -15,7 +15,6 @@ interface ImportedScorePage {
   file: File;
   dimensions?: { width: number; height: number };
   summary: ScoreImportSummary;
-  confirmed: boolean;
   persisted: boolean;
 }
 
@@ -87,10 +86,9 @@ async function loadScoreDocuments(): Promise<ImportedScorePage[]> {
         summary: {
           kind: row.kind,
           supported: true,
-          label: 'Saved locally',
+          label: 'Saved',
           quality: row.quality,
         },
-        confirmed: true,
         persisted: true,
       };
     });
@@ -129,11 +127,6 @@ async function sanitizeImageFile(file: File) {
   }
 }
 
-function formatSize(size: number) {
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
 function PdfCanvasPreview({
   file,
   name,
@@ -150,14 +143,14 @@ function PdfCanvasPreview({
   onPageCount: (count: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [renderStatus, setRenderStatus] = useState('Loading PDF page.');
+  const [renderStatus, setRenderStatus] = useState('Opening PDF…');
 
   useEffect(() => {
     let cancelled = false;
     let cleanup: (() => void) | undefined;
 
     async function renderPdfPage() {
-      setRenderStatus('Loading PDF page.');
+      setRenderStatus('Opening PDF…');
       const pdfjs = await import('pdfjs-dist');
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
       const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
@@ -185,9 +178,9 @@ function PdfCanvasPreview({
           void loadingTask.destroy();
         };
         await renderTask.promise;
-        if (!cancelled) setRenderStatus(`PDF page ${safePageNumber} of ${pdf.numPages} rendered locally.`);
+        if (!cancelled) setRenderStatus('');
       } catch (error) {
-        if (!cancelled) setRenderStatus(error instanceof Error && error.message !== 'Rendering cancelled, page 0' ? 'PDF page could not render in this browser.' : 'PDF rendering cancelled.');
+        if (!cancelled) setRenderStatus(error instanceof Error && error.message !== 'Rendering cancelled, page 0' ? 'This PDF page could not open in this browser.' : '');
       }
     }
 
@@ -200,8 +193,8 @@ function PdfCanvasPreview({
 
   return (
     <>
-      <canvas ref={canvasRef} aria-label={`PDF preview for ${name}`} />
-      <span className="score-render-status" role="status">{renderStatus}</span>
+      <canvas ref={canvasRef} aria-label={`Sheet music page for ${name}`} />
+      {renderStatus && <span className="sm-render-status" role="status">{renderStatus}</span>}
     </>
   );
 }
@@ -210,23 +203,35 @@ export function ScorePracticePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const photosInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const pagesRef = useRef<ImportedScorePage[]>([]);
   const [pages, setPages] = useState<ImportedScorePage[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [status, setStatus] = useState('Choose a PDF, image, or camera scan. Source pages stay on this device unless you export them.');
+  const [status, setStatus] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [fitWidth, setFitWidth] = useState(true);
   const [rotation, setRotation] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(false);
   const [pdfPageNumber, setPdfPageNumber] = useState(1);
   const [pdfPageCount, setPdfPageCount] = useState(1);
   const canUseCamera = typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
   const selected = pages.find((page) => page.id === selectedId) ?? pages[0];
+  const hasPages = pages.length > 0;
+  const showImport = !hasPages || importOpen;
+  const showFilmstrip = pages.length > 1 && !focusMode;
 
   useEffect(() => {
     setPdfPageNumber(1);
     setPdfPageCount(1);
+    setZoom(1);
+    setFitWidth(true);
+    setRotation(0);
+    setMenuOpen(false);
   }, [selected?.id]);
 
   const updatePdfPageCount = useCallback((count: number) => {
@@ -236,7 +241,6 @@ export function ScorePracticePage() {
         page.id === selectedId
           ? {
             ...page,
-            confirmed: false,
             persisted: false,
             summary: {
               ...page.summary,
@@ -274,6 +278,12 @@ export function ScorePracticePage() {
   }, [cameraActive]);
 
   useEffect(() => {
+    const onFullscreenChange = () => setFocusMode(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const files = Array.from(event.clipboardData?.files ?? []);
       if (files.length) void importFiles(files, 'clipboard');
@@ -293,10 +303,10 @@ export function ScorePracticePage() {
         if (cancelled || stored.length === 0) return;
         setPages(stored);
         setSelectedId(stored[0].id);
-        setStatus(`${stored.length} saved score page${stored.length === 1 ? '' : 's'} restored from this browser.`);
+        setStatus('Your music is here.');
       })
       .catch(() => {
-        if (!cancelled) setStatus('Saved score pages could not be loaded in this browser.');
+        if (!cancelled) setStatus('Saved music could not be opened in this browser.');
       });
     return () => {
       cancelled = true;
@@ -307,12 +317,12 @@ export function ScorePracticePage() {
     const imported: ImportedScorePage[] = [];
     for (const file of files) {
       if (file.size > MAX_SCORE_FILE_BYTES) {
-        setStatus(`${file.name} is too large for local score practice.`);
+        setStatus(`${file.name} is too large to add.`);
         continue;
       }
       const kind = await verifiedScoreSourceKind(file);
       if (kind === 'unsupported') {
-        setStatus(`${file.name} is not supported or its file contents do not match a safe PDF/image format.`);
+        setStatus(`${file.name} isn't a photo or PDF we can open.`);
         continue;
       }
       const prepared = kind === 'image' ? await sanitizeImageFile(file) : { dimensions: undefined, file };
@@ -330,20 +340,27 @@ export function ScorePracticePage() {
         file: prepared.file,
         dimensions: prepared.dimensions,
         summary,
-        confirmed: false,
         persisted: false,
       });
     }
-    if (imported.length) {
-      setPages((current) => [...current, ...imported]);
-      setSelectedId(imported[0].id);
-      setStatus(`${imported.length} page${imported.length === 1 ? '' : 's'} ready for review.`);
+    if (!imported.length) return;
+    setPages((current) => [...current, ...imported]);
+    setSelectedId(imported[0].id);
+    setImportOpen(false);
+    setStatus(imported.length === 1 ? 'Added your page.' : `Added ${imported.length} pages.`);
+    for (const page of imported) {
+      try {
+        await saveScoreDocument(page);
+        setPages((current) => current.map((entry) => (entry.id === page.id ? { ...entry, persisted: true } : entry)));
+      } catch {
+        setStatus('Added — but this browser may not keep it after you close the tab.');
+      }
     }
   };
 
   const startCamera = async () => {
     if (!canUseCamera) {
-      setStatus('Camera scanning is unavailable in this browser. Choose Photos or Files instead.');
+      setStatus('This browser can’t use the camera. Choose Photos or Files instead.');
       return;
     }
     try {
@@ -351,16 +368,16 @@ export function ScorePracticePage() {
       cameraStreamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       setCameraActive(true);
-      setStatus('Camera preview is active. Capture a page, then review it before practice.');
+      setStatus('Point at your music, then Capture page.');
     } catch {
-      setStatus('Camera permission was denied or no camera was available. Choose Photos or Files instead.');
+      setStatus('Camera permission was blocked. Choose Photos or Files instead.');
     }
   };
 
   const captureCameraPage = async () => {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
-      setStatus('Camera preview is not ready yet.');
+      setStatus('Camera isn’t ready yet.');
       return;
     }
     const canvas = document.createElement('canvas');
@@ -371,24 +388,15 @@ export function ScorePracticePage() {
     context.drawImage(video, 0, 0);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
     if (!blob) {
-      setStatus('Camera capture failed. Try again.');
+      setStatus('Capture failed. Try again.');
       return;
     }
+    stopCamera();
     await importFiles([new File([blob], `camera-score-${new Date().toISOString().slice(0, 19)}.jpg`, { type: 'image/jpeg' })], 'camera');
   };
 
-  const confirmSelected = async () => {
-    if (!selected) return;
-    try {
-      await saveScoreDocument(selected);
-      setPages((current) => current.map((page) => (page.id === selected.id ? { ...page, confirmed: true, persisted: true } : page)));
-      setStatus(`${selected.name} saved locally for score practice.`);
-    } catch {
-      setStatus('This browser could not save the score locally. Keep the page open or export it before closing.');
-    }
-  };
-
-  const removeSelected = async () => {
+  const performDelete = async () => {
+    setPendingDelete(false);
     if (!selected) return;
     URL.revokeObjectURL(selected.url);
     if (selected.persisted) {
@@ -396,157 +404,225 @@ export function ScorePracticePage() {
     }
     setPages((current) => current.filter((page) => page.id !== selected.id));
     setSelectedId(null);
-    setStatus(selected.persisted ? 'Page removed from this practice set and local storage.' : 'Page removed from this practice set.');
+    setStatus('Page removed.');
   };
 
-  return (
-    <ScreenContainer className="score-practice-screen">
-      <PageHeader
-        eyebrow="Practice with score"
-        title="Score practice"
-        description="Import a PDF, image, or camera capture, review the page, and keep it on this device. Pages are read locally, with no note recognition or automatic score following."
-        meta={<StatusBadge tone="gold">Local by default</StatusBadge>}
-      />
-      <SectionCard title="Import score" eyebrow="Three actions">
-        <div
-          className="score-drop-zone"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            void importFiles(Array.from(event.dataTransfer.files), 'drop');
-          }}
-        >
-          <div className="settings-actions">
-            {canUseCamera && (
-              <button className="primary-button" type="button" onClick={cameraActive ? captureCameraPage : startCamera}>
-                <Camera size={18} />
-                {cameraActive ? 'Capture page' : 'Scan with Camera'}
-              </button>
-            )}
-            <button className="ghost-button" type="button" onClick={() => photosInputRef.current?.click()}>
-              <ImageIcon size={18} />
-              Choose from Photos
-            </button>
-            <button className="ghost-button" type="button" onClick={() => fileInputRef.current?.click()}>
-              <Upload size={18} />
-              Choose Files
-            </button>
-          </div>
-          <input
-            ref={photosInputRef}
-            className="visually-hidden"
-            type="file"
-            accept={scoreAcceptAttribute()}
-            multiple
-            onChange={(event) => {
-              void importFiles(Array.from(event.target.files ?? []), 'photos').finally(() => {
-                event.currentTarget.value = '';
-              });
-            }}
-            aria-label="Choose score images from Photos"
-          />
-          <input
-            ref={fileInputRef}
-            className="visually-hidden"
-            type="file"
-            accept={scoreAcceptAttribute()}
-            multiple
-            onChange={(event) => {
-              void importFiles(Array.from(event.target.files ?? []), 'files').finally(() => {
-                event.currentTarget.value = '';
-              });
-            }}
-            aria-label="Choose score files"
-          />
-          <p>Drag and drop or paste images here. Raw SVG is rejected instead of rendered.</p>
-          {cameraActive && (
-            <div className="camera-preview">
-              <video ref={videoRef} autoPlay playsInline muted aria-label="Camera preview for score scanning" />
-              <button className="ghost-button" type="button" onClick={stopCamera}>Stop camera</button>
-            </div>
-          )}
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+    const el = viewerRef.current;
+    if (el?.requestFullscreen) {
+      el.requestFullscreen().catch(() => setFocusMode((value) => !value));
+    } else {
+      setFocusMode((value) => !value);
+    }
+  };
+
+  const zoomIn = () => {
+    setFitWidth(false);
+    setZoom((value) => Math.min(3, Number((value + 0.15).toFixed(2))));
+  };
+  const zoomOut = () => {
+    setFitWidth(false);
+    setZoom((value) => Math.max(0.4, Number((value - 0.15).toFixed(2))));
+  };
+  const pdfZoom = fitWidth ? 1 : zoom;
+
+  const acceptAttribute = scoreAcceptAttribute();
+
+  const importPanel = (
+    <div
+      className="sm-import-dropzone"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault();
+        void importFiles(Array.from(event.dataTransfer.files), 'drop');
+      }}
+    >
+      {!hasPages && (
+        <p className="sm-import-lead"><Music2 size={20} />Add your sheet music to read while you play.</p>
+      )}
+      <div className="sm-import-actions">
+        {canUseCamera && (
+          <button className="primary-button" type="button" onClick={cameraActive ? captureCameraPage : startCamera}>
+            <Camera size={18} />
+            {cameraActive ? 'Capture page' : 'Scan with camera'}
+          </button>
+        )}
+        <button className={canUseCamera ? 'ghost-button' : 'primary-button'} type="button" onClick={() => photosInputRef.current?.click()}>
+          <ImageIcon size={18} />
+          Choose from Photos
+        </button>
+        <button className="ghost-button" type="button" onClick={() => fileInputRef.current?.click()}>
+          <Upload size={18} />
+          Choose Files
+        </button>
+      </div>
+      <p className="sm-import-hint">Or drag and drop a file here.</p>
+      {cameraActive && (
+        <div className="camera-preview">
+          <video ref={videoRef} autoPlay playsInline muted aria-label="Camera preview" />
+          <button className="ghost-button" type="button" onClick={stopCamera}>Stop camera</button>
         </div>
-        <p className="settings-status" aria-live="polite">{status}</p>
-      </SectionCard>
-      <div className="score-reader-grid">
-        <SectionCard title="Pages" eyebrow={`${pages.length} imported`}>
-          {pages.length === 0 ? (
-            <InsightCard title="No score yet" body="Choose a file, photo, or camera capture to begin. Imported source pages are not uploaded." icon={Music2} tone="gold" />
-          ) : (
-            <div className="score-page-list">
-              {pages.map((page, index) => (
-                <button className={`score-page-row ${page.id === selected?.id ? 'active' : ''}`} key={page.id} type="button" onClick={() => setSelectedId(page.id)}>
-                  <span className="insight-icon">{page.kind === 'pdf' ? <FileText size={17} /> : <ImageIcon size={17} />}</span>
-                  <span>
-                    <strong>Page {index + 1}</strong>
-                    <em>{page.name}</em>
-                  </span>
-                  <StatusBadge tone={page.confirmed ? 'green' : page.summary.quality.status === 'good' ? 'gold' : 'amber'}>{page.confirmed ? 'Confirmed' : page.summary.label}</StatusBadge>
-                </button>
-              ))}
-            </div>
-          )}
-        </SectionCard>
-        <SectionCard title="Preview and confirm" eyebrow={selected?.source ?? 'Waiting'}>
-          {selected ? (
-            <div className={`score-preview-stack ${focusMode ? 'score-preview-stack-focused' : ''}`}>
-              <div className="score-toolbar">
-                <button className="icon-button" type="button" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} aria-label="Zoom in score preview" title="Zoom in"><ZoomIn size={18} /></button>
-                <button className="icon-button" type="button" onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))} aria-label="Zoom out score preview" title="Zoom out"><ZoomOut size={18} /></button>
-                <button className="icon-button" type="button" onClick={() => setRotation((value) => (value + 90) % 360)} aria-label="Rotate score preview" title="Rotate"><RotateCw size={18} /></button>
-                {selected.kind === 'pdf' && (
+      )}
+      <p className="sm-import-note">Your music stays on this device.</p>
+    </div>
+  );
+
+  return (
+    <ScreenContainer className="score-practice-screen sm-screen">
+      <PageHeader
+        title="Sheet Music"
+        description="Add a photo, PDF, or scan of your sheet music to read while you play."
+        action={hasPages ? (
+          <button className="ghost-button" type="button" onClick={() => setImportOpen((value) => !value)}>
+            <Plus size={18} />
+            Add music
+          </button>
+        ) : undefined}
+      />
+
+      {selected && (
+        <SectionCard className="sm-viewer-card">
+          <div className={`sm-viewer ${focusMode ? 'is-focus' : ''}`} ref={viewerRef}>
+            <div className="sm-toolbar">
+              <button className="icon-button labeled" type="button" onClick={() => { setFitWidth(true); setZoom(1); }} aria-pressed={fitWidth} title="Fit to width">
+                <MoveHorizontal size={17} />Fit width
+              </button>
+              <button className="icon-button labeled" type="button" onClick={zoomOut} title="Zoom out">
+                <ZoomOut size={17} />Zoom out
+              </button>
+              <button className="icon-button labeled" type="button" onClick={zoomIn} title="Zoom in">
+                <ZoomIn size={17} />Zoom in
+              </button>
+              <button className="icon-button labeled" type="button" onClick={() => setRotation((value) => (value + 90) % 360)} title="Rotate">
+                <RotateCw size={17} />Rotate
+              </button>
+              {selected.kind === 'pdf' && pdfPageCount > 1 && (
+                <div className="sm-pager">
+                  <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.max(1, value - 1))} disabled={pdfPageNumber <= 1} aria-label="Previous page"><ChevronLeft size={18} /></button>
+                  <span className="sm-pager-label">Page {pdfPageNumber} / {pdfPageCount}</span>
+                  <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.min(pdfPageCount, value + 1))} disabled={pdfPageNumber >= pdfPageCount} aria-label="Next page"><ChevronRight size={18} /></button>
+                </div>
+              )}
+              <button className="icon-button labeled" type="button" onClick={toggleFullscreen} aria-pressed={focusMode} title={focusMode ? 'Exit full screen' : 'Full screen'}>
+                {focusMode ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                {focusMode ? 'Exit full screen' : 'Full screen'}
+              </button>
+              <div className="sm-menu-wrap">
+                <button className="icon-button" type="button" onClick={() => setMenuOpen((value) => !value)} aria-label="More options" aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertical size={18} /></button>
+                {menuOpen && (
                   <>
-                    <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.max(1, value - 1))} disabled={pdfPageNumber <= 1} aria-label="Previous PDF page" title="Previous PDF page"><ChevronLeft size={18} /></button>
-                    <span className="score-page-counter">Page {pdfPageNumber} / {pdfPageCount}</span>
-                    <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.min(pdfPageCount, value + 1))} disabled={pdfPageNumber >= pdfPageCount} aria-label="Next PDF page" title="Next PDF page"><ChevronRight size={18} /></button>
+                    <button className="sm-menu-scrim" type="button" aria-label="Close menu" onClick={() => setMenuOpen(false)} />
+                    <div className="sm-menu" role="menu">
+                      <button className="sm-menu-item sm-menu-danger" type="button" role="menuitem" onClick={() => { setMenuOpen(false); setPendingDelete(true); }}>
+                        <Trash2 size={17} />Delete this page
+                      </button>
+                    </div>
                   </>
                 )}
-                <button className="icon-button" type="button" onClick={() => setFocusMode((value) => !value)} aria-label={focusMode ? 'Exit focused score preview' : 'Focus score preview'} aria-pressed={focusMode} title={focusMode ? 'Exit focus mode' : 'Focus mode'}><Maximize2 size={18} /></button>
-                <button className="icon-button danger-action" type="button" onClick={() => void removeSelected()} aria-label="Remove selected score page" title="Remove"><Trash2 size={18} /></button>
-              </div>
-              <div className="score-preview-frame">
-                {selected.kind === 'pdf' ? (
-                  <PdfCanvasPreview
-                    file={selected.file}
-                    name={selected.name}
-                    pageNumber={pdfPageNumber}
-                    zoom={zoom}
-                    rotation={rotation}
-                    onPageCount={updatePdfPageCount}
-                  />
-                ) : (
-                  <img alt={`Preview ${selected.name}`} src={selected.url} style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }} />
-                )}
-              </div>
-              <div className="insight-grid">
-                <InsightCard title={selected.summary.label} detail={sheetMusicNameHint(selected.summary.quality.likelySheetMusicScore)} body={selected.summary.quality.messages.join(' ')} icon={CheckCircle2} tone={selected.summary.quality.status === 'good' ? 'green' : 'amber'} />
-                <InsightCard title="Privacy" detail={`${formatSize(selected.file.size)} ${selected.file.type || selected.kind}`} body="The source page is stored locally after confirmation. Export reports should omit source pages unless you choose otherwise." icon={FileText} />
-              </div>
-              <div className="settings-actions">
-                <button className="primary-button" type="button" onClick={confirmSelected} disabled={!selected.summary.supported || selected.confirmed}>
-                  <CheckCircle2 size={18} />
-                  {selected.confirmed ? 'Confirmed' : 'Confirm for practice'}
-                </button>
               </div>
             </div>
-          ) : (
-            <InsightCard title="Preview required" body="Every imported page must be reviewed before practice. BrassTune does not silently discard images." icon={FileText} tone="gold" />
-          )}
+
+            <div className={`sm-viewer-body ${showFilmstrip ? 'has-strip' : ''}`}>
+              {showFilmstrip && (
+                <aside className="sm-filmstrip" aria-label="Pages">
+                  {pages.map((page, index) => (
+                    <button className={`sm-thumb ${page.id === selected.id ? 'is-active' : ''}`} key={page.id} type="button" onClick={() => setSelectedId(page.id)}>
+                      <span className="sm-thumb-img">
+                        {page.kind === 'image' ? <img src={page.url} alt="" /> : <FileText size={22} />}
+                      </span>
+                      <span className="sm-thumb-meta">
+                        <strong>Page {index + 1}</strong>
+                        {!page.summary.supported && <StatusBadge tone="amber">Can’t open</StatusBadge>}
+                        <em className="sm-thumb-name">{page.name}</em>
+                      </span>
+                    </button>
+                  ))}
+                </aside>
+              )}
+              <div className="sm-stage">
+                <div className={`sm-frame ${fitWidth ? 'is-fit' : ''}`}>
+                  {selected.kind === 'pdf' ? (
+                    <PdfCanvasPreview
+                      file={selected.file}
+                      name={selected.name}
+                      pageNumber={pdfPageNumber}
+                      zoom={pdfZoom}
+                      rotation={rotation}
+                      onPageCount={updatePdfPageCount}
+                    />
+                  ) : (
+                    <img
+                      className={`sm-page ${fitWidth ? 'sm-page-fit' : ''}`}
+                      alt={`Sheet music ${selected.name}`}
+                      src={selected.url}
+                      style={fitWidth ? { transform: rotation ? `rotate(${rotation}deg)` : undefined } : { transform: `scale(${zoom}) rotate(${rotation}deg)` }}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </SectionCard>
-      </div>
-      <SectionCard title="Want BrassTune to grade you?" eyebrow="Play-Along Trainer">
-        <p className="muted-copy">This page is for reading sheet music. To have BrassTune listen and score how accurately you play, use the Play-Along Trainer — pick an exercise and it grades each note in real time.</p>
-        <Link className="primary-button" to="/practice/play-along">
-          <Target size={18} />
-          Open Play-Along Trainer
-        </Link>
-      </SectionCard>
-      <SectionCard title="How reading works" eyebrow="Local preview">
-        <div className="insight-grid">
-          <InsightCard title="Manual review" detail="Zoom, rotate, pages" body="Use the zoom, rotate, and page controls above to read the imported score. Pages are read locally on your device." icon={Music2} tone="gold" />
-          <InsightCard title="Metronome" detail="Separate tool" body="Open the metronome from More for tempo and count-in while you read. It runs on its own and is not synced to the score." icon={CheckCircle2} />
+      )}
+
+      {showImport && (
+        <SectionCard
+          title={hasPages ? 'Add music' : undefined}
+          action={hasPages ? (
+            <button className="icon-button" type="button" onClick={() => setImportOpen(false)} aria-label="Close"><X size={18} /></button>
+          ) : undefined}
+        >
+          {importPanel}
+        </SectionCard>
+      )}
+
+      {status && <p className="sm-status" aria-live="polite">{status}</p>}
+
+      <input
+        ref={photosInputRef}
+        className="visually-hidden"
+        type="file"
+        accept={acceptAttribute}
+        multiple
+        onChange={(event) => {
+          void importFiles(Array.from(event.target.files ?? []), 'photos').finally(() => {
+            event.currentTarget.value = '';
+          });
+        }}
+        aria-label="Choose sheet music from Photos"
+      />
+      <input
+        ref={fileInputRef}
+        className="visually-hidden"
+        type="file"
+        accept={acceptAttribute}
+        multiple
+        onChange={(event) => {
+          void importFiles(Array.from(event.target.files ?? []), 'files').finally(() => {
+            event.currentTarget.value = '';
+          });
+        }}
+        aria-label="Choose sheet music files"
+      />
+
+      {pendingDelete && (
+        <div className="sm-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Remove page">
+          <div className="sm-confirm">
+            <h3>Remove this page?</h3>
+            <p>You can add it again anytime.</p>
+            <div className="sm-confirm-actions">
+              <button className="ghost-button" type="button" onClick={() => setPendingDelete(false)}>Cancel</button>
+              <button className="sm-danger-button" type="button" onClick={() => void performDelete()}>
+                <Trash2 size={17} />Remove
+              </button>
+            </div>
+          </div>
         </div>
-      </SectionCard>
+      )}
     </ScreenContainer>
   );
 }
