@@ -8,6 +8,10 @@ struct BrassTuneApp: App {
         WindowGroup {
             AppRootView()
                 .environmentObject(appModel)
+                // Inject the engine so views that show live pitch (the Tuner)
+                // observe it directly and re-render per frame, without churning
+                // the whole AppModel at frame rate.
+                .environmentObject(appModel.audioEngine)
         }
     }
 }

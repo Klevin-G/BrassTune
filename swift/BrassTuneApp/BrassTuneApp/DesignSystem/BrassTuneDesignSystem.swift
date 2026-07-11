@@ -65,7 +65,11 @@ struct BTScreen<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: BTSpacing.lg) {
+            // Regular VStack (not Lazy): these are short app screens, not long
+            // lists. LazyVStack left below-the-fold controls (e.g. the tuner's
+            // "Start listening" button) unrendered and unreachable to
+            // VoiceOver/UI tests until scrolled into view.
+            VStack(alignment: .leading, spacing: BTSpacing.lg) {
                 content
             }
             .padding(BTSpacing.lg)

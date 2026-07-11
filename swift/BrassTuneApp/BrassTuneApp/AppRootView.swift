@@ -155,7 +155,9 @@ struct OnboardingView: View {
             }
             .navigationTitle("Welcome")
         }
-        .presentationDetents([.medium, .large])
+        // Open at full height so the primary "Start" action is always visible
+        // (at .medium it fell below the fold on smaller devices).
+        .presentationDetents([.large])
     }
 }
 
@@ -458,11 +460,15 @@ private struct PlayAlongTransportBar: View {
 
 struct TunerView: View {
     @EnvironmentObject private var model: AppModel
+    // Observe the engine directly so the readout, record button, and floating
+    // transport re-render live as frames/recording change (SwiftUI does not
+    // subscribe to a nested ObservableObject reached through `model`).
+    @EnvironmentObject private var audioEngine: NativeAudioEngine
 
     private var activeFrame: PitchFrame? {
-        guard model.audioEngine.recording else { return nil }
-        guard model.audioEngine.activeSource == .live || model.testFixturesEnabled else { return nil }
-        return model.audioEngine.currentFrame
+        guard audioEngine.recording else { return nil }
+        guard audioEngine.activeSource == .live || model.testFixturesEnabled else { return nil }
+        return audioEngine.currentFrame
     }
 
     var body: some View {
@@ -475,7 +481,7 @@ struct TunerView: View {
 
             TunerReadout(frame: activeFrame)
 
-            if !model.audioEngine.recording {
+            if !audioEngine.recording {
                 Button {
                     Task {
                         await model.startRecording()
@@ -489,9 +495,9 @@ struct TunerView: View {
                 .accessibilityIdentifier("tuner.recordButton")
             }
 
-            if model.audioEngine.permissionDenied {
+            if audioEngine.permissionDenied {
                 MicrophoneRecoveryView()
-            } else if let notice = model.audioEngine.audioNotice {
+            } else if let notice = audioEngine.audioNotice {
                 Text(notice)
                     .font(.footnote)
                     .foregroundStyle(BTTheme.warning)
@@ -500,7 +506,7 @@ struct TunerView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if model.audioEngine.recording {
+            if audioEngine.recording {
                 FloatingPracticeControlBar()
                     .padding(.horizontal, BTSpacing.lg)
                     .padding(.bottom, BTSpacing.md)
@@ -557,7 +563,6 @@ private struct TunerReadout: View {
 
             TuningMeter(cents: frame?.centsDeviation)
         }
-        .accessibilityIdentifier("tuner.readout")
     }
 }
 

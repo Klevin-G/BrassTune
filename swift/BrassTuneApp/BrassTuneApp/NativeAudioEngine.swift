@@ -112,6 +112,20 @@ final class NativeAudioEngine: ObservableObject {
     }
 
     func startLiveRecording(instrumentId: String, referencePitchHz: Double) async throws -> Bool {
+        if Self.testFixturesEnabled {
+            // Simulate a live capture so the tuner's recording UI is drivable in
+            // UI tests without a physical microphone. activeSource stays .live so
+            // it behaves like a real live take (no sample-mode surface).
+            stopAndResetAudioEngine()
+            recording = true
+            permissionDenied = false
+            activeSource = .live
+            audioNotice = nil
+            routeChanged = false
+            frames = (0..<12).map { PitchFrame.fixture(index: $0, instrumentId: instrumentId, referencePitchHz: referencePitchHz) }
+            currentFrame = frames.last
+            return true
+        }
         let requestID = UUID()
         liveStartRequestID = requestID
         let permissionGranted = await requestMicrophonePermission()

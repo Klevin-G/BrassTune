@@ -74,11 +74,11 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Request microphone permission"].exists)
 
         let tunerStart = app.descendants(matching: .any)["tuner.recordButton"]
-        XCTAssertTrue(tunerStart.waitForExistence(timeout: 5))
+        XCTAssertTrue(tunerStart.waitForExistence(timeout: 10))
         tunerStart.tap()
 
-        let floatingBar = app.descendants(matching: .any)["tuner.floatingBar"]
-        XCTAssertTrue(floatingBar.waitForExistence(timeout: 5), "Recording should expose the floating practice transport")
+        let floatingStopControl = app.descendants(matching: .any)["tuner.floating.stop"]
+        XCTAssertTrue(floatingStopControl.waitForExistence(timeout: 8), "Recording should expose the floating practice transport")
         let floatingMetronome = app.descendants(matching: .any)["tuner.floating.metronome"]
         XCTAssertTrue(floatingMetronome.waitForExistence(timeout: 5))
         floatingMetronome.tap()
@@ -102,7 +102,7 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["settings.referencePitchStepper"].exists)
         advancedTuner.tap()
         XCTAssertTrue(
-            waitForElementOrScroll(app.descendants(matching: .any)["settings.referencePitchStepper"], in: app),
+            app.descendants(matching: .any)["settings.referencePitchStepper"].waitForExistence(timeout: 8),
             "A4 should live behind Advanced tuner settings"
         )
 

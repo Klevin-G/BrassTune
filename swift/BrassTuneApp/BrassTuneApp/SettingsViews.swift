@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var password = ""
     @State private var rawAppleNonce = ""
     @State private var pendingDestructiveAction: DestructiveAction?
+    @State private var advancedTunerExpanded = false
 
     private var accountActionsEnabled: Bool {
         model.accountFeaturesEnabled
@@ -38,7 +39,22 @@ struct SettingsView: View {
                 }
                 .accessibilityIdentifier("settings.instrumentPicker")
 
-                DisclosureGroup {
+                Button {
+                    withAnimation { advancedTunerExpanded.toggle() }
+                } label: {
+                    HStack {
+                        Label("Advanced tuner settings", systemImage: "tuningfork")
+                            .font(.headline)
+                        Spacer()
+                        Image(systemName: advancedTunerExpanded ? "chevron.up" : "chevron.down")
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("settings.advancedTunerSettings")
+
+                if advancedTunerExpanded {
                     VStack(alignment: .leading, spacing: BTSpacing.sm) {
                         Text("Most bands use A4 = 440 Hz. Change this only if your director asks you to.")
                             .font(.footnote)
@@ -48,11 +64,7 @@ struct SettingsView: View {
                             .accessibilityIdentifier("settings.referencePitchStepper")
                     }
                     .padding(.top, BTSpacing.sm)
-                } label: {
-                    Label("Advanced tuner settings", systemImage: "tuningfork")
-                        .font(.headline)
                 }
-                .accessibilityIdentifier("settings.advancedTunerSettings")
 
                 Button {
                     onboardingPresented = true
