@@ -9,7 +9,7 @@ on:
       web_base_url:
         description: Web app base URL
         required: false
-        default: https://brass-tune.vercel.app
+        default: https://brasstune.vercel.app
         type: string
       api_base_url:
         description: Backend API base URL
@@ -36,15 +36,17 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     environment: production
     env:
-      BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brass-tune.vercel.app' }}
+      BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brasstune.vercel.app' }}
       BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
       BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
       BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.event.workflow_run.head_sha || vars.BRASSTUNE_EXPECTED_BACKEND_SHA || github.sha }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
       - name: Run hosted production smoke
@@ -60,14 +62,16 @@ jobs:
     env:
       CI: "true"
       PLAYWRIGHT_HTML_OPEN: never
-      BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brass-tune.vercel.app' }}
+      BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brasstune.vercel.app' }}
       BRASSTUNE_API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
       BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm

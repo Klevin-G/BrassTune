@@ -206,9 +206,13 @@ struct PlayAlongView: View {
         BTCard {
             BTSectionHeader(title: "Choose an exercise", subtitle: "C major is a friendly place to start.")
             Picker("Exercise", selection: $model.selectedPlayAlongExerciseID) {
-                ForEach(model.playAlongExercises) { exercise in
-                    Text("\(exercise.title) · \(exercise.difficulty)")
-                        .tag(exercise.id)
+                ForEach(PlayAlongExerciseCategory.allCases) { category in
+                    Section(category.title) {
+                        ForEach(model.playAlongExercises.filter { $0.category == category }) { exercise in
+                            Text(exercise.title)
+                                .tag(exercise.id)
+                        }
+                    }
                 }
             }
             .pickerStyle(.menu)

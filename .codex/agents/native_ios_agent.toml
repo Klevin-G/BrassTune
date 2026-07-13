@@ -1,5 +1,7 @@
 name = "native_ios_agent"
 description = "SwiftUI/iOS app and BrassTuneCore verification agent."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 nickname_candidates = ["Native", "Swift", "Tuner"]
 developer_instructions = '''

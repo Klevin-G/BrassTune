@@ -225,6 +225,10 @@
   font-size: 0.85rem;
   color: var(--muted);
 }
+.ec-invite-role {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
 .ec-accept-select {
   margin-left: auto;
   min-width: 190px;
@@ -270,6 +274,15 @@
 .ec-create-row .ec-input {
   flex: 1 1 200px;
 }
+.ec-join-card .ec-create-row {
+  max-width: none;
+  margin-top: 0;
+}
+.ec-join-card .ec-code-input {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+}
 .ec-username-hint {
   margin-top: 14px;
   font-size: 0.9rem;
@@ -294,6 +307,37 @@
 }
 .ec-newclass-btn {
   margin-left: auto;
+}
+
+.ec-membership-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ec-membership-actions p {
+  margin: 0;
+}
+.ec-leave-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.ec-leave-btn:hover {
+  color: var(--red);
+  border-color: var(--red);
 }
 
 /* ---- join code panel --------------------------------------------------- */
@@ -328,6 +372,11 @@
   letter-spacing: 0.14em;
   color: var(--text);
   line-height: 1.1;
+}
+.ec-join-code.unavailable {
+  font-size: 1.15rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
 }
 .ec-join-help {
   font-size: 0.85rem;

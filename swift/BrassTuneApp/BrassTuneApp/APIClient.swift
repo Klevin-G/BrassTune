@@ -2,6 +2,7 @@ import Foundation
 
 struct APIClient {
     var timeout: TimeInterval = 15
+    var session: URLSession = .shared
 
     func request<T: Decodable>(
         _ type: T.Type,
@@ -24,9 +25,28 @@ struct APIClient {
         if let bearerToken {
             request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            throw UserVisibleError.timeout
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
             throw UserVisibleError.networkUnavailable
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw UserVisibleError.malformedResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let detail = (try? JSONDecoder().decode(APIErrorResponse.self, from: data))?.userSafeDetail
+            throw UserVisibleError.apiRequestFailed(
+                statusCode: http.statusCode,
+                message: detail ?? Self.fallbackMessage(for: http.statusCode)
+            )
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -34,6 +54,57 @@ struct APIClient {
             return try decoder.decode(T.self, from: data)
         } catch {
             throw UserVisibleError.malformedResponse
+        }
+    }
+
+    private static func fallbackMessage(for statusCode: Int) -> String {
+        switch statusCode {
+        case 401: return "Your sign-in expired. Sign in again, then retry."
+        case 403: return "You don't have permission to do that."
+        case 404: return "That class could not be found."
+        case 409: return "That class action conflicts with your current membership."
+        default: return "The class service could not complete this request."
+        }
+    }
+}
+
+private struct APIErrorResponse: Decodable {
+    let detail: Detail?
+
+    var userSafeDetail: String? {
+        let raw: String?
+        switch detail {
+        case .message(let message): raw = message
+        case .validation(let issues): raw = issues.prefix(2).map(\.message).joined(separator: " ")
+        case nil: raw = nil
+        }
+        guard let raw else { return nil }
+        let normalized = raw
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return String(normalized.prefix(240))
+    }
+
+    enum Detail: Decodable {
+        case message(String)
+        case validation([ValidationIssue])
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let message = try? container.decode(String.self) {
+                self = .message(message)
+                return
+            }
+            self = .validation(try container.decode([ValidationIssue].self))
+        }
+    }
+
+    struct ValidationIssue: Decodable {
+        let message: String
+
+        enum CodingKeys: String, CodingKey {
+            case message = "msg"
         }
     }
 }

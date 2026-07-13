@@ -10,7 +10,9 @@ site_url = "https://brasstune.vercel.app"
 additional_redirect_urls = [
   "https://brasstune.vercel.app/auth/callback",
   "https://brasstune.vercel.app/auth/reset-password",
-  "https://*.vercel.app/auth/callback",
+  # Vercel previews are restricted to the owner account suffix. Never use a
+  # blanket *.vercel.app callback: other users can create matching hosts.
+  "https://*-kelvis-prject.vercel.app/auth/callback",
   "http://localhost:5173/auth/callback",
 ]
 jwt_expiry = 3600

@@ -10,6 +10,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
@@ -22,7 +23,7 @@ from app.db.readiness import public_readiness_report, readiness_report, version_
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes
+from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, enforce_audio_storage_quota, local_audio_path, read_audio_bytes
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 from app.services.usage import record_event
@@ -35,6 +36,9 @@ DEFAULT_EXPORT_MAX_TOTAL_ROWS = 250_000
 DEFAULT_EXPORT_MAX_AUDIO_BYTES = 200 * 1024 * 1024
 DEFAULT_EXPORT_MAX_ARCHIVE_BYTES = 250 * 1024 * 1024
 STALE_DELETION_JOB_SECONDS = 15 * 60
+DEFAULT_MAX_OWNED_CLASSES_PER_USER = 10
+DEFAULT_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER = 20
+DEFAULT_MAX_PENDING_CLASS_INVITATIONS_PER_USER = 20
 
 
 def _bad_instrument(instrument_id: str) -> HTTPException:
@@ -53,17 +57,37 @@ def _validate_optional_instrument(instrument_id: Optional[str]) -> None:
 
 # Unambiguous alphabet for class join codes (no 0/O/1/I/L confusion).
 _JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+_JOIN_CODE_LENGTH = 8
+
+
+def _positive_env_limit(name: str, default: int) -> int:
+    """Return a bounded positive quota without letting bad deployment config
+    disable a safety limit or make every request fail."""
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if 1 <= value <= 10_000 else default
+
+
+def _lock_class_quota_user(db: Session, user_id: int) -> None:
+    """Serialize class quota decisions for one user on PostgreSQL.
+
+    SQLite ignores FOR UPDATE, which is sufficient for local development; the
+    production database prevents concurrent joins/invites from both observing
+    the same pre-limit count.
+    """
+    db.query(User.id).filter(User.id == user_id).with_for_update().first()
 
 
 def _generate_join_code(db: Session) -> str:
     import secrets
 
     for _ in range(12):
-        code = "".join(secrets.choice(_JOIN_CODE_ALPHABET) for _ in range(6))
+        code = "".join(secrets.choice(_JOIN_CODE_ALPHABET) for _ in range(_JOIN_CODE_LENGTH))
         if db.query(Group.id).filter(Group.join_code == code).first() is None:
             return code
-    # Extremely unlikely; widen the space rather than fail a class creation.
-    return "".join(secrets.choice(_JOIN_CODE_ALPHABET) for _ in range(8))
+    raise HTTPException(status_code=503, detail="A class code could not be created. Try again.")
 
 
 def _parse_date_start(value: Optional[str], field_name: str) -> Optional[dt.datetime]:
@@ -208,9 +232,12 @@ def _schema_dict(model):
 
 def _positive_int_config(name: str, default: int) -> int:
     try:
-        return max(0, int(os.getenv(name, str(default))))
-    except ValueError:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
         return default
+    # Export caps are mandatory resource-safety boundaries. Unlike explicitly
+    # optional local/test quotas, zero must not disable them.
+    return value if value > 0 else default
 
 
 class ExportBudget:
@@ -458,6 +485,7 @@ async def upload_session_audio(
 ):
     session = _require_session_access(db, session_id, auth)
     data, mime_type = read_audio_bytes(await _read_limited_body(request), content_type or "")
+    enforce_audio_storage_quota(db, session, len(data))
     attach_audio_to_session(session, data, mime_type, x_audio_duration_seconds)
     db.add(session)
     db.commit()
@@ -957,6 +985,7 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
         "group_memberships": db.query(GroupMember).filter(GroupMember.user_id == user_id).count(),
         "invitations": db.query(Invitation).filter((Invitation.invited_user_id == user_id) | (Invitation.invited_by_user_id == user_id)).count(),
         "recommendations": db.query(Recommendation).filter(Recommendation.user_id == user_id).count(),
+        "usage_events": db.query(UsageEvent).filter(UsageEvent.user_id == user_id).count(),
     }
     if job is None:
         job = AccountDeletionJob(
@@ -990,6 +1019,9 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
     db.query(Invitation).filter((Invitation.invited_user_id == user_id) | (Invitation.invited_by_user_id == user_id)).delete(synchronize_session=False)
     db.query(GroupMember).filter(GroupMember.user_id == user_id).delete(synchronize_session=False)
     db.query(Recommendation).filter(Recommendation.user_id == user_id).delete(synchronize_session=False)
+    # Usage analytics are not retained under a deleted account identifier. This
+    # intentionally removes those events rather than preserving linkable history.
+    db.query(UsageEvent).filter(UsageEvent.user_id == user_id).delete(synchronize_session=False)
     db.delete(user)
     _mark_deletion_job(job, "local_cleanup_completed", "in_progress")
     db.add(job)
@@ -1051,21 +1083,71 @@ def _can_view_group(user: User, group: Group, db: Session) -> bool:
 
 
 def _visible_group_members(db: Session, group: Group, user: User):
-    if _can_view_full_roster(db, group, user):
+    if _can_manage_group(user, group):
         members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group.id).order_by(GroupMember.created_at.asc()).all()
-        return [group_member_to_dict(member) for member in members], True
+        return [group_member_to_dict(member) for member in members], "full"
+    membership = _viewer_membership(db, group.id, user.id)
+    if membership is not None and membership.role_in_group in {"assistant", "director"}:
+        members = (
+            db.query(GroupMember)
+            .options(joinedload(GroupMember.user))
+            .filter(GroupMember.group_id == group.id, GroupMember.status == "active")
+            .order_by(GroupMember.created_at.asc())
+            .all()
+        )
+        payloads = []
+        for member in members:
+            payload = group_member_to_dict(member)
+            payload.pop("user_id", None)
+            payload.pop("username", None)
+            if member.user_id == user.id:
+                payload["is_current_user"] = True
+            payloads.append(payload)
+        return payloads, "active_redacted"
     membership = (
         db.query(GroupMember)
         .options(joinedload(GroupMember.user))
         .filter(GroupMember.group_id == group.id, GroupMember.user_id == user.id, GroupMember.status == "active")
         .first()
     )
-    return ([group_member_to_dict(membership, include_identity=False)] if membership else []), False
+    return ([group_member_to_dict(membership, include_identity=False)] if membership else []), "self"
+
+
+def _group_viewer_capabilities(db: Session, group: Group, user: User) -> dict:
+    """Describe the viewer's effective class capabilities without relying on
+    management-only fields such as the join code."""
+    membership = _viewer_membership(db, group.id, user.id)
+    is_owner = group.director_user_id == user.id
+    if is_owner:
+        viewer_role = "owner"
+    elif membership is not None and membership.role_in_group in {"assistant", "director"}:
+        # Non-owner `director` memberships have the same effective read
+        # capability as assistants; ownership remains the management boundary.
+        viewer_role = "assistant"
+    elif membership is not None:
+        viewer_role = "student"
+    elif user.role == "admin":
+        viewer_role = "admin_observer"
+    else:
+        viewer_role = "student"
+    return {
+        "viewer_role": viewer_role,
+        "viewer_can_leave": bool(
+            membership is not None
+            and not is_owner
+        ),
+        "viewer_can_manage": _can_manage_group(user, group),
+    }
 
 
 @router.post("/ensemble/groups")
 def create_ensemble_group(payload: CreateGroupRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     # Self-serve: any signed-in user can start an ensemble and becomes its director.
+    _lock_class_quota_user(db, auth.user.id)
+    owned_count = db.query(Group.id).filter(Group.director_user_id == auth.user.id).count()
+    owned_limit = _positive_env_limit("BRASSTUNE_MAX_OWNED_CLASSES_PER_USER", DEFAULT_MAX_OWNED_CLASSES_PER_USER)
+    if owned_count >= owned_limit:
+        raise HTTPException(status_code=409, detail="You have reached the class ownership limit.")
     group = Group(name=payload.name.strip(), director_user_id=auth.user.id, join_code=_generate_join_code(db))
     db.add(group)
     if auth.user.role == "student":
@@ -1089,8 +1171,14 @@ def list_ensemble_groups(db: Session = Depends(get_db), auth: AuthContext = Depe
     else:
         group_ids = [row.group_id for row in db.query(GroupMember).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").all()]
         groups = db.query(Group).filter(Group.id.in_(group_ids)).order_by(Group.name.asc()).all() if group_ids else []
-    include_director_identity = auth.user.role in {"admin", "director"}
-    return [group_to_dict(group, include_director_identity=include_director_identity) for group in groups]
+    # The global "director" role only means the user owns at least one class. It
+    # must not reveal management details for unrelated classes they merely joined.
+    payloads = []
+    for group in groups:
+        payload = group_to_dict(group, include_director_identity=_can_manage_group(auth.user, group))
+        payload.update(_group_viewer_capabilities(db, group, auth.user))
+        payloads.append(payload)
+    return payloads
 
 
 @router.get("/ensemble/groups/{group_id}")
@@ -1098,9 +1186,12 @@ def get_ensemble_group(group_id: int, db: Session = Depends(get_db), auth: AuthC
     group = _group_or_404(db, group_id)
     if not _can_view_group(auth.user, group, db):
         raise HTTPException(status_code=403, detail="You do not have access to this ensemble.")
-    members, full_roster = _visible_group_members(db, group, auth.user)
-    payload = group_to_dict(group, members, include_director_identity=full_roster)
-    payload["roster_scope"] = "full" if full_roster else "self"
+    members, roster_scope = _visible_group_members(db, group, auth.user)
+    # Assistants can view the roster, but the join code remains a management
+    # credential and is only returned to the owner or an administrator.
+    payload = group_to_dict(group, members, include_director_identity=_can_manage_group(auth.user, group))
+    payload["roster_scope"] = roster_scope
+    payload.update(_group_viewer_capabilities(db, group, auth.user))
     return payload
 
 
@@ -1126,7 +1217,8 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     invite_instrument = payload.instrument_id or "unassigned"
     user = db.query(User).filter(User.username == payload.username).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="No user exists with that username.")
+        raise HTTPException(status_code=404, detail="That username could not be invited.")
+    _lock_class_quota_user(db, user.id)
     existing = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
     if existing:
         previous_status = existing.status
@@ -1134,6 +1226,13 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
             raise HTTPException(status_code=409, detail="This user is already an active ensemble member.")
         if previous_status == "invited":
             raise HTTPException(status_code=409, detail="This user already has a pending invitation.")
+        pending_count = db.query(GroupMember.id).filter(GroupMember.user_id == user.id, GroupMember.status == "invited").count()
+        pending_limit = _positive_env_limit(
+            "BRASSTUNE_MAX_PENDING_CLASS_INVITATIONS_PER_USER",
+            DEFAULT_MAX_PENDING_CLASS_INVITATIONS_PER_USER,
+        )
+        if pending_count >= pending_limit:
+            raise HTTPException(status_code=409, detail="That username could not be invited right now.")
         existing.instrument_id = invite_instrument
         existing.role_in_group = payload.role_in_group
         existing.status = "invited"
@@ -1141,6 +1240,13 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
         existing.removed_at = None
         member = existing
     else:
+        pending_count = db.query(GroupMember.id).filter(GroupMember.user_id == user.id, GroupMember.status == "invited").count()
+        pending_limit = _positive_env_limit(
+            "BRASSTUNE_MAX_PENDING_CLASS_INVITATIONS_PER_USER",
+            DEFAULT_MAX_PENDING_CLASS_INVITATIONS_PER_USER,
+        )
+        if pending_count >= pending_limit:
+            raise HTTPException(status_code=409, detail="That username could not be invited right now.")
         member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=invite_instrument, role_in_group=payload.role_in_group, status="invited", active_since=None)
         db.add(member)
     db.commit()
@@ -1188,6 +1294,14 @@ def list_my_invitations(db: Session = Depends(get_db), auth: AuthContext = Depen
 @router.post("/ensemble/invitations/{member_id}/accept")
 def accept_invitation(member_id: int, payload: Optional[AcceptInvitationRequest] = None, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     member = _my_invitation_or_404(db, member_id, auth)
+    _lock_class_quota_user(db, auth.user.id)
+    active_count = db.query(GroupMember.id).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").count()
+    active_limit = _positive_env_limit(
+        "BRASSTUNE_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER",
+        DEFAULT_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER,
+    )
+    if active_count >= active_limit:
+        raise HTTPException(status_code=409, detail="You have reached the active class limit.")
     # The invited student may set their own instrument when accepting, overriding
     # whatever placeholder the director used.
     chosen_instrument = payload.instrument_id if payload else None
@@ -1228,20 +1342,94 @@ def join_ensemble_by_code(payload: JoinByCodeRequest, db: Session = Depends(get_
     existing = db.query(GroupMember).filter(GroupMember.group_id == group.id, GroupMember.user_id == auth.user.id).first()
     if existing and existing.status == "active":
         raise HTTPException(status_code=409, detail="You're already in this class.")
+    _lock_class_quota_user(db, auth.user.id)
+    active_count = db.query(GroupMember.id).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").count()
+    active_limit = _positive_env_limit(
+        "BRASSTUNE_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER",
+        DEFAULT_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER,
+    )
+    if active_count >= active_limit:
+        raise HTTPException(status_code=409, detail="You have reached the active class limit.")
     now = dt.datetime.utcnow()
     if existing:
         existing.status = "active"
         existing.active_since = now
         existing.removed_at = None
-        if payload.instrument_id:
-            existing.instrument_id = instrument
+        # A join code always grants ordinary student access. Do not resurrect an
+        # elevated role from a removed or stale membership record.
+        existing.role_in_group = "student"
+        existing.instrument_id = instrument
         member = existing
     else:
         member = GroupMember(group_id=group.id, user_id=auth.user.id, instrument_id=instrument, role_in_group="student", status="active", active_since=now)
         db.add(member)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # With the (group_id, user_id) uniqueness constraint, another request
+        # may have won the join race after our initial lookup. Translate only
+        # that verified outcome; unrelated integrity failures still propagate.
+        concurrent_membership = (
+            db.query(GroupMember)
+            .filter(
+                GroupMember.group_id == group.id,
+                GroupMember.user_id == auth.user.id,
+                GroupMember.status == "active",
+            )
+            .first()
+        )
+        if concurrent_membership is not None:
+            raise HTTPException(status_code=409, detail="You're already in this class.")
+        raise
     record_event(db, "invitation_accepted", auth.user.id, {"group_id": group.id, "via": "join_code"})
     return {"joined": True, "group_id": group.id, "group_name": group.name}
+
+
+@router.delete("/ensemble/groups/{group_id}/membership")
+def leave_ensemble_group(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    """Leave one class without affecting the user's other memberships."""
+    group = _group_or_404(db, group_id)
+    if group.director_user_id == auth.user.id:
+        raise HTTPException(status_code=409, detail="The class owner cannot leave their own class.")
+    membership = (
+        db.query(GroupMember)
+        .filter(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == auth.user.id,
+            GroupMember.status == "active",
+        )
+        .first()
+    )
+    if membership is None:
+        raise HTTPException(status_code=404, detail="You are not an active member of this class.")
+    membership.status = "removed"
+    membership.removed_at = dt.datetime.utcnow()
+    db.add(membership)
+    db.commit()
+    record_event(db, "group_left", auth.user.id, {"group_id": group_id})
+    return {"left": True, "group_id": group_id}
+
+
+@router.post("/ensemble/groups/{group_id}/join-code/rotate")
+def rotate_ensemble_join_code(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    """Invalidate the previous class code and return a fresh management-only code."""
+    group = _require_group_manager(db, group_id, auth)
+    previous_code = group.join_code
+    for _ in range(4):
+        group.join_code = _generate_join_code(db)
+        if group.join_code == previous_code:
+            continue
+        db.add(group)
+        try:
+            db.commit()
+            db.refresh(group)
+            record_event(db, "group_join_code_rotated", auth.user.id, {"group_id": group.id})
+            return {"group_id": group.id, "join_code": group.join_code}
+        except IntegrityError:
+            db.rollback()
+            group = _require_group_manager(db, group_id, auth)
+    raise HTTPException(status_code=503, detail="A new class code could not be created. Try again.")
 
 
 @router.patch("/ensemble/groups/{group_id}/members/{member_id}")
@@ -1250,27 +1438,36 @@ def update_ensemble_member(group_id: int, member_id: int, payload: UpdateGroupMe
     member = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.id == member_id).first()
     if member is None:
         raise HTTPException(status_code=404, detail="Group member not found.")
+    if payload.status:
+        if payload.status not in {"active", "invited", "removed"}:
+            raise HTTPException(status_code=400, detail="Invalid member status.")
+        # Activation is always an act of member consent: invitation acceptance or
+        # entering a join code. Managers may edit an already-active member, but
+        # cannot reactivate invited or removed records.
+        if payload.status == "active" and member.status != "active":
+            raise HTTPException(status_code=409, detail="The member must activate their membership themselves.")
     if payload.instrument_id:
         _validate_instrument(payload.instrument_id)
         member.instrument_id = payload.instrument_id
     if payload.role_in_group:
         if payload.role_in_group not in {"student", "assistant", "director"}:
             raise HTTPException(status_code=400, detail="Invalid role_in_group.")
+        requested_status = payload.status or member.status
+        if (
+            member.status == "active"
+            and requested_status == "active"
+            and payload.role_in_group in {"assistant", "director"}
+            and payload.role_in_group != member.role_in_group
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Elevated class access requires a new invitation and member acceptance.",
+            )
         member.role_in_group = payload.role_in_group
     if payload.status:
-        if payload.status not in {"active", "invited", "removed"}:
-            raise HTTPException(status_code=400, detail="Invalid member status.")
         previous_status = member.status
-        # A manager must NOT be able to convert a pending invite into an active
-        # membership — only the invited user can accept (see accept_invitation).
-        # This preserves the consent gate and prevents non-consensual monitoring.
-        if payload.status == "active" and previous_status == "invited":
-            raise HTTPException(status_code=409, detail="The invited student must accept the invitation themselves.")
         member.status = payload.status
-        if payload.status == "active" and previous_status == "removed":
-            member.active_since = dt.datetime.utcnow()
-            member.removed_at = None
-        elif payload.status in {"invited", "removed"} and previous_status == "active":
+        if payload.status in {"invited", "removed"} and previous_status == "active":
             member.removed_at = dt.datetime.utcnow()
     db.add(member)
     db.commit()

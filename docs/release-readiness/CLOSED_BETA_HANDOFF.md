@@ -4,7 +4,7 @@ Status: web/backend closed-beta production path deployed and smoke-passed in gue
 
 ## Tester URLs
 
-- Production web URL: `https://brass-tune.vercel.app`
+- Production web URL: `https://brasstune.vercel.app`
 - Backend API: `https://brasstune-u8qj.onrender.com`
 - Backend health: `https://brasstune-u8qj.onrender.com/api/health`
 - WebSocket endpoint: `wss://brasstune-u8qj.onrender.com/ws/pitch`

@@ -1,6 +1,10 @@
 import json
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, deque
+import ipaddress
+import os
+import threading
+import time
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -21,11 +25,107 @@ MAX_UNAUTHENTICATED_ERRORS = 3
 UNAUTHENTICATED_TIMEOUT_SECONDS = 15
 IDLE_TIMEOUT_SECONDS = 120
 
+_WS_STATE_LOCK = threading.Lock()
+_WS_CONNECTIONS_BY_IP = defaultdict(int)
+_WS_CONNECTIONS_BY_ACCOUNT = defaultdict(int)
+_WS_ACTIVE_PITCH_COMPUTATIONS = 0
 
-async def _reject(websocket: WebSocket, message: str) -> None:
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+def _websocket_client_host(websocket: WebSocket) -> str:
+    if os.getenv("BRASSTUNE_TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"}:
+        forwarded = websocket.headers.get("x-forwarded-for", "")
+        if forwarded and len(forwarded) <= 1024:
+            # Match Render's first-entry contract and the HTTP middleware. A
+            # malformed first entry fails back to the socket peer; never scan
+            # later, potentially attacker-controlled values for a usable IP.
+            candidate = forwarded.split(",", 1)[0].strip()
+            try:
+                if candidate and len(candidate) <= 64 and "%" not in candidate:
+                    return str(ipaddress.ip_address(candidate))
+            except ValueError:
+                pass
+    return websocket.client.host if websocket.client else "unknown"
+
+
+def _try_acquire_connection(store, key, limit: int) -> bool:
+    with _WS_STATE_LOCK:
+        if limit and store[key] >= limit:
+            return False
+        store[key] += 1
+        return True
+
+
+def _release_connection(store, key) -> None:
+    if key is None:
+        return
+    with _WS_STATE_LOCK:
+        remaining = store.get(key, 0) - 1
+        if remaining > 0:
+            store[key] = remaining
+        else:
+            store.pop(key, None)
+
+
+def _try_acquire_pitch_compute_slot() -> bool:
+    global _WS_ACTIVE_PITCH_COMPUTATIONS
+    limit = _positive_int_env("BRASSTUNE_WS_MAX_CONCURRENT_PITCH_COMPUTATIONS", 4)
+    with _WS_STATE_LOCK:
+        if limit and _WS_ACTIVE_PITCH_COMPUTATIONS >= limit:
+            return False
+        _WS_ACTIVE_PITCH_COMPUTATIONS += 1
+        return True
+
+
+def _release_pitch_compute_slot() -> None:
+    global _WS_ACTIVE_PITCH_COMPUTATIONS
+    with _WS_STATE_LOCK:
+        _WS_ACTIVE_PITCH_COMPUTATIONS = max(0, _WS_ACTIVE_PITCH_COMPUTATIONS - 1)
+
+
+def _reset_abuse_state_for_tests() -> None:
+    global _WS_ACTIVE_PITCH_COMPUTATIONS
+    with _WS_STATE_LOCK:
+        _WS_CONNECTIONS_BY_IP.clear()
+        _WS_CONNECTIONS_BY_ACCOUNT.clear()
+        _WS_ACTIVE_PITCH_COMPUTATIONS = 0
+
+
+class _AudioFrameBudget:
+    def __init__(self) -> None:
+        self.events = deque()
+
+    def consume(self, sample_count: int, now: float | None = None) -> bool:
+        timestamp = time.monotonic() if now is None else now
+        while self.events and timestamp - self.events[0][0] >= 1.0:
+            self.events.popleft()
+        frame_limit = _positive_int_env("BRASSTUNE_WS_MAX_AUDIO_FRAMES_PER_SECOND", 30)
+        sample_limit = _positive_int_env("BRASSTUNE_WS_MAX_PCM_SAMPLES_PER_SECOND", 400_000)
+        if frame_limit and len(self.events) >= frame_limit:
+            return False
+        samples = max(0, sample_count)
+        if sample_limit and sum(count for _, count in self.events) + samples > sample_limit:
+            return False
+        self.events.append((timestamp, samples))
+        return True
+
+
+def _can_track_pending_session(pending_frames, session_id: int) -> bool:
+    limit = _positive_int_env("BRASSTUNE_WS_MAX_PENDING_SESSIONS_PER_CONNECTION", 4)
+    return session_id in pending_frames or not limit or len(pending_frames) < limit
+
+
+async def _reject(websocket: WebSocket, message: str, code: int = 1008) -> None:
     await websocket.accept()
     await websocket.send_json({"type": "error", "message": message})
-    await websocket.close(code=1008)
+    await websocket.close(code=code)
 
 
 def _origin_allowed(websocket: WebSocket) -> bool:
@@ -42,47 +142,79 @@ async def pitch_socket(websocket: WebSocket):
     if not _origin_allowed(websocket):
         await _reject(websocket, "WebSocket origin is not allowed.")
         return
-    await websocket.accept()
-    detector = PitchDetector()
-    db = SessionLocal()
-    auth: Optional[AuthContext] = None
+
+    client_host = _websocket_client_host(websocket)
+    ip_acquired = _try_acquire_connection(
+        _WS_CONNECTIONS_BY_IP,
+        client_host,
+        _positive_int_env("BRASSTUNE_WS_MAX_CONNECTIONS_PER_IP", 8),
+    )
+    if not ip_acquired:
+        await _reject(websocket, "Too many WebSocket connections from this network.", code=1013)
+        return
+
+    db = None
+    account_key = None
+    account_acquired = False
+    pending_frames = defaultdict(list)
+    frame_budget = _AudioFrameBudget()
+    unauthenticated_errors = 0
+
     try:
+        await websocket.accept()
+        detector = PitchDetector()
+        db = SessionLocal()
+        auth: Optional[AuthContext] = None
+
+        def acquire_account(auth_context: AuthContext) -> bool:
+            nonlocal account_key, account_acquired
+            candidate = str(auth_context.user.id)
+            if not _try_acquire_connection(
+                _WS_CONNECTIONS_BY_ACCOUNT,
+                candidate,
+                _positive_int_env("BRASSTUNE_WS_MAX_CONNECTIONS_PER_ACCOUNT", 4),
+            ):
+                return False
+            account_key = candidate
+            account_acquired = True
+            return True
+
         if websocket.query_params:
             await websocket.send_json({"type": "error", "message": "WebSocket query-token auth is disabled."})
             await websocket.close(code=1008)
-            db.close()
             return
         if local_auth_enabled():
-            auth = auth_context_from_token(db, None)
-    except HTTPException as exc:
-        await websocket.send_json({"type": "error", "message": exc.detail})
-        await websocket.close()
-        db.close()
-        return
-    pending_frames = defaultdict(list)
-    unauthenticated_errors = 0
+            try:
+                auth = auth_context_from_token(db, None)
+            except HTTPException as exc:
+                await websocket.send_json({"type": "error", "message": exc.detail})
+                await websocket.close(code=1008)
+                return
+            if not acquire_account(auth):
+                await websocket.send_json({"type": "error", "message": "Too many WebSocket connections for this account."})
+                await websocket.close(code=1013)
+                return
 
-    def flush_session(session_id: int) -> None:
-        frames = pending_frames.get(session_id, [])
-        if frames:
-            save_pitch_frames(db, session_id, frames)
-            pending_frames[session_id] = []
+        def flush_session(session_id: int) -> None:
+            frames = pending_frames.get(session_id, [])
+            if frames:
+                save_pitch_frames(db, session_id, frames)
+                pending_frames[session_id] = []
 
-    def can_write_session(session_id: int) -> bool:
-        session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
-        if session is None:
-            return False
-        return auth.user.role == "admin" or session.user_id == auth.user.id
+        def can_write_session(session_id: int) -> bool:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
+            if session is None:
+                return False
+            return auth.user.role == "admin" or session.user_id == auth.user.id
 
-    def session_for_write(session_id: int) -> Optional[PracticeSession]:
-        session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
-        if session is None:
-            return None
-        if auth.user.role == "admin" or session.user_id == auth.user.id:
-            return session
-        raise HTTPException(status_code=403, detail="You do not have access to this session.")
+        def session_for_write(session_id: int) -> Optional[PracticeSession]:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
+            if session is None:
+                return None
+            if auth.user.role == "admin" or session.user_id == auth.user.id:
+                return session
+            raise HTTPException(status_code=403, detail="You do not have access to this session.")
 
-    try:
         while True:
             try:
                 raw = await asyncio.wait_for(
@@ -102,6 +234,9 @@ async def pitch_socket(websocket: WebSocket):
             except json.JSONDecodeError:
                 await websocket.send_json({"type": "error", "message": "Malformed JSON frame."})
                 continue
+            if not isinstance(message, dict):
+                await websocket.send_json({"type": "error", "message": "WebSocket messages must be JSON objects."})
+                continue
             msg_type = message.get("type")
             if auth is None:
                 if msg_type != "authenticate":
@@ -115,11 +250,16 @@ async def pitch_socket(websocket: WebSocket):
                     token = message.get("token")
                     if not isinstance(token, str) or not token:
                         raise HTTPException(status_code=401, detail="Authentication token is required.")
-                    auth = auth_context_from_token(db, token)
+                    authenticated = auth_context_from_token(db, token)
+                    if not acquire_account(authenticated):
+                        await websocket.send_json({"type": "error", "message": "Too many WebSocket connections for this account."})
+                        await websocket.close(code=1013)
+                        return
+                    auth = authenticated
                     await websocket.send_json({"type": "authenticated"})
                 except HTTPException as exc:
                     await websocket.send_json({"type": "error", "message": exc.detail})
-                    await websocket.close()
+                    await websocket.close(code=1008)
                     return
                 continue
             if msg_type == "authenticate":
@@ -131,13 +271,18 @@ async def pitch_socket(websocket: WebSocket):
                 if not is_valid_instrument_id(instrument_id):
                     await websocket.send_json({"type": "error", "message": "Unknown instrument_id: %s" % instrument_id})
                     continue
-                session = start_session(
-                    db,
-                    instrument_id,
-                    message.get("name"),
-                    float(message.get("reference_pitch_hz", 440.0)),
-                    auth.user.id,
-                )
+                try:
+                    session = start_session(
+                        db,
+                        instrument_id,
+                        message.get("name"),
+                        float(message.get("reference_pitch_hz", 440.0)),
+                        auth.user.id,
+                    )
+                except HTTPException as exc:
+                    db.rollback()
+                    await websocket.send_json({"type": "error", "message": exc.detail})
+                    continue
                 await websocket.send_json({"type": "session_started", "session": {"id": session.id, "name": session.name}})
             elif msg_type == "stop_session":
                 session_id = int(message.get("session_id", 0))
@@ -157,15 +302,46 @@ async def pitch_socket(websocket: WebSocket):
                     await websocket.send_json({"type": "session_stopped", "session": {"id": session.id, "average_abs_cents": session.average_abs_cents}})
             elif msg_type == "audio_frame":
                 try:
+                    raw_pcm = message.get("pcm")
+                    sample_count = len(raw_pcm) if isinstance(raw_pcm, list) else 0
+                    if not frame_budget.consume(sample_count):
+                        await websocket.send_json({"type": "error", "message": "WebSocket audio frame rate limit exceeded."})
+                        await websocket.close(code=1008)
+                        return
                     payload = AudioFrameIn(**message)
                     if not is_valid_instrument_id(payload.instrument_id):
                         await websocket.send_json({"type": "error", "message": "Unknown instrument_id: %s" % payload.instrument_id})
                         continue
-                    frame = detector.estimate_frame(payload.pcm, payload.sample_rate, payload.instrument_id, payload.reference_pitch_hz).to_dict()
+                    if not _try_acquire_pitch_compute_slot():
+                        await websocket.send_json({"type": "error", "message": "Pitch processing is busy. Reconnect in a moment."})
+                        await websocket.close(code=1013)
+                        return
+                    def estimate_with_slot():
+                        try:
+                            return detector.estimate_frame(
+                                payload.pcm,
+                                payload.sample_rate,
+                                payload.instrument_id,
+                                payload.reference_pitch_hz,
+                            )
+                        finally:
+                            # Release from the worker only after the synchronous
+                            # detector actually stops, even if the awaiting socket
+                            # task is cancelled while work is still running.
+                            _release_pitch_compute_slot()
+
+                    detected = await asyncio.to_thread(
+                        estimate_with_slot,
+                    )
+                    frame = detected.to_dict()
                     if payload.session_id:
                         if not can_write_session(payload.session_id):
                             await websocket.send_json({"type": "error", "message": "You do not have access to this session."})
                             continue
+                        if not _can_track_pending_session(pending_frames, payload.session_id):
+                            await websocket.send_json({"type": "error", "message": "Too many pending sessions on this WebSocket connection."})
+                            await websocket.close(code=1008)
+                            return
                         pending_frames[payload.session_id].append(frame)
                         if len(pending_frames[payload.session_id]) >= 12:
                             flush_session(payload.session_id)
@@ -181,6 +357,17 @@ async def pitch_socket(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        for session_id in list(pending_frames.keys()):
-            flush_session(session_id)
-        db.close()
+        try:
+            if db is not None:
+                for session_id in list(pending_frames.keys()):
+                    try:
+                        frames = pending_frames.get(session_id, [])
+                        if frames:
+                            save_pitch_frames(db, session_id, frames)
+                    except Exception:
+                        db.rollback()
+                db.close()
+        finally:
+            if account_acquired:
+                _release_connection(_WS_CONNECTIONS_BY_ACCOUNT, account_key)
+            _release_connection(_WS_CONNECTIONS_BY_IP, client_host)

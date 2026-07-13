@@ -1,6 +1,6 @@
 # Native Swift Parity Surfaces
 
-Updated: 2026-07-10
+Updated: 2026-07-12
 
 ## Scope
 
@@ -10,10 +10,10 @@ This document describes the current local SwiftUI redesign under `swift/BrassTun
 
 The app now has four focused tabs with one primary home for each workflow:
 
-- **Play-Along** is the default tab and flagship action. A musician chooses one of six written-note exercises, starts the microphone inline, and holds each highlighted note steady. The grader uses the existing native pitch stream, matches written pitch class across octave and enharmonic spelling, collects a sustained hold, and reports per-note cents, a plain-language rating, an overall percentage, and stars. A completed live exercise can save a real-microphone practice session.
+- **Play-Along** is the default tab and flagship action. A musician chooses from all 12 major scales, all 12 natural-minor scales, or the existing practice exercises, grouped by category. The grader uses the native pitch stream, matches written pitch class across octave and enharmonic spelling, collects a sustained hold, and reports per-note cents, a plain-language rating, an overall percentage, and stars. A completed live exercise can save a real-microphone practice session.
 - **Tuner** is the live chromatic tuner. Its shipping UI has no source picker or Sample option. It begins with “Play a note” / “Listening…” and reports flat, in tune, or sharp with a single tuning meter. The first tap of **Start listening** requests microphone access; a denied permission produces an **Open iOS Settings** recovery action.
 - **Progress** replaces the duplicate Analytics, Coach, Progress, and session-summary surfaces. It shows a friendly zero state or local tuning metrics, a single practice suggestion, recent recordings, and a link to the complete practice history.
-- **Settings** owns instrument choice, advanced A4 reference pitch, metronome defaults and the full metronome, the sheet-music library, local export/deletion, account state, and the single Privacy/Terms/Support entry points.
+- **Settings** owns instrument choice, advanced A4 reference pitch, metronome defaults and the full metronome, the sheet-music library, authenticated class join/switch/leave, local export/deletion, account state, and the single Privacy/Terms/Support entry points.
 
 Home-as-launcher, the More bento grid, the standalone Analytics and Coach tabs, Audio Lab, `NativeToolShell`, duplicate legal tiles, and the demo Ensemble dead end are no longer shipping navigation surfaces.
 
@@ -46,8 +46,8 @@ Home-as-launcher, the More bento grid, the standalone Analytics and Coach tabs, 
 The current redesign has the following local evidence:
 
 - `cd swift/BrassTuneCore && swift test`: passed, `3/3` tests.
-- Native app test source contains `35` app unit tests and `2` UI tests covering the four-tab IA, onboarding, fixture isolation, audible metronome defaults, Play-Along grading, destructive alerts, and existing persistence/audio behavior.
-- The app and test sources were source/typecheck-validated, but the `35` app tests and `2` UI tests were **not executed** in this environment. `xcodebuild`/CoreSimulator access is blocked by the sandbox, so no current simulator test or build pass is claimed.
+- The current native suite contains `40` app unit tests and `2` UI tests covering the four-tab IA, onboarding, fixture isolation, audible metronome defaults, grouped Play-Along scales, class API/capability/race handling, destructive alerts, and existing persistence/audio behavior.
+- `40/40` app unit tests and `2/2` UI smoke tests passed on dynamically discovered iOS 26.5 simulators with code signing disabled.
 
 When an unrestricted macOS/Xcode environment is available, run:
 
@@ -62,7 +62,7 @@ Always discover an available simulator dynamically instead of hard-coding a devi
 
 ## Explicit Non-Claims
 
-- The current redesign has not completed simulator test execution in this environment.
+- The current redesign completed simulator unit and UI-smoke execution; it has not completed a signed archive or physical-device run.
 - No physical-device microphone, brass-room acoustic, interruption/route, haptic, metronome timing, speaker/headphone bleed, Files, or Photos validation is claimed.
 - No signed archive, Apple Developer signing, App Store Connect upload, TestFlight run, App Review, or App Store readiness is claimed.
 - Camera score capture remains absent; no camera capability or validation is implied.

@@ -24,7 +24,12 @@
 - Backend server-side checks enforce session, audio, analytics, recommendation, export, and ensemble scoping.
 - WebSocket URLs no longer carry bearer tokens; signed-in clients send an initial auth message, `stop_session` requires session ownership/admin, query-token auth is rejected, and production WebSocket origins must be explicitly allowed.
 - Audio upload, raw WebSocket message, pitch-frame, and PCM payload sizes are capped.
-- Global JSON request bodies are rejected before parsing when they exceed `BRASSTUNE_MAX_JSON_BODY_BYTES`, and repeated per-client path requests are throttled by `BRASSTUNE_RATE_LIMIT_PER_MINUTE`.
+- Global JSON request bodies are rejected before parsing when they exceed `BRASSTUNE_MAX_JSON_BODY_BYTES`. HTTP throttling now layers a per-client global budget, canonical route-family budget, and stricter class-join/expensive-operation budgets so rotating resource IDs cannot bypass limits or exhaust the route-bucket table.
+- Render disables Uvicorn's automatic proxy-header rewriting. Following Render's April 2026 guidance and first-entry contract, the application validates the first `X-Forwarded-For` value for HTTP and WebSocket limits. A missing, oversized, scoped, or malformed first value falls back to the socket peer without scanning later attacker-controlled entries.
+- WebSocket abuse controls cap connections per network/account, audio frames and PCM samples per second, concurrent pitch computations, and pending session IDs per connection.
+- Account quotas bound owned classes, active memberships, pending invitations,
+  cloud sessions, and stored recording bytes. Recording replacement subtracts the
+  current session's prior size before evaluating the per-user audio quota.
 - Score-practice source PDFs/images stay local by default; raw SVG is rejected instead of rendered.
 - Guest export uses local guest data instead of cloud export endpoints.
 - Supabase storage delete/read helpers avoid exposing upstream error bodies.
@@ -36,13 +41,13 @@
 ## Known Risks
 
 - Account deletion now blocks re-login/re-creation while external cleanup is queued. The scheduled retry workflow exists, but production durability still requires `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET` in Render and the GitHub production environment plus live disposable-account verification.
-- WebSocket origin checks require explicit `CORS_ALLOWED_ORIGINS`; `CORS_ALLOWED_ORIGIN_REGEX` only applies to HTTP CORS middleware.
+- WebSocket origin checks mirror the exact HTTP CORS policy. Production regex use remains disabled unless `BRASSTUNE_ALLOW_CORS_REGEX=1`; exact owner-controlled origins are preferred.
 - Score image/PDF validation includes magic-byte/active-content checks and decoded-pixel caps, but still needs EXIF orientation/private metadata handling and stronger visual quality checks.
 - Metronome click bleed, long-run drift, and physical-device audio behavior are not verified.
-- Hosted Render is live on merge commit `4bda5691a05988471e412519bbfdcf4078430ee0`; enhanced hosted smoke passed query-token rejection, bad-Origin rejection, and browser-origin app-level WebSocket response after `BRASSTUNE_AUTH_MODE=disabled` was set in the live Render service.
+- Live observation on 2026-07-12: hosted Render `/api/version` reported `36a225ce0de638771c02bd7d5d7cebb25e6d2871`. The local committed baseline for this work was `a2be09eeb9f4cfa4b74e36eef8b07862dd45b091`; the current multi-class/play-along/security candidate is still uncommitted and is not deployed. Local or simulator results must not be attributed to the live Render SHA.
 - Live Supabase deletion/export was not tested because disposable live credentials were not provided. The schema migrations needed for account deletion durability were applied to project `yznziwewxrlwnwiynlvl` on 2026-07-04, but Render deployment and disposable account/storage/delete journeys remain unverified.
 - Supabase live-project drift was remediated for `public.rls_auto_enable()` by revoking execute from `public`, `anon`, and `authenticated`; verification showed `anon_execute=false` and `authenticated_execute=false`.
-- A clean Supabase baseline migration now exists and was applied to the connected project. The account-deletion/membership-window and invitation-index migrations were also applied on 2026-07-04; direct Data API policies remain intentionally closed while FastAPI mediates app access.
+- A clean Supabase baseline plus the account-deletion/membership-window, invitation-index, usage, pruning, and 2026-07-11 class-code migrations are recorded on the linked project. The three 2026-07-12 membership uniqueness, join-code rotation, and Data API/storage-lockdown migrations remain local candidate work until they pass exact-SHA PostgreSQL CI and are deliberately applied. FastAPI remains the only application data path.
 - Hosted smoke and account-deletion retry automation now validate approved BrassTune Vercel/Render hostnames before attaching Vercel bypass or maintenance secret headers.
 - Native app production flows remain fixture-backed in several areas despite passing simulator builds/tests.
-- Dependency audit evidence must stay tied to the exact environment and pushed SHA. The direct requirements-file `pip-audit` command was blocked locally by a temporary resolver venv `ensurepip` SIGABRT; equivalent Python 3.12 evidence passed by resolving `requirements-dev.txt` with `uv pip compile --python ...` and auditing the resolved file with `pip-audit --no-deps --disable-pip`. Treat the Security workflow on the exact pushed SHA as the remote merge gate.
+- Dependency audit evidence must stay tied to the exact environment and pushed SHA. The resolved local Python 3.12 environment reported no known vulnerabilities with `pip-audit --local`; the direct requirements-file resolver remained blocked by a temporary `ensurepip` SIGABRT. Treat the Security workflow on the exact pushed SHA as the remote merge gate.

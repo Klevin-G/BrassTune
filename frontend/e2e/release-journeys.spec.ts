@@ -93,6 +93,9 @@ test('settings replays the tour with a keyboard-trapped dialog', async ({ page }
 
 test('demo take creates a reviewable session with a plain-language result', async ({ page }) => {
   await page.goto('/practice');
+  const demoMode = page.getByRole('radio', { name: 'Demo', exact: true });
+  await demoMode.click();
+  await expect(demoMode).toBeChecked();
   const startButton = page.getByRole('button', { name: /save this take/i });
   await expect(startButton).toBeVisible();
   await expect(startButton).toBeEnabled();

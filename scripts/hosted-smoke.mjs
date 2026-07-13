@@ -2,13 +2,12 @@ import crypto from 'node:crypto';
 import net from 'node:net';
 import tls from 'node:tls';
 
-const DEFAULT_WEB_BASE_URL = 'https://brass-tune.vercel.app';
+const DEFAULT_WEB_BASE_URL = 'https://brasstune.vercel.app';
 const DEFAULT_API_BASE_URL = 'https://brasstune-u8qj.onrender.com';
 const DEFAULT_WS_BASE_URL = 'wss://brasstune-u8qj.onrender.com';
 const APPROVED_RENDER_HOST = 'brasstune-u8qj.onrender.com';
 const APPROVED_VERCEL_HOSTS = new Set([
-  'brass-tune.vercel.app',
-  'brass-tune-aryaswebsites.vercel.app',
+  'brasstune.vercel.app',
 ]);
 
 const webBaseURL = cleanBase(process.env.BRASSTUNE_WEB_BASE_URL || DEFAULT_WEB_BASE_URL);
@@ -43,7 +42,7 @@ function assertHostedURL(label, value, expectedProtocol) {
 
 function isApprovedVercelHost(hostname) {
   return APPROVED_VERCEL_HOSTS.has(hostname)
-    || (hostname.startsWith('brass-tune-') && hostname.endsWith('-aryaswebsites.vercel.app'));
+    || (hostname.startsWith('brass-tune-') && hostname.endsWith('-kelvis-prject.vercel.app'));
 }
 
 function assertApprovedSecretDestination(label, value, type) {

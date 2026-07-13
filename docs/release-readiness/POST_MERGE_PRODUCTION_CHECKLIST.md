@@ -26,7 +26,7 @@ Precondition: the latest PR #2 head must have green Backend, Frontend, Security,
 Run from the repo root:
 
 ```bash
-BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app \
+BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app \
 BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
 BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
 npm run smoke:hosted
@@ -35,11 +35,11 @@ npm run smoke:hosted
 Manual HTTP checks:
 
 ```bash
-curl -IL --max-time 30 https://brass-tune.vercel.app
-curl -IL --max-time 30 https://brass-tune.vercel.app/settings
+curl -IL --max-time 30 https://brasstune.vercel.app
+curl -IL --max-time 30 https://brasstune.vercel.app/settings
 curl -fsS --max-time 70 https://brasstune-u8qj.onrender.com/api/health
 curl -i -X OPTIONS https://brasstune-u8qj.onrender.com/api/health \
-  -H "Origin: https://brass-tune.vercel.app" \
+  -H "Origin: https://brasstune.vercel.app" \
   -H "Access-Control-Request-Method: GET"
 ```
 
@@ -64,7 +64,7 @@ Suggested production hosted browser run after deployment:
 ```bash
 cd frontend
 E2E_START_LOCAL_SERVERS=0 \
-E2E_BASE_URL=https://brass-tune.vercel.app \
+E2E_BASE_URL=https://brasstune.vercel.app \
 E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com \
 E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
 npm run e2e:hosted
@@ -75,7 +75,7 @@ Strict production content check after this branch is deployed:
 ```bash
 cd frontend
 E2E_START_LOCAL_SERVERS=0 \
-E2E_BASE_URL=https://brass-tune.vercel.app \
+E2E_BASE_URL=https://brasstune.vercel.app \
 E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com \
 E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
 npm run e2e:hosted:strict

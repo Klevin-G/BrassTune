@@ -8,8 +8,7 @@ const aliases = new Map([
   ['E2E_VERCEL_AUTOMATION_BYPASS_SECRET', 'BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET'],
 ]);
 const approvedVercelHosts = new Set([
-  'brass-tune.vercel.app',
-  'brass-tune-aryaswebsites.vercel.app',
+  'brasstune.vercel.app',
 ]);
 const approvedRenderHost = 'brasstune-u8qj.onrender.com';
 
@@ -60,7 +59,7 @@ for (const [name, protocol] of checks) {
 
 function isApprovedVercelHost(hostname) {
   return approvedVercelHosts.has(hostname)
-    || (hostname.startsWith('brass-tune-') && hostname.endsWith('-aryaswebsites.vercel.app'));
+    || (hostname.startsWith('brass-tune-') && hostname.endsWith('-kelvis-prject.vercel.app'));
 }
 
 function assertApprovedHost(name, value, type) {

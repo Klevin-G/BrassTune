@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { PlayAlongGrader, centsGrade, summarizeGrades } from './playAlong';
+import {
+  EXERCISES,
+  MAJOR_SCALES,
+  MINOR_SCALES,
+  PlayAlongGrader,
+  centsGrade,
+  normalizePitchClass,
+  samePitchClass,
+  summarizeGrades,
+} from './playAlong';
 import type { PitchFrame } from './types';
 
 function frame(note: string | null, cents: number | null, confidence = 0.9): PitchFrame {
@@ -29,6 +38,75 @@ describe('centsGrade', () => {
     expect(centsGrade(25)).toBe('close');
     expect(centsGrade(60)).toBe('off');
     expect(centsGrade(null)).toBe('missed');
+  });
+});
+
+describe('exercise catalog', () => {
+  const expectedMajorScales: Record<string, string[]> = {
+    cmaj: ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C'],
+    dbmaj: ['Db', 'Eb', 'F', 'Gb', 'Ab', 'Bb', 'C', 'Db'],
+    dmaj: ['D', 'E', 'F#', 'G', 'A', 'B', 'C#', 'D'],
+    ebmaj: ['Eb', 'F', 'G', 'Ab', 'Bb', 'C', 'D', 'Eb'],
+    emaj: ['E', 'F#', 'G#', 'A', 'B', 'C#', 'D#', 'E'],
+    fmaj: ['F', 'G', 'A', 'Bb', 'C', 'D', 'E', 'F'],
+    fsmaj: ['F#', 'G#', 'A#', 'B', 'C#', 'D#', 'E#', 'F#'],
+    gmaj: ['G', 'A', 'B', 'C', 'D', 'E', 'F#', 'G'],
+    abmaj: ['Ab', 'Bb', 'C', 'Db', 'Eb', 'F', 'G', 'Ab'],
+    amaj: ['A', 'B', 'C#', 'D', 'E', 'F#', 'G#', 'A'],
+    bbmaj: ['Bb', 'C', 'D', 'Eb', 'F', 'G', 'A', 'Bb'],
+    bmaj: ['B', 'C#', 'D#', 'E', 'F#', 'G#', 'A#', 'B'],
+  };
+
+  const expectedMinorScales: Record<string, string[]> = {
+    cmin: ['C', 'D', 'Eb', 'F', 'G', 'Ab', 'Bb', 'C'],
+    csmin: ['C#', 'D#', 'E', 'F#', 'G#', 'A', 'B', 'C#'],
+    dmin: ['D', 'E', 'F', 'G', 'A', 'Bb', 'C', 'D'],
+    ebmin: ['Eb', 'F', 'Gb', 'Ab', 'Bb', 'Cb', 'Db', 'Eb'],
+    emin: ['E', 'F#', 'G', 'A', 'B', 'C', 'D', 'E'],
+    fmin: ['F', 'G', 'Ab', 'Bb', 'C', 'Db', 'Eb', 'F'],
+    fsmin: ['F#', 'G#', 'A', 'B', 'C#', 'D', 'E', 'F#'],
+    gmin: ['G', 'A', 'Bb', 'C', 'D', 'Eb', 'F', 'G'],
+    gsmin: ['G#', 'A#', 'B', 'C#', 'D#', 'E', 'F#', 'G#'],
+    amin: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'A'],
+    bbmin: ['Bb', 'C', 'Db', 'Eb', 'F', 'Gb', 'Ab', 'Bb'],
+    bmin: ['B', 'C#', 'D', 'E', 'F#', 'G', 'A', 'B'],
+  };
+
+  it('contains all 12 major and 12 natural minor scales with stable original IDs', () => {
+    expect(MAJOR_SCALES).toHaveLength(12);
+    expect(MINOR_SCALES).toHaveLength(12);
+    expect(new Set(EXERCISES.map((exercise) => exercise.id)).size).toBe(EXERCISES.length);
+    expect(MAJOR_SCALES.find((exercise) => exercise.id === 'cmaj')?.notes).toEqual(['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C']);
+    expect(MAJOR_SCALES.some((exercise) => exercise.id === 'fmaj')).toBe(true);
+    expect(MAJOR_SCALES.some((exercise) => exercise.id === 'gmaj')).toBe(true);
+  });
+
+  it('preserves the exact diatonic spellings for every scale', () => {
+    expect(Object.fromEntries(MAJOR_SCALES.map((scale) => [scale.id, scale.notes]))).toEqual(expectedMajorScales);
+    expect(Object.fromEntries(MINOR_SCALES.map((scale) => [scale.id, scale.notes]))).toEqual(expectedMinorScales);
+  });
+
+  it.each([
+    ['major', MAJOR_SCALES, [0, 2, 4, 5, 7, 9, 11, 0]],
+    ['minor', MINOR_SCALES, [0, 2, 3, 5, 7, 8, 10, 0]],
+  ] as const)('uses the correct %s scale formula and closes the octave', (_name, scales, formula) => {
+    for (const scale of scales) {
+      expect(scale.notes).toHaveLength(8);
+      const root = normalizePitchClass(scale.notes[0]);
+      expect(root).not.toBeNull();
+      expect(scale.notes.map((note) => ((normalizePitchClass(note) as number) - (root as number) + 12) % 12)).toEqual(formula);
+      expect(samePitchClass(scale.notes[0], scale.notes[scale.notes.length - 1])).toBe(true);
+    }
+  });
+
+  it('normalizes enharmonic spellings used by written scales', () => {
+    expect(samePitchClass('Db', 'C#')).toBe(true);
+    expect(samePitchClass('E#', 'F')).toBe(true);
+    expect(samePitchClass('Cb', 'B')).toBe(true);
+    expect(samePitchClass('Gb', 'F#')).toBe(true);
+    expect(samePitchClass('D♭', 'C♯')).toBe(true);
+    expect(samePitchClass('F♯', 'Gb')).toBe(true);
+    expect(normalizePitchClass('not-a-note')).toBeNull();
   });
 });
 
@@ -62,6 +140,14 @@ describe('PlayAlongGrader', () => {
     grader.feed(frame('C', 5), 300);
     grader.feed(frame('C', 5), 400); // only 100ms since reset
     expect(grader.results.length).toBe(0);
+  });
+
+  it('grades detector canonical names against enharmonic written spellings', () => {
+    const grader = new PlayAlongGrader(['E#'], { holdMs: 300, minSamples: 3 });
+    for (let t = 0; t <= 400; t += 100) grader.feed(frame('F', 4), t);
+    expect(grader.done).toBe(true);
+    expect(grader.results[0].name).toBe('E#');
+    expect(grader.results[0].grade).toBe('excellent');
   });
 
   it('tolerates brief low-confidence dropouts without resetting', () => {

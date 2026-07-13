@@ -18,9 +18,12 @@ account owner can create (they are tied to your Google/Apple accounts).
    - Copy the **Client ID** and **Client secret**.
 2. Supabase → **Authentication → Providers → Google** → enable → paste Client ID + Secret → Save.
 3. Supabase → **Authentication → URL Configuration**:
-   - Site URL: `https://brass-tune.vercel.app`
-   - Redirect URLs: add `https://brass-tune.vercel.app/auth/callback`,
-     `https://*.vercel.app/auth/callback`, `http://localhost:5173/auth/callback`.
+   - Site URL: `https://brasstune.vercel.app`
+   - Redirect URLs: add `https://brasstune.vercel.app/auth/callback`,
+     `https://*-kelvis-prject.vercel.app/auth/callback`, and
+     `http://localhost:5173/auth/callback`.
+   - Do not allow blanket `*.vercel.app` callbacks. Preview patterns must include
+     the owner account suffix so another Vercel user cannot receive auth results.
 4. Enable the button: set `VITE_AUTH_GOOGLE_ENABLED=true` in Vercel (Production + Preview) and redeploy.
 
 > Give me the Google **Client ID + Secret** and I'll do steps 2–4 for you (or paste them into

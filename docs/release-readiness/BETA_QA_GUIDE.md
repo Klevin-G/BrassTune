@@ -6,7 +6,7 @@ Status: operational guide for owner-controlled closed-beta testing. BrassTune re
 
 Use disposable data only.
 
-1. Open `https://brass-tune.vercel.app`.
+1. Open `https://brasstune.vercel.app`.
 2. Complete onboarding and choose an instrument.
 3. Run the demo tuner, start a take, stop it, and open session review.
 4. Deny microphone permission, then confirm the recovery copy is understandable.

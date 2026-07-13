@@ -18,7 +18,7 @@ BrassTune is a brass-practice analytics product with a React/Vite web app, FastA
 - Frontend build/typecheck: `cd frontend && npm run build`.
 - Frontend dependency audit: `cd frontend && npm audit --omit=dev`.
 - Local browser journeys: `cd frontend && npm run e2e:local`.
-- Hosted read-only smoke: `cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted`.
+- Hosted read-only smoke: `cd frontend && E2E_BASE_URL=https://brasstune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted`.
 - Device simulation: `cd frontend && npm run simulate:devices`.
 - Swift package tests: `cd swift/BrassTuneCore && swift test`.
 - Native app schemes: `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj`.
@@ -38,7 +38,7 @@ BrassTune is a brass-practice analytics product with a React/Vite web app, FastA
 ## Safety Rules
 
 - Never commit `.env`, Supabase service keys, Vercel tokens, Render hooks, Apple credentials, signing identities, real user data, or recordings.
-- Do not push directly to `main`, merge PRs, create tags, force-push, or change production infrastructure without explicit owner approval.
+- Standing authorization permits ordinary task-scoped commits and pushes to the current branch, including `main`, without separate approval. Merging pull requests, creating tags, force-pushing, and changing production infrastructure still require explicit owner authorization.
 - Treat live Supabase, Vercel, Render, Apple Developer, and App Store Connect work as externally blocked unless credentials and explicit authorization are present.
 - Do not claim physical microphone quality, Apple archive signing, or App Store readiness from simulator-only evidence.
 - Keep raw large datasets, recordings, model artifacts, caches, Playwright traces, and Xcode derived data out of Git.
@@ -107,7 +107,7 @@ Run/dev commands:
 
 Deployment commands:
 - Vercel frontend and Render backend deploy through configured workflows; do not change production config or secrets without approval.
-- cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted
+- cd frontend && E2E_BASE_URL=https://brasstune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted
 
 Coding and safety conventions:
 - Never commit env files, Supabase service keys, Vercel tokens, Render hooks, Apple credentials, recordings, local DBs, Playwright traces, or Xcode derived data.
@@ -118,8 +118,8 @@ Coding and safety conventions:
 
 Git rules:
 - Check `git status --short --branch` before edits and handoff.
-- Do not use broad staging in dirty repos; stage only explicit paths when the user later asks for a commit.
-- Do not commit, push, force-push, rewrite history, delete files, or mutate production infrastructure without explicit approval.
+- Do not use broad staging in dirty repos; stage only explicit task-scoped paths.
+- Standing authorization permits ordinary task-scoped commits and pushes to the current branch, including `main`, without a separate approval. Force-pushes, history rewrites, important-file deletion, and production-infrastructure changes still require explicit authorization.
 - Keep secrets, credentials, tokens, private keys, env files, build output, caches, downloaded data, model artifacts, and oversized generated files out of Git.
 
 Known risks:
@@ -131,7 +131,7 @@ Known risks:
 
 Codex should use parallel subagents for nontrivial work, but fanout must be justified by independent workstreams. Prefer 4-8 agents for normal tasks. Use 8-12 only for large independent modules, audits, migrations, data pipelines, or test/review sweeps.
 
-Do not spawn agents that edit the same file at the same time. Keep `max_depth = 1` unless the repo-specific config and setup notes explain why `2` is justified. Always use a read-only scout before major edits, and always use independent tester/reviewer agents before claiming completion.
+Do not spawn agents that edit the same file at the same time. Do not add project-local `[agents]` concurrency, depth, or runtime keys while global `features.multi_agent_v2` is enabled; use justified first-level fanout and supported v2/global settings instead. Always use a read-only scout before major edits, and always use independent tester/reviewer agents before claiming completion.
 
 Use CSV fanout for repeated independent tasks like file audits, package reviews, migration target reviews, route/component checks, artifact inventories, fixture audits, endpoint reviews, or per-module security reviews. Keep `max_concurrency` bounded so local builds, browser tests, Xcode, GPU work, or data pipelines do not overload the machine.
 
