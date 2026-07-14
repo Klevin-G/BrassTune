@@ -1,6 +1,6 @@
 # Apple App Store Checklist
 
-Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-20, and native implementation status updated on 2026-07-12:
+Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-20, and native implementation status updated on 2026-07-13:
 
 - [SDK minimum requirements](https://developer.apple.com/news/upcoming-requirements/?id=02032026a): apps uploaded to App Store Connect must be built with Xcode 26 or later using iOS/iPadOS 26 SDKs since April 28, 2026.
 - [Submitting apps](https://developer.apple.com/app-store/submitting/): build and test with current Xcode/latest SDKs.
@@ -31,7 +31,7 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 - Native metronome scope exists: audible-by-default click output at volume `0.6`, visual pulse, haptic option, mute, volume, meter, subdivision, and tap tempo. Output is temporarily muted only during an active live recording.
 - Native score scope includes PDF/image/Photos import, thumbnails, page selection, rotate/crop/enhance preview, a full-resolution zoomable page viewer (PDFKit for PDFs, memory-safe ImageIO decoding for images), annotations, metadata + original-file export, and local delete. The synthetic score is UI-test-only.
 - Adaptive system light/dark surfaces are implemented. Custom iOS 26 Liquid Glass is availability-gated and limited to floating transports, primary Start/Record actions, and the score viewer top controls, with iOS 17–25 fallbacks.
-- The current app, unit-test, and UI-test sources compile under Swift 6 for iOS 17+ targets. `BrassTuneCore` passed `3/3`; the app unit suite passed `40/40`; and the full UI smoke passed `2/2` on dynamically discovered iOS 26.5 simulators.
+- The current source targets Swift 6 and iOS 17+. This Windows integration run verified the native design-token rules, but it could not run `swift`, `xcodebuild`, or CoreSimulator. Earlier branch-specific `BrassTuneCore`, app-unit, and UI-smoke results do not validate the resolved integration revision; rerun the commands in `TEST_MATRIX.md` on macOS/Xcode before release claims.
 
 ## Owner Decisions Required
 

@@ -342,8 +342,9 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(major.count, 12)
         XCTAssertEqual(minor.count, 12)
         XCTAssertEqual(patterns.count, 3)
+        XCTAssertEqual(PlayAlongExercise.library.count, 27)
         XCTAssertEqual(Set(PlayAlongExercise.library.map(\.id)).count, PlayAlongExercise.library.count)
-        XCTAssertTrue(["cmaj", "fmaj", "gmaj"].allSatisfy { id in
+        XCTAssertTrue(["cmaj", "fmaj", "gmaj", "arpeggio", "chromatic", "longtones"].allSatisfy { id in
             PlayAlongExercise.library.contains { $0.id == id }
         })
         XCTAssertFalse(PlayAlongExercise.library.contains { $0.writtenNotes.isEmpty })

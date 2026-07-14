@@ -79,16 +79,17 @@
 .note-display-verdict.tone-red { color: var(--red); }
 .note-display-verdict.tone-muted { color: var(--muted-2); }
 
-.note-display-detail {
+.note-display .note-display-detail {
   color: var(--muted);
   font-size: 1rem;
   font-weight: 600;
 }
 
-.note-display-concert {
+.note-display .note-display-concert {
   margin-top: 2px;
-  color: var(--muted-2);
+  color: var(--muted);
   font-size: 0.82rem;
+  font-weight: 600;
 }
 
 /* --- Horizontal tuning meter --- */

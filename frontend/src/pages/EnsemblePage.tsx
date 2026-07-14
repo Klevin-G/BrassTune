@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Copy, Link2, LogOut, Mail, Plus, Printer, RefreshCw, SlidersHorizontal, Trash2, UserPlus, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Link2, LogOut, Mail, Plus, Printer, RefreshCw, SlidersHorizontal, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -90,21 +90,38 @@ export function EnsemblePage() {
   const [pendingLeave, setPendingLeave] = useState<{ groupId: number; label: string } | null>(null);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [joinInstrument, setJoinInstrument] = useState('');
+  const [showJoin, setShowJoin] = useState(false);
   const [joining, setJoining] = useState(false);
   const [rotatingCode, setRotatingCode] = useState(false);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [invitingMember, setInvitingMember] = useState(false);
+  const [respondingInvitations, setRespondingInvitations] = useState<Record<number, 'accept' | 'decline'>>({});
   const [loading, setLoading] = useState(true);
   const joinInFlightRef = useRef(false);
+  const createInFlightRef = useRef(false);
+  const inviteInFlightRef = useRef(false);
+  const invitationResponsesInFlightRef = useRef(new Set<number>());
+  const classLoadGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
   const leaveDialogRef = useRef<HTMLDivElement | null>(null);
   const leaveCancelRef = useRef<HTMLButtonElement | null>(null);
   const leaveReturnFocusRef = useRef<HTMLElement | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const auth = useAuth();
+  const myId = auth.profile?.id;
 
   const managesGroup = (group: any): boolean => {
-    return group?.viewer_can_manage === true;
+    if (typeof group?.viewer_can_manage === 'boolean') return group.viewer_can_manage;
+    if (auth.profile?.role === 'admin') return true;
+    return group?.director_user_id != null && group.director_user_id === myId;
   };
   const managesSelected = managesGroup(selectedGroup);
-  const canLeaveSelected = selectedGroup?.viewer_can_leave === true;
+  const selectedMembership = (selectedGroup?.members ?? []).find(
+    (member: any) => member.is_current_user || member.user_id === myId,
+  );
+  const canLeaveSelected = typeof selectedGroup?.viewer_can_leave === 'boolean'
+    ? selectedGroup.viewer_can_leave
+    : Boolean(!managesSelected && selectedMembership?.status === 'active');
   const hasDirectorReport = Boolean(managesSelected && selectedGroup && report);
 
   const memberLabel = (member: any) => {
@@ -113,45 +130,56 @@ export function EnsemblePage() {
     return member.display_name ?? 'Member';
   };
 
-  const selectGroup = async (groupId: number) => {
-    setLoading(true);
+  const isCurrentClassLoad = (generation: number) => (
+    mountedRef.current && classLoadGenerationRef.current === generation
+  );
+
+  const selectGroup = async (groupId: number, requestedGeneration?: number) => {
+    const generation = requestedGeneration ?? ++classLoadGenerationRef.current;
+    if (isCurrentClassLoad(generation)) setLoading(true);
     try {
       const group = await getEnsembleGroup(groupId);
+      if (!isCurrentClassLoad(generation)) return;
       setSelectedGroup(group);
+      setSummary(null);
+      setReport(null);
+      setRoster(null);
       if (managesGroup(group)) {
         const [summaryData, reportData, rosterData] = await Promise.all([
           getEnsembleSummary(groupId).catch(() => null),
           getEnsembleReport(groupId).catch(() => null),
           getEnsembleRoster(groupId).catch(() => null),
         ]);
+        if (!isCurrentClassLoad(generation)) return;
         setSummary(summaryData);
         setReport(reportData);
         setRoster(rosterData?.students ?? null);
-      } else {
-        setSummary(null);
-        setReport(null);
-        setRoster(null);
       }
-      setEnsembleStatus('');
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not load your class.'));
+      if (isCurrentClassLoad(generation)) {
+        setEnsembleStatus(friendlyUserFacingError(error, 'Could not load your class.'));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentClassLoad(generation)) setLoading(false);
     }
   };
 
   const loadEverything = async (preferredGroupId?: number) => {
-    setLoading(true);
+    const generation = ++classLoadGenerationRef.current;
+    if (isCurrentClassLoad(generation)) setLoading(true);
     try {
       const [groupsData, invitesData] = await Promise.all([
         getEnsembleGroups(),
         getEnsembleInvitations().catch(() => ({ invitations: [] })),
       ]);
+      if (!isCurrentClassLoad(generation)) return;
       setGroups(groupsData);
       setInvitations(invitesData.invitations ?? []);
-      const preferred = groupsData.find((group: any) => group.id === preferredGroupId) ?? groupsData[0];
-      if (preferred) {
-        await selectGroup(preferred.id);
+      const nextGroup = groupsData.find((group) => group.id === preferredGroupId)
+        ?? groupsData.find((group) => group.id === selectedGroup?.id)
+        ?? groupsData[0];
+      if (nextGroup) {
+        await selectGroup(nextGroup.id, generation);
       } else {
         setSelectedGroup(null);
         setSummary(null);
@@ -159,14 +187,25 @@ export function EnsemblePage() {
         setRoster(null);
       }
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not load your class.'));
+      if (isCurrentClassLoad(generation)) {
+        setEnsembleStatus(friendlyUserFacingError(error, 'Could not load your class.'));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentClassLoad(generation)) setLoading(false);
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      classLoadGenerationRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!auth.isSignedIn) {
+      classLoadGenerationRef.current += 1;
       setGroups([]);
       setSelectedGroup(null);
       setSummary(null);
@@ -183,7 +222,10 @@ export function EnsemblePage() {
 
   useEffect(() => {
     const sharedCode = searchParams.get('join')?.trim().toUpperCase();
-    if (sharedCode) setJoinCodeInput(sharedCode);
+    if (!sharedCode) return;
+    setJoinCodeInput(sharedCode);
+    setShowJoin(true);
+    setShowCreate(false);
   }, [searchParams]);
 
   useEffect(() => {
@@ -220,8 +262,13 @@ export function EnsemblePage() {
       if (returnFocus?.isConnected) returnFocus.focus();
     };
   }, [pendingLeave]);
-
   const respondToInvitation = async (invitation: EnsembleInvitation, accept: boolean) => {
+    if (invitationResponsesInFlightRef.current.has(invitation.member_id)) return;
+    invitationResponsesInFlightRef.current.add(invitation.member_id);
+    setRespondingInvitations((current) => ({
+      ...current,
+      [invitation.member_id]: accept ? 'accept' : 'decline',
+    }));
     try {
       if (accept) {
         // The student's own instrument choice is set as part of accepting.
@@ -234,6 +281,15 @@ export function EnsemblePage() {
       setEnsembleStatus(accept ? `You joined “${invitation.group_name}”.` : `You declined “${invitation.group_name}”.`);
     } catch (error) {
       setEnsembleStatus(friendlyUserFacingError(error, 'Could not update the invitation.'));
+    } finally {
+      invitationResponsesInFlightRef.current.delete(invitation.member_id);
+      if (mountedRef.current) {
+        setRespondingInvitations((current) => {
+          const next = { ...current };
+          delete next[invitation.member_id];
+          return next;
+        });
+      }
     }
   };
 
@@ -251,6 +307,7 @@ export function EnsemblePage() {
       const result = await joinEnsembleByCode(code, joinInstrument || undefined);
       setJoinCodeInput('');
       setJoinInstrument('');
+      setShowJoin(false);
       await loadEverything(result.group_id);
       setEnsembleStatus(`You joined “${result.group_name}”.`);
       if (searchParams.has('join')) {
@@ -272,25 +329,31 @@ export function EnsemblePage() {
   };
 
   const createGroup = async () => {
-    if (!newGroupName.trim()) {
+    if (createInFlightRef.current) return;
+    const groupName = newGroupName.trim();
+    if (!groupName) {
       setEnsembleStatus('Give your class a name first.');
       return;
     }
+    createInFlightRef.current = true;
+    setCreatingGroup(true);
     try {
-      const group = await createEnsembleGroup(newGroupName);
+      const group = await createEnsembleGroup(groupName);
       setNewGroupName('');
       setShowCreate(false);
-      setEnsembleStatus(`“${group.name}” is ready. Add students below.`);
       await auth.refreshProfile().catch(() => undefined);
-      const groupsData = await getEnsembleGroups();
-      setGroups(groupsData);
-      await selectGroup(group.id);
+      await loadEverything(group.id);
+      setEnsembleStatus(`“${group.name}” is ready. Add students below.`);
     } catch (error) {
       setEnsembleStatus(friendlyUserFacingError(error, 'Could not create the class.'));
+    } finally {
+      createInFlightRef.current = false;
+      if (mountedRef.current) setCreatingGroup(false);
     }
   };
 
   const addMember = async () => {
+    if (inviteInFlightRef.current) return;
     if (!selectedGroup?.id) {
       setEnsembleStatus('Pick a class before adding a student.');
       return;
@@ -299,21 +362,29 @@ export function EnsemblePage() {
       setEnsembleStatus('Enter the student’s username first.');
       return;
     }
+    const groupId = selectedGroup.id;
+    const username = memberUsername.trim();
+    const instrumentId = inviteInstrument;
+    inviteInFlightRef.current = true;
+    setInvitingMember(true);
     try {
       // Pass the instrument the director chose — never the director's own tuner setting.
       // The instrument is optional: if the director leaves it unset the student picks
       // their own when they accept the invitation.
-      await addEnsembleMemberByUsername(selectedGroup.id, {
-        username: memberUsername,
-        instrument_id: inviteInstrument || undefined,
+      await addEnsembleMemberByUsername(groupId, {
+        username,
+        instrument_id: instrumentId || undefined,
         role_in_group: 'student',
       });
       setMemberUsername('');
       setInviteInstrument('');
+      await selectGroup(groupId);
       setEnsembleStatus('Invite sent — they’ll see it when they sign in.');
-      await selectGroup(selectedGroup.id);
     } catch (error) {
       setEnsembleStatus(friendlyUserFacingError(error, 'Could not send the invite. Check the username is exact.'));
+    } finally {
+      inviteInFlightRef.current = false;
+      if (mountedRef.current) setInvitingMember(false);
     }
   };
 
@@ -323,8 +394,8 @@ export function EnsemblePage() {
     setPendingRemove(null);
     try {
       await removeEnsembleMember(selectedGroup.id, memberId);
-      setEnsembleStatus(`${label} removed.`);
       await selectGroup(selectedGroup.id);
+      setEnsembleStatus(`${label} removed.`);
     } catch (error) {
       setEnsembleStatus(friendlyUserFacingError(error, 'Could not remove the student.'));
     }
@@ -358,7 +429,6 @@ export function EnsemblePage() {
       setRotatingCode(false);
     }
   };
-
   const copyText = async (text: string, key: string) => {
     try {
       await navigator.clipboard?.writeText(text);
@@ -491,6 +561,7 @@ export function EnsemblePage() {
           <div className="ec-invite-cards">
             {invitations.map((invitation) => {
               const chosen = acceptInstruments[invitation.member_id] ?? (isKnownInstrument(invitation.instrument_id) ? invitation.instrument_id : '');
+              const pendingAction = respondingInvitations[invitation.member_id];
               return (
                 <div className="ec-invite-card" key={invitation.member_id}>
                   <span className="ec-invite-icon"><Mail size={18} /></span>
@@ -504,6 +575,7 @@ export function EnsemblePage() {
                     <select
                       value={chosen}
                       onChange={(event) => setAcceptInstruments((prev) => ({ ...prev, [invitation.member_id]: event.target.value }))}
+                      disabled={Boolean(pendingAction)}
                     >
                       <option value="">Pick your instrument</option>
                       {INSTRUMENT_OPTIONS.map((id) => (
@@ -512,13 +584,13 @@ export function EnsemblePage() {
                     </select>
                   </label>
                   <div className="ec-invite-actions">
-                    <button className="primary-button" type="button" onClick={() => respondToInvitation(invitation, true)}>
+                    <button className="primary-button" type="button" onClick={() => respondToInvitation(invitation, true)} disabled={Boolean(pendingAction)}>
                       <Check size={16} />
-                      Accept
+                      {pendingAction === 'accept' ? 'Joining…' : 'Accept'}
                     </button>
-                    <button className="ghost-button" type="button" onClick={() => respondToInvitation(invitation, false)}>
+                    <button className="ghost-button" type="button" onClick={() => respondToInvitation(invitation, false)} disabled={Boolean(pendingAction)}>
                       <X size={16} />
-                      Decline
+                      {pendingAction === 'decline' ? 'Declining…' : 'Decline'}
                     </button>
                   </div>
                 </div>
@@ -528,83 +600,145 @@ export function EnsemblePage() {
         </SectionCard>
       )}
 
-      <SectionCard title={groups.length === 0 ? 'Join your class' : 'Join another class'} eyebrow="For students" className="ec-join-card">
-        <div className="ec-create-row ec-no-print">
-          <input
-            className="ec-input ec-code-input"
-            value={joinCodeInput}
-            onChange={(event) => setJoinCodeInput(event.target.value.toUpperCase())}
-            placeholder="Class code"
-            aria-label="Class code"
-            autoCapitalize="characters"
-            maxLength={16}
-            disabled={joining}
-            onKeyDown={(event) => { if (event.key === 'Enter') joinByCode(); }}
-          />
-          <select className="ec-input" value={joinInstrument} onChange={(event) => setJoinInstrument(event.target.value)} aria-label="Your instrument" disabled={joining}>
-            <option value="">Your instrument</option>
-            {INSTRUMENT_OPTIONS.map((id) => (
-              <option key={id} value={id}>{instrumentDisplayName(id)}</option>
-            ))}
-          </select>
-          <button className="primary-button" type="button" onClick={joinByCode} disabled={joinCodeInput.trim().length < 4 || loading || joining}>
-            <UserPlus size={18} />
-            {joining ? 'Joining…' : 'Join'}
-          </button>
-        </div>
-        {groups.length === 0 && auth.profile?.username && (
-          <p className="ec-username-hint">
-            No code? Ask your teacher to add you by your username: <strong>@{auth.profile.username}</strong>
-          </p>
-        )}
-      </SectionCard>
       {ensembleStatus && <p className="settings-status" role="status" aria-live="polite">{ensembleStatus}</p>}
 
-      <div className="ec-classbar ec-no-print">
-        <div className="ec-class-tabs" aria-label="Your classes">
-          {groups.map((group) => (
-            <button
-              key={group.id}
-              type="button"
-              className={`chip-tab ${selectedGroup?.id === group.id ? 'active' : ''}`}
-              onClick={() => selectGroup(group.id)}
-              disabled={loading}
-            >
-              {group.name}
+      {groups.length === 0 ? (
+        <>
+          <SectionCard title="Join your class" eyebrow="For students">
+            <div className="ec-empty">
+              <span className="ec-empty-icon"><Users size={26} /></span>
+              <p className="muted-copy">Enter the class code your teacher gave you.</p>
+              <div className="ec-create-row ec-no-print">
+                <input
+                  className="ec-input ec-code-input"
+                  value={joinCodeInput}
+                  onChange={(event) => setJoinCodeInput(event.target.value.toUpperCase())}
+                  placeholder="e.g. BXK4QD"
+                  aria-label="Class code"
+                  autoCapitalize="characters"
+                  maxLength={16}
+                  disabled={joining}
+                  onKeyDown={(event) => { if (event.key === 'Enter') joinByCode(); }}
+                />
+                <select className="ec-input" value={joinInstrument} onChange={(event) => setJoinInstrument(event.target.value)} aria-label="Your instrument" disabled={joining}>
+                  <option value="">Your instrument</option>
+                  {INSTRUMENT_OPTIONS.map((id) => (
+                    <option key={id} value={id}>{instrumentDisplayName(id)}</option>
+                  ))}
+                </select>
+                <button className="primary-button" type="button" onClick={joinByCode} disabled={joinCodeInput.trim().length < 4 || joining}>
+                  <UserPlus size={18} />
+                  {joining ? 'Joining…' : 'Join'}
+                </button>
+              </div>
+              {auth.profile?.username && (
+                <p className="ec-username-hint">
+                  No code? Ask your teacher to add you by your username: <strong>@{auth.profile.username}</strong>
+                </p>
+              )}
+            </div>
+          </SectionCard>
+          <SectionCard title="Start a class" eyebrow="For teachers">
+            <div className="ec-empty">
+              <p className="muted-copy">Name your class, then share the code so students can join.</p>
+              <div className="ec-create-row ec-no-print">
+                <input
+                  className="ec-input"
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                  placeholder="e.g. Period 3 Brass"
+                  aria-label="Class name"
+                  disabled={creatingGroup}
+                  onKeyDown={(event) => { if (event.key === 'Enter') createGroup(); }}
+                />
+                <button className="primary-button" type="button" onClick={createGroup} disabled={!newGroupName.trim() || creatingGroup}>
+                  <Plus size={18} />
+                  {creatingGroup ? 'Creating…' : 'Create a class'}
+                </button>
+              </div>
+            </div>
+          </SectionCard>
+        </>
+      ) : (
+        <>
+          <div className="ec-classbar ec-no-print">
+            {groups.length > 1 ? (
+              <div className="ec-class-tabs" aria-busy={loading}>
+                {groups.map((group) => (
+                  <button
+                    key={group.id}
+                    type="button"
+                    className={`chip-tab ${selectedGroup?.id === group.id ? 'active' : ''}`}
+                    onClick={() => selectGroup(group.id)}
+                  >
+                    {group.name}
+                  </button>
+                ))}
+              </div>
+            ) : <span />}
+            <button className="ghost-button ec-newclass-btn" type="button" onClick={() => { setShowJoin((value) => !value); setShowCreate(false); }} aria-expanded={showJoin}>
+              <UserPlus size={16} />
+              Join another class
             </button>
-          ))}
-          {groups.length === 0 && <span className="muted-copy">You haven’t joined or created a class yet.</span>}
-        </div>
-        <button className="ghost-button ec-newclass-btn" type="button" onClick={() => setShowCreate((value) => !value)}>
-          <Plus size={16} />
-          {showCreate ? 'Cancel' : 'Create a class'}
-        </button>
-      </div>
-
-      {showCreate && (
-        <SectionCard className="ec-no-print" title="Start a class" eyebrow="For teachers">
-          <div className="ec-create-row">
-            <input
-              className="ec-input"
-              value={newGroupName}
-              onChange={(event) => setNewGroupName(event.target.value)}
-              placeholder="e.g. Jazz Band, Period 5"
-              aria-label="New class name"
-              onKeyDown={(event) => { if (event.key === 'Enter') createGroup(); }}
-            />
-            <button className="primary-button" type="button" onClick={createGroup} disabled={!newGroupName.trim()}>
-              <Plus size={18} />
-              Create a class
+            <button className="ghost-button" type="button" onClick={() => { setShowCreate((value) => !value); setShowJoin(false); }} aria-expanded={showCreate}>
+              <Plus size={16} />
+              New class
             </button>
           </div>
-        </SectionCard>
-      )}
 
-      {groups.length === 0 ? null : !selectedGroup ? (
-        <SectionCard title="Loading class">
-          <p className="muted-copy" role="status">Loading your selected class…</p>
-        </SectionCard>
-      ) : managesSelected ? (
+          {showJoin && (
+            <SectionCard title="Join another class" className="ec-no-print">
+              <div className="ec-create-row">
+                <input
+                  className="ec-input ec-code-input"
+                  value={joinCodeInput}
+                  onChange={(event) => setJoinCodeInput(event.target.value.toUpperCase())}
+                  placeholder="Class code"
+                  aria-label="Class code"
+                  autoCapitalize="characters"
+                  maxLength={16}
+                  disabled={joining}
+                  onKeyDown={(event) => { if (event.key === 'Enter') joinByCode(); }}
+                />
+                <select className="ec-input" value={joinInstrument} onChange={(event) => setJoinInstrument(event.target.value)} aria-label="Your instrument" disabled={joining}>
+                  <option value="">Your instrument</option>
+                  {INSTRUMENT_OPTIONS.map((id) => (
+                    <option key={id} value={id}>{instrumentDisplayName(id)}</option>
+                  ))}
+                </select>
+                <button className="primary-button" type="button" onClick={joinByCode} disabled={joinCodeInput.trim().length < 4 || joining}>
+                  <UserPlus size={18} />
+                  {joining ? 'Joining…' : 'Join'}
+                </button>
+              </div>
+            </SectionCard>
+          )}
+
+          {showCreate && (
+            <SectionCard className="ec-no-print">
+              <div className="ec-create-row">
+                <input
+                  className="ec-input"
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                  placeholder="e.g. Jazz Band, Period 5"
+                  aria-label="New class name"
+                  disabled={creatingGroup}
+                  onKeyDown={(event) => { if (event.key === 'Enter') createGroup(); }}
+                />
+                <button className="primary-button" type="button" onClick={createGroup} disabled={!newGroupName.trim() || creatingGroup}>
+                  <Plus size={18} />
+                  {creatingGroup ? 'Creating…' : 'Create a class'}
+                </button>
+              </div>
+            </SectionCard>
+          )}
+
+          {!selectedGroup ? (
+            <SectionCard title="Loading class">
+              <p className="muted-copy" role="status">Loading your selected class…</p>
+            </SectionCard>
+          ) : managesSelected ? (
             <div className="ec-print-area">
               <SectionCard title={selectedGroup?.name ?? 'Class'}>
                 <div className="ec-print-only ec-print-head">
@@ -639,7 +773,7 @@ export function EnsemblePage() {
                 <div className="ec-invite-row ec-no-print">
                   <label className="ec-select">
                     <span>Instrument</span>
-                    <select value={inviteInstrument} onChange={(event) => setInviteInstrument(event.target.value)}>
+                    <select value={inviteInstrument} onChange={(event) => setInviteInstrument(event.target.value)} disabled={invitingMember}>
                       <option value="">Choose (optional)</option>
                       {INSTRUMENT_OPTIONS.map((id) => (
                         <option value={id} key={id}>{instrumentDisplayName(id)}</option>
@@ -653,12 +787,13 @@ export function EnsemblePage() {
                       value={memberUsername}
                       onChange={(event) => setMemberUsername(event.target.value.toLowerCase())}
                       placeholder="student-username"
+                      disabled={invitingMember}
                       onKeyDown={(event) => { if (event.key === 'Enter') addMember(); }}
                     />
                   </label>
-                  <button className="primary-button ec-send-invite" type="button" onClick={addMember} disabled={!memberUsername.trim()}>
+                  <button className="primary-button ec-send-invite" type="button" onClick={addMember} disabled={!memberUsername.trim() || invitingMember}>
                     <UserPlus size={17} />
-                    Send invite
+                    {invitingMember ? 'Sending…' : 'Send invite'}
                   </button>
                 </div>
 
@@ -732,25 +867,22 @@ export function EnsemblePage() {
               )}
             </div>
           ) : (
-            <SectionCard title={selectedGroup?.name ?? 'Class'}>
-              <div className="ec-membership-actions ec-no-print">
-                <p className="muted-copy">You’re a member of this class.</p>
-                {canLeaveSelected ? (
-                  <button
-                    className="ec-leave-btn"
-                    type="button"
-                    onClick={(event) => {
-                      leaveReturnFocusRef.current = event.currentTarget;
-                      setPendingLeave({ groupId: selectedGroup.id, label: selectedGroup.name });
-                    }}
-                  >
-                    <LogOut size={15} />
-                    Leave class
-                  </button>
-                ) : (
-                  <span className="muted-copy">This class role cannot leave through self-service.</span>
-                )}
-              </div>
+            <SectionCard
+              title={selectedGroup?.name ?? 'Class'}
+              action={canLeaveSelected ? (
+                <button
+                  className="ghost-button ec-leave-class ec-no-print"
+                  type="button"
+                  onClick={(event) => {
+                    leaveReturnFocusRef.current = event.currentTarget;
+                    setPendingLeave({ groupId: selectedGroup.id, label: selectedGroup.name });
+                  }}
+                >
+                  <LogOut size={15} />
+                  Leave class
+                </button>
+              ) : undefined}
+            >
               <div className="ec-roster">
                 {(selectedGroup?.members ?? []).map((member: any) => (
                   <div className="ec-student-card" key={member.id}>
@@ -767,6 +899,8 @@ export function EnsemblePage() {
               </div>
             </SectionCard>
           )}
+        </>
+      )}
 
       {pendingRemove && (
         <div className="ec-modal-overlay ec-no-print" role="presentation" onClick={() => setPendingRemove(null)}>
@@ -792,7 +926,7 @@ export function EnsemblePage() {
             onClick={(event) => event.stopPropagation()}
           >
             <h3 id="ec-leave-title">Leave {pendingLeave.label}?</h3>
-            <p className="muted-copy">You’ll lose access to this class roster. Your practice history stays on your account.</p>
+            <p className="muted-copy">You’ll lose access to this class. Your practice history stays on your account.</p>
             <div className="ec-modal-actions">
               <button className="ghost-button" type="button" ref={leaveCancelRef} onClick={() => setPendingLeave(null)}>Cancel</button>
               <button className="ec-danger-btn" type="button" onClick={doLeave}>Leave class</button>

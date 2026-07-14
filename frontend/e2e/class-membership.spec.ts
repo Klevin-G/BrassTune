@@ -4,10 +4,29 @@ type Group = {
   id: number;
   name: string;
   join_code?: string | null;
+  director_user_id?: number | null;
   viewer_role: string;
-  viewer_can_leave: boolean;
-  viewer_can_manage: boolean;
+  viewer_can_leave?: boolean;
+  viewer_can_manage?: boolean;
 };
+
+type Invitation = {
+  member_id: number;
+  group_id: number;
+  group_name: string;
+  instrument_id: string;
+  role_in_group: string;
+  invited_at: string | null;
+  director_name: string | null;
+};
+
+type FixtureOptions = {
+  groupDelaysMs?: Record<number, number>;
+  mutationDelayMs?: number;
+  invitations?: Invitation[];
+};
+
+const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const fakeAuthModule = `
 const session = { access_token: 'signed-in-e2e-token', user: { id: 'class-user' } };
@@ -24,12 +43,20 @@ export const supabase = {
 };
 `;
 
-async function installSignedInClassFixture(page: Page) {
+async function installSignedInClassFixture(page: Page, options: FixtureOptions = {}) {
   let groups: Group[] = [
-    { id: 1, name: 'Concert Band', viewer_role: 'student', viewer_can_leave: true, viewer_can_manage: false },
+    { id: 1, name: 'Concert Band', director_user_id: 12, viewer_role: 'student' },
     { id: 2, name: 'Jazz Band', viewer_role: 'assistant', viewer_can_leave: true, viewer_can_manage: false },
     { id: 3, name: 'Student-led Brass', join_code: null, viewer_role: 'owner', viewer_can_leave: false, viewer_can_manage: true },
+    { id: 4, name: 'Legacy-owned Brass', join_code: 'LEGACY99', director_user_id: 99, viewer_role: 'owner' },
   ];
+  let invitations = [...(options.invitations ?? [])];
+  const counters = {
+    creates: 0,
+    memberInvites: 0,
+    accepts: 0,
+    declines: 0,
+  };
 
   await page.route('**/src/lib/supabase.ts*', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/javascript', body: fakeAuthModule });
@@ -57,8 +84,46 @@ async function installSignedInClassFixture(page: Page) {
         primary_instrument_id: 'horn',
       });
     }
-    if (path === '/api/ensemble/invitations') return respond({ invitations: [] });
+    if (path === '/api/ensemble/invitations' && request.method() === 'GET') return respond({ invitations });
     if (path === '/api/ensemble/groups' && request.method() === 'GET') return respond(groups);
+
+    if (path === '/api/ensemble/groups' && request.method() === 'POST') {
+      counters.creates += 1;
+      if (options.mutationDelayMs) await delay(options.mutationDelayMs);
+      const payload = request.postDataJSON() as { name?: string };
+      const group: Group = {
+        id: Math.max(...groups.map((candidate) => candidate.id), 0) + 1,
+        name: payload.name ?? 'New class',
+        join_code: 'NEWCLASS',
+        director_user_id: 99,
+        viewer_role: 'owner',
+        viewer_can_leave: false,
+        viewer_can_manage: true,
+      };
+      groups = [...groups, group];
+      return respond(group);
+    }
+
+    const invitationResponseMatch = path.match(/^\/api\/ensemble\/invitations\/(\d+)\/(accept|decline)$/);
+    if (invitationResponseMatch && request.method() === 'POST') {
+      const memberID = Number(invitationResponseMatch[1]);
+      const action = invitationResponseMatch[2];
+      if (action === 'accept') counters.accepts += 1;
+      else counters.declines += 1;
+      if (options.mutationDelayMs) await delay(options.mutationDelayMs);
+      const invitation = invitations.find((candidate) => candidate.member_id === memberID);
+      invitations = invitations.filter((candidate) => candidate.member_id !== memberID);
+      return respond(action === 'accept'
+        ? { accepted: true, group_id: invitation?.group_id ?? 1 }
+        : { declined: true });
+    }
+
+    const memberInviteMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/members\/by-username$/);
+    if (memberInviteMatch && request.method() === 'POST') {
+      counters.memberInvites += 1;
+      if (options.mutationDelayMs) await delay(options.mutationDelayMs);
+      return respond({ id: 901, group_id: Number(memberInviteMatch[1]), status: 'invited' });
+    }
 
     const rotateMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/join-code\/rotate$/);
     if (rotateMatch && request.method() === 'POST') {
@@ -76,12 +141,16 @@ async function installSignedInClassFixture(page: Page) {
 
     const groupMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)$/);
     if (groupMatch && request.method() === 'GET') {
-      const group = groups.find((candidate) => candidate.id === Number(groupMatch[1]));
+      const groupID = Number(groupMatch[1]);
+      const groupDelay = options.groupDelaysMs?.[groupID] ?? 0;
+      if (groupDelay) await delay(groupDelay);
+      const group = groups.find((candidate) => candidate.id === groupID);
       if (!group) return respond({ detail: 'Group not found' }, 404);
+      const canManage = group.viewer_can_manage ?? group.director_user_id === 99;
       return respond({
         ...group,
-        roster_scope: group.viewer_can_manage ? 'full' : 'self',
-        members: group.viewer_can_manage ? [] : [{
+        roster_scope: canManage ? 'full' : 'self',
+        members: canManage ? [] : [{
           id: group.id * 10,
           group_id: group.id,
           instrument_id: 'horn',
@@ -105,13 +174,21 @@ async function installSignedInClassFixture(page: Page) {
     localStorage.setItem('brasstune.referencePitch', '442');
     localStorage.setItem('brasstune.guestSessions.v1', JSON.stringify([{ id: -901, name: 'Local warmup' }]));
   });
+
+  return counters;
 }
 
 test('class UI stays stable across switching and leaving one of several classes', async ({ page }) => {
   await installSignedInClassFixture(page);
   await page.goto('/ensemble');
 
+  const joinAnother = page.getByRole('button', { name: 'Join another class' });
+  await expect(joinAnother).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Join another class' })).toHaveCount(0);
+  await joinAnother.click();
   await expect(page.getByRole('heading', { name: 'Join another class' })).toBeVisible();
+  await joinAnother.click();
+  await expect(page.getByRole('heading', { name: 'Join another class' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Concert Band' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Jazz Band' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Leave class' })).toBeVisible();
@@ -135,10 +212,11 @@ test('class UI stays stable across switching and leaving one of several classes'
   await leaveTrigger.click();
   dialog = page.getByRole('dialog', { name: 'Leave Jazz Band?' });
   await dialog.getByRole('button', { name: 'Leave class' }).click();
-  await expect(page.getByText('You left “Jazz Band”.')).toBeVisible();
+  await expect(page.getByText(/You left.*Jazz Band/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Jazz Band' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Concert Band' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Join another class' })).toBeVisible();
+  await expect(joinAnother).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Join another class' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Student-led Brass' }).click();
   await expect(page.getByText('Unavailable', { exact: true })).toBeVisible();
@@ -148,6 +226,10 @@ test('class UI stays stable across switching and leaving one of several classes'
   await page.getByRole('button', { name: 'Create code' }).click();
   await expect(page.getByText('ABCD2345', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Rotate code' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Legacy-owned Brass' }).click();
+  await expect(page.getByText('LEGACY99', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Leave class' })).toHaveCount(0);
 
   const preservedState = await page.evaluate(() => ({
     instrument: localStorage.getItem('brasstune.instrument'),
@@ -159,4 +241,69 @@ test('class UI stays stable across switching and leaving one of several classes'
     referencePitch: '442',
     guestSessions: JSON.stringify([{ id: -901, name: 'Local warmup' }]),
   });
+});
+
+test('the latest class selection wins when detail responses arrive out of order', async ({ page }) => {
+  await installSignedInClassFixture(page, { groupDelaysMs: { 1: 10, 2: 250 } });
+  await page.goto('/ensemble');
+  await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
+
+  const concertTab = page.getByRole('button', { name: 'Concert Band' });
+  const jazzTab = page.getByRole('button', { name: 'Jazz Band' });
+  await jazzTab.click();
+  await concertTab.click();
+
+  await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
+  await expect(concertTab).toHaveClass(/active/);
+  await expect(jazzTab).not.toHaveClass(/active/);
+});
+
+test('class mutations ignore duplicate and competing activations', async ({ page }) => {
+  const counters = await installSignedInClassFixture(page, {
+    mutationDelayMs: 150,
+    invitations: [{
+      member_id: 701,
+      group_id: 1,
+      group_name: 'Concert Band',
+      instrument_id: 'horn',
+      role_in_group: 'student',
+      invited_at: '2026-07-13T12:00:00Z',
+      director_name: 'Ms. Rivera',
+    }],
+  });
+  await page.goto('/ensemble');
+  await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
+
+  await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    buttons.find((button) => button.textContent?.trim() === 'Accept')?.click();
+    buttons.find((button) => button.textContent?.trim() === 'Decline')?.click();
+  });
+  await expect(page.getByRole('button', { name: 'Joining…' })).toBeDisabled();
+  await expect(page.getByText(/You joined.*Concert Band/)).toBeVisible();
+  expect(counters.accepts + counters.declines).toBe(1);
+  expect(counters.accepts).toBe(1);
+
+  await page.getByRole('button', { name: 'New class' }).click();
+  await page.getByLabel('New class name').fill('Morning Brass');
+  const createButton = page.getByRole('button', { name: 'Create a class' });
+  await createButton.evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+  await expect(page.getByRole('button', { name: 'Creating…' })).toBeDisabled();
+  await expect(page.getByText(/Morning Brass.*is ready/)).toBeVisible();
+  expect(counters.creates).toBe(1);
+
+  await page.getByLabel('Add a student by username').fill('student-two');
+  const inviteButton = page.getByRole('button', { name: 'Send invite' });
+  await inviteButton.evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+  await expect(page.getByRole('button', { name: 'Sending…' })).toBeDisabled();
+  await expect(page.getByText(/Invite sent/)).toBeVisible();
+  expect(counters.memberInvites).toBe(1);
 });

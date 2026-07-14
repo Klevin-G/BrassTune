@@ -1,8 +1,8 @@
 # Post-Merge Production Checklist
 
-Use this only after PR #2 is merged into `main`. Do not merge, tag, or promote production from this checklist without owner approval.
+Use this only after the current integration pull request is merged into `main`. Do not tag or promote production from this checklist without owner approval.
 
-Precondition: the latest PR #2 head must have green Backend, Frontend, Security, Swift, and exact-SHA preview checks. PR head `36b29c8cff85f3364648763fd36d6472fb1ef8a3` was verified green before the ensemble privacy, Score Practice focus, hosted-smoke copy, Settings affordance, device-simulation, and evidence-doc follow-up; re-check the exact latest pushed SHA before merging. Production Render must then be owner-deployed to that backend commit before final hosted smoke can pass.
+Precondition: the final integration head must have reviewed Backend, Frontend, Security, Swift, and exact-SHA preview results, or any external CI/service blocker must be recorded explicitly before merge. Production Supabase migrations must be applied in order, then Render must be owner-deployed to that backend commit before the capability-aware frontend is promoted and final hosted smoke can pass.
 
 ## Confirm Deployed State
 
@@ -18,7 +18,7 @@ Precondition: the latest PR #2 head must have green Backend, Frontend, Security,
 4. Confirm the owner has recorded remaining external blockers in `HUMAN_ACTIONS.md`.
 5. Confirm production deploy uses the repo-root GitHub workflow path. The root `vercel.json` builds `frontend`; do not assume the GitHub production deploy should run from `frontend`.
 6. Confirm required secret names exist without printing values: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_API_BASE_URL`, `VITE_WS_BASE_URL`, Supabase frontend vars, and the Render deploy hook.
-7. Confirm Supabase migration state includes the baseline/readiness/RPC lockdown migrations, nine RLS-enabled app tables, and `rls_auto_enable()` with `anon_execute=false` and `authenticated_execute=false`.
+7. Confirm Supabase migration state includes the baseline/readiness/RPC lockdown migrations, nine RLS-enabled app tables, `rls_auto_enable()` with `anon_execute=false` and `authenticated_execute=false`, unique class membership, rotated eight-character join codes, and Data API/storage lockdown.
 8. Confirm `.github/workflows/render-keepalive.yml` is enabled only after owner approval for scheduled Actions usage. Keepalive is a cold-start mitigation, not an uptime guarantee.
 
 ## Hosted Smoke

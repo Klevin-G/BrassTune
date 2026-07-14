@@ -299,16 +299,16 @@ export function joinEnsembleByCode(code: string, instrumentId?: string) {
   });
 }
 
+export function leaveEnsembleGroup(groupId: number) {
+  return request<{ left: boolean; group_id: number }>(`/api/ensemble/groups/${groupId}/membership`, { method: 'DELETE' });
+}
+
 export function updateEnsembleMember(groupId: number, memberId: number, payload: { instrument_id?: string; role_in_group?: string; status?: string }) {
   return request<any>(`/api/ensemble/groups/${groupId}/members/${memberId}`, { method: 'PATCH', body: JSON.stringify(payload) });
 }
 
 export function removeEnsembleMember(groupId: number, memberId: number) {
   return request<{ removed: boolean }>(`/api/ensemble/groups/${groupId}/members/${memberId}`, { method: 'DELETE' });
-}
-
-export function leaveEnsembleGroup(groupId: number) {
-  return request<{ left: boolean; group_id: number }>(`/api/ensemble/groups/${groupId}/membership`, { method: 'DELETE' });
 }
 
 export function rotateEnsembleJoinCode(groupId: number) {

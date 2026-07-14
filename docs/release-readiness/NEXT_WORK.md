@@ -2,10 +2,10 @@
 
 ## Must Finish Before Closed-Beta Merge
 
-- [P0] Verify the latest pushed PR #2 head
+- [P0] Verify the final integration pull-request head
   - Owner type: repo
   - Acceptance criteria: the latest PR head has Backend, Frontend, Security, Swift, and Vercel checks all green on the exact new SHA.
-  - Verification command or evidence: GitHub Actions and Vercel status for PR #2 on the latest pushed commit.
+  - Verification command or evidence: GitHub Actions and Vercel status for the current integration pull request on its exact latest commit.
 
 - [P0] Owner-approved Render deployment before production beta smoke
   - Owner type: owner/provider
@@ -61,10 +61,10 @@
   - Acceptance criteria: supported iPhone and iPad pass quiet/noisy-room brass tests, permission denial, route changes, recording/playback/delete, and low/high brass cases.
   - Verification command or evidence: completed `PHYSICAL_DEVICE_PROTOCOL.md` with device models, OS versions, instruments, pass/fail notes.
 
-- [P0] Replace or explicitly scope native fixture-backed product flows
+- [P0] Complete live native provider and physical-device validation
   - Owner type: repo
-  - Acceptance criteria: native practice/audio/analytics/ensemble/auth flows use production API/audio/auth paths or are explicitly scoped out of release claims.
-  - Verification command or evidence: Xcode unit/UI/integration tests plus manual simulator/device evidence; no fixture-only claims in release docs.
+  - Acceptance criteria: production API/auth class journeys and real microphone practice/audio behavior pass on supported iPhone/iPad hardware; test-only fixtures remain unreachable without explicit test launch flags.
+  - Verification command or evidence: Xcode unit/UI/integration tests plus disposable-provider and manual device evidence tied to the resolved release revision.
 
 - [P1] Finalize legal, privacy, SDK, and required-reason audits
   - Owner type: legal
@@ -78,10 +78,10 @@
 
 ## Security/Privacy Follow-Up
 
-- [P1] Make account deletion cleanup durable
+- [P1] Validate durable account deletion cleanup in the live provider environment
   - Owner type: repo
-  - Acceptance criteria: deletion has retry/outbox behavior for Supabase identity/storage cleanup and recoverable partial-failure handling.
-  - Verification command or evidence: backend regression tests covering Supabase failure/retry paths.
+  - Acceptance criteria: the implemented retry/outbox behavior completes Supabase identity/storage cleanup and recovers from an induced provider failure without recreating a blocked account.
+  - Verification command or evidence: backend regression tests plus a redacted disposable-account retry run in the authorized provider environment.
 
 - [P1] Add repeatable live-provider integration coverage
   - Owner type: provider

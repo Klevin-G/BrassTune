@@ -2230,8 +2230,9 @@ def test_join_code_rotation_migration_targets_only_legacy_or_missing_codes():
     assert "join_code is null or char_length(join_code) <= 6" in migration
     assert "share row exclusive" in migration
     assert "not exists" in migration
-    assert "gen_random_uuid" in migration
-    assert ", 1, 10" in migration
+    assert "alphabet constant text := 'abcdefghjkmnpqrstuvwxyz23456789'" in migration
+    assert "generate_series(1, 8)" in migration
+    assert "floor(random() * length(alphabet))" in migration
     assert "create unique index if not exists groups_join_code_key" in migration
 
 

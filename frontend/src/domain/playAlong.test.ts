@@ -3,6 +3,7 @@ import {
   EXERCISES,
   MAJOR_SCALES,
   MINOR_SCALES,
+  OTHER_EXERCISES,
   PlayAlongGrader,
   centsGrade,
   normalizePitchClass,
@@ -72,13 +73,14 @@ describe('exercise catalog', () => {
     bmin: ['B', 'C#', 'D', 'E', 'F#', 'G', 'A', 'B'],
   };
 
-  it('contains all 12 major and 12 natural minor scales with stable original IDs', () => {
+  it('contains 12 major, 12 natural minor, and three existing other exercises', () => {
     expect(MAJOR_SCALES).toHaveLength(12);
     expect(MINOR_SCALES).toHaveLength(12);
+    expect(OTHER_EXERCISES).toHaveLength(3);
+    expect(EXERCISES).toHaveLength(27);
     expect(new Set(EXERCISES.map((exercise) => exercise.id)).size).toBe(EXERCISES.length);
     expect(MAJOR_SCALES.find((exercise) => exercise.id === 'cmaj')?.notes).toEqual(['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C']);
-    expect(MAJOR_SCALES.some((exercise) => exercise.id === 'fmaj')).toBe(true);
-    expect(MAJOR_SCALES.some((exercise) => exercise.id === 'gmaj')).toBe(true);
+    expect(['fmaj', 'gmaj', 'arpeggio', 'chromatic', 'longtones'].every((id) => EXERCISES.some((exercise) => exercise.id === id))).toBe(true);
   });
 
   it('preserves the exact diatonic spellings for every scale', () => {

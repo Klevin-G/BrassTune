@@ -1388,7 +1388,7 @@ def join_ensemble_by_code(payload: JoinByCodeRequest, db: Session = Depends(get_
 
 @router.delete("/ensemble/groups/{group_id}/membership")
 def leave_ensemble_group(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    """Leave one class without affecting the user's other memberships."""
+    """Soft-remove only the signed-in user's membership in one class."""
     group = _group_or_404(db, group_id)
     if group.director_user_id == auth.user.id:
         raise HTTPException(status_code=409, detail="The class owner cannot leave their own class.")
