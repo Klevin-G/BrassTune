@@ -225,6 +225,10 @@
   font-size: 0.85rem;
   color: var(--muted);
 }
+.ec-invite-role {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
 .ec-accept-select {
   margin-left: auto;
   min-width: 190px;
@@ -295,6 +299,12 @@
 .ec-newclass-btn {
   margin-left: auto;
 }
+.ec-leave-class {
+  color: var(--red);
+}
+.ec-leave-class:hover {
+  border-color: var(--red);
+}
 
 /* ---- join code panel --------------------------------------------------- */
 .ec-join {
@@ -328,6 +338,11 @@
   letter-spacing: 0.14em;
   color: var(--text);
   line-height: 1.1;
+}
+.ec-join-code.unavailable {
+  font-size: 1.15rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
 }
 .ec-join-help {
   font-size: 0.85rem;

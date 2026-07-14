@@ -14,12 +14,15 @@ on:
       - "fixtures/**"
       - ".github/workflows/swift.yml"
 
+permissions:
+  contents: read
+
 jobs:
   package-and-ios:
     runs-on: ${{ fromJSON(vars.BRASSTUNE_SWIFT_RUNNER || '"macos-latest"') }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: List Xcode and simulator environment
         run: |
           xcodebuild -version
@@ -72,7 +75,7 @@ jobs:
             -resultBundlePath "$RUNNER_TEMP/BrassTuneAppUISmoke.xcresult"
       - name: Upload UI smoke result bundle
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: BrassTuneAppUISmoke-xcresult
           path: ${{ runner.temp }}/BrassTuneAppUISmoke.xcresult

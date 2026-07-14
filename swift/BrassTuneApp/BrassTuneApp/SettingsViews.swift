@@ -127,6 +127,14 @@ struct SettingsView: View {
                 ) {
                     ScorePracticeView()
                 }
+                SettingsNavigationRow(
+                    title: "Classes",
+                    systemImage: "person.3",
+                    detail: model.ensembles.isEmpty ? nil : "\(model.ensembles.count)",
+                    identifier: "settings.classesLink"
+                ) {
+                    ClassesView()
+                }
             }
 
             if accountActionsEnabled && !model.authState.usesRemoteAccount {
@@ -352,6 +360,161 @@ struct SettingsView: View {
                 model.lastError = .appleSignInCancelled
             } else {
                 model.lastError = .authenticationFailed
+            }
+        }
+    }
+}
+
+struct ClassesView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var joinCode = ""
+    @State private var pendingLeave: EnsembleSummary?
+
+    var body: some View {
+        BTScreen {
+            BTPageHeader(
+                eyebrow: "Classes",
+                title: "Your classes",
+                subtitle: "Join more than one class, switch between them, or leave a class without changing your practice setup."
+            )
+
+            if model.testFixturesEnabled || model.authState.usesRemoteAccount {
+                joinCard
+                membershipContent
+            } else {
+                BTEmptyState(
+                    title: "Sign in to use classes",
+                    message: "Return to Settings and sign in before joining a class.",
+                    systemImage: "person.crop.circle.badge.exclamationmark"
+                )
+                .accessibilityIdentifier("classes.signInRequired")
+            }
+
+            if let message = model.ensembleStatusMessage {
+                BTCard(tint: BTTheme.surfaceWarm) {
+                    Label(message, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(BTTheme.success)
+                }
+                .accessibilityIdentifier("classes.status")
+            }
+
+            if let error = model.lastError {
+                BTCard {
+                    Text(error.localizedDescription)
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("classes.error")
+            }
+        }
+        .navigationTitle("Classes")
+        .accessibilityIdentifier("screen.classes")
+        .task {
+            await model.loadEnsembles()
+        }
+        .refreshable {
+            await model.loadEnsembles()
+        }
+        .alert(item: $pendingLeave) { ensemble in
+            Alert(
+                title: Text("Leave \(ensemble.name)?"),
+                message: Text("Your other classes and practice history will stay available."),
+                primaryButton: .destructive(Text("Leave class")) {
+                    Task { await model.leaveEnsemble(id: ensemble.id) }
+                },
+                secondaryButton: .cancel()
+            )
+        }
+    }
+
+    private var joinCard: some View {
+        BTCard {
+            BTSectionHeader(title: "Join another class", subtitle: "Enter the code your teacher shared.")
+            TextField("Class code", text: $joinCode)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("classes.joinCode")
+            Button {
+                Task {
+                    if await model.joinEnsemble(code: joinCode) {
+                        joinCode = ""
+                    }
+                }
+            } label: {
+                Label(model.ensembleMutationInProgress ? "Joining…" : "Join class", systemImage: "person.badge.plus")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTPrimaryButtonStyle())
+            .disabled(model.ensembleMutationInProgress || joinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityIdentifier("classes.join")
+        }
+    }
+
+    @ViewBuilder
+    private var membershipContent: some View {
+        if model.ensemblesLoading && model.ensembles.isEmpty {
+            BTCard {
+                ProgressView("Loading classes…")
+                    .frame(maxWidth: .infinity)
+            }
+            .accessibilityIdentifier("classes.loading")
+        } else if model.ensembles.isEmpty {
+            BTEmptyState(
+                title: "No classes yet",
+                message: "Joining a class won't change your tuner, instrument, or practice history.",
+                systemImage: "person.3"
+            )
+            .accessibilityIdentifier("classes.empty")
+        } else {
+            BTCard {
+                BTSectionHeader(title: "Active class", subtitle: "Switching only changes which class is selected here.")
+                Picker("Active class", selection: Binding(
+                    get: { model.selectedEnsembleID ?? model.ensembles[0].id },
+                    set: { model.selectedEnsembleID = $0 }
+                )) {
+                    ForEach(model.ensembles) { ensemble in
+                        Text(ensemble.name).tag(ensemble.id)
+                    }
+                }
+                .accessibilityIdentifier("classes.activePicker")
+            }
+
+            ForEach(model.ensembles) { ensemble in
+                BTCard(tint: model.selectedEnsembleID == ensemble.id ? BTTheme.surfaceWarm : BTTheme.surface) {
+                    HStack(alignment: .top, spacing: BTSpacing.md) {
+                        VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                            Text(ensemble.name)
+                                .font(.headline)
+                            Text(ensemble.viewerRoleLabel)
+                                .font(.subheadline)
+                                .foregroundStyle(BTTheme.muted)
+                        }
+                        Spacer()
+                        if model.selectedEnsembleID == ensemble.id {
+                            BTStatusPill(text: "Selected", tint: BTTheme.success)
+                        }
+                    }
+
+                    if ensemble.canLeave {
+                        Button(role: .destructive) {
+                            pendingLeave = ensemble
+                        } label: {
+                            Label("Leave class", systemImage: "rectangle.portrait.and.arrow.right")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.ensembleMutationInProgress)
+                        .accessibilityIdentifier("classes.leave.\(ensemble.id)")
+                    } else {
+                        Text(ensemble.viewerCanManage
+                            ? "Manage this class from its director tools."
+                            : "This class role cannot leave through self-service.")
+                            .font(.footnote)
+                            .foregroundStyle(BTTheme.muted)
+                    }
+                }
             }
         }
     }

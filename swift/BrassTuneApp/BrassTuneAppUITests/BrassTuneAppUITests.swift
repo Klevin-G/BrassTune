@@ -98,7 +98,7 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
 
         let advancedTuner = app.descendants(matching: .any)["settings.advancedTunerSettings"]
-        XCTAssertTrue(waitForElementOrScroll(advancedTuner, in: app))
+        XCTAssertTrue(advancedTuner.waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["settings.referencePitchStepper"].exists)
         advancedTuner.tap()
         XCTAssertTrue(
@@ -107,16 +107,26 @@ final class BrassTuneAppUITests: XCTestCase {
         )
 
         let soundToggle = app.switches["settings.metronomeSound"]
-        XCTAssertTrue(waitForElementOrScroll(soundToggle, in: app))
+        XCTAssertTrue(soundToggle.waitForExistence(timeout: 5))
         XCTAssertNotEqual(soundToggle.value as? String, "0", "Metronome sound should be enabled by default")
-        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["settings.metronomeLink"], in: app))
-        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["settings.scoresLink"], in: app))
-        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["settings.privacyLink"], in: app))
-        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["settings.termsLink"], in: app))
-        XCTAssertTrue(waitForElementOrScroll(app.descendants(matching: .any)["settings.supportLink"], in: app))
+        XCTAssertTrue(app.descendants(matching: .any)["settings.metronomeLink"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["settings.scoresLink"].waitForExistence(timeout: 5))
+        let classesLink = app.descendants(matching: .any)["settings.classesLink"]
+        XCTAssertTrue(classesLink.waitForExistence(timeout: 5))
+        classesLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.classes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["classes.activePicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Demo brass studio"].exists)
+        XCTAssertTrue(app.staticTexts["Second demo class"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["classes.leave.1"].exists)
+        app.navigationBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["settings.privacyLink"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["settings.termsLink"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["settings.supportLink"].waitForExistence(timeout: 5))
 
         let clearData = app.descendants(matching: .any)["settings.clearLocalData"]
-        XCTAssertTrue(waitForElementOrScroll(clearData, in: app))
+        XCTAssertTrue(clearData.waitForExistence(timeout: 5))
         clearData.tap()
         assertDestructiveAlert(
             title: "Delete practice data?",
@@ -133,7 +143,7 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("Settings", in: app)
         let clearDataAgain = app.descendants(matching: .any)["settings.clearLocalData"]
-        XCTAssertTrue(waitForElementOrScroll(clearDataAgain, in: app))
+        XCTAssertTrue(clearDataAgain.waitForExistence(timeout: 5))
         clearDataAgain.tap()
         assertDestructiveAlert(
             title: "Delete practice data?",
@@ -150,7 +160,7 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("Settings", in: app)
         let clearAllData = app.descendants(matching: .any)["settings.deleteAccount"]
-        XCTAssertTrue(waitForElementOrScroll(clearAllData, in: app))
+        XCTAssertTrue(clearAllData.waitForExistence(timeout: 5))
         clearAllData.tap()
         assertDestructiveAlert(
             title: "Clear all app data?",
@@ -204,23 +214,6 @@ final class BrassTuneAppUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
         return elements.contains(where: \.exists)
-    }
-
-    @MainActor
-    private func waitForElementOrScroll(
-        _ element: XCUIElement,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 8
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if element.exists, element.isHittable {
-                return true
-            }
-            app.swipeUp()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.10))
-        }
-        return element.exists && element.isHittable
     }
 
     @MainActor

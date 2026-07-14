@@ -1,6 +1,9 @@
 import datetime as dt
+import os
 from typing import Dict, List, Optional
 
+from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.instruments.profiles import require_instrument_profile
@@ -8,6 +11,14 @@ from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_f
 from app.core.sessions.segmentation import compute_session_summary, segment_note_events
 from app.models.db import NoteEvent, PitchSample, PracticeSession, User
 from app.services.serializers import sample_to_frame_dict, session_to_dict
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
 
 
 def get_or_create_default_user(db: Session) -> User:
@@ -34,7 +45,22 @@ def get_or_create_default_user(db: Session) -> User:
 
 def start_session(db: Session, instrument_id: str, name: Optional[str], reference_pitch_hz: float, user_id: int = 1) -> PracticeSession:
     profile = require_instrument_profile(instrument_id)
-    user = db.query(User).filter(User.id == user_id).first() or get_or_create_default_user(db)
+    # Lock the owner row so concurrent HTTP/WebSocket starts for one account
+    # serialize around the quota check on PostgreSQL.
+    user = db.query(User).filter(User.id == user_id).with_for_update().first() or get_or_create_default_user(db)
+    max_sessions = _positive_int_env("BRASSTUNE_MAX_SESSIONS_PER_USER", 5000)
+    if max_sessions:
+        session_count = int(
+            db.query(func.count(PracticeSession.id))
+            .filter(PracticeSession.user_id == user.id)
+            .scalar()
+            or 0
+        )
+        if session_count >= max_sessions:
+            raise HTTPException(
+                status_code=409,
+                detail="Session storage limit reached. Delete old cloud sessions before starting another.",
+            )
     session = PracticeSession(
         user_id=user.id,
         instrument_id=instrument_id,

@@ -33,10 +33,10 @@ Local mode permits no-token guest/demo requests. Production mode requires a toke
 
 Configure Supabase before inviting auth testers:
 
-1. Set Site URL to `https://brass-tune.vercel.app`.
+1. Set Site URL to `https://brasstune.vercel.app`.
 2. Add redirect allowlist entries for:
-   - `https://brass-tune.vercel.app/auth/callback`
-   - `https://brass-tune.vercel.app/auth/reset-password`
+   - `https://brasstune.vercel.app/auth/callback`
+   - `https://brasstune.vercel.app/auth/reset-password`
    - approved Vercel preview URL patterns used for owner-controlled testing
    - approved Vercel preview reset-password URL patterns used for owner-controlled testing
    - local development callback and reset-password URLs only for dev environments

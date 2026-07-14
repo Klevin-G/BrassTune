@@ -25,11 +25,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var playAlongSession: PlayAlongSession?
     @Published private(set) var playAlongGrade: PlayAlongGrade?
     @Published var ensembles: [EnsembleSummary] = []
+    @Published var selectedEnsembleID: EnsembleSummary.ID?
+    @Published private(set) var ensemblesLoading = false
+    @Published private(set) var ensembleMutationInProgress = false
+    @Published private(set) var ensembleStatusMessage: String?
     @Published var lastError: UserVisibleError?
 
     let audioEngine = NativeAudioEngine()
-    let apiClient = APIClient()
-    let authService = AuthService()
+    let apiClient: APIClient
+    let authService: AuthService
     private let persistenceStore: NativePersistenceStore
     private let scoreImporter: NativeScoreImportService
     private let metronomeOutput = NativeMetronomeOutput()
@@ -42,24 +46,48 @@ final class AppModel: ObservableObject {
     private var playAlongUsesFixture = false
     private var playAlongStartToken: UUID?
     private var recordingStartToken: UUID?
+    private var ensembleLoadGeneration = 0
+    private var activeEnsembleLoadID: UUID?
+    private let classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)?
 
     init(
         persistenceStore: NativePersistenceStore = .live(),
-        scoreStorageDirectory: URL? = nil
+        scoreStorageDirectory: URL? = nil,
+        apiClient: APIClient = APIClient(),
+        authService: AuthService = AuthService(),
+        classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)? = nil
     ) {
         self.persistenceStore = persistenceStore
         self.scoreImporter = NativeScoreImportService(storageDirectory: scoreStorageDirectory ?? NativeScoreImportService.defaultStorageDirectory)
+        self.apiClient = apiClient
+        self.authService = authService
+        self.classAccessTokenProvider = classAccessTokenProvider
         restoreLocalData()
         observeAudioFrames()
     }
 
     static let demoEnsembles = [
         EnsembleSummary(
-            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            id: 1,
             name: "Demo brass studio",
-            role: "Demo student",
-            activeMembers: 4,
-            focus: "Center D5 before range expansion."
+            directorUserID: nil,
+            joinCode: nil,
+            viewerRole: "student",
+            viewerCanLeave: true,
+            viewerCanManage: false,
+            createdAt: nil,
+            updatedAt: nil
+        ),
+        EnsembleSummary(
+            id: 2,
+            name: "Second demo class",
+            directorUserID: nil,
+            joinCode: nil,
+            viewerRole: "owner",
+            viewerCanLeave: false,
+            viewerCanManage: true,
+            createdAt: nil,
+            updatedAt: nil
         )
     ]
 
@@ -113,12 +141,16 @@ final class AppModel: ObservableObject {
         metronome = MetronomeSettings()
         stopMetronome()
         ensembles = NativeAudioEngine.testFixturesEnabled ? Self.demoEnsembles : []
+        selectedEnsembleID = ensembles.first?.id
+        ensembleStatusMessage = nil
         lastError = nil
     }
 
     func enterGuestDemo() {
         authState = .guest
         ensembles.removeAll()
+        selectedEnsembleID = nil
+        ensembleStatusMessage = nil
         lastError = nil
     }
 
@@ -126,6 +158,8 @@ final class AppModel: ObservableObject {
         authService.signOut()
         authState = .signedOut
         ensembles.removeAll()
+        selectedEnsembleID = nil
+        ensembleStatusMessage = nil
         lastError = nil
     }
 
@@ -138,6 +172,207 @@ final class AppModel: ObservableObject {
             if let session = authService.restoreSession() {
                 authState = .signedIn(email: session.email)
             }
+        }
+    }
+
+    func loadEnsembles() async {
+        if NativeAudioEngine.testFixturesEnabled {
+            if ensembles.isEmpty {
+                ensembles = Self.demoEnsembles
+            }
+            selectAvailableEnsemble(preferredID: selectedEnsembleID)
+            return
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch is CancellationError {
+            return
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return
+        }
+        guard !token.isEmpty else {
+            ensembles = []
+            selectedEnsembleID = nil
+            return
+        }
+        ensembleLoadGeneration += 1
+        let generation = ensembleLoadGeneration
+        let loadID = UUID()
+        activeEnsembleLoadID = loadID
+        ensemblesLoading = true
+        defer {
+            if activeEnsembleLoadID == loadID {
+                ensemblesLoading = false
+                activeEnsembleLoadID = nil
+            }
+        }
+        do {
+            let loaded = try await apiClient.request(
+                [EnsembleSummary].self,
+                path: "/api/ensemble/groups",
+                config: config,
+                bearerToken: token
+            )
+            guard !Task.isCancelled, generation == ensembleLoadGeneration else { return }
+            ensembles = loaded
+            selectAvailableEnsemble(preferredID: selectedEnsembleID)
+            ensembleStatusMessage = nil
+            lastError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == ensembleLoadGeneration else { return }
+            handleClassAuthOrNetworkError(error)
+        }
+    }
+
+    @discardableResult
+    func joinEnsemble(code: String) async -> Bool {
+        let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
+        guard (4...16).contains(normalizedCode.count) else {
+            lastError = .apiRequestFailed(statusCode: 422, message: "Enter the 4-16 character class code from your teacher.")
+            return false
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+        guard !ensembleMutationInProgress else { return false }
+        ensembleMutationInProgress = true
+        defer { ensembleMutationInProgress = false }
+        do {
+            let body = try JSONSerialization.data(withJSONObject: [
+                "code": normalizedCode,
+                "instrument_id": selectedInstrumentId,
+            ])
+            let response = try await apiClient.request(
+                EnsembleJoinResponse.self,
+                path: "/api/ensemble/join",
+                method: "POST",
+                body: body,
+                config: config,
+                bearerToken: token
+            )
+            selectedEnsembleID = response.groupID
+            ensembleLoadGeneration += 1
+            if !ensembles.contains(where: { $0.id == response.groupID }) {
+                ensembles.append(
+                    EnsembleSummary(
+                        id: response.groupID,
+                        name: response.groupName,
+                        directorUserID: nil,
+                        joinCode: nil,
+                        viewerRole: "student",
+                        viewerCanLeave: true,
+                        viewerCanManage: false,
+                        createdAt: nil,
+                        updatedAt: nil
+                    )
+                )
+                ensembles.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            }
+            await loadEnsembles()
+            ensembleStatusMessage = "Joined \(response.groupName)."
+            lastError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func leaveEnsemble(id: EnsembleSummary.ID) async -> Bool {
+        guard let target = ensembles.first(where: { $0.id == id }) else { return false }
+        guard target.canLeave else {
+            lastError = .apiRequestFailed(statusCode: 409, message: "Your \(target.viewerRoleLabel.lowercased()) role cannot leave this class through self-service.")
+            return false
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+        guard !ensembleMutationInProgress else { return false }
+        ensembleMutationInProgress = true
+        defer { ensembleMutationInProgress = false }
+        do {
+            let response = try await apiClient.request(
+                EnsembleLeaveResponse.self,
+                path: "/api/ensemble/groups/\(id)/membership",
+                method: "DELETE",
+                config: config,
+                bearerToken: token
+            )
+            guard response.left, response.groupID == id else {
+                throw UserVisibleError.malformedResponse
+            }
+            ensembleLoadGeneration += 1
+            ensembles.removeAll { $0.id == id }
+            selectAvailableEnsemble(preferredID: selectedEnsembleID == id ? nil : selectedEnsembleID)
+            ensembleStatusMessage = "Left \(target.name)."
+            lastError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+    }
+
+    private func validClassAccessToken() async throws -> String {
+        guard classAccessTokenProvider != nil || authState.usesRemoteAccount else {
+            throw UserVisibleError.apiRequestFailed(statusCode: 400, message: "Sign in before using classes.")
+        }
+        let token: String?
+        if let classAccessTokenProvider {
+            token = try await classAccessTokenProvider(config)
+        } else {
+            token = try await authService.validAccessToken(config: config)
+        }
+        guard let token, !token.isEmpty else {
+            throw UserVisibleError.apiRequestFailed(statusCode: 401, message: "Sign in before using classes.")
+        }
+        return token
+    }
+
+    private func handleClassAuthOrNetworkError(_ error: Error) {
+        let visible = (error as? UserVisibleError) ?? .networkUnavailable
+        if case .apiRequestFailed(let statusCode, _) = visible, statusCode == 401 {
+            authService.signOut()
+            authState = .signedOut
+            ensembles = []
+            selectedEnsembleID = nil
+        } else if visible == .authenticationFailed {
+            authService.signOut()
+            authState = .signedOut
+            ensembles = []
+            selectedEnsembleID = nil
+        }
+        lastError = visible
+    }
+
+    private func selectAvailableEnsemble(preferredID: EnsembleSummary.ID?) {
+        if let preferredID, ensembles.contains(where: { $0.id == preferredID }) {
+            selectedEnsembleID = preferredID
+        } else {
+            selectedEnsembleID = ensembles.first?.id
         }
     }
 
@@ -239,6 +474,8 @@ final class AppModel: ObservableObject {
         clearLocalPracticeArtifacts()
         stopMetronome()
         ensembles.removeAll()
+        selectedEnsembleID = nil
+        ensembleStatusMessage = nil
         authService.deleteStoredAuth()
         authState = .signedOut
         lastError = nil
@@ -782,6 +1019,28 @@ final class AppModel: ObservableObject {
 
 private struct BackendDeletionResponse: Decodable {
     let deleted: Bool
+}
+
+private struct EnsembleJoinResponse: Decodable {
+    let joined: Bool
+    let groupID: Int
+    let groupName: String
+
+    enum CodingKeys: String, CodingKey {
+        case joined
+        case groupID = "group_id"
+        case groupName = "group_name"
+    }
+}
+
+private struct EnsembleLeaveResponse: Decodable {
+    let left: Bool
+    let groupID: Int
+
+    enum CodingKeys: String, CodingKey {
+        case left
+        case groupID = "group_id"
+    }
 }
 
 struct NativePersistenceStore {

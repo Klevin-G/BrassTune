@@ -62,7 +62,8 @@ Required Render env vars:
 - `APP_ENV=production`
 - `BRASSTUNE_SEED_DEMO_DATA` should be unset or `0` in production. Set `1` only for a deliberate disposable demo environment.
 - `BRASSTUNE_AUTH_MODE=supabase`
-- `FRONTEND_ORIGIN=https://brass-tune.vercel.app`
+- `BRASSTUNE_TRUST_PROXY=1`. Render must keep Uvicorn proxy rewriting disabled so the application receives the raw forwarding chain. Render's current guidance reads the true client from `X-Forwarded-For`, and its rate-limit example selects the first list entry; malformed first entries fall back to the socket peer instead of scanning later values.
+- `FRONTEND_ORIGIN=https://brasstune.vercel.app`
 - `CORS_ALLOWED_ORIGINS` as an exact comma-separated allowlist for production and approved preview origins.
 - Leave `CORS_ALLOWED_ORIGIN_REGEX` empty in production unless the owner approves a tightly anchored temporary preview pattern.
 - `BRASSTUNE_DATABASE_URL` or `DATABASE_URL` pointing to PostgreSQL. Render is IPv4-only, so use the Supabase pooler endpoint unless a compatible direct connection is explicitly available.
@@ -73,6 +74,27 @@ Required Render env vars:
 - `SUPABASE_JWKS_URL` and `SUPABASE_JWT_SECRET` are reserved for a future JWKS validation path and are not required by the current backend.
 - `SESSION_AUDIO_STORAGE_BACKEND=supabase`
 - `SUPABASE_STORAGE_BUCKET=session-audio`
+- `BRASSTUNE_MAX_OWNED_CLASSES_PER_USER=10`
+- `BRASSTUNE_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER=20`
+- `BRASSTUNE_MAX_PENDING_CLASS_INVITATIONS_PER_USER=20`
+- `BRASSTUNE_MAX_SESSIONS_PER_USER=5000`
+- `BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER=524288000` (500 MiB; replacing
+  one session recording subtracts its prior size before quota evaluation)
+
+Class quota values must be between `1` and `10000`; `0`, negative, or invalid
+values fall back to the checked-in safe defaults. Session and audio quota `0`
+values deliberately disable those quotas and should be used only in local/test
+environments; negative or invalid values fall back to safe defaults.
+Export resource caps cannot be disabled: zero, negative, or invalid
+`BRASSTUNE_EXPORT_MAX_*` values fall back to their safe defaults. HTTP and
+WebSocket rate/connection limits allow `0` only as a deliberate local/test
+disable; negative or invalid values fall back to safe defaults.
+
+The Render start command uses `--no-proxy-headers`, a 256 KiB WebSocket transport
+message cap, a 16-message WebSocket queue, a 100-connection concurrency cap, and
+a 128-connection backlog. Do not replace this with `--forwarded-allow-ips '*'`:
+that makes Uvicorn rewrite the socket peer before the application can validate
+Render's header contract. See Render's [April 2026 DDoS guidance](https://render.com/articles/how-render-handles-ddos-attacks) and [first-entry contract clarification](https://feedback.render.com/features/p/send-the-correct-xforwardedfor).
 
 Liveness check for Render:
 
@@ -98,7 +120,9 @@ WebSocket:
 wss://brasstune-u8qj.onrender.com/ws/pitch
 ```
 
-WebSocket Origin checks use explicit `CORS_ALLOWED_ORIGINS`/`FRONTEND_ORIGIN` entries, not `CORS_ALLOWED_ORIGIN_REGEX`. Include `https://brass-tune.vercel.app` and any owner-approved preview/share origins explicitly when WebSocket smoke must pass from those hosts.
+WebSocket Origin checks mirror the HTTP CORS policy. Include
+`https://brasstune.vercel.app` and any owner-approved preview/share origins;
+prefer exact `CORS_ALLOWED_ORIGINS`/`FRONTEND_ORIGIN` entries.
 
 `CORS_ALLOWED_ORIGIN_REGEX` is disabled in deployed environments unless `BRASSTUNE_ALLOW_CORS_REGEX=1` is also set. Prefer exact origins for production and previews.
 
@@ -142,10 +166,10 @@ Use secret stores only. Do not commit values.
 The manual deployment workflow lives at `.github/workflows/deploy.yml`.
 Use `workflow_dispatch` with `target=frontend`, `backend`, or `all`.
 
-The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It runs after a successful `Deploy` workflow and can also be manually dispatched. It wraps:
+The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It runs after a successful `Deploy` workflow and can also be manually dispatched. For `workflow_run`, both smoke jobs explicitly check out the deploy run's `head_sha`; a manual dispatch checks out its own `github.sha`. It wraps:
 
 ```bash
-BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app \
+BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app \
 BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
 BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
 npm run smoke:hosted

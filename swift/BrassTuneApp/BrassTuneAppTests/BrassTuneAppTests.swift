@@ -3,6 +3,39 @@ import XCTest
 import BrassTuneCore
 import UIKit
 
+private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
+    struct Stub {
+        let response: HTTPURLResponse
+        let data: Data
+        var delayNanoseconds: UInt64 = 0
+    }
+
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> Stub)?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        do {
+            let stub = try handler(request)
+            if stub.delayNanoseconds > 0 {
+                Thread.sleep(forTimeInterval: Double(stub.delayNanoseconds) / 1_000_000_000)
+            }
+            client?.urlProtocol(self, didReceive: stub.response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: stub.data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
 final class BrassTuneAppTests: XCTestCase {
     // MARK: - Shipping defaults and local model behavior
 
@@ -301,14 +334,197 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(PlayAlongNoteRating(cents: .nan), .missed)
     }
 
-    func testPlayAlongExerciseCatalogUsesDetectorPitchSpellings() {
-        let detectorSpellings = Set(["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"])
-        let exerciseNotes = Set(PlayAlongExercise.library.flatMap(\.writtenNotes))
-
+    func testPlayAlongExerciseCatalogIncludesAllGroupedScalesAndPracticePatterns() {
+        let major = PlayAlongExercise.library.filter { $0.category == .major }
+        let minor = PlayAlongExercise.library.filter { $0.category == .naturalMinor }
+        let patterns = PlayAlongExercise.library.filter { $0.category == .practicePattern }
         XCTAssertEqual(PlayAlongExercise.defaultExercise.id, "cmaj")
-        XCTAssertEqual(PlayAlongExercise.library.count, 6)
-        XCTAssertTrue(exerciseNotes.isSubset(of: detectorSpellings))
+        XCTAssertEqual(major.count, 12)
+        XCTAssertEqual(minor.count, 12)
+        XCTAssertEqual(patterns.count, 3)
+        XCTAssertEqual(PlayAlongExercise.library.count, 27)
+        XCTAssertEqual(Set(PlayAlongExercise.library.map(\.id)).count, PlayAlongExercise.library.count)
+        XCTAssertTrue(["cmaj", "fmaj", "gmaj", "arpeggio", "chromatic", "longtones"].allSatisfy { id in
+            PlayAlongExercise.library.contains { $0.id == id }
+        })
         XCTAssertFalse(PlayAlongExercise.library.contains { $0.writtenNotes.isEmpty })
+    }
+
+    func testPlayAlongScaleIntervalsMatchMajorAndNaturalMinorPatterns() throws {
+        let expected: [PlayAlongExerciseCategory: [Int]] = [
+            .major: [0, 2, 4, 5, 7, 9, 11, 0],
+            .naturalMinor: [0, 2, 3, 5, 7, 8, 10, 0],
+        ]
+        for exercise in PlayAlongExercise.library where exercise.category != .practicePattern {
+            let tonic = try XCTUnwrap(testPitchClass(exercise.writtenNotes[0]), exercise.title)
+            let intervals = try exercise.writtenNotes.map { note in
+                let pitchClass = try XCTUnwrap(testPitchClass(note), "Unsupported note spelling \(note) in \(exercise.title)")
+                return (pitchClass - tonic + 12) % 12
+            }
+            XCTAssertEqual(intervals, expected[exercise.category], exercise.title)
+            XCTAssertEqual(exercise.writtenNotes.first, exercise.writtenNotes.last, exercise.title)
+        }
+    }
+
+    func testEnsembleSummaryUsesExplicitViewerCapabilitiesWithoutJoinCodeInference() throws {
+        let decoder = JSONDecoder()
+        let owner = try decoder.decode(
+            EnsembleSummary.self,
+            from: Data(#"{"id":1,"name":"Wind Ensemble","director_user_id":42,"join_code":null,"viewer_role":"owner","viewer_can_leave":false,"viewer_can_manage":true,"created_at":"2026-07-12T12:00:00.123456","updated_at":"2026-07-12T12:00:00.123456"}"#.utf8)
+        )
+        let member = try decoder.decode(
+            EnsembleSummary.self,
+            from: Data(#"{"id":2,"name":"Brass Choir","join_code":"VISIBLE-BUT-NOT-AUTHZ","viewer_role":"assistant","viewer_can_leave":true,"viewer_can_manage":false,"created_at":"2026-07-12T12:00:00","updated_at":"2026-07-12T12:00:00"}"#.utf8)
+        )
+
+        XCTAssertFalse(owner.canLeave)
+        XCTAssertTrue(member.canLeave)
+        XCTAssertEqual(owner.viewerRoleLabel, "Class owner")
+        XCTAssertEqual(member.viewerRoleLabel, "Assistant")
+    }
+
+    func testAPIClientPreservesFastAPIValidationMessagesAndCancellation() async throws {
+        let session = makeStubSession()
+        let client = APIClient(session: session)
+        let baseURL = URL(string: "https://api.example.test")!
+        let config = AppConfig(environment: .staging, apiBaseURL: baseURL, supabaseURL: nil, supabasePublishableKey: nil)
+
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 422, httpVersion: nil, headerFields: nil)!
+            let data = Data(#"{"detail":[{"loc":["body","code"],"msg":"Class code must contain 4-16 characters","type":"value_error"},{"loc":["body","instrument_id"],"msg":"Instrument is not supported","type":"value_error"}]}"#.utf8)
+            return .init(response: response, data: data)
+        }
+        do {
+            let _: TestAPIResponse = try await client.request(TestAPIResponse.self, path: "/api/ensemble/join", config: config)
+            XCTFail("Expected validation failure")
+        } catch let error as UserVisibleError {
+            XCTAssertEqual(
+                error,
+                .apiRequestFailed(
+                    statusCode: 422,
+                    message: "Class code must contain 4-16 characters Instrument is not supported"
+                )
+            )
+        }
+
+        StubURLProtocol.handler = { _ in throw URLError(.cancelled) }
+        do {
+            let _: TestAPIResponse = try await client.request(TestAPIResponse.self, path: "/api/ensemble/groups", config: config)
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            // Expected: view-lifecycle cancellation is not surfaced as a network error.
+        }
+        StubURLProtocol.handler = nil
+    }
+
+    @MainActor
+    func testClassJoinAndLeaveUseExpectedAPIContractAndBearer() async throws {
+        let session = makeStubSession()
+        let client = APIClient(session: session)
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            apiClient: client,
+            classAccessTokenProvider: { _ in "fresh-token" }
+        )
+        model.config = AppConfig(
+            environment: .staging,
+            apiBaseURL: URL(string: "https://api.example.test")!,
+            supabaseURL: nil,
+            supabasePublishableKey: nil
+        )
+        nonisolated(unsafe) var capturedRequests: [CapturedRequest] = []
+        StubURLProtocol.handler = { request in
+            capturedRequests.append(
+                CapturedRequest(
+                    method: request.httpMethod ?? "GET",
+                    path: request.url?.path ?? "",
+                    authorization: request.value(forHTTPHeaderField: "Authorization"),
+                    body: requestBodyData(request)
+                )
+            )
+            let path = request.url!.path
+            let data: Data
+            if request.httpMethod == "POST" {
+                data = Data(#"{"joined":true,"group_id":7,"group_name":"Jazz Band"}"#.utf8)
+            } else if request.httpMethod == "DELETE" {
+                data = Data(#"{"left":true,"group_id":7}"#.utf8)
+            } else if path == "/api/ensemble/groups" {
+                data = Data(#"[{"id":7,"name":"Jazz Band","viewer_role":"student","viewer_can_leave":true,"viewer_can_manage":false}]"#.utf8)
+            } else {
+                data = Data()
+            }
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: data
+            )
+        }
+
+        let joined = await model.joinEnsemble(code: " ab cd ")
+        XCTAssertTrue(joined)
+        XCTAssertEqual(model.ensembles.map(\.id), [7])
+        let left = await model.leaveEnsemble(id: 7)
+        XCTAssertTrue(left)
+        XCTAssertTrue(model.ensembles.isEmpty)
+
+        let post = try XCTUnwrap(capturedRequests.first { $0.method == "POST" })
+        XCTAssertEqual(post.path, "/api/ensemble/join")
+        XCTAssertEqual(post.authorization, "Bearer fresh-token")
+        let body = try XCTUnwrap(post.body)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(payload["code"], "ABCD")
+        XCTAssertEqual(payload["instrument_id"], "trumpet")
+        let delete = try XCTUnwrap(capturedRequests.first { $0.method == "DELETE" })
+        XCTAssertEqual(delete.path, "/api/ensemble/groups/7/membership")
+        XCTAssertEqual(delete.authorization, "Bearer fresh-token")
+        StubURLProtocol.handler = nil
+    }
+
+    @MainActor
+    func testOlderClassLoadCannotOverwritePostJoinAuthoritativeRefresh() async throws {
+        let session = makeStubSession()
+        let client = APIClient(session: session)
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            apiClient: client,
+            classAccessTokenProvider: { _ in "fresh-token" }
+        )
+        model.config = AppConfig(
+            environment: .staging,
+            apiBaseURL: URL(string: "https://api.example.test")!,
+            supabaseURL: nil,
+            supabasePublishableKey: nil
+        )
+        nonisolated(unsafe) var getCount = 0
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.httpMethod == "POST" {
+                return .init(response: response, data: Data(#"{"joined":true,"group_id":2,"group_name":"New Class"}"#.utf8))
+            }
+            getCount += 1
+            if getCount == 1 {
+                return .init(
+                    response: response,
+                    data: Data(#"[{"id":1,"name":"Stale Class","viewer_role":"student","viewer_can_leave":true,"viewer_can_manage":false}]"#.utf8),
+                    delayNanoseconds: 250_000_000
+                )
+            }
+            return .init(
+                response: response,
+                data: Data(#"[{"id":2,"name":"New Class","viewer_role":"student","viewer_can_leave":true,"viewer_can_manage":false}]"#.utf8)
+            )
+        }
+
+        async let staleLoad: Void = model.loadEnsembles()
+        try await Task.sleep(nanoseconds: 40_000_000)
+        let joined = await model.joinEnsemble(code: "ABCD")
+        XCTAssertTrue(joined)
+        await staleLoad
+
+        XCTAssertEqual(model.ensembles.map(\.id), [2])
+        XCTAssertEqual(model.selectedEnsembleID, 2)
+        StubURLProtocol.handler = nil
     }
 
     func testPlayAlongAdvancesAfterSustainedCorrectWrittenPitchClass() {
@@ -676,4 +892,56 @@ final class BrassTuneAppTests: XCTestCase {
         }
         return try XCTUnwrap(image.pngData())
     }
+
+    private func testPitchClass(_ note: String) -> Int? {
+        let normalized = note
+            .replacingOccurrences(of: "♯", with: "#")
+            .replacingOccurrences(of: "♭", with: "b")
+        return [
+            "C": 0, "B#": 0,
+            "C#": 1, "Db": 1,
+            "D": 2,
+            "D#": 3, "Eb": 3,
+            "E": 4, "Fb": 4,
+            "E#": 5, "F": 5,
+            "F#": 6, "Gb": 6,
+            "G": 7,
+            "G#": 8, "Ab": 8,
+            "A": 9,
+            "A#": 10, "Bb": 10,
+            "B": 11, "Cb": 11,
+        ][normalized]
+    }
+
+    private func makeStubSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+}
+
+private struct TestAPIResponse: Decodable {
+    let ok: Bool?
+}
+
+private struct CapturedRequest {
+    let method: String
+    let path: String
+    let authorization: String?
+    let body: Data?
+}
+
+private func requestBodyData(_ request: URLRequest) -> Data? {
+    if let body = request.httpBody { return body }
+    guard let stream = request.httpBodyStream else { return nil }
+    stream.open()
+    defer { stream.close() }
+    var result = Data()
+    var buffer = [UInt8](repeating: 0, count: 1024)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        if count <= 0 { break }
+        result.append(buffer, count: count)
+    }
+    return result
 }

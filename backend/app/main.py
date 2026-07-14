@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
+import ipaddress
 import logging
 import os
 import re
@@ -18,8 +19,16 @@ from app.db.seed import seed_demo_data
 
 
 _RATE_LIMIT_BUCKETS = defaultdict(deque)
+_GLOBAL_RATE_LIMIT_BUCKETS = defaultdict(deque)
+_EXPENSIVE_RATE_LIMIT_BUCKETS = defaultdict(deque)
 _RATE_LIMIT_WINDOW_SECONDS = 60
 logger = logging.getLogger("brasstune.api")
+
+_NUMERIC_PATH_SEGMENT = re.compile(r"^\d+$")
+_UUID_PATH_SEGMENT = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 def should_seed_demo_data() -> bool:
@@ -53,19 +62,119 @@ def cors_origins():
 
 def _positive_int_env(name: str, default: int) -> int:
     try:
-        return max(0, int(os.getenv(name, str(default))))
-    except ValueError:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
         return default
+    return value if value >= 0 else default
 
 
-def _prune_rate_limit_buckets(now: float | None = None) -> None:
+def _prune_rate_limit_store(store, now: float | None = None) -> None:
     timestamp = time.monotonic() if now is None else now
-    for key in list(_RATE_LIMIT_BUCKETS.keys()):
-        bucket = _RATE_LIMIT_BUCKETS[key]
+    for key in list(store.keys()):
+        bucket = store[key]
         while bucket and timestamp - bucket[0] > _RATE_LIMIT_WINDOW_SECONDS:
             bucket.popleft()
         if not bucket:
-            del _RATE_LIMIT_BUCKETS[key]
+            del store[key]
+
+
+def _prune_rate_limit_buckets(now: float | None = None) -> None:
+    """Backward-compatible route-bucket pruning used by existing tests."""
+    _prune_rate_limit_store(_RATE_LIMIT_BUCKETS, now)
+
+
+def _ensure_rate_limit_capacity(store, max_buckets: int, now: float) -> None:
+    """Keep limiter memory bounded without letting a cardinality attack deny all
+    previously unseen clients/routes. The independent per-client global bucket
+    remains the primary anti-rotation control."""
+    if not max_buckets or len(store) < max_buckets:
+        return
+    _prune_rate_limit_store(store, now)
+    while len(store) >= max_buckets:
+        oldest_key = min(
+            store,
+            key=lambda key: store[key][-1] if store[key] else float("-inf"),
+        )
+        del store[oldest_key]
+
+
+def _consume_rate_limit(store, key, limit: int, max_buckets: int, now: float) -> bool:
+    if not limit:
+        return True
+    if key not in store:
+        _ensure_rate_limit_capacity(store, max_buckets, now)
+    bucket = store[key]
+    while bucket and now - bucket[0] > _RATE_LIMIT_WINDOW_SECONDS:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        return False
+    bucket.append(now)
+    return True
+
+
+def _canonical_rate_limit_path(path: str) -> str:
+    segments = []
+    for segment in path.split("/"):
+        if _NUMERIC_PATH_SEGMENT.fullmatch(segment):
+            segments.append("{id}")
+        elif _UUID_PATH_SEGMENT.fullmatch(segment):
+            segments.append("{uuid}")
+        else:
+            segments.append(segment)
+    return "/".join(segments) or "/"
+
+
+def _trusted_forwarded_client(request: Request) -> str | None:
+    if os.getenv("BRASSTUNE_TRUST_PROXY", "").strip().lower() not in {"1", "true", "yes"}:
+        return None
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if not forwarded or len(forwarded) > 1024:
+        return None
+    # Render's documented rate-limit example uses the first X-Forwarded-For
+    # entry, and Render staff state that the platform sets that entry to the
+    # real client address. Never scan later entries after a malformed first
+    # value: those values can originate in an untrusted incoming chain.
+    candidate = forwarded.split(",", 1)[0].strip()
+    if not candidate or len(candidate) > 64 or "%" in candidate:
+        return None
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
+
+
+def _request_client_host(request: Request) -> str:
+    return _trusted_forwarded_client(request) or (request.client.host if request.client else "unknown")
+
+
+def _expensive_operation_family(request: Request, canonical_path: str) -> tuple[str, int] | None:
+    method = request.method.upper()
+    if method == "POST" and canonical_path == "/api/ensemble/join":
+        return "class-join", _positive_int_env("BRASSTUNE_CLASS_JOIN_RATE_LIMIT_PER_MINUTE", 10)
+
+    is_expensive_mutation = method in {"POST", "PUT", "PATCH", "DELETE"} and (
+        canonical_path == "/api/ensemble/groups"
+        or canonical_path.endswith("/members/by-username")
+        or canonical_path.endswith("/audio")
+        or canonical_path == "/api/sessions/start"
+        or canonical_path == "/api/users/me"
+    )
+    if is_expensive_mutation:
+        if canonical_path.endswith("/audio"):
+            family = "audio-upload"
+        elif canonical_path.endswith("/members/by-username"):
+            family = "class-invite"
+        elif canonical_path == "/api/ensemble/groups":
+            family = "class-create"
+        elif canonical_path == "/api/sessions/start":
+            family = "session-start"
+        else:
+            family = "account-mutation"
+        return family, _positive_int_env("BRASSTUNE_EXPENSIVE_MUTATION_RATE_LIMIT_PER_MINUTE", 60)
+
+    if method == "GET" and (canonical_path.endswith(".zip") or canonical_path.endswith("/export.zip")):
+        return "large-export", _positive_int_env("BRASSTUNE_EXPENSIVE_READ_RATE_LIMIT_PER_MINUTE", 10)
+    return None
 
 
 class JSONBodyLimitMiddleware:
@@ -163,29 +272,44 @@ async def request_abuse_limits(request: Request, call_next):
         except ValueError:
             return harden_response(JSONResponse({"detail": "Invalid request size."}, status_code=400))
 
-    rate_limit = _positive_int_env("BRASSTUNE_RATE_LIMIT_PER_MINUTE", 900)
-    if rate_limit and request.url.path not in {"/api/health", "/api/live"}:
-        # Behind a reverse proxy/CDN (Render/Vercel), request.client.host is the
-        # proxy IP and would collapse every user into one bucket. When
-        # BRASSTUNE_TRUST_PROXY is set, use the first X-Forwarded-For hop instead.
-        client_host = request.client.host if request.client else "unknown"
-        if os.getenv("BRASSTUNE_TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"}:
-            forwarded = request.headers.get("x-forwarded-for")
-            if forwarded:
-                client_host = forwarded.split(",")[0].strip() or client_host
-        key = (client_host, request.url.path)
+    if request.url.path not in {"/api/health", "/api/live"}:
+        client_host = _request_client_host(request)
+        canonical_path = _canonical_rate_limit_path(request.url.path)
         now = time.monotonic()
         max_buckets = _positive_int_env("BRASSTUNE_RATE_LIMIT_MAX_BUCKETS", 10000)
-        if max_buckets and key not in _RATE_LIMIT_BUCKETS and len(_RATE_LIMIT_BUCKETS) >= max_buckets:
-            _prune_rate_limit_buckets(now)
-            if len(_RATE_LIMIT_BUCKETS) >= max_buckets:
-                return harden_response(JSONResponse({"detail": "Too many request sources. Try again soon."}, status_code=429))
-        bucket = _RATE_LIMIT_BUCKETS[key]
-        while bucket and now - bucket[0] > _RATE_LIMIT_WINDOW_SECONDS:
-            bucket.popleft()
-        if len(bucket) >= rate_limit:
+        max_clients = _positive_int_env("BRASSTUNE_RATE_LIMIT_MAX_CLIENTS", 10000)
+
+        global_limit = _positive_int_env("BRASSTUNE_GLOBAL_RATE_LIMIT_PER_MINUTE", 1800)
+        if not _consume_rate_limit(
+            _GLOBAL_RATE_LIMIT_BUCKETS,
+            client_host,
+            global_limit,
+            max_clients,
+            now,
+        ):
             return harden_response(JSONResponse({"detail": "Too many requests. Try again soon."}, status_code=429))
-        bucket.append(now)
+
+        route_limit = _positive_int_env("BRASSTUNE_RATE_LIMIT_PER_MINUTE", 900)
+        if not _consume_rate_limit(
+            _RATE_LIMIT_BUCKETS,
+            (client_host, canonical_path),
+            route_limit,
+            max_buckets,
+            now,
+        ):
+            return harden_response(JSONResponse({"detail": "Too many requests. Try again soon."}, status_code=429))
+
+        expensive = _expensive_operation_family(request, canonical_path)
+        if expensive is not None:
+            family, operation_limit = expensive
+            if not _consume_rate_limit(
+                _EXPENSIVE_RATE_LIMIT_BUCKETS,
+                (client_host, family),
+                operation_limit,
+                max_buckets,
+                now,
+            ):
+                return harden_response(JSONResponse({"detail": "Too many requests for this operation. Try again soon."}, status_code=429))
 
     try:
         response = await call_next(request)

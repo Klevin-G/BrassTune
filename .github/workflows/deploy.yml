@@ -39,8 +39,8 @@ jobs:
       VITE_SUPABASE_GOOGLE_ENABLED: ${{ vars.VITE_AUTH_GOOGLE_ENABLED || secrets.VITE_AUTH_GOOGLE_ENABLED || 'false' }}
       VITE_SUPABASE_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED || secrets.VITE_AUTH_APPLE_ENABLED || 'false' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm
@@ -63,10 +63,10 @@ jobs:
       BRASSTUNE_API_BASE_URL: ${{ vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Trigger Render deploy hook
         run: curl --max-time 30 -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
       - name: Wait for Render backend release

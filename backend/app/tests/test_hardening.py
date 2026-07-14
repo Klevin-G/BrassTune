@@ -6,6 +6,7 @@ import math
 import asyncio
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -13,22 +14,46 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
 from app.api.auth import AuthContext, _sync_supabase_user, delete_supabase_identity
-from app.api.routes import _filtered_events, _group_scoped_sessions, _read_limited_body, delete_my_account, retry_account_deletion_jobs
+from app.api.routes import (
+    _filtered_events,
+    _group_scoped_sessions,
+    _read_limited_body,
+    accept_invitation,
+    add_member_by_username,
+    create_ensemble_group,
+    delete_my_account,
+    get_ensemble_group,
+    join_ensemble_by_code,
+    leave_ensemble_group,
+    list_ensemble_groups,
+    retry_account_deletion_jobs,
+    rotate_ensemble_join_code,
+    update_ensemble_member,
+)
 from app.core.security import allowed_origins, cors_allowed_origin_regex
 from app.core.analytics.stats import build_instrument_heatmap, calculate_most_improved_notes, calculate_note_stats
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
 from app.core.pitch.detector import yin_pitch
-from app.db.database import Base, DATABASE_URL, engine
+from app.db.database import Base, DATABASE_URL, SessionLocal, engine
 from app.db.maintenance import clear_practice_data, repair_demo_data
 from app.db.seed import seed_demo_data
 from app.main import app
-from app.models.db import AccountDeletionJob, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, User
-from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AccountDeletionRequest
+from app.models.db import AccountDeletionJob, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, UsageEvent, User
+from app.schemas.schemas import (
+    MAX_BATCH_PITCH_FRAMES,
+    AcceptInvitationRequest,
+    AccountDeletionRequest,
+    AddMemberByUsernameRequest,
+    CreateGroupRequest,
+    JoinByCodeRequest,
+    UpdateGroupMemberRequest,
+)
 from app.services.audio_storage import delete_audio_for_session
 from app.services.session_service import save_pitch_frames
 
@@ -293,6 +318,46 @@ def test_postgres_readiness_requires_account_deletion_counts_jsonb():
         "account_deletion_jobs",
         [{"name": "counts_json", "type": "JSONB"}],
     ) == []
+
+
+def test_postgres_readiness_accepts_exact_membership_unique_constraint_or_index():
+    from app.db.readiness import _postgres_unique_key_issues
+
+    assert _postgres_unique_key_issues(
+        "group_members",
+        [{"name": "uq_group_members_group_user", "column_names": ["group_id", "user_id"]}],
+        [],
+    ) == []
+    assert _postgres_unique_key_issues(
+        "group_members",
+        [],
+        [{"name": "group_members_group_user_key", "column_names": ["group_id", "user_id"], "unique": True}],
+    ) == []
+
+
+def test_postgres_readiness_rejects_nonunique_partial_or_inexact_membership_indexes():
+    from app.db.readiness import _postgres_unique_key_issues
+
+    expected = ["Missing unique constraint or index on group_members(group_id, user_id)."]
+    assert _postgres_unique_key_issues(
+        "group_members",
+        [],
+        [{"column_names": ["group_id", "user_id"], "unique": False}],
+    ) == expected
+    assert _postgres_unique_key_issues(
+        "group_members",
+        [],
+        [{
+            "column_names": ["group_id", "user_id"],
+            "unique": True,
+            "dialect_options": {"postgresql_where": "status = 'active'"},
+        }],
+    ) == expected
+    assert _postgres_unique_key_issues(
+        "group_members",
+        [{"column_names": ["user_id", "group_id"]}],
+        [{"column_names": ["group_id", "user_id", "status"], "unique": True}],
+    ) == expected
 
 
 def test_websocket_audio_frame_returns_pitch_frame_for_synthetic_pcm():
@@ -773,14 +838,14 @@ def test_director_can_add_member_by_username_but_student_cannot():
         assert missing_response.status_code == 404
 
 
-def test_director_cannot_readd_active_member_and_overwrite_role():
+def test_director_cannot_silently_elevate_or_readd_active_member():
     with TestClient(app) as client:
         response = client.patch(
             "/api/ensemble/groups/1/members/1",
             headers={"Authorization": "Bearer dev-user-2"},
             json={"role_in_group": "assistant", "instrument_id": "horn"},
         )
-        assert response.status_code == 200
+        assert response.status_code == 409
         duplicate = client.post(
             "/api/ensemble/groups/1/members/by-username",
             headers={"Authorization": "Bearer dev-user-2"},
@@ -789,14 +854,8 @@ def test_director_cannot_readd_active_member_and_overwrite_role():
         assert duplicate.status_code == 409
         group = client.get("/api/ensemble/groups/1", headers={"Authorization": "Bearer dev-user-2"}).json()
     avery = next(member for member in group["members"] if member["username"] == "avery")
-    assert avery["role_in_group"] == "assistant"
-    assert avery["instrument_id"] == "horn"
-    with TestClient(app) as client:
-        client.patch(
-            "/api/ensemble/groups/1/members/1",
-            headers={"Authorization": "Bearer dev-user-2"},
-            json={"role_in_group": "student", "instrument_id": "trumpet"},
-        )
+    assert avery["role_in_group"] == "student"
+    assert avery["instrument_id"] == "trumpet"
 
 
 def test_websocket_stop_session_requires_owner_or_admin():
@@ -1615,6 +1674,566 @@ def test_self_join_by_class_code():
         # The joined student now appears on the roster.
         roster = client.get(f"/api/ensemble/groups/{gid}/roster", headers={"Authorization": "Bearer dev-user-1"}).json()
         assert any(s["username"] == "maya" and s["instrument_id"] == "trumpet" for s in roster["students"])
+
+
+def test_member_can_join_multiple_classes_and_leave_only_one():
+    with TestClient(app) as client:
+        first = _create_class(client, "dev-user-1", "Multi Membership One")
+        second = _create_class(client, "dev-user-1", "Multi Membership Two")
+        headers = {"Authorization": "Bearer dev-user-4"}
+        for group in (first, second):
+            joined = client.post(
+                "/api/ensemble/join",
+                headers=headers,
+                json={"code": group["join_code"], "instrument_id": "trombone"},
+            )
+            assert joined.status_code == 200, joined.text
+
+        before = client.get("/api/ensemble/groups", headers=headers).json()
+        assert {first["id"], second["id"]}.issubset({group["id"] for group in before})
+
+        left = client.delete(f"/api/ensemble/groups/{first['id']}/membership", headers=headers)
+        assert left.status_code == 200, left.text
+        assert left.json() == {"left": True, "group_id": first["id"]}
+        after = client.get("/api/ensemble/groups", headers=headers).json()
+        after_ids = {group["id"] for group in after}
+        assert first["id"] not in after_ids
+        assert second["id"] in after_ids
+        assert client.get(f"/api/ensemble/groups/{first['id']}", headers=headers).status_code == 403
+        assert client.get(f"/api/ensemble/groups/{second['id']}", headers=headers).status_code == 200
+
+
+def test_leave_is_self_scoped_and_class_owner_cannot_leave():
+    with TestClient(app) as client:
+        group = _create_class(client, "dev-user-1", "Leave Authorization Class")
+        member_headers = {"Authorization": "Bearer dev-user-4"}
+        joined = client.post(
+            "/api/ensemble/join",
+            headers=member_headers,
+            json={"code": group["join_code"]},
+        )
+        assert joined.status_code == 200, joined.text
+
+        not_a_member = client.delete(
+            f"/api/ensemble/groups/{group['id']}/membership",
+            headers={"Authorization": "Bearer dev-user-3"},
+        )
+        assert not_a_member.status_code == 404
+        assert client.get(f"/api/ensemble/groups/{group['id']}", headers=member_headers).status_code == 200
+
+        owner = client.delete(
+            f"/api/ensemble/groups/{group['id']}/membership",
+            headers={"Authorization": "Bearer dev-user-1"},
+        )
+        assert owner.status_code == 409
+        assert "owner" in owner.json()["detail"].lower()
+
+
+def test_join_code_rejoin_resets_removed_elevated_role_and_timestamps():
+    with TestClient(app) as client:
+        group = _create_class(client, "dev-user-1", "Safe Rejoin Class")
+        invited = client.post(
+            f"/api/ensemble/groups/{group['id']}/members/by-username",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"username": "luis", "role_in_group": "assistant"},
+        )
+        assert invited.status_code == 200, invited.text
+        member_id = invited.json()["id"]
+        accepted = client.post(
+            f"/api/ensemble/invitations/{member_id}/accept",
+            headers={"Authorization": "Bearer dev-user-4"},
+            json={"instrument_id": "trombone"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        assistant_details = client.get(
+            f"/api/ensemble/groups/{group['id']}",
+            headers={"Authorization": "Bearer dev-user-4"},
+        ).json()
+        assert assistant_details["roster_scope"] == "active_redacted"
+        assert "join_code" not in assistant_details
+        assert "director_user_id" not in assistant_details
+        assert all("user_id" not in member and "username" not in member for member in assistant_details["members"])
+        first_active_since = next(
+            member["active_since"]
+            for member in assistant_details["members"]
+            if member["id"] == member_id
+        )
+
+        removed = client.delete(
+            f"/api/ensemble/groups/{group['id']}/members/{member_id}",
+            headers={"Authorization": "Bearer dev-user-1"},
+        )
+        assert removed.status_code == 200, removed.text
+        rejoined = client.post(
+            "/api/ensemble/join",
+            headers={"Authorization": "Bearer dev-user-4"},
+            json={"code": group["join_code"], "instrument_id": "tuba"},
+        )
+        assert rejoined.status_code == 200, rejoined.text
+
+        details = client.get(
+            f"/api/ensemble/groups/{group['id']}",
+            headers={"Authorization": "Bearer dev-user-4"},
+        ).json()
+        membership = details["members"][0]
+        assert details["roster_scope"] == "self"
+        assert "join_code" not in details
+        assert "director_user_id" not in details
+        assert membership["role_in_group"] == "student"
+        assert membership["instrument_id"] == "tuba"
+        assert membership["removed_at"] is None
+        assert membership["active_since"] >= first_active_since
+
+
+def test_global_director_role_does_not_reveal_other_class_management_fields():
+    with TestClient(app) as client:
+        owned = _create_class(client, "dev-user-1", "Owned Redaction Class")
+        foreign = _create_class(client, "dev-user-2", "Foreign Redaction Class")
+        joined = client.post(
+            "/api/ensemble/join",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"code": foreign["join_code"]},
+        )
+        assert joined.status_code == 200, joined.text
+
+        groups = client.get(
+            "/api/ensemble/groups",
+            headers={"Authorization": "Bearer dev-user-1"},
+        ).json()
+        owned_payload = next(group for group in groups if group["id"] == owned["id"])
+        foreign_payload = next(group for group in groups if group["id"] == foreign["id"])
+        assert owned_payload["join_code"] == owned["join_code"]
+        assert owned_payload["director_user_id"] == 1
+        assert "join_code" not in foreign_payload
+        assert "director_user_id" not in foreign_payload
+
+
+def test_group_membership_is_unique_per_user_and_group():
+    db = _test_db()
+    try:
+        db.add_all([
+            User(id=301, username="unique301", name="Unique Director", role="director", primary_instrument_id="trumpet"),
+            User(id=302, username="unique302", name="Unique Student", role="student", primary_instrument_id="horn"),
+        ])
+        db.commit()
+        group = Group(name="Unique Membership Class", director_user_id=301, join_code="UNIQ42")
+        db.add(group)
+        db.commit()
+        db.refresh(group)
+        db.add(GroupMember(group_id=group.id, user_id=302, instrument_id="horn"))
+        db.commit()
+        db.add(GroupMember(group_id=group.id, user_id=302, instrument_id="horn"))
+        with pytest.raises(IntegrityError):
+            db.commit()
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_concurrent_join_integrity_error_is_only_translated_for_verified_active_member():
+    group = Group(id=401, name="Concurrent Join Class", director_user_id=402, join_code="RACE42")
+    concurrent = GroupMember(group_id=401, user_id=403, instrument_id="horn", status="active")
+
+    class FakeQuery:
+        def __init__(self, first_result):
+            self.first_result = first_result
+
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return self.first_result
+
+        def count(self):
+            return 0
+
+        def with_for_update(self):
+            return self
+
+    class FakeDB:
+        def __init__(self, concurrent_result):
+            self.concurrent_result = concurrent_result
+            self.membership_queries = 0
+            self.rolled_back = False
+
+        def query(self, model):
+            if model is Group:
+                return FakeQuery(group)
+            if model is User.id:
+                return FakeQuery(None)
+            self.membership_queries += 1
+            return FakeQuery(None if self.membership_queries == 1 else self.concurrent_result)
+
+        def add(self, _member):
+            return None
+
+        def commit(self):
+            raise IntegrityError("insert group membership", {}, Exception("unique violation"))
+
+        def rollback(self):
+            self.rolled_back = True
+
+    auth = SimpleNamespace(user=SimpleNamespace(id=403, primary_instrument_id="horn"))
+    payload = JoinByCodeRequest(code="RACE42")
+
+    winning_db = FakeDB(concurrent)
+    with pytest.raises(HTTPException) as conflict:
+        join_ensemble_by_code(payload, db=winning_db, auth=auth)
+    assert conflict.value.status_code == 409
+    assert "already" in conflict.value.detail.lower()
+    assert winning_db.rolled_back is True
+
+    unrelated_db = FakeDB(None)
+    with pytest.raises(IntegrityError):
+        join_ensemble_by_code(payload, db=unrelated_db, auth=auth)
+    assert unrelated_db.rolled_back is True
+
+
+def test_manager_cannot_reactivate_member_after_join_and_leave():
+    with TestClient(app) as client:
+        group = _create_class(client, "dev-user-1", "Consent After Leave Class")
+        joined = client.post(
+            "/api/ensemble/join",
+            headers={"Authorization": "Bearer dev-user-3"},
+            json={"code": group["join_code"], "instrument_id": "horn"},
+        )
+        assert joined.status_code == 200, joined.text
+        owner_view = client.get(
+            f"/api/ensemble/groups/{group['id']}",
+            headers={"Authorization": "Bearer dev-user-1"},
+        ).json()
+        member_id = next(member["id"] for member in owner_view["members"] if member.get("username") == "maya")
+
+        left = client.delete(
+            f"/api/ensemble/groups/{group['id']}/membership",
+            headers={"Authorization": "Bearer dev-user-3"},
+        )
+        assert left.status_code == 200, left.text
+        forced = client.patch(
+            f"/api/ensemble/groups/{group['id']}/members/{member_id}",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"status": "active"},
+        )
+        assert forced.status_code == 409
+        group_after = client.get(
+            f"/api/ensemble/groups/{group['id']}",
+            headers={"Authorization": "Bearer dev-user-1"},
+        ).json()
+        maya = next(member for member in group_after["members"] if member["id"] == member_id)
+        assert maya["status"] == "removed"
+
+
+def test_class_ownership_active_membership_and_pending_invitation_quotas(monkeypatch):
+    db = _test_db()
+    try:
+        owner = User(id=610, username="owner610", name="Owner", role="student", primary_instrument_id="trumpet")
+        student = User(id=611, username="student611", name="Student", role="student", primary_instrument_id="horn")
+        db.add_all([owner, student])
+        db.commit()
+
+        monkeypatch.setenv("BRASSTUNE_MAX_OWNED_CLASSES_PER_USER", "1")
+        first = create_ensemble_group(CreateGroupRequest(name="Owned One"), db=db, auth=AuthContext(user=owner))
+        with pytest.raises(HTTPException) as ownership_limit:
+            create_ensemble_group(CreateGroupRequest(name="Owned Two"), db=db, auth=AuthContext(user=owner))
+        assert ownership_limit.value.status_code == 409
+        assert "ownership limit" in ownership_limit.value.detail
+
+        second_group = Group(name="Membership Two", director_user_id=owner.id, join_code="MEMB2345")
+        db.add(second_group)
+        db.commit()
+        db.refresh(second_group)
+        db.add(GroupMember(group_id=first["id"], user_id=student.id, instrument_id="horn", status="active"))
+        db.commit()
+        monkeypatch.setenv("BRASSTUNE_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER", "1")
+        with pytest.raises(HTTPException) as membership_limit:
+            join_ensemble_by_code(JoinByCodeRequest(code=second_group.join_code), db=db, auth=AuthContext(user=student))
+        assert membership_limit.value.status_code == 409
+        assert "active class limit" in membership_limit.value.detail
+
+        third_group = Group(name="Invite One", director_user_id=owner.id, join_code="INVT2345")
+        fourth_group = Group(name="Invite Two", director_user_id=owner.id, join_code="INVT6789")
+        db.add_all([third_group, fourth_group])
+        db.commit()
+        db.refresh(third_group)
+        db.refresh(fourth_group)
+        db.add(GroupMember(group_id=third_group.id, user_id=student.id, instrument_id="horn", status="invited"))
+        db.commit()
+        monkeypatch.setenv("BRASSTUNE_MAX_PENDING_CLASS_INVITATIONS_PER_USER", "1")
+        with pytest.raises(HTTPException) as invitation_limit:
+            add_member_by_username(
+                fourth_group.id,
+                AddMemberByUsernameRequest(username=student.username),
+                db=db,
+                auth=AuthContext(user=owner),
+            )
+        assert invitation_limit.value.status_code == 409
+        assert invitation_limit.value.detail == "That username could not be invited right now."
+    finally:
+        db.close()
+
+
+def test_invitation_acceptance_respects_active_membership_quota(monkeypatch):
+    db = _test_db()
+    try:
+        owner = User(id=612, username="owner612", name="Owner", role="director", primary_instrument_id="trumpet")
+        student = User(id=613, username="student613", name="Student", role="student", primary_instrument_id="horn")
+        db.add_all([owner, student])
+        db.commit()
+        groups = [
+            Group(name="Already Active", director_user_id=owner.id, join_code="ACTV2345"),
+            Group(name="Pending Invite", director_user_id=owner.id, join_code="PEND2345"),
+        ]
+        db.add_all(groups)
+        db.commit()
+        db.add_all([
+            GroupMember(group_id=groups[0].id, user_id=student.id, instrument_id="horn", status="active"),
+            GroupMember(group_id=groups[1].id, user_id=student.id, instrument_id="horn", status="invited"),
+        ])
+        db.commit()
+        invitation = db.query(GroupMember).filter(GroupMember.group_id == groups[1].id).first()
+        monkeypatch.setenv("BRASSTUNE_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER", "1")
+
+        with pytest.raises(HTTPException) as limit:
+            accept_invitation(
+                invitation.id,
+                AcceptInvitationRequest(instrument_id="horn"),
+                db=db,
+                auth=AuthContext(user=student),
+            )
+        assert limit.value.status_code == 409
+        assert invitation.status == "invited"
+    finally:
+        db.close()
+
+
+def test_legacy_director_membership_can_leave_and_owner_admin_can_rotate_code():
+    db = _test_db()
+    try:
+        owner = User(id=614, username="owner614", name="Owner", role="director", primary_instrument_id="trumpet")
+        legacy = User(id=615, username="legacy615", name="Legacy", role="student", primary_instrument_id="horn")
+        admin = User(id=616, username="admin616", name="Admin", role="admin", primary_instrument_id="tuba")
+        db.add_all([owner, legacy, admin])
+        db.commit()
+        group = Group(name="Legacy Director Class", director_user_id=owner.id, join_code="LEGACY")
+        db.add(group)
+        db.commit()
+        db.refresh(group)
+        membership = GroupMember(
+            group_id=group.id,
+            user_id=legacy.id,
+            instrument_id="horn",
+            role_in_group="director",
+            status="active",
+        )
+        db.add(membership)
+        db.commit()
+
+        first_rotation = rotate_ensemble_join_code(group.id, db=db, auth=AuthContext(user=owner))
+        assert len(first_rotation["join_code"]) == 8
+        assert first_rotation["join_code"] != "LEGACY"
+        second_rotation = rotate_ensemble_join_code(group.id, db=db, auth=AuthContext(user=admin))
+        assert second_rotation["join_code"] != first_rotation["join_code"]
+        with pytest.raises(HTTPException) as denied_rotation:
+            rotate_ensemble_join_code(group.id, db=db, auth=AuthContext(user=legacy))
+        assert denied_rotation.value.status_code == 403
+
+        left = leave_ensemble_group(group.id, db=db, auth=AuthContext(user=legacy))
+        assert left == {"left": True, "group_id": group.id}
+        db.refresh(membership)
+        assert membership.status == "removed"
+        assert membership.removed_at is not None
+    finally:
+        db.close()
+
+
+def test_active_member_elevation_requires_fresh_invitation_and_acceptance():
+    db = _test_db()
+    try:
+        owner = User(id=617, username="owner617", name="Owner", role="director", primary_instrument_id="trumpet")
+        student = User(id=618, username="student618", name="Student", role="student", primary_instrument_id="horn")
+        db.add_all([owner, student])
+        db.commit()
+        group = Group(name="Elevation Consent", director_user_id=owner.id, join_code="ELEV2345")
+        db.add(group)
+        db.commit()
+        db.refresh(group)
+        member = GroupMember(group_id=group.id, user_id=student.id, instrument_id="horn", role_in_group="student", status="active")
+        db.add(member)
+        db.commit()
+        db.refresh(member)
+
+        with pytest.raises(HTTPException) as silent_elevation:
+            update_ensemble_member(
+                group.id,
+                member.id,
+                UpdateGroupMemberRequest(role_in_group="assistant"),
+                db=db,
+                auth=AuthContext(user=owner),
+            )
+        assert silent_elevation.value.status_code == 409
+
+        invited = update_ensemble_member(
+            group.id,
+            member.id,
+            UpdateGroupMemberRequest(role_in_group="assistant", status="invited"),
+            db=db,
+            auth=AuthContext(user=owner),
+        )
+        assert invited["status"] == "invited"
+        assert invited["role_in_group"] == "assistant"
+        accepted = accept_invitation(
+            member.id,
+            AcceptInvitationRequest(instrument_id="horn"),
+            db=db,
+            auth=AuthContext(user=student),
+        )
+        assert accepted["accepted"] is True
+        db.refresh(member)
+        assert member.status == "active"
+        assert member.role_in_group == "assistant"
+    finally:
+        db.close()
+
+
+def test_missing_invitation_username_uses_generic_failure_wording():
+    db = _test_db()
+    try:
+        owner = User(id=619, username="owner619", name="Owner", role="director", primary_instrument_id="trumpet")
+        db.add(owner)
+        db.commit()
+        group = Group(name="Generic Lookup", director_user_id=owner.id, join_code="LOOK2345")
+        db.add(group)
+        db.commit()
+        db.refresh(group)
+
+        with pytest.raises(HTTPException) as missing:
+            add_member_by_username(
+                group.id,
+                AddMemberByUsernameRequest(username="missing-user"),
+                db=db,
+                auth=AuthContext(user=owner),
+            )
+        assert missing.value.status_code == 404
+        assert missing.value.detail == "That username could not be invited."
+        assert "exists" not in missing.value.detail.lower()
+    finally:
+        db.close()
+
+
+def test_account_deletion_removes_linked_usage_events_and_reports_count():
+    db = _test_db()
+    try:
+        user = User(id=620, username="delete620", name="Delete Usage", role="student", primary_instrument_id="trumpet")
+        db.add(user)
+        db.add_all([
+            UsageEvent(user_id=user.id, event_name="practice_started", properties={"source": "test"}),
+            UsageEvent(user_id=None, event_name="anonymous_event", properties={}),
+        ])
+        db.commit()
+        payload = delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=True, access_token=None),
+        )
+        assert payload["counts"]["usage_events"] == 1
+        assert db.query(UsageEvent).filter(UsageEvent.user_id == user.id).count() == 0
+        assert db.query(UsageEvent).filter(UsageEvent.user_id.is_(None)).count() == 1
+    finally:
+        db.close()
+
+
+def test_group_list_detail_capabilities_and_assistant_roster_privacy_are_isolated():
+    db = _test_db()
+    try:
+        users = [
+            User(id=630, username="owner630", name="Owner", role="director", primary_instrument_id="trumpet"),
+            User(id=631, username="student631", name="Student", role="student", primary_instrument_id="horn"),
+            User(id=632, username="assistant632", name="Assistant", role="student", primary_instrument_id="trombone"),
+            User(id=633, username="admin633", name="Admin", role="admin", primary_instrument_id="tuba"),
+            User(id=634, username="adminmember634", name="Admin Member", role="admin", primary_instrument_id="horn"),
+        ]
+        db.add_all(users)
+        db.commit()
+        group = Group(name="Capability Contract Class", director_user_id=630, join_code=None)
+        db.add(group)
+        db.commit()
+        db.refresh(group)
+        db.add_all([
+            GroupMember(group_id=group.id, user_id=631, instrument_id="horn", role_in_group="student", status="active"),
+            GroupMember(group_id=group.id, user_id=632, instrument_id="trombone", role_in_group="assistant", status="active"),
+            GroupMember(group_id=group.id, user_id=634, instrument_id="horn", role_in_group="assistant", status="active"),
+            User(id=635, username="removed635", name="Removed", role="student", primary_instrument_id="tuba"),
+            User(id=636, username="invited636", name="Invited", role="student", primary_instrument_id="trumpet"),
+        ])
+        db.commit()
+        db.add_all([
+            GroupMember(group_id=group.id, user_id=635, instrument_id="tuba", role_in_group="student", status="removed"),
+            GroupMember(group_id=group.id, user_id=636, instrument_id="trumpet", role_in_group="student", status="invited"),
+        ])
+        db.commit()
+
+        expected = {
+            630: {"viewer_role": "owner", "viewer_can_leave": False, "viewer_can_manage": True},
+            631: {"viewer_role": "student", "viewer_can_leave": True, "viewer_can_manage": False},
+            632: {"viewer_role": "assistant", "viewer_can_leave": True, "viewer_can_manage": False},
+            633: {"viewer_role": "admin_observer", "viewer_can_leave": False, "viewer_can_manage": True},
+            634: {"viewer_role": "assistant", "viewer_can_leave": True, "viewer_can_manage": True},
+        }
+        for user_id, capabilities in expected.items():
+            user = next(row for row in users if row.id == user_id)
+            auth = AuthContext(user=user)
+            listed_group = next(row for row in list_ensemble_groups(db=db, auth=auth) if row["id"] == group.id)
+            detailed = get_ensemble_group(group.id, db=db, auth=auth)
+            for payload in (listed_group, detailed):
+                assert {key: payload[key] for key in capabilities} == capabilities
+            if user_id in {631, 632}:
+                assert "join_code" not in listed_group
+                assert "join_code" not in detailed
+            else:
+                assert listed_group["join_code"] is None
+                assert detailed["join_code"] is None
+            if user_id == 632:
+                assert detailed["roster_scope"] == "active_redacted"
+                assert {member["status"] for member in detailed["members"]} == {"active"}
+                assert all("user_id" not in member and "username" not in member for member in detailed["members"])
+                assert {member["display_name"] for member in detailed["members"]} == {"Student", "Assistant", "Admin Member"}
+    finally:
+        db.close()
+
+
+def test_unique_group_membership_migration_is_fail_closed_and_idempotent():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260712200824_enforce_unique_group_membership.sql"
+    ).read_text().lower()
+    assert "having count(*) > 1" in migration
+    assert "raise exception" in migration
+    assert "pg_index" in migration
+    assert "indpred is null" in migration
+    assert "indnkeyatts = 2" in migration
+    assert "pg_get_indexdef(i.indexrelid, 1, true) = 'group_id'" in migration
+    assert "pg_get_indexdef(i.indexrelid, 2, true) = 'user_id'" in migration
+    assert "uq_group_members_group_user" in migration
+    assert "unique (group_id, user_id)" in migration
+    assert "delete" not in migration
+
+
+def test_join_code_rotation_migration_targets_only_legacy_or_missing_codes():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260712222509_rotate_and_backfill_class_join_codes.sql"
+    ).read_text().lower()
+    assert "join_code is null or char_length(join_code) <= 6" in migration
+    assert "share row exclusive" in migration
+    assert "not exists" in migration
+    assert "alphabet constant text := 'abcdefghjkmnpqrstuvwxyz23456789'" in migration
+    assert "generate_series(1, 8)" in migration
+    assert "floor(random() * length(alphabet))" in migration
+    assert "create unique index if not exists groups_join_code_key" in migration
 
 
 def test_env_granted_admin_is_revoked_when_email_removed(monkeypatch):

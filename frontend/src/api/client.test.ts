@@ -104,6 +104,44 @@ describe('API client runtime URLs', () => {
     expect(headers.get('x-audio-duration-seconds')).toBe('1.5');
   });
 
+  it('leaves only the requested class membership through the self-service endpoint', async () => {
+    const { leaveEnsembleGroup, setAuthTokenProvider } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ left: true, group_id: 42 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setAuthTokenProvider(async () => 'signed-in-token');
+
+    await expect(leaveEnsembleGroup(42)).resolves.toEqual({ left: true, group_id: 42 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/ensemble/groups/42/membership',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    const headers = new Headers(fetchMock.mock.calls[0][1].headers);
+    expect(headers.get('authorization')).toBe('Bearer signed-in-token');
+  });
+
+  it('rotates only the requested class join code through the management endpoint', async () => {
+    const { rotateEnsembleJoinCode, setAuthTokenProvider } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ group_id: 42, join_code: 'ABCD2345' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setAuthTokenProvider(async () => 'signed-in-token');
+
+    await expect(rotateEnsembleJoinCode(42)).resolves.toEqual({ group_id: 42, join_code: 'ABCD2345' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/ensemble/groups/42/join-code/rotate',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    const headers = new Headers(fetchMock.mock.calls[0][1].headers);
+    expect(headers.get('authorization')).toBe('Bearer signed-in-token');
+  });
+
   it('splits pitch frame saves into backend-safe batches', async () => {
     const { recordPitchFramesInBatches } = await loadClient('', 'https://api.example.test');
     const fetchMock = vi.fn().mockImplementation(async (_url, init) => ({

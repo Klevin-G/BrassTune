@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from fastapi import HTTPException
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.db.database import DATA_DIR
-from app.models.db import PracticeSession
+from app.models.db import PracticeSession, User
 
 ALLOWED_AUDIO_MIME_TYPES = {
     "audio/webm": ".webm",
@@ -28,6 +30,35 @@ MAGIC_BYTES = {
 }
 MAX_AUDIO_UPLOAD_BYTES = int(os.getenv("SESSION_AUDIO_MAX_BYTES", str(50 * 1024 * 1024)))
 LOCAL_AUDIO_DIR = DATA_DIR / "audio"
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+def enforce_audio_storage_quota(db: Session, session: PracticeSession, incoming_size: int) -> None:
+    max_bytes = _positive_int_env("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", 500 * 1024 * 1024)
+    if not max_bytes:
+        return
+    # Serialize uploads for one account around quota accounting on PostgreSQL.
+    db.query(User.id).filter(User.id == session.user_id).with_for_update().first()
+    total_bytes = int(
+        db.query(func.coalesce(func.sum(PracticeSession.audio_size_bytes), 0))
+        .filter(PracticeSession.user_id == session.user_id)
+        .scalar()
+        or 0
+    )
+    existing_bytes = max(0, int(session.audio_size_bytes or 0))
+    projected_bytes = max(0, total_bytes - existing_bytes) + max(0, incoming_size)
+    if projected_bytes > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail="Audio storage limit reached. Delete old cloud recordings before uploading another.",
+        )
 
 
 def storage_backend() -> str:

@@ -43,6 +43,10 @@ REQUIRED_INDEX_COLUMN_SETS = {
     "invitations": {("invited_user_id",), ("invited_by_user_id",)},
 }
 
+REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS = {
+    "group_members": {("group_id", "user_id")},
+}
+
 REQUIRED_POSTGRES_COLUMN_TYPES = {
     "account_deletion_jobs": {
         "counts_json": "jsonb",
@@ -79,6 +83,33 @@ def _postgres_column_type_issues(table_name: str, columns: list[dict]) -> list[s
     return issues
 
 
+def _postgres_unique_key_issues(table_name: str, unique_constraints: list[dict], indexes: list[dict]) -> list[str]:
+    """Require an unconditional unique key over the exact ordered columns.
+
+    PostgreSQL/SQLAlchemy versions may expose a UNIQUE constraint through
+    `get_unique_constraints`, `get_indexes`, or both, so either representation
+    is accepted. Partial unique indexes are not equivalent to the invariant.
+    """
+    issues = []
+    constraint_columns = {
+        tuple(constraint.get("column_names") or [])
+        for constraint in unique_constraints
+    }
+    unconditional_unique_index_columns = set()
+    for index in indexes:
+        dialect_options = index.get("dialect_options") or {}
+        predicate = index.get("postgresql_where")
+        if predicate is None:
+            predicate = dialect_options.get("postgresql_where")
+        if bool(index.get("unique")) and predicate is None:
+            unconditional_unique_index_columns.add(tuple(index.get("column_names") or []))
+    available = constraint_columns | unconditional_unique_index_columns
+    for columns in sorted(REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS.get(table_name, set())):
+        if columns not in available:
+            issues.append("Missing unique constraint or index on %s(%s)." % (table_name, ", ".join(columns)))
+    return issues
+
+
 def database_readiness_issues() -> list[str]:
     issues: list[str] = []
     try:
@@ -108,11 +139,40 @@ def database_readiness_issues() -> list[str]:
                 if database_backend(url) == "postgresql":
                     issues.extend(_postgres_column_type_issues(table_name, columns))
                 required_index_columns = REQUIRED_INDEX_COLUMN_SETS.get(table_name, set()) if database_backend(url) == "postgresql" else set()
-                if required_index_columns:
-                    indexed_columns = {tuple(index.get("column_names") or []) for index in inspector.get_indexes(table_name)}
+                required_unique_columns = REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS.get(table_name, set()) if database_backend(url) == "postgresql" else set()
+                indexes = None
+                index_inspection_failed = False
+                if required_index_columns or required_unique_columns:
+                    try:
+                        indexes = inspector.get_indexes(table_name)
+                    except (NotImplementedError, SQLAlchemyError):
+                        index_inspection_failed = True
+                        if required_index_columns:
+                            issues.append("Could not inspect indexes on %s." % table_name)
+                if required_index_columns and indexes is not None:
+                    indexed_columns = {tuple(index.get("column_names") or []) for index in indexes}
                     for columns in sorted(required_index_columns):
                         if columns not in indexed_columns:
                             issues.append("Missing index on %s(%s)." % (table_name, ", ".join(columns)))
+                if required_unique_columns:
+                    unique_constraints = None
+                    unique_inspection_failed = False
+                    try:
+                        unique_constraints = inspector.get_unique_constraints(table_name)
+                    except (NotImplementedError, SQLAlchemyError):
+                        unique_inspection_failed = True
+                    if indexes is not None or unique_constraints is not None:
+                        unique_issues = _postgres_unique_key_issues(
+                            table_name,
+                            unique_constraints or [],
+                            indexes or [],
+                        )
+                        if unique_issues and (index_inspection_failed or unique_inspection_failed):
+                            issues.append("Could not verify unique constraint or index on %s." % table_name)
+                        else:
+                            issues.extend(unique_issues)
+                    else:
+                        issues.append("Could not verify unique constraint or index on %s." % table_name)
     except (SQLAlchemyError, OSError, RuntimeError) as exc:
         issues.append("Database readiness check failed: %s" % exc)
     finally:

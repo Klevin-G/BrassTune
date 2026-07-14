@@ -69,7 +69,8 @@ final class AuthService: NSObject {
             path: "/auth/v1/token",
             query: [URLQueryItem(name: "grant_type", value: "refresh_token")],
             bearerToken: nil,
-            body: ["refresh_token": refreshToken]
+            body: ["refresh_token": refreshToken],
+            expiredSessionFailure: true
         )
         return try store(response: response, fallbackEmail: existing.email)
     }
@@ -116,6 +117,14 @@ final class AuthService: NSObject {
         restoreSession()?.accessToken
     }
 
+    func validAccessToken(config: AppConfig) async throws -> String? {
+        guard let existing = restoreSession() else { return nil }
+        if let expiresAt = existing.expiresAt, expiresAt.timeIntervalSinceNow <= 60 {
+            return try await refreshStoredSession(config: config)?.accessToken
+        }
+        return existing.accessToken
+    }
+
     private func store(response: SupabaseAuthResponse, fallbackEmail: String) throws -> AuthSession {
         guard let accessToken = response.accessToken, !accessToken.isEmpty else { throw UserVisibleError.authenticationFailed }
         let session = AuthSession(
@@ -135,7 +144,8 @@ final class AuthService: NSObject {
         path: String,
         query: [URLQueryItem] = [],
         bearerToken: String?,
-        body: [String: String]
+        body: [String: String],
+        expiredSessionFailure: Bool = false
     ) async throws -> SupabaseAuthResponse {
         guard let supabaseURL = config.supabaseURL,
               let publishableKey = config.supabasePublishableKey,
@@ -156,8 +166,25 @@ final class AuthService: NSObject {
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            throw UserVisibleError.timeout
+        } catch {
+            throw UserVisibleError.networkUnavailable
+        }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 401
+            if expiredSessionFailure {
+                throw UserVisibleError.apiRequestFailed(
+                    statusCode: statusCode,
+                    message: "Your sign-in expired. Sign in again, then retry."
+                )
+            }
             throw UserVisibleError.authenticationFailed
         }
         do {

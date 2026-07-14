@@ -29,9 +29,12 @@ Configure Supabase Auth redirect allowlist for:
 
 - Local development: `http://localhost:5173/auth/callback`
 - Local development: `http://localhost:5173/auth/reset-password`
-- Production: `https://brass-tune.vercel.app/auth/callback`
-- Production: `https://brass-tune.vercel.app/auth/reset-password`
-- Approved preview: the exact Vercel preview URL, only while that preview is in use
+- Production: `https://brasstune.vercel.app/auth/callback`
+- Production: `https://brasstune.vercel.app/auth/reset-password`
+- Approved preview: an exact preview URL, or the owner-restricted pattern
+  `https://*-kelvis-prject.vercel.app/auth/callback`
+
+Never allow `https://*.vercel.app/...`: it includes projects owned by other Vercel users.
 
 Apple provider setup remains an external owner task through Apple Developer and Supabase provider settings.
 

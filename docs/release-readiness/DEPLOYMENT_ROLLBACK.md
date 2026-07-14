@@ -2,7 +2,7 @@
 
 ## Current Hosted Surfaces
 
-- Web: `https://brass-tune.vercel.app`
+- Web: `https://brasstune.vercel.app`
 - Backend: `https://brasstune-u8qj.onrender.com`
 - Health: `https://brasstune-u8qj.onrender.com/api/health`
 
@@ -22,12 +22,12 @@
 4. Frontend deploy uses Vercel CLI with `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 5. Backend deploy uses Render deploy hook secret.
 6. Run hosted smoke:
-   - `BRASSTUNE_WEB_BASE_URL=https://brass-tune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted`
-   - `curl -IL https://brass-tune.vercel.app`
-   - `curl -IL https://brass-tune.vercel.app/settings`
+   - `BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted`
+   - `curl -IL https://brasstune.vercel.app`
+   - `curl -IL https://brasstune.vercel.app/settings`
    - `curl -fsS --max-time 70 https://brasstune-u8qj.onrender.com/api/health`
    - CORS OPTIONS from Vercel origin.
-   - `E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted`
+   - `E2E_BASE_URL=https://brasstune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted`
    - For protected previews, provide `E2E_VERCEL_SHARE_URL` or an automation bypass; connector-only access is not enough for local Playwright.
 
 ## Rollback Procedure

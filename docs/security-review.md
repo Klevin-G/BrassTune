@@ -14,6 +14,16 @@
 - Export endpoints are protected and support authenticated blob downloads in the frontend.
 - Ensemble mutations require director/admin ownership.
 - CORS origins are env-configured for production.
+- HTTP abuse controls combine a per-client global budget, canonical route-family
+  budget, and stricter class-join/expensive-operation budgets. Numeric and UUID
+  path rotation cannot create a fresh route budget.
+- Render disables Uvicorn proxy-header rewriting; the application consumes the
+  raw forwarding chain and validates Render's documented first client-IP entry.
+  A malformed first entry fails back to the socket peer without scanning later
+  attacker-controlled values.
+- WebSocket connections are capped per network and account; audio frames have
+  frame/PCM budgets, pitch computation has a process-wide concurrency cap, and
+  pending session IDs are bounded per connection.
 - `.env.example` contains placeholders only.
 
 ## Tests Added
@@ -25,6 +35,33 @@
 - ZIP export contents.
 - Director add-by-username success.
 - Student add-by-username denial.
+- HTTP route-rotation, bucket-cardinality, proxy-hop, and expensive-operation limits.
+- WebSocket connection release, account/network caps, burst closure, compute,
+  and pending-session bounds.
+
+Abuse-limit defaults can be tuned with `BRASSTUNE_GLOBAL_RATE_LIMIT_PER_MINUTE`,
+`BRASSTUNE_RATE_LIMIT_PER_MINUTE`, `BRASSTUNE_CLASS_JOIN_RATE_LIMIT_PER_MINUTE`,
+`BRASSTUNE_EXPENSIVE_MUTATION_RATE_LIMIT_PER_MINUTE`,
+`BRASSTUNE_WS_MAX_CONNECTIONS_PER_IP`,
+`BRASSTUNE_WS_MAX_CONNECTIONS_PER_ACCOUNT`,
+`BRASSTUNE_WS_MAX_AUDIO_FRAMES_PER_SECOND`,
+`BRASSTUNE_WS_MAX_PCM_SAMPLES_PER_SECOND`, and
+`BRASSTUNE_WS_MAX_CONCURRENT_PITCH_COMPUTATIONS`.
+
+Persistent account quotas default to:
+
+- `BRASSTUNE_MAX_OWNED_CLASSES_PER_USER=10`
+- `BRASSTUNE_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER=20`
+- `BRASSTUNE_MAX_PENDING_CLASS_INVITATIONS_PER_USER=20`
+- `BRASSTUNE_MAX_SESSIONS_PER_USER=5000`
+- `BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER=524288000` (500 MiB)
+
+Class quotas require values from `1` through `10000`; `0`, negative, or invalid
+values fall back to the safe defaults above. Session and audio quotas accept `0`
+only as a deliberate unlimited local/test setting. Negative or invalid session,
+audio, HTTP, and WebSocket safety limits fall back to their safe defaults.
+Export limits are mandatory: zero, negative, or invalid values fall back to
+their safe defaults instead of disabling response-size protections.
 
 ## Tooling
 
@@ -40,17 +77,14 @@ Local checks should be run before release:
 ```bash
 (cd frontend && npm audit --omit=dev)
 (cd backend && python -m pip install pip-audit bandit)
-(cd backend && pip-audit -r requirements.txt \
-  --ignore-vuln PYSEC-2026-161 \
-  --ignore-vuln GHSA-wqp7-x3pw-xc5r \
-  --ignore-vuln GHSA-x746-7m8f-x49c \
-  --ignore-vuln GHSA-82w8-qh3p-5jfq \
-  --ignore-vuln GHSA-jp82-jpqv-5vv3)
+(cd backend && pip-audit -r requirements.txt -r requirements-dev.txt)
 (cd backend && bandit -r app -x app/tests)
 gitleaks detect --source .
 ```
 
-The Starlette ignores are exact and temporary. The current published FastAPI package still requires `starlette<1.0.0`, while these advisories list fixed Starlette versions outside that supported range. New dependency advisories still fail CI.
+Do not add vulnerability ignores merely to make the audit green. The checked-in
+security floor currently resolves to patched FastAPI/Starlette versions; new
+dependency advisories must fail CI until they are remediated or explicitly reviewed.
 
 ## Supabase Notes
 
@@ -62,7 +96,11 @@ The Starlette ignores are exact and temporary. The current published FastAPI pac
 
 ## Remaining Risks
 
-- Rate limiting is documented but not fully implemented.
+- Abuse counters are process-local. A multi-process or horizontally scaled
+  deployment needs a shared limiter store to enforce one global budget.
+- Confirm the live Supabase dashboard uses only exact production redirects or
+  owner-suffix-restricted preview callbacks; repository config cannot prove
+  provider drift is absent.
 - Supabase RLS policies are intentionally conservative scaffolding until direct table access is designed.
 - Real-device microphone validation is still manual.
-- Supabase Storage delete is deferred to lifecycle/admin policy; local delete is implemented.
+- Supabase Storage object deletion is implemented for session deletion, practice-data clearing, account deletion, and retry recovery. The remaining risk is live disposable-account/storage verification, including provider failures and cleanup retries.
