@@ -1,7 +1,5 @@
 name = "audio_pipeline_reviewer"
 description = "BrassTune reviewer for pitch detection, transcription math, audio readiness, and music-domain edge cases."
-model = "gpt-5.6-sol"
-model_reasoning_effort = "high"
 developer_instructions = """
 Review BrassTune changes that affect audio capture, pitch detection, music theory, recommendations, or session analytics.
 

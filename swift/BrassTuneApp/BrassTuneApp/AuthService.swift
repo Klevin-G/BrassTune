@@ -69,7 +69,8 @@ final class AuthService: NSObject {
             path: "/auth/v1/token",
             query: [URLQueryItem(name: "grant_type", value: "refresh_token")],
             bearerToken: nil,
-            body: ["refresh_token": refreshToken]
+            body: ["refresh_token": refreshToken],
+            expiredSessionFailure: true
         )
         return try store(response: response, fallbackEmail: existing.email)
     }
@@ -143,7 +144,8 @@ final class AuthService: NSObject {
         path: String,
         query: [URLQueryItem] = [],
         bearerToken: String?,
-        body: [String: String]
+        body: [String: String],
+        expiredSessionFailure: Bool = false
     ) async throws -> SupabaseAuthResponse {
         guard let supabaseURL = config.supabaseURL,
               let publishableKey = config.supabasePublishableKey,
@@ -177,10 +179,13 @@ final class AuthService: NSObject {
         }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 401
-            throw UserVisibleError.apiRequestFailed(
-                statusCode: statusCode,
-                message: "Your sign-in expired. Sign in again, then retry."
-            )
+            if expiredSessionFailure {
+                throw UserVisibleError.apiRequestFailed(
+                    statusCode: statusCode,
+                    message: "Your sign-in expired. Sign in again, then retry."
+                )
+            }
+            throw UserVisibleError.authenticationFailed
         }
         do {
             return try JSONDecoder().decode(SupabaseAuthResponse.self, from: data)

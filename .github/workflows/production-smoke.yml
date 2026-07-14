@@ -33,7 +33,7 @@ jobs:
     name: protocol-smoke
     runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 10
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
     environment: production
     env:
       BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brasstune.vercel.app' }}
@@ -57,7 +57,7 @@ jobs:
     needs: smoke
     runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || vars.BRASSTUNE_FRONTEND_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 20
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
     environment: production
     env:
       CI: "true"

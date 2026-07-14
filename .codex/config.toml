@@ -1,32 +1,3 @@
-# Codex multi_agent_v2 compatibility: do not set legacy [agents] max_threads,
-# max_depth, or job_max_runtime_seconds here. The static parser accepts these
-# v1 keys, but a live thread-start probe rejected max_threads under V2. Keep
-# repo-specific agent roles in .codex/agents/*.toml and AGENTS.md.
-
-[features.multi_agent_v2]
-enabled = true
-max_concurrent_threads_per_session = 6
-
-[agents.artifact_hygiene_reviewer]
-config_file = "./agents/artifact_hygiene_reviewer.toml"
-
-[agents.audio_pipeline_reviewer]
-config_file = "./agents/audio_pipeline_reviewer.toml"
-
-[agents.backend_security_agent]
-config_file = "./agents/backend_security_agent.toml"
-
-[agents.data_domain_parity_agent]
-config_file = "./agents/data_domain_parity_agent.toml"
-
-[agents.deployment_smoke_agent]
-config_file = "./agents/deployment_smoke_agent.toml"
-
-[agents.native_ios_agent]
-config_file = "./agents/native_ios_agent.toml"
-
-[agents.release_integration_lead]
-config_file = "./agents/release_integration_lead.toml"
-
-[agents.web_auth_agent]
-config_file = "./agents/web_auth_agent.toml"
+[agents]
+max_depth = 1
+job_max_runtime_seconds = 2400

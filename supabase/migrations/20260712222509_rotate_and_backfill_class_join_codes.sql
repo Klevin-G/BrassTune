@@ -5,6 +5,7 @@ do $$
 declare
   target record;
   candidate text;
+  alphabet constant text := 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 begin
   if to_regclass('public.groups') is null then
     raise exception 'public.groups does not exist';
@@ -20,8 +21,13 @@ begin
     for update
   loop
     loop
-      -- Ten UUID hex characters provide a 40-bit space while remaining easy to type.
-      candidate := upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 10));
+      -- Match the application's eight-character alphabet and omit 0/O/1/I/L.
+      select string_agg(
+        substr(alphabet, (floor(random() * length(alphabet)) + 1)::integer, 1),
+        ''
+      )
+      into candidate
+      from generate_series(1, 8);
       exit when not exists (
         select 1
         from public.groups

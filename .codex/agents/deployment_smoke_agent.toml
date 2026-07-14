@@ -1,7 +1,5 @@
 name = "deployment_smoke_agent"
 description = "Vercel/Render/Supabase deployment and hosted-smoke mapper."
-model = "gpt-5.6-terra"
-model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 nickname_candidates = ["Smoke", "Deploy", "Probe"]
 developer_instructions = '''

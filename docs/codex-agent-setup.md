@@ -6,11 +6,11 @@ BrassTune is a fullstack release-oriented music practice app with a FastAPI back
 
 ## Agent Settings
 
-Project-local `.codex/config.toml` intentionally does not set the legacy `[agents]` runtime table.
+- `max_threads = 8`
+- `max_depth = 1`
+- `job_max_runtime_seconds = 2400`
 
-This Codex install enables `features.multi_agent_v2` globally in `/Users/aryasalem/.codex/config.toml`. Its static parser accepts v1 project keys such as `agents.max_threads`, `agents.max_depth`, and `agents.job_max_runtime_seconds`, but a live `codex exec` thread-start probe rejected `agents.max_threads` with V2 enabled. This project omits all three legacy runtime keys as the safe compatibility policy.
-
-Use the global v2 concurrency cap plus the repo-specific custom agents in `.codex/agents/*.toml`. Keep fanout justified by independent workstreams; do not recreate the old `[agents]` table unless a future Codex version documents a supported v2-compatible schema.
+Eight threads are useful for separating frontend UI, backend/API, audio-domain review, fixture checks, docs, testing, security, native, and release hygiene without overloading browser, backend, or Xcode runs. Depth stays at `1` because recursive delegation is not needed for normal BrassTune work.
 
 ## Custom Agents
 
@@ -76,13 +76,3 @@ Report exact commands and evidence.
 ## Validation Performed
 
 This setup reconciliation inspected repo structure, git status, project files, upstream tracked Codex setup, preserved local Codex setup, and BrassTune release instructions. Broader app validation is recorded in `docs/release-readiness/MASTER_FINDINGS.md`.
-
-## 2026-07-12 Reassessment
-
-- Bootstrap version: `2026-07`; Codex CLI: `0.144.1`.
-- Classification remains multi-runtime full-stack plus native iOS.
-- V2 session cap: 6; depth policy: 1. No depth-two gate passed because children are verified to inherit the parent route and shared fixtures/release evidence require coordinator ownership.
-- Routing status: `VERIFIED_INHERITED`; custom-agent model fields remain intended routes only because authoritative child records showed Terra Medium inheritance rather than heterogeneous selection.
-- Recommended fanout: backend/security, frontend/auth, audio/data parity, native iOS, and independent release validation when those lanes are actually in scope.
-- Preserve the dirty Codex guidance and frontend ignore change; use isolated ownership for `fixtures/`, deployment files, and release evidence.
-- Last assessed: 2026-07-12.

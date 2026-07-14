@@ -1,7 +1,5 @@
 name = "artifact_hygiene_reviewer"
 description = "BrassTune secret, generated artifact, and large-file reviewer."
-model = "gpt-5.6-luna"
-model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 nickname_candidates = ["Artifact", "Trace", "Clean"]
 developer_instructions = '''
