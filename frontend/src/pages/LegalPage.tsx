@@ -3,10 +3,8 @@ import { ArrowLeft, ArrowRight, Check, Copy, Download, Mail, Mic, UserX, Users }
 import { Link, useNavigate } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
+import { SUPPORT_EMAIL, supportGmailComposeUrl } from '../domain/supportContact';
 import './LegalPage.css';
-
-const SUPPORT_EMAIL = 'brasstune1@gmail.com';
-const SUPPORT_SUBJECT = 'BrassTune support';
 
 function BackButton() {
   const navigate = useNavigate();
@@ -71,7 +69,13 @@ function SupportContact() {
   return (
     <div className="lg-contact">
       <div className="settings-actions">
-        <a className="primary-button" href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(SUPPORT_SUBJECT)}`}>
+        <a
+          className="primary-button"
+          href={supportGmailComposeUrl()}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Email BrassTune support in Gmail (opens in a new tab)"
+        >
           <Mail size={18} />
           Email support
         </a>

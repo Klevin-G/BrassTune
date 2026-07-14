@@ -1617,6 +1617,102 @@ def test_self_join_by_class_code():
         assert any(s["username"] == "maya" and s["instrument_id"] == "trumpet" for s in roster["students"])
 
 
+def test_member_can_join_two_classes_leave_one_and_rejoin_without_affecting_peers():
+    with TestClient(app) as client:
+        first = _create_class(client, "dev-user-1", "Lifecycle First Class")
+        second = _create_class(client, "dev-user-2", "Lifecycle Second Class")
+
+        for group in (first, second):
+            joined = client.post(
+                "/api/ensemble/join",
+                headers={"Authorization": "Bearer dev-user-3"},
+                json={"code": group["join_code"], "instrument_id": "horn"},
+            )
+            assert joined.status_code == 200, joined.text
+
+        listed = client.get("/api/ensemble/groups", headers={"Authorization": "Bearer dev-user-3"})
+        assert listed.status_code == 200
+        listed_ids = {group["id"] for group in listed.json()}
+        assert {first["id"], second["id"]}.issubset(listed_ids)
+
+        before_leave = client.get(
+            f"/api/ensemble/groups/{first['id']}",
+            headers={"Authorization": "Bearer dev-user-3"},
+        ).json()
+        membership_before = next(member for member in before_leave["members"] if member["is_current_user"])
+
+        promoted = client.patch(
+            f"/api/ensemble/groups/{first['id']}/members/{membership_before['id']}",
+            headers={"Authorization": "Bearer dev-user-1"},
+            json={"role_in_group": "assistant"},
+        )
+        assert promoted.status_code == 200, promoted.text
+        assert promoted.json()["role_in_group"] == "assistant"
+
+        left = client.delete(
+            f"/api/ensemble/groups/{first['id']}/membership",
+            headers={"Authorization": "Bearer dev-user-3"},
+        )
+        assert left.status_code == 200, left.text
+        assert left.json() == {"left": True, "group_id": first["id"]}
+
+        after_leave = client.get("/api/ensemble/groups", headers={"Authorization": "Bearer dev-user-3"})
+        after_leave_ids = {group["id"] for group in after_leave.json()}
+        assert first["id"] not in after_leave_ids
+        assert second["id"] in after_leave_ids
+        assert client.get(
+            f"/api/ensemble/groups/{first['id']}",
+            headers={"Authorization": "Bearer dev-user-3"},
+        ).status_code == 403
+
+        # The owner cannot abandon an owned class through the membership API,
+        # and an outsider cannot use it to change anyone else's membership.
+        owner_leave = client.delete(
+            f"/api/ensemble/groups/{first['id']}/membership",
+            headers={"Authorization": "Bearer dev-user-1"},
+        )
+        assert owner_leave.status_code == 409
+        outsider_leave = client.delete(
+            f"/api/ensemble/groups/{first['id']}/membership",
+            headers={"Authorization": "Bearer dev-user-5"},
+        )
+        assert outsider_leave.status_code == 404
+
+        # A peer leaving the other class removes only that peer.
+        peer_join = client.post(
+            "/api/ensemble/join",
+            headers={"Authorization": "Bearer dev-user-4"},
+            json={"code": second["join_code"], "instrument_id": "trombone"},
+        )
+        assert peer_join.status_code == 200, peer_join.text
+        peer_leave = client.delete(
+            f"/api/ensemble/groups/{second['id']}/membership",
+            headers={"Authorization": "Bearer dev-user-4"},
+        )
+        assert peer_leave.status_code == 200, peer_leave.text
+        assert client.get(
+            f"/api/ensemble/groups/{second['id']}",
+            headers={"Authorization": "Bearer dev-user-3"},
+        ).status_code == 200
+
+        rejoined = client.post(
+            "/api/ensemble/join",
+            headers={"Authorization": "Bearer dev-user-3"},
+            json={"code": first["join_code"], "instrument_id": "tuba"},
+        )
+        assert rejoined.status_code == 200, rejoined.text
+        after_rejoin = client.get(
+            f"/api/ensemble/groups/{first['id']}",
+            headers={"Authorization": "Bearer dev-user-3"},
+        ).json()
+        membership_after = next(member for member in after_rejoin["members"] if member["is_current_user"])
+        assert membership_after["id"] == membership_before["id"]
+        assert membership_after["status"] == "active"
+        assert membership_after["role_in_group"] == "student"
+        assert membership_after["instrument_id"] == "tuba"
+        assert membership_after["removed_at"] is None
+
+
 def test_env_granted_admin_is_revoked_when_email_removed(monkeypatch):
     db = _test_db()
     try:

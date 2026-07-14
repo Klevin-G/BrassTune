@@ -9,18 +9,66 @@ export interface Exercise {
   label: string;
   detail: string;
   notes: string[];
+  group: 'major' | 'minor' | 'other';
 }
 
-// Note-name spellings must match the detector's output set:
-// ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'].
-export const EXERCISES: Exercise[] = [
-  { id: 'cmaj', label: 'C major scale', detail: 'One octave, ascending', notes: ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C'] },
-  { id: 'fmaj', label: 'F major scale', detail: 'One octave, ascending', notes: ['F', 'G', 'A', 'Bb', 'C', 'D', 'E', 'F'] },
-  { id: 'gmaj', label: 'G major scale', detail: 'One octave, ascending', notes: ['G', 'A', 'B', 'C', 'D', 'E', 'F#', 'G'] },
-  { id: 'arpeggio', label: 'C major arpeggio', detail: 'C · E · G · C', notes: ['C', 'E', 'G', 'C'] },
-  { id: 'chromatic', label: 'Chromatic run', detail: 'C up to G', notes: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G'] },
-  { id: 'longtones', label: 'Long tones', detail: 'C · G · C — hold each note', notes: ['C', 'G', 'C'] },
+const PITCH_CLASS: Record<string, number> = {
+  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, 'E#': 5, Fb: 4,
+  F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10,
+  B: 11, Cb: 11, 'B#': 0,
+};
+
+/** Compare written spellings enharmonically with the detector's canonical names. */
+export function normalizePitchClass(note: string | null | undefined): number | null {
+  if (!note) return null;
+  const normalized = note.trim().replace(/♯/g, '#').replace(/♭/g, 'b');
+  return PITCH_CLASS[normalized] ?? null;
+}
+
+export function samePitchClass(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = normalizePitchClass(a);
+  return left != null && left === normalizePitchClass(b);
+}
+
+// Keep musically correct written spellings for display. The grader compares by
+// pitch class, so detector output such as F still matches E# in F# major.
+export const MAJOR_SCALES: Exercise[] = [
+  ['cmaj', 'C', ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C']],
+  ['dbmaj', 'D♭', ['Db', 'Eb', 'F', 'Gb', 'Ab', 'Bb', 'C', 'Db']],
+  ['dmaj', 'D', ['D', 'E', 'F#', 'G', 'A', 'B', 'C#', 'D']],
+  ['ebmaj', 'E♭', ['Eb', 'F', 'G', 'Ab', 'Bb', 'C', 'D', 'Eb']],
+  ['emaj', 'E', ['E', 'F#', 'G#', 'A', 'B', 'C#', 'D#', 'E']],
+  ['fmaj', 'F', ['F', 'G', 'A', 'Bb', 'C', 'D', 'E', 'F']],
+  ['fsmaj', 'F♯', ['F#', 'G#', 'A#', 'B', 'C#', 'D#', 'E#', 'F#']],
+  ['gmaj', 'G', ['G', 'A', 'B', 'C', 'D', 'E', 'F#', 'G']],
+  ['abmaj', 'A♭', ['Ab', 'Bb', 'C', 'Db', 'Eb', 'F', 'G', 'Ab']],
+  ['amaj', 'A', ['A', 'B', 'C#', 'D', 'E', 'F#', 'G#', 'A']],
+  ['bbmaj', 'B♭', ['Bb', 'C', 'D', 'Eb', 'F', 'G', 'A', 'Bb']],
+  ['bmaj', 'B', ['B', 'C#', 'D#', 'E', 'F#', 'G#', 'A#', 'B']],
+].map(([id, root, notes]) => ({ id: id as string, label: `${root} major`, detail: 'One octave, ascending', notes: notes as string[], group: 'major' }));
+
+export const MINOR_SCALES: Exercise[] = [
+  ['cmin', 'C', ['C', 'D', 'Eb', 'F', 'G', 'Ab', 'Bb', 'C']],
+  ['csmin', 'C♯', ['C#', 'D#', 'E', 'F#', 'G#', 'A', 'B', 'C#']],
+  ['dmin', 'D', ['D', 'E', 'F', 'G', 'A', 'Bb', 'C', 'D']],
+  ['ebmin', 'E♭', ['Eb', 'F', 'Gb', 'Ab', 'Bb', 'Cb', 'Db', 'Eb']],
+  ['emin', 'E', ['E', 'F#', 'G', 'A', 'B', 'C', 'D', 'E']],
+  ['fmin', 'F', ['F', 'G', 'Ab', 'Bb', 'C', 'Db', 'Eb', 'F']],
+  ['fsmin', 'F♯', ['F#', 'G#', 'A', 'B', 'C#', 'D', 'E', 'F#']],
+  ['gmin', 'G', ['G', 'A', 'Bb', 'C', 'D', 'Eb', 'F', 'G']],
+  ['gsmin', 'G♯', ['G#', 'A#', 'B', 'C#', 'D#', 'E', 'F#', 'G#']],
+  ['amin', 'A', ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'A']],
+  ['bbmin', 'B♭', ['Bb', 'C', 'Db', 'Eb', 'F', 'Gb', 'Ab', 'Bb']],
+  ['bmin', 'B', ['B', 'C#', 'D', 'E', 'F#', 'G', 'A', 'B']],
+].map(([id, root, notes]) => ({ id: id as string, label: `${root} minor`, detail: 'Natural minor · one octave, ascending', notes: notes as string[], group: 'minor' }));
+
+export const OTHER_EXERCISES: Exercise[] = [
+  { id: 'arpeggio', label: 'C major arpeggio', detail: 'C · E · G · C', notes: ['C', 'E', 'G', 'C'], group: 'other' },
+  { id: 'chromatic', label: 'Chromatic run', detail: 'C up to G', notes: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G'], group: 'other' },
+  { id: 'longtones', label: 'Long tones', detail: 'C · G · C — hold each note', notes: ['C', 'G', 'C'], group: 'other' },
 ];
+
+export const EXERCISES: Exercise[] = [...MAJOR_SCALES, ...MINOR_SCALES, ...OTHER_EXERCISES];
 
 export type CentsGrade = 'excellent' | 'good' | 'close' | 'off' | 'missed';
 
@@ -144,14 +192,14 @@ export class PlayAlongGrader {
     if (!this.done) {
       const target = this.notes[this.idx];
       const confident = frame.confidence >= this.minConfidence && frame.frequency_hz != null;
-      const matches = confident && frame.written_note_name === target && frame.cents_deviation != null;
+      const matches = confident && samePitchClass(frame.written_note_name, target) && frame.cents_deviation != null;
       if (matches) {
         if (this.firstMatchTs == null) this.firstMatchTs = nowMs;
         this.centsBuf.push({ ts: nowMs, cents: frame.cents_deviation as number });
         if (nowMs - this.firstMatchTs >= this.holdMs && this.centsBuf.length >= this.minSamples) {
           this.finalize(true);
         }
-      } else if (confident && frame.written_note_name && frame.written_note_name !== target) {
+      } else if (confident && frame.written_note_name && !samePitchClass(frame.written_note_name, target)) {
         // Player is sustaining a different note — reset the current hold.
         this.firstMatchTs = null;
         this.centsBuf = [];

@@ -235,11 +235,28 @@ enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum PlayAlongExerciseCategory: String, Codable, CaseIterable, Identifiable {
+    case major
+    case naturalMinor
+    case practicePattern
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .major: return "Major scales"
+        case .naturalMinor: return "Natural minor scales"
+        case .practicePattern: return "Other exercises"
+        }
+    }
+}
+
 struct PlayAlongExercise: Codable, Equatable, Identifiable {
     let id: String
     let title: String
     let detail: String
     let difficulty: String
+    let category: PlayAlongExerciseCategory
     let writtenNotes: [String]
 
     static let library: [PlayAlongExercise] = [
@@ -247,28 +264,200 @@ struct PlayAlongExercise: Codable, Equatable, Identifiable {
             id: "cmaj",
             title: "C major scale",
             detail: "One octave, ascending",
-            difficulty: "Beginner",
+            difficulty: "Major",
+            category: .major,
             writtenNotes: ["C", "D", "E", "F", "G", "A", "B", "C"]
+        ),
+        PlayAlongExercise(
+            id: "dbmaj",
+            title: "D♭ major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["Db", "Eb", "F", "Gb", "Ab", "Bb", "C", "Db"]
+        ),
+        PlayAlongExercise(
+            id: "dmaj",
+            title: "D major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["D", "E", "F#", "G", "A", "B", "C#", "D"]
+        ),
+        PlayAlongExercise(
+            id: "ebmaj",
+            title: "E♭ major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["Eb", "F", "G", "Ab", "Bb", "C", "D", "Eb"]
+        ),
+        PlayAlongExercise(
+            id: "emaj",
+            title: "E major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["E", "F#", "G#", "A", "B", "C#", "D#", "E"]
         ),
         PlayAlongExercise(
             id: "fmaj",
             title: "F major scale",
             detail: "One octave, ascending",
-            difficulty: "Beginner",
+            difficulty: "Major",
+            category: .major,
             writtenNotes: ["F", "G", "A", "Bb", "C", "D", "E", "F"]
+        ),
+        PlayAlongExercise(
+            id: "fsmaj",
+            title: "F♯ major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["F#", "G#", "A#", "B", "C#", "D#", "E#", "F#"]
         ),
         PlayAlongExercise(
             id: "gmaj",
             title: "G major scale",
             detail: "One octave, ascending",
-            difficulty: "Beginner",
+            difficulty: "Major",
+            category: .major,
             writtenNotes: ["G", "A", "B", "C", "D", "E", "F#", "G"]
+        ),
+        PlayAlongExercise(
+            id: "abmaj",
+            title: "A♭ major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["Ab", "Bb", "C", "Db", "Eb", "F", "G", "Ab"]
+        ),
+        PlayAlongExercise(
+            id: "amaj",
+            title: "A major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["A", "B", "C#", "D", "E", "F#", "G#", "A"]
+        ),
+        PlayAlongExercise(
+            id: "bbmaj",
+            title: "B♭ major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["Bb", "C", "D", "Eb", "F", "G", "A", "Bb"]
+        ),
+        PlayAlongExercise(
+            id: "bmaj",
+            title: "B major scale",
+            detail: "One octave, ascending",
+            difficulty: "Major",
+            category: .major,
+            writtenNotes: ["B", "C#", "D#", "E", "F#", "G#", "A#", "B"]
+        ),
+        PlayAlongExercise(
+            id: "cmin",
+            title: "C natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["C", "D", "Eb", "F", "G", "Ab", "Bb", "C"]
+        ),
+        PlayAlongExercise(
+            id: "csmin",
+            title: "C♯ natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["C#", "D#", "E", "F#", "G#", "A", "B", "C#"]
+        ),
+        PlayAlongExercise(
+            id: "dmin",
+            title: "D natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["D", "E", "F", "G", "A", "Bb", "C", "D"]
+        ),
+        PlayAlongExercise(
+            id: "ebmin",
+            title: "E♭ natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["Eb", "F", "Gb", "Ab", "Bb", "Cb", "Db", "Eb"]
+        ),
+        PlayAlongExercise(
+            id: "emin",
+            title: "E natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["E", "F#", "G", "A", "B", "C", "D", "E"]
+        ),
+        PlayAlongExercise(
+            id: "fmin",
+            title: "F natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["F", "G", "Ab", "Bb", "C", "Db", "Eb", "F"]
+        ),
+        PlayAlongExercise(
+            id: "fsmin",
+            title: "F♯ natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["F#", "G#", "A", "B", "C#", "D", "E", "F#"]
+        ),
+        PlayAlongExercise(
+            id: "gmin",
+            title: "G natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["G", "A", "Bb", "C", "D", "Eb", "F", "G"]
+        ),
+        PlayAlongExercise(
+            id: "gsmin",
+            title: "G♯ natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["G#", "A#", "B", "C#", "D#", "E", "F#", "G#"]
+        ),
+        PlayAlongExercise(
+            id: "amin",
+            title: "A natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["A", "B", "C", "D", "E", "F", "G", "A"]
+        ),
+        PlayAlongExercise(
+            id: "bbmin",
+            title: "B♭ natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["Bb", "C", "Db", "Eb", "F", "Gb", "Ab", "Bb"]
+        ),
+        PlayAlongExercise(
+            id: "bmin",
+            title: "B natural minor scale",
+            detail: "One octave, ascending",
+            difficulty: "Minor",
+            category: .naturalMinor,
+            writtenNotes: ["B", "C#", "D", "E", "F#", "G", "A", "B"]
         ),
         PlayAlongExercise(
             id: "arpeggio",
             title: "C major arpeggio",
             detail: "C · E · G · C",
             difficulty: "Beginner",
+            category: .practicePattern,
             writtenNotes: ["C", "E", "G", "C"]
         ),
         PlayAlongExercise(
@@ -276,6 +465,7 @@ struct PlayAlongExercise: Codable, Equatable, Identifiable {
             title: "Chromatic run",
             detail: "C up to G",
             difficulty: "Challenge",
+            category: .practicePattern,
             writtenNotes: ["C", "C#", "D", "Eb", "E", "F", "F#", "G"]
         ),
         PlayAlongExercise(
@@ -283,6 +473,7 @@ struct PlayAlongExercise: Codable, Equatable, Identifiable {
             title: "Long tones",
             detail: "C · G · C — hold each note",
             difficulty: "Beginner",
+            category: .practicePattern,
             writtenNotes: ["C", "G", "C"]
         ),
     ]

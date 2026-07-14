@@ -1233,6 +1233,10 @@ def join_ensemble_by_code(payload: JoinByCodeRequest, db: Session = Depends(get_
         existing.status = "active"
         existing.active_since = now
         existing.removed_at = None
+        # A public join code grants student membership only. Never resurrect a
+        # previously removed assistant/director role without a fresh manager
+        # invitation and acceptance flow.
+        existing.role_in_group = "student"
         if payload.instrument_id:
             existing.instrument_id = instrument
         member = existing
@@ -1242,6 +1246,31 @@ def join_ensemble_by_code(payload: JoinByCodeRequest, db: Session = Depends(get_
     db.commit()
     record_event(db, "invitation_accepted", auth.user.id, {"group_id": group.id, "via": "join_code"})
     return {"joined": True, "group_id": group.id, "group_name": group.name}
+
+
+@router.delete("/ensemble/groups/{group_id}/membership")
+def leave_ensemble_group(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    """Soft-remove only the signed-in user's active membership in one class."""
+    group = _group_or_404(db, group_id)
+    if group.director_user_id == auth.user.id:
+        raise HTTPException(status_code=409, detail="The class owner cannot leave their own class.")
+    membership = (
+        db.query(GroupMember)
+        .filter(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == auth.user.id,
+            GroupMember.status == "active",
+        )
+        .first()
+    )
+    if membership is None:
+        raise HTTPException(status_code=404, detail="You are not an active member of this class.")
+    membership.status = "removed"
+    membership.removed_at = dt.datetime.utcnow()
+    db.add(membership)
+    db.commit()
+    record_event(db, "group_left", auth.user.id, {"group_id": group_id})
+    return {"left": True, "group_id": group_id}
 
 
 @router.patch("/ensemble/groups/{group_id}/members/{member_id}")

@@ -104,6 +104,21 @@ describe('API client runtime URLs', () => {
     expect(headers.get('x-audio-duration-seconds')).toBe('1.5');
   });
 
+  it('leaves only the requested class through the self-membership endpoint', async () => {
+    const { leaveEnsembleGroup } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ left: true, group_id: 42 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(leaveEnsembleGroup(42)).resolves.toEqual({ left: true, group_id: 42 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.example.test/api/ensemble/groups/42/membership');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' });
+  });
+
   it('splits pitch frame saves into backend-safe batches', async () => {
     const { recordPitchFramesInBatches } = await loadClient('', 'https://api.example.test');
     const fetchMock = vi.fn().mockImplementation(async (_url, init) => ({

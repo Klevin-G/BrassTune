@@ -3,7 +3,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import './PlayAlongPage.css';
 import { PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
 import { usePitchStream } from '../hooks/usePitchStream';
-import { EXERCISES, PlayAlongGrader, summarizeGrades, type GraderSnapshot, type NoteGrade, type CentsGrade } from '../domain/playAlong';
+import {
+  EXERCISES,
+  MAJOR_SCALES,
+  MINOR_SCALES,
+  OTHER_EXERCISES,
+  PlayAlongGrader,
+  samePitchClass,
+  summarizeGrades,
+  type Exercise,
+  type GraderSnapshot,
+  type NoteGrade,
+  type CentsGrade,
+} from '../domain/playAlong';
 import { describeCents, describeInTunePercent, starsForPercent } from '../domain/tuningLanguage';
 import { instrumentDisplayName } from '../domain/instrumentNames';
 import { midiToFrequency, noteLabelToMidi } from '../domain/music';
@@ -39,6 +51,15 @@ const EXERCISE_META: Record<string, { difficulty: Difficulty; help: string }> = 
   chromatic: { difficulty: { tag: 'Harder', variant: 'hard' }, help: 'Every half-step in a row. Trickier — try it once scales feel easy.' },
   longtones: { difficulty: { tag: 'Warm-up', variant: 'plain' }, help: 'Hold each note long and steady to warm up.' },
 };
+
+function exerciseMeta(exercise: Exercise): { difficulty: Difficulty; help: string } {
+  const explicit = EXERCISE_META[exercise.id];
+  if (explicit) return explicit;
+  if (exercise.group === 'major') {
+    return { difficulty: { tag: 'Major', variant: 'plain' }, help: `Play the ${exercise.label} scale going up.` };
+  }
+  return { difficulty: { tag: 'Minor', variant: 'plain' }, help: `Play the ${exercise.label} scale going up (natural minor).` };
+}
 
 // Written -> concert transposition (semitones down) for the reference tone, so
 // "Hear it" sounds the pitch the player should actually produce on their horn.
@@ -123,7 +144,7 @@ export function PlayAlongPage() {
   exerciseIdRef.current = exerciseId;
 
   const exercise = EXERCISES.find((item) => item.id === exerciseId) ?? EXERCISES[0];
-  const meta = EXERCISE_META[exercise.id];
+  const meta = exerciseMeta(exercise);
 
   const onFrame = useCallback((frame: any) => {
     if (phaseRef.current !== 'running' || !graderRef.current) return;
@@ -265,23 +286,34 @@ export function PlayAlongPage() {
 
       {phase === 'idle' && (
         <SectionCard title="Choose an exercise">
-          <div className="chip-row pa-chips">
-            {EXERCISES.map((item) => {
-              const itemMeta = EXERCISE_META[item.id];
-              return (
-                <SelectionChip
-                  key={item.id}
-                  active={item.id === exerciseId}
-                  onClick={() => setExerciseId(item.id)}
-                  tone="gold"
-                >
-                  <span className="pa-chip-body">
-                    {item.label}
-                    {itemMeta && <span className={`pa-chip-tag pa-tag-${itemMeta.difficulty.variant}`}>{itemMeta.difficulty.tag}</span>}
-                  </span>
-                </SelectionChip>
-              );
-            })}
+          <div className="pa-exercise-groups">
+            {([
+              ['Major scales', MAJOR_SCALES],
+              ['Minor scales', MINOR_SCALES],
+              ['Other exercises', OTHER_EXERCISES],
+            ] as const).map(([heading, exercises]) => (
+              <section className="pa-exercise-group" aria-labelledby={`pa-${heading.replace(/ /g, '-').toLowerCase()}`} key={heading}>
+                <h3 id={`pa-${heading.replace(/ /g, '-').toLowerCase()}`}>{heading}</h3>
+                <div className="chip-row pa-chips">
+                  {exercises.map((item) => {
+                    const itemMeta = exerciseMeta(item);
+                    return (
+                      <SelectionChip
+                        key={item.id}
+                        active={item.id === exerciseId}
+                        onClick={() => setExerciseId(item.id)}
+                        tone="gold"
+                      >
+                        <span className="pa-chip-body">
+                          {item.label}
+                          {item.id === 'cmaj' && <span className={`pa-chip-tag pa-tag-${itemMeta.difficulty.variant}`}>{itemMeta.difficulty.tag}</span>}
+                        </span>
+                      </SelectionChip>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
 
           <div className="pa-selected">
@@ -326,10 +358,10 @@ export function PlayAlongPage() {
             </div>
             <div className="playalong-detected">
               <span className="playalong-detected-label">You’re playing</span>
-              <strong className={snapshot.detectedName === snapshot.currentName ? 'match' : ''}>{snapshot.detectedName ?? '—'}</strong>
+              <strong className={samePitchClass(snapshot.detectedName, snapshot.currentName) ? 'match' : ''}>{snapshot.detectedName ?? '—'}</strong>
               {(() => {
                 const cents = snapshot.detectedCents;
-                const onTarget = snapshot.detectedName === snapshot.currentName && cents != null;
+                const onTarget = samePitchClass(snapshot.detectedName, snapshot.currentName) && cents != null;
                 if (!onTarget) {
                   return (
                     <span className="pa-live-verdict">

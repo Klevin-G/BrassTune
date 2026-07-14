@@ -295,6 +295,12 @@
 .ec-newclass-btn {
   margin-left: auto;
 }
+.ec-leave-class {
+  color: var(--red);
+}
+.ec-leave-class:hover {
+  border-color: var(--red);
+}
 
 /* ---- join code panel --------------------------------------------------- */
 .ec-join {

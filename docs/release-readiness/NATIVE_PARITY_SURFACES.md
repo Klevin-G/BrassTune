@@ -1,6 +1,6 @@
 # Native Swift Parity Surfaces
 
-Updated: 2026-07-10
+Updated: 2026-07-13
 
 ## Scope
 
@@ -10,7 +10,7 @@ This document describes the current local SwiftUI redesign under `swift/BrassTun
 
 The app now has four focused tabs with one primary home for each workflow:
 
-- **Play-Along** is the default tab and flagship action. A musician chooses one of six written-note exercises, starts the microphone inline, and holds each highlighted note steady. The grader uses the existing native pitch stream, matches written pitch class across octave and enharmonic spelling, collects a sustained hold, and reports per-note cents, a plain-language rating, an overall percentage, and stars. A completed live exercise can save a real-microphone practice session.
+- **Play-Along** is the default tab and flagship action. A musician chooses from `12` major scales, `12` natural-minor scales, and `3` other exercises grouped in the native picker, starts the microphone inline, and holds each highlighted note steady. The grader uses the existing native pitch stream, matches written pitch class across octave and enharmonic spelling, collects a sustained hold, and reports per-note cents, a plain-language rating, an overall percentage, and stars. A completed live exercise can save a real-microphone practice session.
 - **Tuner** is the live chromatic tuner. Its shipping UI has no source picker or Sample option. It begins with “Play a note” / “Listening…” and reports flat, in tune, or sharp with a single tuning meter. The first tap of **Start listening** requests microphone access; a denied permission produces an **Open iOS Settings** recovery action.
 - **Progress** replaces the duplicate Analytics, Coach, Progress, and session-summary surfaces. It shows a friendly zero state or local tuning metrics, a single practice suggestion, recent recordings, and a link to the complete practice history.
 - **Settings** owns instrument choice, advanced A4 reference pitch, metronome defaults and the full metronome, the sheet-music library, local export/deletion, account state, and the single Privacy/Terms/Support entry points.
@@ -46,8 +46,8 @@ Home-as-launcher, the More bento grid, the standalone Analytics and Coach tabs, 
 The current redesign has the following local evidence:
 
 - `cd swift/BrassTuneCore && swift test`: passed, `3/3` tests.
-- Native app test source contains `35` app unit tests and `2` UI tests covering the four-tab IA, onboarding, fixture isolation, audible metronome defaults, Play-Along grading, destructive alerts, and existing persistence/audio behavior.
-- The app and test sources were source/typecheck-validated, but the `35` app tests and `2` UI tests were **not executed** in this environment. `xcodebuild`/CoreSimulator access is blocked by the sandbox, so no current simulator test or build pass is claimed.
+- Native app test source contains `36` app unit tests and `2` UI tests covering the four-tab IA, onboarding, fixture isolation, audible metronome defaults, Play-Along catalog and grading, destructive alerts, and existing persistence/audio behavior.
+- The prior app surface was source/typecheck-validated, but the current grouped-catalog edits and the `36` app tests and `2` UI tests were **not compiled or executed** in this Windows environment. `xcodebuild`/CoreSimulator is unavailable, so no current simulator test or build pass is claimed.
 
 When an unrestricted macOS/Xcode environment is available, run:
 

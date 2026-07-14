@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { nextDemoPitchFrame } from './demoPitch';
-import { MIN_RECORDING_CONFIDENCE, midiToFrequency, pitchFrameFromFrequency } from './music';
+import { EXERCISES } from './playAlong';
+import { MIN_RECORDING_CONFIDENCE, midiToFrequency, noteLabelToMidi, pitchFrameFromFrequency } from './music';
 
 function stddev(values: number[]) {
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -52,5 +53,29 @@ describe('pitchFrameFromFrequency', () => {
     expect(stddev(cents)).toBeGreaterThan(4);
     expect(noLock.length).toBeGreaterThan(0);
     expect(noLock.every((frame) => frame.confidence < MIN_RECORDING_CONFIDENCE)).toBe(true);
+  });
+});
+
+describe('noteLabelToMidi', () => {
+  it('converts edge enharmonic spellings to the correct finite MIDI notes', () => {
+    expect(noteLabelToMidi('E#4')).toBe(65);
+    expect(noteLabelToMidi('F4')).toBe(65);
+    expect(noteLabelToMidi('Cb4')).toBe(59);
+    expect(noteLabelToMidi('B3')).toBe(59);
+    expect(noteLabelToMidi('Fb4')).toBe(64);
+    expect(noteLabelToMidi('B#3')).toBe(60);
+    expect(noteLabelToMidi('F♯4')).toBe(66);
+    expect(noteLabelToMidi('D♭4')).toBe(61);
+    expect(midiToFrequency(noteLabelToMidi('E#4'))).toBeCloseTo(midiToFrequency(noteLabelToMidi('F4')), 10);
+    expect(midiToFrequency(noteLabelToMidi('Cb4'))).toBeCloseTo(midiToFrequency(noteLabelToMidi('B3')), 10);
+  });
+
+  it('supports every written spelling in the play-along catalog', () => {
+    const notes = new Set(EXERCISES.flatMap((exercise) => exercise.notes));
+    for (const note of notes) {
+      const midi = noteLabelToMidi(`${note}4`);
+      expect(Number.isFinite(midi), note).toBe(true);
+      expect(Number.isFinite(midiToFrequency(midi)), note).toBe(true);
+    }
   });
 });

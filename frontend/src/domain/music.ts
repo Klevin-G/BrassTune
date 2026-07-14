@@ -9,6 +9,8 @@ const NOTE_INDEX: Record<string, number> = {
   Eb: 3,
   'D#': 3,
   E: 4,
+  Fb: 4,
+  'E#': 5,
   F: 5,
   'F#': 6,
   Gb: 6,
@@ -19,6 +21,8 @@ const NOTE_INDEX: Record<string, number> = {
   Bb: 10,
   'A#': 10,
   B: 11,
+  Cb: -1,
+  'B#': 12,
 };
 
 export const demoProfileTransposition: Record<string, number> = {
@@ -53,9 +57,10 @@ export function midiToNote(midi: number) {
 }
 
 export function noteLabelToMidi(label: string): number {
-  const accidental = label[1] === '#' || label[1] === 'b';
-  const note = accidental ? label.slice(0, 2) : label.slice(0, 1);
-  const octave = Number(label.slice(accidental ? 2 : 1));
+  const normalized = label.trim().replace(/♯/g, '#').replace(/♭/g, 'b');
+  const accidental = normalized[1] === '#' || normalized[1] === 'b';
+  const note = accidental ? normalized.slice(0, 2) : normalized.slice(0, 1);
+  const octave = Number(normalized.slice(accidental ? 2 : 1));
   return (octave + 1) * 12 + NOTE_INDEX[note];
 }
 

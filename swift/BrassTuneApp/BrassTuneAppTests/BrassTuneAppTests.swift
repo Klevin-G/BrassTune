@@ -301,14 +301,50 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(PlayAlongNoteRating(cents: .nan), .missed)
     }
 
-    func testPlayAlongExerciseCatalogUsesDetectorPitchSpellings() {
-        let detectorSpellings = Set(["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"])
-        let exerciseNotes = Set(PlayAlongExercise.library.flatMap(\.writtenNotes))
-
+    func testPlayAlongExerciseCatalogIncludesAllGroupedScalesAndPracticePatterns() {
+        let major = PlayAlongExercise.library.filter { $0.category == .major }
+        let minor = PlayAlongExercise.library.filter { $0.category == .naturalMinor }
+        let patterns = PlayAlongExercise.library.filter { $0.category == .practicePattern }
         XCTAssertEqual(PlayAlongExercise.defaultExercise.id, "cmaj")
-        XCTAssertEqual(PlayAlongExercise.library.count, 6)
-        XCTAssertTrue(exerciseNotes.isSubset(of: detectorSpellings))
+        XCTAssertEqual(major.count, 12)
+        XCTAssertEqual(minor.count, 12)
+        XCTAssertEqual(patterns.count, 3)
+        XCTAssertEqual(Set(PlayAlongExercise.library.map(\.id)).count, PlayAlongExercise.library.count)
+        XCTAssertTrue(["cmaj", "fmaj", "gmaj", "arpeggio", "chromatic", "longtones"].allSatisfy { id in
+            PlayAlongExercise.library.contains { $0.id == id }
+        })
         XCTAssertFalse(PlayAlongExercise.library.contains { $0.writtenNotes.isEmpty })
+    }
+
+    func testPlayAlongScaleIntervalsMatchMajorAndNaturalMinorPatterns() throws {
+        let pitchClasses = [
+            "C": 0, "B#": 0,
+            "C#": 1, "Db": 1,
+            "D": 2,
+            "D#": 3, "Eb": 3,
+            "E": 4, "Fb": 4,
+            "E#": 5, "F": 5,
+            "F#": 6, "Gb": 6,
+            "G": 7,
+            "G#": 8, "Ab": 8,
+            "A": 9,
+            "A#": 10, "Bb": 10,
+            "B": 11, "Cb": 11,
+        ]
+        let expected: [PlayAlongExerciseCategory: [Int]] = [
+            .major: [0, 2, 4, 5, 7, 9, 11, 0],
+            .naturalMinor: [0, 2, 3, 5, 7, 8, 10, 0],
+        ]
+
+        for exercise in PlayAlongExercise.library where exercise.category != .practicePattern {
+            let tonic = try XCTUnwrap(pitchClasses[exercise.writtenNotes[0]], exercise.title)
+            let intervals = try exercise.writtenNotes.map { note in
+                let pitchClass = try XCTUnwrap(pitchClasses[note], "Unsupported note spelling \(note) in \(exercise.title)")
+                return (pitchClass - tonic + 12) % 12
+            }
+            XCTAssertEqual(intervals, expected[exercise.category], exercise.title)
+            XCTAssertEqual(exercise.writtenNotes.first, exercise.writtenNotes.last, exercise.title)
+        }
     }
 
     func testPlayAlongAdvancesAfterSustainedCorrectWrittenPitchClass() {
