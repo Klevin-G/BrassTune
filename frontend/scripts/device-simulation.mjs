@@ -72,10 +72,21 @@ async function waitFor(url, label, timeoutMs = 20000) {
   throw new Error(`${label} did not become reachable at ${url}`);
 }
 
+const childClosePromises = new WeakMap();
+
 function spawnServer(command, args, cwd, env = {}) {
-  const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, stdio: 'pipe', shell: false, windowsHide: true });
-  child.stdout.on('data', () => {});
-  child.stderr.on('data', () => {});
+  const child = spawn(command, args, {
+    cwd,
+    env: { ...process.env, ...env },
+    stdio: 'ignore',
+    shell: false,
+    windowsHide: true,
+    detached: !isWindows,
+  });
+  childClosePromises.set(child, new Promise((resolve) => {
+    child.once('close', resolve);
+    child.once('error', () => {});
+  }));
   return child;
 }
 
@@ -98,31 +109,115 @@ async function backendServerCommand() {
 
 async function ensureServers() {
   const started = [];
-  if (!(await isReachable(apiUrl))) {
-    const backend = await backendServerCommand();
-    started.push(spawnServer(backend.command, backend.args, backendDir, {
-      APP_ENV: 'local',
-      FRONTEND_ORIGIN: appUrl,
-      CORS_ALLOWED_ORIGINS: `${appUrl},http://localhost:5173,http://127.0.0.1:5173`,
-    }));
+  try {
+    if (!(await isReachable(apiUrl))) {
+      const backend = await backendServerCommand();
+      started.push(spawnServer(backend.command, backend.args, backendDir, {
+        APP_ENV: 'local',
+        FRONTEND_ORIGIN: appUrl,
+        CORS_ALLOWED_ORIGINS: `${appUrl},http://localhost:5173,http://127.0.0.1:5173`,
+      }));
+    }
+    if (!(await isReachable(appUrl))) {
+      const viteBin = path.join(frontendDir, 'node_modules', 'vite', 'bin', 'vite.js');
+      started.push(spawnServer(process.execPath, [viteBin, '--host', '127.0.0.1', '--port', '5173'], frontendDir, {
+        VITE_API_BASE_URL: 'http://127.0.0.1:8000',
+        VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
+        VITE_SUPABASE_URL: '',
+        VITE_SUPABASE_PUBLISHABLE_KEY: '',
+        VITE_ENABLE_INTERNAL_TOOLS: 'false',
+      }));
+    }
+    await waitFor(apiUrl, 'FastAPI');
+    await waitFor(appUrl, 'Vite');
+    return started;
+  } catch (startupError) {
+    try {
+      await stopServers(started);
+    } catch (cleanupError) {
+      throw new AggregateError([startupError, cleanupError], 'Device simulation servers failed to start and clean up.');
+    }
+    throw startupError;
   }
-  if (!(await isReachable(appUrl))) {
-    started.push(spawnServer(isWindows ? 'npm.cmd' : 'npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173'], frontendDir, {
-      VITE_API_BASE_URL: 'http://127.0.0.1:8000',
-      VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
-      VITE_SUPABASE_URL: '',
-      VITE_SUPABASE_PUBLISHABLE_KEY: '',
-      VITE_ENABLE_INTERNAL_TOOLS: 'false',
-    }));
-  }
-  await waitFor(apiUrl, 'FastAPI');
-  await waitFor(appUrl, 'Vite');
-  return started;
 }
 
-function stopServers(children) {
-  for (const child of children) {
-    if (!child.killed) child.kill('SIGINT');
+function waitForChildClose(child, timeoutMs) {
+  const closePromise = childClosePromises.get(child);
+  if (!closePromise) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (closed) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(closed);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    closePromise.then(() => finish(true), () => finish(true));
+  });
+}
+
+async function stopWindowsProcessTree(child) {
+  if (!child.pid) return;
+  const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
+  await new Promise((resolve) => {
+    killer.once('close', resolve);
+    killer.once('error', resolve);
+  });
+  if (!(await waitForChildClose(child, 3000))) {
+    throw new Error(`Windows dev server process tree ${child.pid} did not stop cleanly.`);
+  }
+}
+
+function signalPosixProcessGroup(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error;
+  }
+}
+
+function posixProcessGroupExists(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'EPERM') return true;
+    if (error?.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function waitForPosixProcessGroupExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!posixProcessGroupExists(pid)) return true;
+    await sleep(50);
+  }
+  return !posixProcessGroupExists(pid);
+}
+
+async function stopPosixProcessTree(child) {
+  if (!child.pid) return;
+  signalPosixProcessGroup(child.pid, 'SIGTERM');
+  if (!(await waitForPosixProcessGroupExit(child.pid, 3000))) {
+    signalPosixProcessGroup(child.pid, 'SIGKILL');
+    if (!(await waitForPosixProcessGroupExit(child.pid, 1000))) {
+      throw new Error(`POSIX dev server process group ${child.pid} survived cleanup.`);
+    }
+  }
+  if (!(await waitForChildClose(child, 1000))) {
+    throw new Error(`Dev server process ${child.pid} closed its group but not its process handle.`);
+  }
+}
+
+async function stopServers(children) {
+  const results = await Promise.allSettled(children.map((child) => (
+    isWindows ? stopWindowsProcessTree(child) : stopPosixProcessTree(child)
+  )));
+  const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'One or more dev server process trees did not stop cleanly.');
   }
 }
 
@@ -350,29 +445,41 @@ async function main() {
   await fs.rm(screenshotDir, { recursive: true, force: true });
   await fs.mkdir(screenshotDir, { recursive: true });
   const servers = await ensureServers();
-  const browser = await chromium.launch({ headless: true });
+  let browser;
+  let cleanupError = null;
   const results = [];
   try {
+    browser = await chromium.launch({ headless: true });
     for (const viewport of viewports) {
       results.push(await runViewport(browser, viewport));
     }
   } finally {
-    await browser.close();
-    stopServers(servers);
+    try {
+      await browser?.close();
+    } catch (error) {
+      cleanupError = error;
+    }
+    try {
+      await stopServers(servers);
+    } catch (error) {
+      cleanupError ??= error;
+    }
   }
   await writeReport(results);
+  if (cleanupError) throw cleanupError;
   const failures = results.filter((result) => result.issues.length > 0);
   if (failures.length > 0) {
     for (const failure of failures) {
       console.error(`${failure.viewport.name}:`);
       for (const issue of failure.issues) console.error(`  - ${issue}`);
     }
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   console.log(`Device simulation passed. Report: ${reportPath}`);
 }
 
 main().catch((error) => {
   console.error(error);
-  process.exit(1);
+  process.exitCode = 1;
 });
