@@ -22,11 +22,12 @@ Only set those flags after the matching Supabase Auth provider is configured and
 
 ## Setup Steps
 
-1. Open the Vercel project settings.
-2. Add the variables for Production and any approved Preview environments.
-3. Redeploy Vercel so the variables are baked into the frontend bundle.
-4. Verify `/auth/sign-in` no longer shows account-disabled mode when Supabase is configured.
-5. Verify Supabase redirect URLs include production and any approved preview callback/reset-password URL.
+1. Store the required Production values in the matching GitHub Actions repository secrets.
+2. Run the checked-in frontend deployment workflow. It synchronizes those values into Vercel Production without logging them, re-pulls the Vercel environment, and fails before build if any required value is empty.
+3. Use Vercel project settings only to inspect the synchronized names/status or to configure an approved Preview environment; do not replace the Production values with blanks.
+4. Redeploy Vercel so the variables are baked into the frontend bundle.
+5. Verify `/` and `/auth/sign-in` expose Google and email/password sign-in from fresh browser storage.
+6. Verify Supabase redirect URLs include production and any approved preview callback/reset-password URL.
 
 The frontend has a beta-safe Render fallback only for known BrassTune production/preview hostnames. Unknown hosted origins must use explicit environment configuration rather than silently calling production Render.
 

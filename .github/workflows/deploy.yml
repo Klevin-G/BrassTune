@@ -30,6 +30,11 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+      VITE_WS_BASE_URL: ${{ secrets.VITE_WS_BASE_URL }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      VITE_AUTH_GOOGLE_ENABLED: "true"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -41,6 +46,86 @@ jobs:
         run: npm install -g vercel@54.14.0
       - name: Pull Vercel environment
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Sync required Vercel production environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sync_variable() {
+            local name="$1"
+            local value="$2"
+
+            if [[ -z "$value" ]]; then
+              echo "::error::${name} is missing or empty in the GitHub Production environment."
+              return 1
+            fi
+
+            if ! printf '%s\n' "$value" | vercel env add "$name" production \
+              --force --no-sensitive --yes --token="$VERCEL_TOKEN" >/dev/null 2>&1; then
+              echo "::error::Failed to synchronize ${name} to Vercel Production."
+              return 1
+            fi
+          }
+
+          sync_variable VITE_API_BASE_URL "$VITE_API_BASE_URL"
+          sync_variable VITE_WS_BASE_URL "$VITE_WS_BASE_URL"
+          sync_variable VITE_SUPABASE_URL "$VITE_SUPABASE_URL"
+          sync_variable VITE_SUPABASE_PUBLISHABLE_KEY "$VITE_SUPABASE_PUBLISHABLE_KEY"
+          sync_variable VITE_AUTH_GOOGLE_ENABLED "$VITE_AUTH_GOOGLE_ENABLED"
+      - name: Refresh Vercel production environment
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Validate production frontend environment
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const envPath = '.vercel/.env.production.local';
+          if (!fs.existsSync(envPath)) {
+            console.error(`::error file=${envPath}::Vercel production environment was not pulled.`);
+            process.exit(1);
+          }
+
+          const values = new Map();
+          for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+            const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/);
+            if (!match) continue;
+
+            let value = match[2].trim();
+            const quote = value[0];
+            if ((quote === '"' || quote === "'") && value.at(-1) === quote) {
+              value = value.slice(1, -1);
+            }
+            values.set(match[1], value.trim());
+          }
+
+          const required = [
+            'VITE_API_BASE_URL',
+            'VITE_WS_BASE_URL',
+            'VITE_SUPABASE_URL',
+            'VITE_SUPABASE_PUBLISHABLE_KEY',
+            'VITE_AUTH_GOOGLE_ENABLED',
+          ];
+          const missingOrEmpty = required.filter((name) => !values.get(name));
+          let failed = false;
+
+          if (missingOrEmpty.length > 0) {
+            console.error(
+              `::error file=${envPath}::Missing or empty required Vercel Production variables: ${missingOrEmpty.join(', ')}`,
+            );
+            failed = true;
+          }
+
+          if (values.has('VITE_AUTH_GOOGLE_ENABLED') && values.get('VITE_AUTH_GOOGLE_ENABLED') !== 'true') {
+            console.error(
+              `::error file=${envPath}::VITE_AUTH_GOOGLE_ENABLED must equal true in Vercel Production.`,
+            );
+            failed = true;
+          }
+
+          if (failed) process.exit(1);
+          console.log('Verified required Vercel Production frontend variables without exposing values.');
+          NODE
       - name: Build frontend
         run: vercel build --prod --token="$VERCEL_TOKEN"
       - name: Deploy frontend

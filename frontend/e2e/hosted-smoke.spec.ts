@@ -8,6 +8,9 @@ const hostedMode = process.env.E2E_START_LOCAL_SERVERS === '0';
 const vercelShareURL = process.env.E2E_VERCEL_SHARE_URL;
 const vercelBypassSecret = process.env.E2E_VERCEL_AUTOMATION_BYPASS_SECRET || process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 const webBaseURL = process.env.E2E_BASE_URL;
+const productionHostedAuth = hostedMode && webBaseURL
+  ? new URL(webBaseURL).hostname === 'brasstune.vercel.app'
+  : false;
 
 const routes = [
   '/',
@@ -84,7 +87,42 @@ async function grantGuestAccess(page: Page) {
   });
 }
 
+async function startWithFreshAuthStorage(page: Page) {
+  await page.context().clearCookies();
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+}
+
 test.describe('hosted read-only smoke', () => {
+  test('production exposes Google and email sign-in from fresh storage', async ({ page }) => {
+    test.skip(!productionHostedAuth, 'Canonical production auth is not required for local or preview smoke runs.');
+    await startWithFreshAuthStorage(page);
+
+    const rootResponse = await page.goto(routeURL('/'));
+    await assertNotProtectedPreview(rootResponse, page, '/');
+    expect(rootResponse?.status(), 'Production root should load without protection or routing errors.').toBeLessThan(400);
+
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+    const emailDisclosure = page.getByRole('button', { name: 'Sign in with email' });
+    await expect(emailDisclosure).toBeVisible();
+    await emailDisclosure.click();
+    await expect(page.getByLabel('Email')).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+
+    const signInResponse = await page.goto(routeURL('/auth/sign-in'));
+    await assertNotProtectedPreview(signInResponse, page, '/auth/sign-in');
+    expect(signInResponse?.status(), 'Production sign-in route should load without protection or routing errors.').toBeLessThan(400);
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+    await expect(page.getByLabel('Email')).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Create account', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Forgot password?' })).toBeVisible();
+  });
+
   test('deployed app loads root and deep links without mixed content', async ({ page }) => {
     await grantGuestAccess(page);
     const consoleErrors: string[] = [];
