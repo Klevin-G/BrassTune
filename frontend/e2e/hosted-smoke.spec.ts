@@ -29,6 +29,13 @@ const routes = [
   '/support',
 ];
 
+const expectedRoutePaths = new Map([
+  ['/analytics', '/progress'],
+  ['/coach', '/progress'],
+  ['/more', '/settings'],
+  ['/settings/audio-lab', '/settings'],
+]);
+
 function assertNoHostedURLRegression(url: string, appOrigin: string) {
   const parsed = new URL(url);
   const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
@@ -92,7 +99,11 @@ test.describe('hosted read-only smoke', () => {
       expect(response?.status(), `${route} should not be behind auth or missing`).toBeLessThan(400);
       await expect(page.getByRole('main')).toBeVisible();
       if (!route.startsWith('/auth/') && route !== '/') {
-        expect(new URL(page.url()).pathname, `${route} should render its own route instead of redirecting to the auth gateway`).toBe(route);
+        const expectedPath = expectedRoutePaths.get(route) ?? route;
+        await expect.poll(
+          () => new URL(page.url()).pathname,
+          { message: `${route} should resolve to ${expectedPath} instead of the auth gateway` },
+        ).toBe(expectedPath);
       }
       await expect(page.locator('body')).not.toContainText(/mixed content/i);
       await expect(page.locator('body')).not.toContainText(/vercel authentication|log in to vercel|single sign-on|authentication required/i);
@@ -122,10 +133,10 @@ test.describe('hosted read-only smoke', () => {
         badURLs.push(socket.url());
       }
     });
-    const response = await page.goto(routeURL('/settings/audio-lab'));
-    await assertNotProtectedPreview(response, page, '/settings/audio-lab');
-    await expect(page.getByText(/Cloud sync stream/i)).toBeVisible();
-    await expect(page.getByText(/Connection diagnostics/i)).toBeVisible();
+    const response = await page.goto(routeURL('/practice'));
+    await assertNotProtectedPreview(response, page, '/practice');
+    await expect(page.getByText(/Live mic/i)).toBeVisible();
+    await expect(page.getByLabel('Instrument').locator('option').first()).toBeAttached();
     expect(badURLs).toEqual([]);
   });
 
@@ -208,7 +219,7 @@ test.describe('hosted read-only smoke', () => {
   test('strict hosted branch content is current when enabled', async ({ page }) => {
     test.skip(!strictHostedContent, 'Strict content validation runs only after deploying this branch.');
     await grantGuestAccess(page);
-    await page.goto(routeURL('/more'));
+    await page.goto(routeURL('/settings'));
     await expect(page.locator('body')).not.toContainText(/\/dev\/calibration|MVP|Developer testing|FastAPI|Supabase env vars/i);
     await page.goto(routeURL('/privacy'));
     await expect(page.getByText(/Privacy Policy/i)).toBeVisible();
