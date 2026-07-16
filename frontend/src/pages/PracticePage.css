@@ -227,6 +227,17 @@
 .tuner-saved strong { display: block; font-size: 1.1rem; }
 .tuner-saved span { color: var(--muted); font-size: 0.85rem; }
 
+@media (max-width: 860px) and (max-height: 780px) {
+  .tuner-stage {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .tuning-meter-track {
+    height: 48px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tuning-meter-indicator,
   .tuning-meter-reward { transition: none; }

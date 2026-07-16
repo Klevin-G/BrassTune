@@ -122,18 +122,29 @@ test('demo take creates a reviewable session with a plain-language result', asyn
   await expect(page.locator('body')).not.toContainText(/Authentication required/i);
 });
 
-test('tiny-phone tuner controls stay clear of the bottom navigation', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 568 });
-  await page.goto('/practice');
-  const controls = page.locator('.tuner-stage .session-controls');
-  const bottomNav = page.locator('.floating-tabbar');
-  await expect(controls).toBeVisible();
-  await expect(bottomNav).toBeVisible();
-  const controlsBox = await controls.boundingBox();
-  const navBox = await bottomNav.boundingBox();
-  expect(controlsBox).not.toBeNull();
-  expect(navBox).not.toBeNull();
-  expect(controlsBox!.y + controlsBox!.height).toBeLessThanOrEqual(navBox!.y + 4);
+test('short mobile tuner controls stay clear of the bottom navigation', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('brasstune.demoMode', 'false'));
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 540, height: 720 },
+    { width: 641, height: 720 },
+    { width: 860, height: 780 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/practice');
+    const controls = page.locator('.tuner-stage .session-controls');
+    const bottomNav = page.locator('.floating-tabbar');
+    await expect(controls).toBeVisible();
+    await expect(bottomNav).toBeVisible();
+    const controlsBox = await controls.boundingBox();
+    const navBox = await bottomNav.boundingBox();
+    expect(controlsBox).not.toBeNull();
+    expect(navBox).not.toBeNull();
+    expect(
+      controlsBox!.y + controlsBox!.height,
+      `${viewport.width}x${viewport.height} controls should clear the bottom navigation`,
+    ).toBeLessThanOrEqual(navBox!.y + 1);
+  }
 });
 
 test('settings exposes export, danger zone, and legal links', async ({ page }) => {

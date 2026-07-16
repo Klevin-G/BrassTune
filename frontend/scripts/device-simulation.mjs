@@ -24,32 +24,30 @@ const viewports = [
   { name: 'iPad landscape', slug: 'ipad-landscape', width: 1024, height: 768, kind: 'tablet-landscape' },
   { name: 'iPad Pro landscape', slug: 'ipad-pro-landscape', width: 1366, height: 1024, kind: 'desktop' },
   { name: 'Laptop', slug: 'laptop', width: 1440, height: 900, kind: 'desktop' },
-  { name: 'Wide desktop analytics', slug: 'wide-desktop', width: 1728, height: 1117, kind: 'wide-desktop' },
+  { name: 'Wide desktop', slug: 'wide-desktop', width: 1728, height: 1117, kind: 'wide-desktop' },
   { name: 'Desktop HD', slug: 'desktop-hd', width: 1920, height: 1080, kind: 'wide-desktop' },
   { name: 'Ultra-wide desktop', slug: 'ultra-wide-desktop', width: 2560, height: 1440, kind: 'wide-desktop' },
 ];
 
-const routesVisited = ['Auth Gateway', 'Home', 'Onboarding', 'Practice', 'Metronome', 'Score Practice', 'Session Review', 'Analytics', 'Coach', 'Sessions', 'Progress', 'Ensemble', 'More', 'Settings', 'Audio Lab'];
+const routesVisited = ['Auth Gateway', 'Onboarding', 'Tuner', 'Play-Along', 'Metronome', 'Sheet Music', 'Session Review', 'Progress', 'Sessions', 'Class', 'Settings'];
 
 const screenshotPlan = new Map([
   ['tiny-phone:practice', 'tiny-phone-practice.png'],
-  ['iphone-modern:home', 'phone-home.png'],
   ['iphone-modern:auth', 'phone-auth.png'],
   ['iphone-modern:onboarding', 'phone-onboarding.png'],
   ['iphone-modern:practice', 'phone-practice.png'],
-  ['iphone-modern:analytics', 'phone-analytics.png'],
+  ['iphone-modern:progress', 'phone-progress.png'],
   ['iphone-modern:session-review', 'phone-session-review.png'],
   ['iphone-modern:sessions', 'phone-session-playback.png'],
   ['ipad-portrait:practice', 'ipad-portrait-practice.png'],
   ['ipad-landscape:practice', 'ipad-landscape-practice.png'],
-  ['ipad-landscape:analytics', 'ipad-landscape-analytics.png'],
-  ['laptop:home', 'desktop-home.png'],
+  ['ipad-landscape:progress', 'ipad-landscape-progress.png'],
   ['laptop:practice', 'desktop-practice.png'],
-  ['wide-desktop:analytics', 'desktop-analytics-dashboard.png'],
-  ['ultra-wide-desktop:analytics', 'ultrawide-analytics-dashboard.png'],
+  ['wide-desktop:progress', 'desktop-progress-dashboard.png'],
+  ['ultra-wide-desktop:progress', 'ultrawide-progress-dashboard.png'],
   ['laptop:session-review', 'desktop-session-review.png'],
   ['laptop:ensemble', 'desktop-ensemble.png'],
-  ['laptop:audio-lab', 'audio-lab.png'],
+  ['laptop:settings', 'desktop-settings.png'],
 ]);
 
 function sleep(ms) {
@@ -114,6 +112,7 @@ async function ensureServers() {
       VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
       VITE_SUPABASE_URL: '',
       VITE_SUPABASE_PUBLISHABLE_KEY: '',
+      VITE_ENABLE_INTERNAL_TOOLS: 'false',
     }));
   }
   await waitFor(apiUrl, 'FastAPI');
@@ -256,14 +255,11 @@ async function runViewport(browser, viewport) {
     await gotoAndCheck(page, viewport, '/', 'Auth Gateway', issues);
     await saveScreenshot(page, viewport, 'auth', screenshots);
 
-    await gotoAndCheck(page, viewport, '/home', 'Home', issues);
-    await saveScreenshot(page, viewport, 'home', screenshots);
-
     await gotoAndCheck(page, viewport, '/auth/sign-in', 'Auth Form', issues);
     if (viewport.slug === 'iphone-modern') {
       await gotoAndCheck(page, viewport, '/settings', 'Settings onboarding trigger', issues);
-      await page.getByRole('button', { name: /reopen onboarding/i }).click();
-      await page.waitForSelector('.onboarding-panel', { state: 'visible' });
+      await page.getByRole('button', { name: /replay tour/i }).click();
+      await page.getByRole('dialog').waitFor({ state: 'visible' });
       await assertNoHorizontalOverflow(page, issues, `${viewport.name} Onboarding`);
       await saveScreenshot(page, viewport, 'onboarding', screenshots);
       await page.getByRole('button', { name: /skip/i }).click();
@@ -271,18 +267,20 @@ async function runViewport(browser, viewport) {
 
     await gotoAndCheck(page, viewport, '/practice', 'Practice', issues);
     await assertTunerDominant(page, viewport, issues, `${viewport.name} Practice`);
-    if (viewport.kind === 'tablet-landscape') await assertSideBySide(page, '.practice-layout', issues, `${viewport.name} Practice`);
+    await page.locator('.tuner-stage').waitFor({ state: 'visible' });
     await saveScreenshot(page, viewport, 'practice', screenshots);
 
+    await gotoAndCheck(page, viewport, '/practice/play-along', 'Play-Along', issues);
     await gotoAndCheck(page, viewport, '/metronome', 'Metronome', issues);
-    await gotoAndCheck(page, viewport, '/practice/score', 'Score Practice', issues);
+    await gotoAndCheck(page, viewport, '/practice/score', 'Sheet Music', issues);
     await gotoAndCheck(page, viewport, '/practice', 'Practice return', issues);
 
-    await page.getByRole('button', { name: /start recording/i }).click();
-    await page.getByRole('button', { name: /stop recording/i }).waitFor({ state: 'visible' });
+    await page.getByRole('radio', { name: 'Demo', exact: true }).click();
+    await page.getByRole('button', { name: /save this take/i }).click();
+    await page.getByRole('button', { name: /stop and save/i }).waitFor({ state: 'visible' });
     await sleep(2600);
-    await page.getByRole('button', { name: /stop recording/i }).click();
-    const reviewLink = page.getByRole('link', { name: /review session/i });
+    await page.getByRole('button', { name: /stop and save/i }).click();
+    const reviewLink = page.getByRole('link', { name: /see results/i });
     await reviewLink.waitFor({ state: 'visible', timeout: 15000 });
     const reviewHref = await reviewLink.getAttribute('href');
     if (!reviewHref) issues.push(`${viewport.name} Practice: saved session review link missing href`);
@@ -297,29 +295,16 @@ async function runViewport(browser, viewport) {
     if (viewport.kind === 'tablet-landscape') await assertSideBySide(page, '.two-column-grid', issues, `${viewport.name} Session Review`);
     await saveScreenshot(page, viewport, 'session-review', screenshots);
 
-    await gotoAndCheck(page, viewport, '/analytics', 'Analytics', issues);
-    if (viewport.width >= 900) await assertSideBySide(page, '.analytics-main-grid', issues, `${viewport.name} Analytics`);
-    if (viewport.width >= 1200) await assertSideBySide(page, '.analytics-chart-grid', issues, `${viewport.name} Analytics charts`);
-    const heatCell = page.locator('button.heat-cell').filter({ hasNotText: 'no data' }).first();
-    if (await heatCell.count()) {
-      await heatCell.click();
-      const intervalRadio = page.getByRole('radio', { name: '7D' });
-      if (await intervalRadio.count()) await intervalRadio.click();
-      await page.waitForLoadState('networkidle');
-      await assertNoConsoleErrors(page, issues, `${viewport.name} Analytics interactions`);
-    }
-    await saveScreenshot(page, viewport, 'analytics', screenshots);
+    await gotoAndCheck(page, viewport, '/progress', 'Progress', issues);
+    await page.getByRole('heading', { name: /your progress/i }).waitFor({ state: 'visible' });
+    await saveScreenshot(page, viewport, 'progress', screenshots);
 
-    await gotoAndCheck(page, viewport, '/coach', 'Coach', issues);
     await gotoAndCheck(page, viewport, '/sessions', 'Sessions', issues);
     await saveScreenshot(page, viewport, 'sessions', screenshots);
-    await gotoAndCheck(page, viewport, '/progress', 'Progress', issues);
-    await gotoAndCheck(page, viewport, '/ensemble', 'Ensemble', issues);
+    await gotoAndCheck(page, viewport, '/ensemble', 'Class', issues);
     await saveScreenshot(page, viewport, 'ensemble', screenshots);
-    await gotoAndCheck(page, viewport, '/more', 'More', issues);
     await gotoAndCheck(page, viewport, '/settings', 'Settings', issues);
-    await gotoAndCheck(page, viewport, '/settings/audio-lab', 'Audio Lab', issues);
-    await saveScreenshot(page, viewport, 'audio-lab', screenshots);
+    await saveScreenshot(page, viewport, 'settings', screenshots);
   } catch (error) {
     issues.push(`Fatal simulation error: ${error.message}`);
   } finally {
