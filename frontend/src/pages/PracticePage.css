@@ -228,6 +228,10 @@
 .tuner-saved span { color: var(--muted); font-size: 0.85rem; }
 
 @media (max-width: 860px) and (max-height: 780px) {
+  .tuner-page {
+    gap: 12px;
+  }
+
   .tuner-stage {
     gap: 10px;
     padding: 12px;

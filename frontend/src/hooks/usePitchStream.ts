@@ -242,6 +242,11 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     return () => window.clearInterval(timer);
   }, [demoMode, enabled, handleFrame, instrumentId, referencePitch]);
 
+  useEffect(() => {
+    setCurrentFrame(null);
+    setHistory([]);
+  }, [demoMode]);
+
   const cleanupMicrophone = useCallback((message?: string) => {
     processorRef.current?.disconnect();
     sourceRef.current?.disconnect();

@@ -232,7 +232,10 @@ async function runViewport(browser, viewport) {
   console.log(`Simulating ${viewport.name} (${viewport.width}x${viewport.height})`);
   const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, deviceScaleFactor: 1 });
   await context.addInitScript(() => {
-    localStorage.clear();
+    if (sessionStorage.getItem('brasstune.deviceSimulationInitialized') !== 'true') {
+      localStorage.clear();
+      sessionStorage.setItem('brasstune.deviceSimulationInitialized', 'true');
+    }
     localStorage.setItem('brasstune.onboardingComplete', 'true');
     localStorage.setItem('brasstune.guestAccess', 'true');
     window.__brasstuneErrors = [];

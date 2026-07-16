@@ -123,7 +123,14 @@ test('demo take creates a reviewable session with a plain-language result', asyn
 });
 
 test('short mobile tuner controls stay clear of the bottom navigation', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('brasstune.demoMode', 'false'));
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError')),
+      },
+    });
+  });
   for (const viewport of [
     { width: 320, height: 568 },
     { width: 540, height: 720 },
@@ -132,6 +139,9 @@ test('short mobile tuner controls stay clear of the bottom navigation', async ({
   ]) {
     await page.setViewportSize(viewport);
     await page.goto('/practice');
+    await page.getByRole('radio', { name: /live mic/i }).click();
+    await expect(page.locator('.tuner-banner')).toBeVisible();
+    await expect(page.locator('.note-display')).toHaveAttribute('aria-label', 'Play a note');
     const controls = page.locator('.tuner-stage .session-controls');
     const bottomNav = page.locator('.floating-tabbar');
     await expect(controls).toBeVisible();
@@ -144,6 +154,46 @@ test('short mobile tuner controls stay clear of the bottom navigation', async ({
       controlsBox!.y + controlsBox!.height,
       `${viewport.width}x${viewport.height} controls should clear the bottom navigation`,
     ).toBeLessThanOrEqual(navBox!.y + 1);
+  }
+});
+
+test('tiny-phone empty-state actions stay clear of the bottom navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const [route, actionName] of [
+    ['/progress', /record your first note/i],
+    ['/sessions', /start practicing/i],
+  ] as const) {
+    await page.goto(route);
+    const action = page.getByRole('link', { name: actionName });
+    const bottomNav = page.locator('.floating-tabbar');
+    await expect(action).toBeVisible();
+    await expect(bottomNav).toBeVisible();
+    const actionBox = await action.boundingBox();
+    const navBox = await bottomNav.boundingBox();
+    expect(actionBox).not.toBeNull();
+    expect(navBox).not.toBeNull();
+    expect(actionBox!.y + actionBox!.height, `${route} action should clear the bottom navigation`).toBeLessThanOrEqual(navBox!.y + 1);
+    const actionIsTopmostAtCenter = await action.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const topmost = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return Boolean(topmost && (topmost === element || element.contains(topmost)));
+    });
+    expect(actionIsTopmostAtCenter, `${route} action center should remain actionable`).toBe(true);
+  }
+});
+
+test('narrow settings controls do not widen the document', async ({ page }) => {
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 360, height: 740 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/settings');
+    await expect(page.getByRole('heading', { name: /settings/i })).toBeVisible();
+    const overflow = await page.evaluate(() => (
+      Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - document.documentElement.clientWidth
+    ));
+    expect(overflow, `${viewport.width}px Settings should not overflow horizontally`).toBeLessThanOrEqual(2);
   }
 });
 

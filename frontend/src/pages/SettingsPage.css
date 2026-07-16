@@ -48,6 +48,15 @@
   width: 100%;
 }
 
+.settings-tuner-card .segmented-control {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-tuner-card .segmented-control button {
+  min-width: 0;
+  white-space: normal;
+}
+
 .set-reset {
   align-self: flex-start;
   min-height: 34px;
