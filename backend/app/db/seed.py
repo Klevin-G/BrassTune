@@ -3,6 +3,7 @@ import json
 import random
 from typing import Dict, List, Tuple
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile
@@ -12,6 +13,38 @@ from app.services.session_service import rebuild_note_events, save_pitch_frame, 
 
 NOTE_INDEX = {"C": 0, "C#": 1, "Db": 1, "D": 2, "Eb": 3, "D#": 3, "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "Ab": 8, "G#": 8, "A": 9, "Bb": 10, "A#": 10, "B": 11}
 DEMO_RECORDING_CONFIDENCE = max(MIN_RECORDING_CONFIDENCE, 0.97)
+
+
+def _sync_explicit_identity_sequences(db: Session) -> None:
+    """Keep PostgreSQL-generated IDs above the fixed demo IDs."""
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+
+    # PostgreSQL identity sequences do not advance when rows are inserted with
+    # explicit IDs. The demo fixtures intentionally use stable user/group IDs,
+    # so advance those two owned sequences to at least the current table maxima
+    # without rewinding an already higher sequence value.
+    for table_name in ("users", "groups"):
+        db.execute(
+            text(
+                f"""
+                WITH identity_state AS (
+                    SELECT
+                        pg_get_serial_sequence('public.{table_name}', 'id')::regclass AS sequence_name,
+                        COALESCE((SELECT MAX(id) FROM public.{table_name}), 1) AS maximum_id,
+                        EXISTS (SELECT 1 FROM public.{table_name}) AS has_rows
+                )
+                SELECT setval(
+                    sequence_name,
+                    GREATEST(maximum_id, COALESCE(pg_sequence_last_value(sequence_name), 1)),
+                    has_rows OR pg_sequence_last_value(sequence_name) IS NOT NULL
+                )
+                FROM identity_state
+                WHERE sequence_name IS NOT NULL
+                """
+            )
+        )
 
 
 def note_to_midi(label: str) -> int:
@@ -65,6 +98,8 @@ def ensure_users_and_group(db: Session) -> None:
         exists = db.query(GroupMember).filter(GroupMember.group_id == 1, GroupMember.user_id == user_id).first()
         if exists is None:
             db.add(GroupMember(group_id=1, user_id=user_id, instrument_id=instrument_id, role_in_group="student", status="active"))
+    db.commit()
+    _sync_explicit_identity_sequences(db)
     db.commit()
 
 

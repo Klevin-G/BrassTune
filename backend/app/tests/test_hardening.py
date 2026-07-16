@@ -13,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -40,9 +40,9 @@ from app.core.analytics.stats import build_instrument_heatmap, calculate_most_im
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, midi_to_frequency
 from app.core.pitch.detector import yin_pitch
-from app.db.database import Base, DATABASE_URL, SessionLocal, engine
+from app.db.database import Base, DATABASE_URL, SessionLocal, database_backend, engine
 from app.db.maintenance import clear_practice_data, repair_demo_data
-from app.db.seed import seed_demo_data
+from app.db.seed import _sync_explicit_identity_sequences, seed_demo_data
 from app.main import app
 from app.models.db import AccountDeletionJob, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, UsageEvent, User
 from app.schemas.schemas import (
@@ -555,6 +555,78 @@ def test_fresh_seed_creates_recordable_samples_and_note_events():
         assert all(session.note_events for session in sessions)
         assert db.query(PitchSample).filter(PitchSample.confidence < MIN_RECORDING_CONFIDENCE).count() == 0
     finally:
+        db.close()
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL identity regression")
+def test_demo_seed_repairs_identities_without_rewinding_them():
+    db = SessionLocal()
+    original_states = {}
+    try:
+        seed_demo_data(db)
+        sequence_names = {}
+        maximum_ids = {}
+        for table_name in ("users", "groups"):
+            sequence_names[table_name] = db.execute(
+                text(f"SELECT pg_get_serial_sequence('public.{table_name}', 'id')")
+            ).scalar_one()
+            maximum_ids[table_name] = db.execute(
+                text(f"SELECT MAX(id) FROM public.{table_name}")
+            ).scalar_one()
+            last_value = db.execute(
+                text("SELECT pg_sequence_last_value(CAST(:sequence_name AS regclass))"),
+                {"sequence_name": sequence_names[table_name]},
+            ).scalar_one_or_none()
+            start_value = db.execute(
+                text("SELECT seqstart FROM pg_sequence WHERE seqrelid = CAST(:sequence_name AS regclass)"),
+                {"sequence_name": sequence_names[table_name]},
+            ).scalar_one()
+            original_states[table_name] = {
+                "value": last_value if last_value is not None else start_value,
+                "is_called": last_value is not None,
+            }
+            db.execute(
+                text("SELECT setval(CAST(:sequence_name AS regclass), 1, false)"),
+                {"sequence_name": sequence_names[table_name]},
+            )
+
+        _sync_explicit_identity_sequences(db)
+        repaired_next_values = {
+            table_name: db.execute(
+                text("SELECT nextval(CAST(:sequence_name AS regclass))"),
+                {"sequence_name": sequence_name},
+            ).scalar_one()
+            for table_name, sequence_name in sequence_names.items()
+        }
+        assert all(repaired_next_values[name] == maximum_ids[name] + 1 for name in sequence_names)
+
+        high_water_marks = {name: value + 50 for name, value in repaired_next_values.items()}
+        for table_name, sequence_name in sequence_names.items():
+            db.execute(
+                text("SELECT setval(CAST(:sequence_name AS regclass), :value, true)"),
+                {"sequence_name": sequence_name, "value": high_water_marks[table_name]},
+            )
+
+        _sync_explicit_identity_sequences(db)
+        assert all(
+            db.execute(
+                text("SELECT nextval(CAST(:sequence_name AS regclass))"),
+                {"sequence_name": sequence_names[table_name]},
+            ).scalar_one()
+            == high_water_marks[table_name] + 1
+            for table_name in sequence_names
+        )
+    finally:
+        for table_name, state in original_states.items():
+            db.execute(
+                text("SELECT setval(CAST(:sequence_name AS regclass), :value, :is_called)"),
+                {
+                    "sequence_name": sequence_names[table_name],
+                    "value": state["value"],
+                    "is_called": state["is_called"],
+                },
+            )
+        db.commit()
         db.close()
 
 
