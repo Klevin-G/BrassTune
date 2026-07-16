@@ -190,7 +190,7 @@ export function OnboardingFlow() {
               notes to fix. Let's get you playing in under a minute.
             </p>
             <div className="ob-facts">
-              <span><Sparkles size={15} /> AI Play-Along score</span>
+              <span><Sparkles size={15} /> Live Play-Along score</span>
               <span><Gauge size={15} /> Live tuner</span>
               <span><TrendingUp size={15} /> Tracks your progress</span>
             </div>

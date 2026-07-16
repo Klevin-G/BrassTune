@@ -34,17 +34,57 @@ const IMAGE_MIME_TYPES = new Set([
 ]);
 
 const PDF_MIME_TYPES = new Set(['application/pdf']);
+const ISO_BMFF_IMAGE_BRANDS = new Set([
+  'avif',
+  'avis',
+  'heic',
+  'heix',
+  'hevc',
+  'hevx',
+  'heim',
+  'heis',
+  'hevm',
+  'hevs',
+  'mif1',
+  'msf1',
+]);
+
+function uint32BigEndian(bytes: Uint8Array, offset: number) {
+  return (((bytes[offset] << 24) >>> 0) + (bytes[offset + 1] << 16) + (bytes[offset + 2] << 8) + bytes[offset + 3]) >>> 0;
+}
+
+function isoBmffImageBrand(header: Uint8Array) {
+  if (header.length < 16 || header[4] !== 0x66 || header[5] !== 0x74 || header[6] !== 0x79 || header[7] !== 0x70) {
+    return false;
+  }
+  const boxSize = uint32BigEndian(header, 0);
+  if (boxSize < 16) return false;
+  const decoder = new TextDecoder('latin1');
+  const availableBoxLength = Math.min(boxSize, header.length);
+  // The ftyp box stores the major brand at byte 8, a four-byte numeric minor
+  // version at byte 12, then zero or more compatible brands at byte 16. Never
+  // interpret the minor-version bytes as a compatible image brand.
+  for (let offset = 8; offset + 4 <= availableBoxLength; offset += offset === 8 ? 8 : 4) {
+    if (ISO_BMFF_IMAGE_BRANDS.has(decoder.decode(header.slice(offset, offset + 4)).toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function sniffScoreKind(header: Uint8Array): ScoreSourceKind {
-  const ascii = new TextDecoder('latin1').decode(header.slice(0, 64)).trimStart().toLowerCase();
-  if (ascii.startsWith('%pdf-')) return 'pdf';
+  const ascii = new TextDecoder('latin1').decode(header.slice(0, 256)).toLowerCase();
+  if (/^%pdf-[12]\.[0-9]/.test(ascii)) return 'pdf';
   if (header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) return 'image';
-  if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47) return 'image';
+  if (
+    header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47
+    && header[4] === 0x0d && header[5] === 0x0a && header[6] === 0x1a && header[7] === 0x0a
+  ) return 'image';
   if (ascii.startsWith('gif87a') || ascii.startsWith('gif89a')) return 'image';
   if (header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46 && header[8] === 0x57 && header[9] === 0x45 && header[10] === 0x42 && header[11] === 0x50) return 'image';
   if ((header[0] === 0x49 && header[1] === 0x49 && header[2] === 0x2a && header[3] === 0x00) || (header[0] === 0x4d && header[1] === 0x4d && header[2] === 0x00 && header[3] === 0x2a)) return 'image';
   if (header[0] === 0x42 && header[1] === 0x4d) return 'image';
-  if (header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) return 'image';
+  if (isoBmffImageBrand(header)) return 'image';
   if (ascii.startsWith('<svg') || ascii.includes('<script') || ascii.startsWith('<!doctype html') || ascii.startsWith('<html')) return 'unsupported';
   return 'unsupported';
 }
@@ -71,9 +111,10 @@ export async function verifiedScoreSourceKind(file: File): Promise<ScoreSourceKi
   if (ACTIVE_MIME_TYPES.has(file.type)) return 'unsupported';
   const header = new Uint8Array(await file.slice(0, 64).arrayBuffer());
   if (hasActiveHeader(header)) return 'unsupported';
-  const sniffed = sniffScoreKind(header);
-  if (sniffed !== 'unsupported') return sniffed;
-  return scoreSourceKind(file);
+  // Imports are rendered and persisted locally, so the declared MIME type or
+  // filename is only a picker hint. Content that does not match a supported
+  // magic signature must fail closed instead of becoming a broken saved page.
+  return sniffScoreKind(header);
 }
 
 export function likelySheetMusicFromName(name: string) {

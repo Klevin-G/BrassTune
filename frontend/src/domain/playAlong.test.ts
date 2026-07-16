@@ -157,9 +157,32 @@ describe('PlayAlongGrader', () => {
     grader.feed(frame('C', 8), 0);
     grader.feed(frame(null, null, 0.1), 100); // silence blip
     grader.feed(frame('C', 8), 200);
-    grader.feed(frame('C', 8), 500); // total window >= 400ms
+    grader.feed(frame('C', 8), 440); // total window >= 400ms, latest gap <= 250ms
     expect(grader.results.length).toBe(1);
     expect(grader.results[0].grade).toBe('good');
+  });
+
+  it('resets a stale hold after the native 250ms dropout grace', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 400, minSamples: 3, maximumDropoutMs: 250 });
+    grader.feed(frame('C', 4), 0);
+    grader.feed(frame('C', 4), 100);
+    const afterGap = grader.feed(frame('C', 4), 500);
+
+    expect(afterGap.heldFraction).toBe(0);
+    for (let t = 600; t <= 800; t += 100) grader.feed(frame('C', 4), t);
+    expect(grader.done).toBe(false);
+    expect(grader.results).toEqual([]);
+  });
+
+  it('resets while receiving prolonged low-confidence frames', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 400, minSamples: 3, maximumDropoutMs: 250 });
+    grader.feed(frame('C', 4), 0);
+    grader.feed(frame('C', 4), 100);
+    grader.feed(frame(null, null, 0.1), 200);
+    const afterSilence = grader.feed(frame(null, null, 0.1), 400);
+
+    expect(afterSilence.heldFraction).toBe(0);
+    expect(grader.results).toEqual([]);
   });
 
   it('trims the attack transient so a scooped attack does not wreck the grade', () => {

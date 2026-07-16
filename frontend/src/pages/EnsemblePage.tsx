@@ -92,12 +92,14 @@ export function EnsemblePage() {
   const [joinInstrument, setJoinInstrument] = useState('');
   const [showJoin, setShowJoin] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [leavingGroup, setLeavingGroup] = useState(false);
   const [rotatingCode, setRotatingCode] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [invitingMember, setInvitingMember] = useState(false);
   const [respondingInvitations, setRespondingInvitations] = useState<Record<number, 'accept' | 'decline'>>({});
   const [loading, setLoading] = useState(true);
   const joinInFlightRef = useRef(false);
+  const leaveInFlightRef = useRef(false);
   const createInFlightRef = useRef(false);
   const inviteInFlightRef = useRef(false);
   const invitationResponsesInFlightRef = useRef(new Set<number>());
@@ -234,6 +236,7 @@ export function EnsemblePage() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (leaveInFlightRef.current) return;
         setPendingLeave(null);
         return;
       }
@@ -402,15 +405,24 @@ export function EnsemblePage() {
   };
 
   const doLeave = async () => {
-    if (!pendingLeave) return;
+    if (!pendingLeave || leaveInFlightRef.current) return;
     const leaving = pendingLeave;
-    setPendingLeave(null);
+    leaveInFlightRef.current = true;
+    setLeavingGroup(true);
     try {
       await leaveEnsembleGroup(leaving.groupId);
       await loadEverything();
-      setEnsembleStatus(`You left “${leaving.label}”.`);
+      if (mountedRef.current) setEnsembleStatus(`You left “${leaving.label}”.`);
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not leave the class.'));
+      if (mountedRef.current) {
+        setEnsembleStatus(friendlyUserFacingError(error, 'Could not leave the class.'));
+      }
+    } finally {
+      leaveInFlightRef.current = false;
+      if (mountedRef.current) {
+        setLeavingGroup(false);
+        setPendingLeave(null);
+      }
     }
   };
 
@@ -491,6 +503,21 @@ export function EnsemblePage() {
   const code = selectedGroup ? classCode(selectedGroup) : null;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const shareLink = code ? `${origin}/ensemble?join=${encodeURIComponent(code)}` : null;
+  const leaveClassAction = canLeaveSelected && selectedGroup ? (
+    <button
+      className="ghost-button ec-leave-class ec-no-print"
+      type="button"
+      disabled={leavingGroup}
+      aria-busy={leavingGroup}
+      onClick={(event) => {
+        leaveReturnFocusRef.current = event.currentTarget;
+        setPendingLeave({ groupId: selectedGroup.id, label: selectedGroup.name });
+      }}
+    >
+      <LogOut size={15} />
+      Leave class
+    </button>
+  ) : undefined;
 
   const renderStudentCard = (student: EnsembleRosterStudent) => {
     const invited = student.status === 'invited';
@@ -740,7 +767,7 @@ export function EnsemblePage() {
             </SectionCard>
           ) : managesSelected ? (
             <div className="ec-print-area">
-              <SectionCard title={selectedGroup?.name ?? 'Class'}>
+              <SectionCard title={selectedGroup?.name ?? 'Class'} action={leaveClassAction}>
                 <div className="ec-print-only ec-print-head">
                   <h2>{selectedGroup?.name ?? 'Class'}</h2>
                   <p>Class report · {new Date().toLocaleDateString()}</p>
@@ -869,19 +896,7 @@ export function EnsemblePage() {
           ) : (
             <SectionCard
               title={selectedGroup?.name ?? 'Class'}
-              action={canLeaveSelected ? (
-                <button
-                  className="ghost-button ec-leave-class ec-no-print"
-                  type="button"
-                  onClick={(event) => {
-                    leaveReturnFocusRef.current = event.currentTarget;
-                    setPendingLeave({ groupId: selectedGroup.id, label: selectedGroup.name });
-                  }}
-                >
-                  <LogOut size={15} />
-                  Leave class
-                </button>
-              ) : undefined}
+              action={leaveClassAction}
             >
               <div className="ec-roster">
                 {(selectedGroup?.members ?? []).map((member: any) => (
@@ -916,11 +931,16 @@ export function EnsemblePage() {
       )}
 
       {pendingLeave && (
-        <div className="ec-modal-overlay ec-no-print" role="presentation" onClick={() => setPendingLeave(null)}>
+        <div
+          className="ec-modal-overlay ec-no-print"
+          role="presentation"
+          onClick={() => { if (!leavingGroup) setPendingLeave(null); }}
+        >
           <div
             className="ec-modal"
             role="dialog"
             aria-modal="true"
+            aria-busy={leavingGroup}
             aria-labelledby="ec-leave-title"
             ref={leaveDialogRef}
             onClick={(event) => event.stopPropagation()}
@@ -928,8 +948,10 @@ export function EnsemblePage() {
             <h3 id="ec-leave-title">Leave {pendingLeave.label}?</h3>
             <p className="muted-copy">You’ll lose access to this class. Your practice history stays on your account.</p>
             <div className="ec-modal-actions">
-              <button className="ghost-button" type="button" ref={leaveCancelRef} onClick={() => setPendingLeave(null)}>Cancel</button>
-              <button className="ec-danger-btn" type="button" onClick={doLeave}>Leave class</button>
+              <button className="ghost-button" type="button" ref={leaveCancelRef} onClick={() => setPendingLeave(null)} disabled={leavingGroup}>Cancel</button>
+              <button className="ec-danger-btn" type="button" onClick={doLeave} disabled={leavingGroup}>
+                {leavingGroup ? 'Leaving…' : 'Leave class'}
+              </button>
             </div>
           </div>
         </div>

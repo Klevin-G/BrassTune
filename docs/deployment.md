@@ -90,11 +90,26 @@ Export resource caps cannot be disabled: zero, negative, or invalid
 WebSocket rate/connection limits allow `0` only as a deliberate local/test
 disable; negative or invalid values fall back to safe defaults.
 
-The Render start command uses `--no-proxy-headers`, a 256 KiB WebSocket transport
-message cap, a 16-message WebSocket queue, a 100-connection concurrency cap, and
-a 128-connection backlog. Do not replace this with `--forwarded-allow-ips '*'`:
-that makes Uvicorn rewrite the socket peer before the application can validate
-Render's header contract. See Render's [April 2026 DDoS guidance](https://render.com/articles/how-render-handles-ddos-attacks) and [first-entry contract clarification](https://feedback.render.com/features/p/send-the-correct-xforwardedfor).
+Render's free web-service plan does not support pre-deploy commands. The start
+command therefore runs the read-only `python -m app.db.check_ready` gate before
+Uvicorn; an incomplete database schema or unsafe production configuration keeps
+the new instance from becoming live. This gate does not apply migrations. Apply
+pending Supabase migrations as a separate controlled release step before the
+Render deployment:
+
+```bash
+supabase migration list --linked
+supabase db push --linked --dry-run
+supabase db push --linked
+```
+
+The remainder of the Render start command uses `--no-proxy-headers`, a 256 KiB
+WebSocket transport message cap, a 16-message WebSocket queue, a 100-connection
+concurrency cap, and a 128-connection backlog. Do not replace this with
+`--forwarded-allow-ips '*'`: that makes Uvicorn rewrite the socket peer before
+the application can validate Render's header contract. See Render's [April 2026
+DDoS guidance](https://render.com/articles/how-render-handles-ddos-attacks) and
+[first-entry contract clarification](https://feedback.render.com/features/p/send-the-correct-xforwardedfor).
 
 Liveness check for Render:
 
@@ -158,13 +173,15 @@ Use secret stores only. Do not commit values.
 - `VERCEL_TOKEN`
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
-- `RENDER_DEPLOY_HOOK_URL`
 - `RENDER_API_KEY`
 - `RENDER_SERVICE_ID`
 - `RENDER_KEEPALIVE_URL` if overriding the default liveness URL
 
 The manual deployment workflow lives at `.github/workflows/deploy.yml`.
-Use `workflow_dispatch` with `target=frontend`, `backend`, or `all`.
+Use `workflow_dispatch` with `target=frontend`, `backend`, or `all`. The backend
+job disables Render auto-deploy, then calls Render's authenticated deploy API
+with the workflow commit SHA. This prevents a push-triggered build from racing
+the exact-SHA release. Do not replace it with an unpinned deploy hook.
 
 The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It runs after a successful `Deploy` workflow and can also be manually dispatched. For `workflow_run`, both smoke jobs explicitly check out the deploy run's `head_sha`; a manual dispatch checks out its own `github.sha`. It wraps:
 

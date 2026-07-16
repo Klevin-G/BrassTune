@@ -17,7 +17,7 @@ Precondition: the final integration head must have reviewed Backend, Frontend, S
 3. Confirm Render backend deploy state and commit in Render. The backend service is `https://brasstune-u8qj.onrender.com`.
 4. Confirm the owner has recorded remaining external blockers in `HUMAN_ACTIONS.md`.
 5. Confirm production deploy uses the repo-root GitHub workflow path. The root `vercel.json` builds `frontend`; do not assume the GitHub production deploy should run from `frontend`.
-6. Confirm required secret names exist without printing values: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_API_BASE_URL`, `VITE_WS_BASE_URL`, Supabase frontend vars, and the Render deploy hook.
+6. Confirm required secret names exist without printing values: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `RENDER_API_KEY`, and `RENDER_SERVICE_ID`. Confirm the Vercel Production environment contains the frontend API, WebSocket, Supabase, and provider-enable variables; `vercel pull --environment=production` is the deploy build's source of truth.
 7. Confirm Supabase migration state includes the baseline/readiness/RPC lockdown migrations, nine RLS-enabled app tables, `rls_auto_enable()` with `anon_execute=false` and `authenticated_execute=false`, unique class membership, rotated eight-character join codes, and Data API/storage lockdown.
 8. Confirm `.github/workflows/render-keepalive.yml` is enabled only after owner approval for scheduled Actions usage. Keepalive is a cold-start mitigation, not an uptime guarantee.
 

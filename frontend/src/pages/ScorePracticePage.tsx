@@ -18,6 +18,24 @@ interface ImportedScorePage {
   persisted: boolean;
 }
 
+type PreparedScorePage = Omit<ImportedScorePage, 'url' | 'persisted'>;
+
+interface StoredScoreDocument {
+  id?: unknown;
+  name?: unknown;
+  source?: unknown;
+  type?: unknown;
+  blob?: unknown;
+}
+
+interface StoredScoreLoadResult {
+  pages: ImportedScorePage[];
+  removedInvalidCount: number;
+  cleanupFailures: string[];
+}
+
+const SCORE_IMPORT_SOURCES = new Set<ImportedScorePage['source']>(['camera', 'photos', 'files', 'clipboard', 'drop']);
+
 function openScoreDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(SCORE_DOCUMENTS_DB_NAME, 1);
@@ -31,67 +49,167 @@ function openScoreDb() {
 
 async function saveScoreDocument(page: ImportedScorePage) {
   const db = await openScoreDb();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readwrite');
-    transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).put({
-      id: page.id,
-      name: page.name,
-      source: page.source,
-      kind: page.kind,
-      type: page.file.type,
-      size: page.file.size,
-      dimensions: page.dimensions,
-      confirmedAt: new Date().toISOString(),
-      quality: page.summary.quality,
-      blob: page.file,
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readwrite');
+      transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).put({
+        id: page.id,
+        name: page.name,
+        source: page.source,
+        kind: page.kind,
+        type: page.file.type,
+        size: page.file.size,
+        dimensions: page.dimensions,
+        confirmedAt: new Date().toISOString(),
+        quality: page.summary.quality,
+        blob: page.file,
+      });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Could not save score document.'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Score document save was cancelled.'));
     });
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
+  } finally {
+    db.close();
+  }
 }
 
-async function deleteScoreDocument(id: string) {
+async function deleteScoreDocument(id: string | number) {
   const db = await openScoreDb();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readwrite');
-    transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).delete(id);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readwrite');
+      transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Could not delete score document.'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Score document deletion was cancelled.'));
+    });
+  } finally {
+    db.close();
+  }
 }
 
-async function loadScoreDocuments(): Promise<ImportedScorePage[]> {
+async function readStoredScoreDocuments(): Promise<StoredScoreDocument[]> {
   const db = await openScoreDb();
-  const rows = await new Promise<any[]>((resolve, reject) => {
-    const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readonly');
-    const request = transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).getAll();
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-  db.close();
-  return rows
-    .filter((row) => row.blob instanceof Blob)
-    .map((row) => {
-      const file = new File([row.blob], row.name, { type: row.type || row.blob.type });
-      return {
-        id: row.id,
-        name: row.name,
-        source: row.source,
-        kind: row.kind,
-        url: URL.createObjectURL(file),
-        file,
-        dimensions: row.dimensions,
-        summary: {
-          kind: row.kind,
-          supported: true,
-          label: 'Saved',
-          quality: row.quality,
-        },
-        persisted: true,
-      };
+  try {
+    return await new Promise<StoredScoreDocument[]>((resolve, reject) => {
+      const transaction = db.transaction(SCORE_DOCUMENTS_STORE_NAME, 'readonly');
+      const request = transaction.objectStore(SCORE_DOCUMENTS_STORE_NAME).getAll();
+      request.onsuccess = () => resolve(request.result as StoredScoreDocument[]);
+      request.onerror = () => reject(request.error ?? new Error('Could not read saved score documents.'));
     });
+  } finally {
+    db.close();
+  }
+}
+
+async function readPdfPageCount(file: File) {
+  const pdfjs = await import('pdfjs-dist');
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+  try {
+    const pdf = await loadingTask.promise;
+    return pdf.numPages;
+  } finally {
+    await loadingTask.destroy().catch(() => undefined);
+  }
+}
+
+async function decodeImageDimensions(file: File) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Image decode failed.'));
+      image.src = url;
+    });
+    if (image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+      throw new Error('Image decode returned empty dimensions.');
+    }
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function loadScoreDocuments(): Promise<StoredScoreLoadResult> {
+  const rows = await readStoredScoreDocuments();
+  const pages: ImportedScorePage[] = [];
+  const cleanupFailures: string[] = [];
+  let removedInvalidCount = 0;
+
+  for (const row of rows) {
+    const cleanupKey = typeof row.id === 'string' || typeof row.id === 'number' ? row.id : null;
+    const cleanupLabel = typeof row.name === 'string' ? row.name : 'A saved file';
+    if (typeof row.id !== 'string' || typeof row.name !== 'string' || !(row.blob instanceof Blob)) {
+      if (cleanupKey == null) {
+        cleanupFailures.push(cleanupLabel);
+      } else {
+        try {
+          await deleteScoreDocument(cleanupKey);
+          removedInvalidCount += 1;
+        } catch {
+          cleanupFailures.push(cleanupLabel);
+        }
+      }
+      continue;
+    }
+    const file = new File([row.blob], row.name, { type: typeof row.type === 'string' ? row.type : row.blob.type });
+    let kind: ImportedScorePage['kind'] | null = null;
+    let dimensions: ImportedScorePage['dimensions'];
+    let summary: ScoreImportSummary | null = null;
+    let shouldRemove = file.size <= 0 || file.size > MAX_SCORE_FILE_BYTES;
+
+    if (!shouldRemove) {
+      try {
+        const verifiedKind = await verifiedScoreSourceKind(file);
+        if (verifiedKind === 'unsupported') {
+          shouldRemove = true;
+        } else {
+          kind = verifiedKind;
+          if (kind === 'pdf') {
+            shouldRemove = pdfPageLimitMessage(await readPdfPageCount(file)) != null;
+          } else {
+            dimensions = await decodeImageDimensions(file);
+          }
+          summary = verifyScoreFile(file, dimensions, kind);
+          shouldRemove ||= !summary.supported;
+        }
+      } catch {
+        shouldRemove = true;
+      }
+    }
+
+    if (shouldRemove || kind == null || summary == null) {
+      try {
+        await deleteScoreDocument(row.id);
+        removedInvalidCount += 1;
+      } catch {
+        // Never resurrect a known-invalid row. If IndexedDB refuses cleanup,
+        // keep it hidden and report that it remains saved instead of claiming
+        // deletion succeeded.
+        cleanupFailures.push(row.name);
+      }
+      continue;
+    }
+
+    const source = typeof row.source === 'string' && SCORE_IMPORT_SOURCES.has(row.source as ImportedScorePage['source'])
+      ? row.source as ImportedScorePage['source']
+      : 'files';
+    pages.push({
+      id: row.id,
+      name: row.name,
+      source,
+      kind,
+      url: URL.createObjectURL(file),
+      file,
+      dimensions,
+      summary: { ...summary, label: 'Saved' },
+      persisted: true,
+    });
+  }
+
+  return { pages, removedInvalidCount, cleanupFailures };
 }
 
 async function sanitizeImageFile(file: File) {
@@ -100,10 +218,11 @@ async function sanitizeImageFile(file: File) {
     const image = new Image();
     await new Promise<void>((resolve, reject) => {
       image.onload = () => resolve();
-      image.onerror = () => reject(new Error('Image preview failed.'));
+      image.onerror = () => reject(new Error('Image decode failed.'));
       image.src = url;
     });
     const dimensions = { width: image.naturalWidth, height: image.naturalHeight };
+    if (dimensions.width <= 0 || dimensions.height <= 0) throw new Error('Image decode returned empty dimensions.');
     if (dimensions.width * dimensions.height > MAX_SCORE_PIXELS) {
       return { dimensions, file };
     }
@@ -120,8 +239,6 @@ async function sanitizeImageFile(file: File) {
       dimensions,
       file: new File([blob], `${name}.jpg`, { type: 'image/jpeg' }),
     };
-  } catch {
-    return { dimensions: undefined, file };
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -206,6 +323,7 @@ export function ScorePracticePage() {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const pagesRef = useRef<ImportedScorePage[]>([]);
+  const mountedRef = useRef(true);
   const [pages, setPages] = useState<ImportedScorePage[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [status, setStatus] = useState('');
@@ -237,25 +355,28 @@ export function ScorePracticePage() {
   const updatePdfPageCount = useCallback((count: number) => {
     const limitMessage = pdfPageLimitMessage(count);
     if (limitMessage) {
-      setPages((current) => current.map((page) => (
-        page.id === selectedId
-          ? {
-            ...page,
-            persisted: false,
-            summary: {
-              ...page.summary,
-              supported: false,
-              label: 'Too many pages',
-              quality: {
-                status: 'unsupported',
-                messages: [limitMessage],
-                likelySheetMusicScore: page.summary.quality.likelySheetMusicScore,
-              },
-            },
+      const oversizedPage = pagesRef.current.find((page) => page.id === selectedId);
+      if (oversizedPage) {
+        // Imports are page-counted before persistence and restored rows are
+        // validated before display. This is a final fail-closed guard for a
+        // document that changes or races those checks.
+        void (async () => {
+          let cleanupFailed = false;
+          if (oversizedPage.persisted) {
+            try {
+              await deleteScoreDocument(oversizedPage.id);
+            } catch {
+              cleanupFailed = true;
+            }
           }
-          : page
-      )));
-      setStatus(limitMessage);
+          URL.revokeObjectURL(oversizedPage.url);
+          setPages((current) => current.filter((page) => page.id !== oversizedPage.id));
+          setSelectedId((current) => current === oversizedPage.id ? null : current);
+          setStatus(cleanupFailed
+            ? `${limitMessage} It couldn't be removed from saved music, so it was hidden. Clear this site's browser data to remove it.`
+            : limitMessage);
+        })();
+      }
     }
     setPdfPageCount(count);
     setPdfPageNumber((value) => Math.min(Math.max(1, value), count));
@@ -284,12 +405,14 @@ export function ScorePracticePage() {
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     const onPaste = (event: ClipboardEvent) => {
       const files = Array.from(event.clipboardData?.files ?? []);
       if (files.length) void importFiles(files, 'clipboard');
     };
     window.addEventListener('paste', onPaste);
     return () => {
+      mountedRef.current = false;
       window.removeEventListener('paste', onPaste);
       stopCamera();
       pagesRef.current.forEach((page) => URL.revokeObjectURL(page.url));
@@ -299,11 +422,30 @@ export function ScorePracticePage() {
   useEffect(() => {
     let cancelled = false;
     loadScoreDocuments()
-      .then((stored) => {
-        if (cancelled || stored.length === 0) return;
-        setPages(stored);
-        setSelectedId(stored[0].id);
-        setStatus('Your music is here.');
+      .then(({ pages: stored, removedInvalidCount, cleanupFailures }) => {
+        if (cancelled) {
+          stored.forEach((page) => URL.revokeObjectURL(page.url));
+          return;
+        }
+        if (stored.length > 0) {
+          setPages((current) => {
+            const currentIds = new Set(current.map((page) => page.id));
+            const restored = stored.filter((page) => {
+              if (!currentIds.has(page.id)) return true;
+              URL.revokeObjectURL(page.url);
+              return false;
+            });
+            return [...current, ...restored];
+          });
+          setSelectedId((current) => current ?? stored[0].id);
+        }
+        if (cleanupFailures.length > 0) {
+          setStatus(`${cleanupFailures.length === 1 ? cleanupFailures[0] : 'Some saved files'} couldn't be removed from saved music and ${cleanupFailures.length === 1 ? 'was' : 'were'} hidden. Clear this site's browser data to remove ${cleanupFailures.length === 1 ? 'it' : 'them'}.`);
+        } else if (removedInvalidCount > 0) {
+          setStatus(`Removed ${removedInvalidCount === 1 ? 'a saved file that could not be opened safely' : `${removedInvalidCount} saved files that could not be opened safely`}.`);
+        } else if (stored.length > 0) {
+          setStatus('Your music is here.');
+        }
       })
       .catch(() => {
         if (!cancelled) setStatus('Saved music could not be opened in this browser.');
@@ -314,48 +456,66 @@ export function ScorePracticePage() {
   }, []);
 
   const importFiles = async (files: File[], source: ImportedScorePage['source']) => {
-    const imported: ImportedScorePage[] = [];
+    const imported: PreparedScorePage[] = [];
     for (const file of files) {
-      if (file.size > MAX_SCORE_FILE_BYTES) {
-        setStatus(`${file.name} is too large to add.`);
-        continue;
+      try {
+        if (file.size > MAX_SCORE_FILE_BYTES) {
+          setStatus(`${file.name} is too large to add.`);
+          continue;
+        }
+        const kind = await verifiedScoreSourceKind(file);
+        if (kind === 'unsupported') {
+          setStatus(`${file.name} isn't a photo or PDF we can open.`);
+          continue;
+        }
+        if (kind === 'pdf') {
+          const limitMessage = pdfPageLimitMessage(await readPdfPageCount(file));
+          if (limitMessage) {
+            setStatus(limitMessage);
+            continue;
+          }
+        }
+        const prepared = kind === 'image' ? await sanitizeImageFile(file) : { dimensions: undefined, file };
+        const summary = verifyScoreFile(prepared.file, prepared.dimensions, kind);
+        if (!summary.supported) {
+          setStatus(`${file.name}: ${summary.quality.messages.join(' ')}`);
+          continue;
+        }
+        imported.push({
+          id: `${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+          name: prepared.file.name,
+          source,
+          kind,
+          file: prepared.file,
+          dimensions: prepared.dimensions,
+          summary,
+        });
+      } catch {
+        setStatus(`${file.name} could not be decoded as a valid ${/\.pdf$/i.test(file.name) || file.type === 'application/pdf' ? 'PDF' : 'image'}.`);
       }
-      const kind = await verifiedScoreSourceKind(file);
-      if (kind === 'unsupported') {
-        setStatus(`${file.name} isn't a photo or PDF we can open.`);
-        continue;
-      }
-      const prepared = kind === 'image' ? await sanitizeImageFile(file) : { dimensions: undefined, file };
-      const summary = verifyScoreFile(prepared.file, prepared.dimensions, kind);
-      if (!summary.supported) {
-        setStatus(`${file.name}: ${summary.quality.messages.join(' ')}`);
-        continue;
-      }
-      imported.push({
-        id: `${Date.now()}-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
-        name: prepared.file.name,
-        source,
-        kind,
-        url: URL.createObjectURL(prepared.file),
-        file: prepared.file,
-        dimensions: prepared.dimensions,
-        summary,
-        persisted: false,
-      });
     }
     if (!imported.length) return;
-    setPages((current) => [...current, ...imported]);
-    setSelectedId(imported[0].id);
-    setImportOpen(false);
-    setStatus(imported.length === 1 ? 'Added your page.' : `Added ${imported.length} pages.`);
-    for (const page of imported) {
+    setStatus(imported.length === 1 ? 'Saving your page…' : `Saving ${imported.length} pages…`);
+    const saved = await Promise.all(imported.map(async (page) => {
       try {
-        await saveScoreDocument(page);
-        setPages((current) => current.map((entry) => (entry.id === page.id ? { ...entry, persisted: true } : entry)));
+        await saveScoreDocument({ ...page, url: '', persisted: false });
+        return { page, persisted: true };
       } catch {
-        setStatus('Added — but this browser may not keep it after you close the tab.');
+        return { page, persisted: false };
       }
-    }
+    }));
+    if (!mountedRef.current) return;
+    const ready = saved.map(({ page, persisted }) => ({
+      ...page,
+      url: URL.createObjectURL(page.file),
+      persisted,
+    }));
+    setPages((current) => [...current, ...ready]);
+    setSelectedId(ready[0].id);
+    setImportOpen(false);
+    setStatus(saved.some(({ persisted }) => !persisted)
+      ? 'Added — but this browser may not keep every page after you close the tab.'
+      : ready.length === 1 ? 'Added your page.' : `Added ${ready.length} pages.`);
   };
 
   const startCamera = async () => {
@@ -398,10 +558,15 @@ export function ScorePracticePage() {
   const performDelete = async () => {
     setPendingDelete(false);
     if (!selected) return;
-    URL.revokeObjectURL(selected.url);
     if (selected.persisted) {
-      await deleteScoreDocument(selected.id).catch(() => undefined);
+      try {
+        await deleteScoreDocument(selected.id);
+      } catch {
+        setStatus(`${selected.name} couldn't be removed. It is still in your saved music.`);
+        return;
+      }
     }
+    URL.revokeObjectURL(selected.url);
     setPages((current) => current.filter((page) => page.id !== selected.id));
     setSelectedId(null);
     setStatus('Page removed.');

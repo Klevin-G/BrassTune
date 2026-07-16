@@ -3,10 +3,10 @@ services:
     name: brasstune-backend
     runtime: python
     plan: free
+    autoDeployTrigger: off
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: python -m app.db.check_ready
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-proxy-headers --ws-max-size 262144 --ws-max-queue 16 --limit-concurrency 100 --backlog 128
+    startCommand: python -m app.db.check_ready && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-proxy-headers --ws-max-size 262144 --ws-max-queue 16 --limit-concurrency 100 --backlog 128
     healthCheckPath: /api/live
     envVars:
       - key: APP_ENV

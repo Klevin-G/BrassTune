@@ -143,18 +143,21 @@ export class PlayAlongGrader {
   minConfidence: number;
   minSamples: number;
   attackTrimMs: number;
+  maximumDropoutMs: number;
   private idx = 0;
   private firstMatchTs: number | null = null;
+  private lastMatchTs: number | null = null;
   private lastNow = 0;
   private centsBuf: { ts: number; cents: number }[] = [];
   results: NoteGrade[] = [];
 
-  constructor(notes: string[], options: { holdMs?: number; minConfidence?: number; minSamples?: number; attackTrimMs?: number } = {}) {
+  constructor(notes: string[], options: { holdMs?: number; minConfidence?: number; minSamples?: number; attackTrimMs?: number; maximumDropoutMs?: number } = {}) {
     this.notes = notes;
     this.holdMs = options.holdMs ?? 450;
     this.minConfidence = options.minConfidence ?? 0.65;
     this.minSamples = options.minSamples ?? 5;
     this.attackTrimMs = options.attackTrimMs ?? 120;
+    this.maximumDropoutMs = Math.max(0, options.maximumDropoutMs ?? 250);
   }
 
   get done(): boolean {
@@ -178,7 +181,12 @@ export class PlayAlongGrader {
     const rounded = scored == null ? null : Math.round(scored * 10) / 10;
     this.results.push({ name: this.notes[this.idx], avgCents: rounded, samples: this.centsBuf.length, grade: centsGrade(rounded) });
     this.idx += 1;
+    this.resetHold();
+  }
+
+  private resetHold(): void {
     this.firstMatchTs = null;
+    this.lastMatchTs = null;
     this.centsBuf = [];
   }
 
@@ -194,15 +202,22 @@ export class PlayAlongGrader {
       const confident = frame.confidence >= this.minConfidence && frame.frequency_hz != null;
       const matches = confident && samePitchClass(frame.written_note_name, target) && frame.cents_deviation != null;
       if (matches) {
+        if (this.lastMatchTs != null && nowMs - this.lastMatchTs > this.maximumDropoutMs) {
+          this.resetHold();
+        }
         if (this.firstMatchTs == null) this.firstMatchTs = nowMs;
+        this.lastMatchTs = nowMs;
         this.centsBuf.push({ ts: nowMs, cents: frame.cents_deviation as number });
         if (nowMs - this.firstMatchTs >= this.holdMs && this.centsBuf.length >= this.minSamples) {
           this.finalize(true);
         }
       } else if (confident && frame.written_note_name && !samePitchClass(frame.written_note_name, target)) {
         // Player is sustaining a different note — reset the current hold.
-        this.firstMatchTs = null;
-        this.centsBuf = [];
+        this.resetHold();
+      } else if (!confident && this.lastMatchTs != null && nowMs - this.lastMatchTs > this.maximumDropoutMs) {
+        // Match native behavior: tolerate a short detector dropout, but never
+        // let a stale hold bridge more than 250 ms of silence/low confidence.
+        this.resetHold();
       }
     }
     return this.snapshot(frame);

@@ -30,14 +30,6 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
-      VITE_WS_BASE_URL: ${{ secrets.VITE_WS_BASE_URL }}
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-      VITE_AUTH_GOOGLE_ENABLED: ${{ vars.VITE_AUTH_GOOGLE_ENABLED || secrets.VITE_AUTH_GOOGLE_ENABLED || 'false' }}
-      VITE_AUTH_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED || secrets.VITE_AUTH_APPLE_ENABLED || 'false' }}
-      VITE_SUPABASE_GOOGLE_ENABLED: ${{ vars.VITE_AUTH_GOOGLE_ENABLED || secrets.VITE_AUTH_GOOGLE_ENABLED || 'false' }}
-      VITE_SUPABASE_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED || secrets.VITE_AUTH_APPLE_ENABLED || 'false' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -62,10 +54,27 @@ jobs:
     env:
       BRASSTUNE_API_BASE_URL: ${{ vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.sha }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Trigger Render deploy hook
-        run: curl --max-time 30 -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      - name: Disable Render auto-deploy
+        run: |
+          curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
+            --request PATCH \
+            --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data '{"autoDeploy":"no"}' \
+            --output /dev/null
+      - name: Trigger exact Render deploy
+        run: |
+          curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
+            --request POST \
+            --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data "{\"commitId\":\"${GITHUB_SHA}\",\"clearCache\":\"do_not_clear\"}"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"

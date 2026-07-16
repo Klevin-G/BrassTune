@@ -24,6 +24,7 @@ type FixtureOptions = {
   groupDelaysMs?: Record<number, number>;
   mutationDelayMs?: number;
   invitations?: Invitation[];
+  initialGroups?: Group[];
 };
 
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -44,7 +45,7 @@ export const supabase = {
 `;
 
 async function installSignedInClassFixture(page: Page, options: FixtureOptions = {}) {
-  let groups: Group[] = [
+  let groups: Group[] = options.initialGroups ? [...options.initialGroups] : [
     { id: 1, name: 'Concert Band', director_user_id: 12, viewer_role: 'student' },
     { id: 2, name: 'Jazz Band', viewer_role: 'assistant', viewer_can_leave: true, viewer_can_manage: false },
     { id: 3, name: 'Student-led Brass', join_code: null, viewer_role: 'owner', viewer_can_leave: false, viewer_can_manage: true },
@@ -56,6 +57,9 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
     memberInvites: 0,
     accepts: 0,
     declines: 0,
+    joins: 0,
+    leaves: 0,
+    joinPayload: null as { code?: string; instrument_id?: string } | null,
   };
 
   await page.route('**/src/lib/supabase.ts*', async (route) => {
@@ -86,6 +90,24 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
     }
     if (path === '/api/ensemble/invitations' && request.method() === 'GET') return respond({ invitations });
     if (path === '/api/ensemble/groups' && request.method() === 'GET') return respond(groups);
+
+    if (path === '/api/ensemble/join' && request.method() === 'POST') {
+      counters.joins += 1;
+      const payload = request.postDataJSON() as { code?: string; instrument_id?: string };
+      counters.joinPayload = payload;
+      if (options.mutationDelayMs) await delay(options.mutationDelayMs);
+      if (payload.code !== 'CHAMBER7') return respond({ detail: 'Invalid class code.' }, 404);
+      const group: Group = {
+        id: Math.max(...groups.map((candidate) => candidate.id), 0) + 1,
+        name: 'Chamber Winds',
+        director_user_id: 12,
+        viewer_role: 'student',
+        viewer_can_leave: true,
+        viewer_can_manage: false,
+      };
+      groups = [...groups, group];
+      return respond({ joined: true, group_id: group.id, group_name: group.name });
+    }
 
     if (path === '/api/ensemble/groups' && request.method() === 'POST') {
       counters.creates += 1;
@@ -134,7 +156,9 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
 
     const leaveMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/membership$/);
     if (leaveMatch && request.method() === 'DELETE') {
+      counters.leaves += 1;
       const groupID = Number(leaveMatch[1]);
+      if (options.mutationDelayMs) await delay(options.mutationDelayMs);
       groups = groups.filter((group) => group.id !== groupID);
       return respond({ left: true, group_id: groupID });
     }
@@ -258,6 +282,61 @@ test('the latest class selection wins when detail responses arrive out of order'
   await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
   await expect(concertTab).toHaveClass(/active/);
   await expect(jazzTab).not.toHaveClass(/active/);
+});
+
+test('joins a second class and keeps prior memberships available', async ({ page }) => {
+  const counters = await installSignedInClassFixture(page, { mutationDelayMs: 150 });
+  await page.goto('/ensemble');
+  await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Join another class' }).click();
+  await page.getByLabel('Class code').fill('chamber7');
+  await page.getByLabel('Your instrument').selectOption('tuba');
+  const joinButton = page.getByRole('button', { name: 'Join', exact: true });
+  await joinButton.click();
+  await expect(page.getByRole('button', { name: 'Joining…' })).toBeDisabled();
+
+  await expect(page.getByText(/You joined.*Chamber Winds/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Chamber Winds' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Chamber Winds' })).toHaveClass(/active/);
+  await expect(page.getByRole('button', { name: 'Concert Band' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Jazz Band' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Join another class' })).toHaveCount(0);
+  expect(counters.joins).toBe(1);
+  expect(counters.joinPayload).toEqual({ code: 'CHAMBER7', instrument_id: 'tuba' });
+});
+
+test('a managing member can leave once while a slow request is in flight', async ({ page }) => {
+  const counters = await installSignedInClassFixture(page, {
+    mutationDelayMs: 200,
+    initialGroups: [{
+      id: 41,
+      name: 'Admin Member Class',
+      join_code: 'ADMIN41',
+      director_user_id: 12,
+      viewer_role: 'admin_observer',
+      viewer_can_leave: true,
+      viewer_can_manage: true,
+    }],
+  });
+  await page.goto('/ensemble');
+  await expect(page.getByRole('heading', { name: 'Admin Member Class' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Leave class' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Leave Admin Member Class?' });
+  const confirmLeave = dialog.getByRole('button', { name: 'Leave class' });
+  await confirmLeave.evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+
+  await expect(dialog).toHaveAttribute('aria-busy', 'true');
+  await expect(dialog.getByRole('button', { name: 'Leaving…' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  await expect(page.getByText(/You left.*Admin Member Class/)).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Join your class' })).toBeVisible();
+  expect(counters.leaves).toBe(1);
 });
 
 test('class mutations ignore duplicate and competing activations', async ({ page }) => {

@@ -12,7 +12,7 @@
 - Frontend unit/build/audit plus Playwright browser release journeys.
 - Security workflow with npm audit, pip-audit with exact ignored advisories, Bandit, and Gitleaks.
 - Swift workflow for Swift package tests, native simulator build, native unit tests, and native UI smoke with dynamic simulator discovery.
-- Deploy workflow is guarded to run only from `main`, uses the `production` GitHub environment, has bounded timeouts, minimal read permissions, deploy concurrency, and a Render hook timeout.
+- Deploy workflow is guarded to run only from `main`, uses the `production` GitHub environment, has bounded timeouts, minimal read permissions, deploy concurrency, and an exact-SHA Render API request.
 
 ## Deployment Procedure
 
@@ -20,7 +20,7 @@
 2. Confirm backend migrations are compatible with current production data.
 3. Trigger deploy workflow from `main` only.
 4. Frontend deploy uses Vercel CLI with `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
-5. Backend deploy uses Render deploy hook secret.
+5. Backend deploy uses `RENDER_API_KEY` and `RENDER_SERVICE_ID` to disable auto-deploy and request the exact workflow commit from Render's deploy API.
 6. Run hosted smoke:
    - `BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted`
    - `curl -IL https://brasstune.vercel.app`

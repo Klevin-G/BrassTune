@@ -53,12 +53,16 @@ final class AppModel: ObservableObject {
     init(
         persistenceStore: NativePersistenceStore = .live(),
         scoreStorageDirectory: URL? = nil,
+        scoreFileRemover: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
         apiClient: APIClient = APIClient(),
         authService: AuthService = AuthService(),
         classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)? = nil
     ) {
         self.persistenceStore = persistenceStore
-        self.scoreImporter = NativeScoreImportService(storageDirectory: scoreStorageDirectory ?? NativeScoreImportService.defaultStorageDirectory)
+        self.scoreImporter = NativeScoreImportService(
+            storageDirectory: scoreStorageDirectory ?? NativeScoreImportService.defaultStorageDirectory,
+            removeItem: scoreFileRemover
+        )
         self.apiClient = apiClient
         self.authService = authService
         self.classAccessTokenProvider = classAccessTokenProvider
@@ -135,7 +139,7 @@ final class AppModel: ObservableObject {
         authState = .guest
         selectedInstrumentId = "trumpet"
         referencePitchHz = 440.0
-        clearLocalPracticeArtifacts()
+        let clearedLocalArtifacts = clearLocalPracticeArtifacts()
         resetPlayAlong()
         recordingSource = NativeAudioEngine.defaultRecordingSource
         metronome = MetronomeSettings()
@@ -143,7 +147,9 @@ final class AppModel: ObservableObject {
         ensembles = NativeAudioEngine.testFixturesEnabled ? Self.demoEnsembles : []
         selectedEnsembleID = ensembles.first?.id
         ensembleStatusMessage = nil
-        lastError = nil
+        if clearedLocalArtifacts {
+            lastError = nil
+        }
     }
 
     func enterGuestDemo() {
@@ -471,14 +477,16 @@ final class AppModel: ObservableObject {
             }
         }
         resetPlayAlong()
-        clearLocalPracticeArtifacts()
+        let clearedLocalArtifacts = clearLocalPracticeArtifacts()
         stopMetronome()
         ensembles.removeAll()
         selectedEnsembleID = nil
         ensembleStatusMessage = nil
         authService.deleteStoredAuth()
         authState = .signedOut
-        lastError = nil
+        if clearedLocalArtifacts {
+            lastError = nil
+        }
     }
 
     func startDemoRecording() {
@@ -742,27 +750,86 @@ final class AppModel: ObservableObject {
     }
 
     func deleteScore(id: ImportedScore.ID) {
-        let deletedScore = scores.first { $0.id == id }
-        if let score = deletedScore {
-            scoreImporter.deleteStoredFile(named: score.localFileName)
-        }
-        scores.removeAll { $0.id == id }
-        if activeScoreID == id {
-            activeScoreID = scores.first?.id
-        }
-        sessions = sessions.map { session in
+        guard let deletedScore = scores.first(where: { $0.id == id }) else { return }
+        let preDeleteSnapshot = makeLocalSnapshot()
+        let remainingScores = scores.filter { $0.id != id }
+        let nextActiveScoreID = activeScoreID == id ? remainingScores.first?.id : activeScoreID
+        let updatedSessions = sessions.map { session in
             var updated = session
             if updated.attachedScoreID == id {
                 updated.attachedScoreID = nil
-                if let deletedScore {
-                    updated.practiceNotes = updated.practiceNotes
-                        .replacingOccurrences(of: "Practiced with \(deletedScore.title).", with: "")
-                        .replacingOccurrences(of: "Focus: \(deletedScore.annotation.focusMeasures).", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                }
+                updated.practiceNotes = updated.practiceNotes
+                    .replacingOccurrences(of: "Practiced with \(deletedScore.title).", with: "")
+                    .replacingOccurrences(of: "Focus: \(deletedScore.annotation.focusMeasures).", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
             }
             return updated
         }
+        let postDeleteSnapshot = makeLocalSnapshot(
+            sessions: updatedSessions,
+            scores: remainingScores,
+            activeScoreID: nextActiveScoreID
+        )
+
+        do {
+            try persistenceStore.saveOrThrow(postDeleteSnapshot)
+        } catch {
+            lastError = .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't save the score deletion, so the score and file were kept. Try again."
+            )
+            return
+        }
+
+        do {
+            try scoreImporter.deleteStoredFile(named: deletedScore.localFileName)
+        } catch {
+            do {
+                try persistenceStore.saveOrThrow(preDeleteSnapshot)
+            } catch {
+                lastError = .apiRequestFailed(
+                    statusCode: 500,
+                    message: "BrassTune couldn't remove the local score file or restore its saved state. The score is still open; export your data before closing the app."
+                )
+                return
+            }
+            lastError = .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't remove the local score file, so the score was kept. Try again."
+            )
+            return
+        }
+
+        isRestoringLocalState = true
+        sessions = updatedSessions
+        scores = remainingScores
+        activeScoreID = nextActiveScoreID
+        isRestoringLocalState = false
+        lastError = nil
+    }
+
+    private func makeLocalSnapshot(
+        sessions: [PracticeSession],
+        scores: [ImportedScore],
+        activeScoreID: ImportedScore.ID?
+    ) -> NativeLocalSnapshot {
+        NativeLocalSnapshot(
+            selectedInstrumentId: selectedInstrumentId,
+            referencePitchHz: referencePitchHz,
+            sessions: sessions,
+            scores: scores,
+            activeScoreID: activeScoreID,
+            metronome: metronome,
+            metronomeDefaultsVersion: 2
+        )
+    }
+
+    private func makeLocalSnapshot() -> NativeLocalSnapshot {
+        makeLocalSnapshot(
+            sessions: sessions,
+            scores: scores,
+            activeScoreID: activeScoreID
+        )
     }
 
     func attachScoreToLatestSession(scoreID: ImportedScore.ID) {
@@ -968,12 +1035,44 @@ final class AppModel: ObservableObject {
         sessions.insert(session, at: 0)
     }
 
-    private func clearLocalPracticeArtifacts() {
-        scoreImporter.deleteAllStoredFiles()
+    @discardableResult
+    private func clearLocalPracticeArtifacts() -> Bool {
+        let snapshot = makeLocalSnapshot()
+        do {
+            try persistenceStore.clear()
+        } catch {
+            lastError = .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't clear its saved local data, so your practice data was kept. Try again."
+            )
+            return false
+        }
+
+        do {
+            try scoreImporter.deleteAllStoredFiles()
+        } catch {
+            do {
+                try persistenceStore.saveOrThrow(snapshot)
+            } catch {
+                lastError = .apiRequestFailed(
+                    statusCode: 500,
+                    message: "BrassTune couldn't finish clearing local data or restore its saved copy. Your data is still open; export it before closing the app."
+                )
+                return false
+            }
+            lastError = .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't remove your imported score files, so your local practice data was kept. Try again."
+            )
+            return false
+        }
+
+        isRestoringLocalState = true
         sessions.removeAll()
         scores.removeAll()
         activeScoreID = nil
-        persistenceStore.clear()
+        isRestoringLocalState = false
+        return true
     }
 
     private func restoreLocalData() {
@@ -1004,16 +1103,7 @@ final class AppModel: ObservableObject {
 
     private func persistLocalData() {
         guard !isRestoringLocalState else { return }
-        let snapshot = NativeLocalSnapshot(
-            selectedInstrumentId: selectedInstrumentId,
-            referencePitchHz: referencePitchHz,
-            sessions: sessions,
-            scores: scores,
-            activeScoreID: activeScoreID,
-            metronome: metronome,
-            metronomeDefaultsVersion: 2
-        )
-        persistenceStore.save(snapshot)
+        persistenceStore.save(makeLocalSnapshot())
     }
 }
 
@@ -1045,6 +1135,20 @@ private struct EnsembleLeaveResponse: Decodable {
 
 struct NativePersistenceStore {
     let fileURL: URL
+    private let removeItem: (URL) throws -> Void
+    private let writeData: (Data, URL) throws -> Void
+
+    init(
+        fileURL: URL,
+        removeItem: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
+        writeData: @escaping (Data, URL) throws -> Void = { data, url in
+            try data.write(to: url, options: [.atomic])
+        }
+    ) {
+        self.fileURL = fileURL
+        self.removeItem = removeItem
+        self.writeData = writeData
+    }
 
     static func live() -> NativePersistenceStore {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -1052,8 +1156,14 @@ struct NativePersistenceStore {
         return NativePersistenceStore(fileURL: directory.appendingPathComponent("native-local-state.json"))
     }
 
-    static func ephemeral(fileURL: URL) -> NativePersistenceStore {
-        NativePersistenceStore(fileURL: fileURL)
+    static func ephemeral(
+        fileURL: URL,
+        removeItem: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
+        writeData: @escaping (Data, URL) throws -> Void = { data, url in
+            try data.write(to: url, options: [.atomic])
+        }
+    ) -> NativePersistenceStore {
+        NativePersistenceStore(fileURL: fileURL, removeItem: removeItem, writeData: writeData)
     }
 
     func load() -> NativeLocalSnapshot? {
@@ -1065,19 +1175,24 @@ struct NativePersistenceStore {
 
     func save(_ snapshot: NativeLocalSnapshot) {
         do {
-            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(snapshot)
-            try data.write(to: fileURL, options: [.atomic])
+            try saveOrThrow(snapshot)
         } catch {
             // Local persistence failures should not block practice in the beta app.
         }
     }
 
-    func clear() {
-        try? FileManager.default.removeItem(at: fileURL)
+    func saveOrThrow(_ snapshot: NativeLocalSnapshot) throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(snapshot)
+        try writeData(data, fileURL)
+    }
+
+    func clear() throws {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        try removeItem(fileURL)
     }
 }
 
@@ -1097,6 +1212,8 @@ struct NativeScoreImportService {
         case unreadableFile
         case fileTooLarge
         case noPages
+        case tooManyPages(maximum: Int)
+        case cleanupFailed
 
         var errorDescription: String? {
             switch self {
@@ -1104,6 +1221,8 @@ struct NativeScoreImportService {
             case .unreadableFile: return "BrassTune could not read that score file."
             case .fileTooLarge: return "This file is too large to import."
             case .noPages: return "No score pages were found in that file."
+            case .tooManyPages(let maximum): return "This PDF has more than \(maximum) pages. Split it into smaller files before importing."
+            case .cleanupFailed: return "The score could not be imported, and BrassTune could not remove its copied file. The copied file remains on this device."
             }
         }
     }
@@ -1112,8 +1231,17 @@ struct NativeScoreImportService {
         .appendingPathComponent("BrassTune/ImportedScores", isDirectory: true)
 
     let storageDirectory: URL
+    private let removeItem: (URL) throws -> Void
     private let maxFileSizeBytes: Int64 = 30 * 1024 * 1024
     private let maxPages = 32
+
+    init(
+        storageDirectory: URL,
+        removeItem: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
+    ) {
+        self.storageDirectory = storageDirectory
+        self.removeItem = removeItem
+    }
 
     func importScore(from url: URL) throws -> ImportedScore {
         let scoped = url.startAccessingSecurityScopedResource()
@@ -1141,7 +1269,7 @@ struct NativeScoreImportService {
         let fileName = "\(UUID().uuidString).\(url.pathExtension.isEmpty ? "score" : url.pathExtension)"
         let storedURL = storageDirectory.appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: storedURL.path) {
-            try FileManager.default.removeItem(at: storedURL)
+            try removeItem(storedURL)
         }
         try FileManager.default.copyItem(at: url, to: storedURL)
 
@@ -1154,9 +1282,13 @@ struct NativeScoreImportService {
             case .photos, .sample:
                 throw ImportError.unsupportedType
             }
-        } catch {
-            deleteStoredFile(named: fileName)
-            throw error
+        } catch let importError {
+            do {
+                try deleteStoredFile(named: fileName)
+            } catch {
+                throw ImportError.cleanupFailed
+            }
+            throw importError
         }
     }
 
@@ -1170,9 +1302,13 @@ struct NativeScoreImportService {
             var score = try makeImageScore(from: storedURL, localFileName: fileName, fileSize: Int64(data.count), sourceKind: sourceKind)
             score.title = preferredName
             return score
-        } catch {
-            deleteStoredFile(named: fileName)
-            throw error
+        } catch let importError {
+            do {
+                try deleteStoredFile(named: fileName)
+            } catch {
+                throw ImportError.cleanupFailed
+            }
+            throw importError
         }
     }
 
@@ -1204,9 +1340,11 @@ struct NativeScoreImportService {
         )
     }
 
-    func deleteStoredFile(named fileName: String?) {
+    func deleteStoredFile(named fileName: String?) throws {
         guard let fileName else { return }
-        try? FileManager.default.removeItem(at: storageDirectory.appendingPathComponent(fileName))
+        let url = storageDirectory.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try removeItem(url)
     }
 
     func storedFileURL(named fileName: String?) -> URL? {
@@ -1215,14 +1353,16 @@ struct NativeScoreImportService {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    func deleteAllStoredFiles() {
-        try? FileManager.default.removeItem(at: storageDirectory)
+    func deleteAllStoredFiles() throws {
+        guard FileManager.default.fileExists(atPath: storageDirectory.path) else { return }
+        try removeItem(storageDirectory)
     }
 
     private func makePDFScore(from url: URL, localFileName: String, fileSize: Int64) throws -> ImportedScore {
         guard let document = PDFDocument(url: url) else { throw ImportError.unreadableFile }
-        let pageCount = min(document.pageCount, maxPages)
+        let pageCount = document.pageCount
         guard pageCount > 0 else { throw ImportError.noPages }
+        guard pageCount <= maxPages else { throw ImportError.tooManyPages(maximum: maxPages) }
         let pages: [ScorePage] = (0..<pageCount).compactMap { index in
             guard let page = document.page(at: index) else { return nil }
             let text = page.string ?? ""

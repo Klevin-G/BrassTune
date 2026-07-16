@@ -1,6 +1,7 @@
 import XCTest
 @testable import BrassTuneApp
 import BrassTuneCore
+import PDFKit
 import UIKit
 
 private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
@@ -191,6 +192,164 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testScoreDeleteFailureKeepsFileRecordAndSessionReference() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let model = AppModel(
+            persistenceStore: store,
+            scoreStorageDirectory: scoreDirectory,
+            scoreFileRemover: { _ in
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+            }
+        )
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Protected score")
+        let score = try XCTUnwrap(model.scores.first)
+        let storedURL = try XCTUnwrap(model.storedScoreFileURL(for: score))
+        model.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
+        model.attachScoreToLatestSession(scoreID: score.id)
+
+        model.deleteScore(id: score.id)
+
+        XCTAssertEqual(model.scores.first?.id, score.id)
+        XCTAssertEqual(model.activeScoreID, score.id)
+        XCTAssertEqual(model.sessions.first?.attachedScoreID, score.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
+        XCTAssertEqual(
+            model.lastError,
+            .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't remove the local score file, so the score was kept. Try again."
+            )
+        )
+
+        let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        XCTAssertEqual(restored.scores.first?.id, score.id, "Failed file removal must roll the persisted deletion back.")
+        XCTAssertEqual(restored.sessions.first?.attachedScoreID, score.id)
+    }
+
+    @MainActor
+    func testScoreDeletePersistsCompletePostDeleteStateAcrossRelaunch() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let model = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Disposable score")
+        let score = try XCTUnwrap(model.scores.first)
+        let storedURL = try XCTUnwrap(model.storedScoreFileURL(for: score))
+        model.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
+        model.attachScoreToLatestSession(scoreID: score.id)
+
+        model.deleteScore(id: score.id)
+
+        XCTAssertTrue(model.scores.isEmpty)
+        XCTAssertNil(model.sessions.first?.attachedScoreID)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storedURL.path))
+        let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        XCTAssertTrue(restored.scores.isEmpty)
+        XCTAssertNil(restored.sessions.first?.attachedScoreID)
+    }
+
+    @MainActor
+    func testScoreDeleteSaveFailureKeepsPreDeleteStateAcrossRelaunch() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        let durableStore = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let seedModel = AppModel(persistenceStore: durableStore, scoreStorageDirectory: scoreDirectory)
+        try seedModel.importPhotoScore(data: makeTinyPNGData(), preferredName: "Durable score")
+        let score = try XCTUnwrap(seedModel.scores.first)
+        seedModel.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
+        seedModel.attachScoreToLatestSession(scoreID: score.id)
+
+        let failingStore = NativePersistenceStore.ephemeral(
+            fileURL: stateURL,
+            writeData: { _, _ in
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+            }
+        )
+        let model = AppModel(persistenceStore: failingStore, scoreStorageDirectory: scoreDirectory)
+        let storedURL = try XCTUnwrap(model.scores.first.flatMap { model.storedScoreFileURL(for: $0) })
+
+        model.deleteScore(id: score.id)
+
+        XCTAssertEqual(model.scores.first?.id, score.id)
+        XCTAssertEqual(model.sessions.first?.attachedScoreID, score.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
+        XCTAssertEqual(
+            model.lastError,
+            .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't save the score deletion, so the score and file were kept. Try again."
+            )
+        )
+        let restored = AppModel(persistenceStore: durableStore, scoreStorageDirectory: scoreDirectory)
+        XCTAssertEqual(restored.scores.first?.id, score.id)
+        XCTAssertEqual(restored.sessions.first?.attachedScoreID, score.id)
+    }
+
+    @MainActor
+    func testScoreDeleteRollbackFailureKeepsOpenModelAndReportsRecoveryRisk() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        let durableStore = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let seedModel = AppModel(persistenceStore: durableStore, scoreStorageDirectory: scoreDirectory)
+        try seedModel.importPhotoScore(data: makeTinyPNGData(), preferredName: "Rollback score")
+        let score = try XCTUnwrap(seedModel.scores.first)
+        seedModel.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
+        seedModel.attachScoreToLatestSession(scoreID: score.id)
+
+        var writeCount = 0
+        let transactionalStore = NativePersistenceStore.ephemeral(
+            fileURL: stateURL,
+            writeData: { data, url in
+                writeCount += 1
+                if writeCount == 2 {
+                    throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+                }
+                try data.write(to: url, options: [.atomic])
+            }
+        )
+        let model = AppModel(
+            persistenceStore: transactionalStore,
+            scoreStorageDirectory: scoreDirectory,
+            scoreFileRemover: { _ in
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+            }
+        )
+        let storedURL = try XCTUnwrap(model.scores.first.flatMap { model.storedScoreFileURL(for: $0) })
+
+        model.deleteScore(id: score.id)
+
+        XCTAssertEqual(writeCount, 2)
+        XCTAssertEqual(model.scores.first?.id, score.id)
+        XCTAssertEqual(model.sessions.first?.attachedScoreID, score.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
+        XCTAssertEqual(
+            model.lastError,
+            .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't remove the local score file or restore its saved state. The score is still open; export your data before closing the app."
+            )
+        )
+    }
+
+    @MainActor
     func testClearingLocalPracticeDataRemovesImportedScoreFiles() throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
@@ -219,6 +378,137 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertTrue(model.scores.isEmpty)
         let storedFiles = (try? FileManager.default.contentsOfDirectory(at: scoreDirectory, includingPropertiesForKeys: nil)) ?? []
         XCTAssertTrue(storedFiles.isEmpty)
+    }
+
+    @MainActor
+    func testPDFOverPageLimitIsRejectedWithoutLeavingCopiedFile() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        let sourceURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneOversized-\(UUID().uuidString).pdf")
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+            try? FileManager.default.removeItem(at: sourceURL)
+        }
+        let pdfData = makePDFData(pageCount: 33)
+        try pdfData.write(to: sourceURL, options: [.atomic])
+        XCTAssertEqual(PDFDocument(data: pdfData)?.pageCount, 33, "Regression fixture must be a real 33-page PDF.")
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+
+        XCTAssertThrowsError(try model.importScore(from: sourceURL)) { error in
+            XCTAssertEqual(error as? NativeScoreImportService.ImportError, .tooManyPages(maximum: 32))
+        }
+
+        XCTAssertTrue(model.scores.isEmpty)
+        let storedFiles = (try? FileManager.default.contentsOfDirectory(at: scoreDirectory, includingPropertiesForKeys: nil)) ?? []
+        XCTAssertTrue(storedFiles.isEmpty, "Rejected PDFs must be removed from imported-score storage.")
+    }
+
+    @MainActor
+    func testPDFOverPageLimitReportsCleanupFailureWhenCopiedFileCannotBeRemoved() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        let sourceURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneOversized-\(UUID().uuidString).pdf")
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+            try? FileManager.default.removeItem(at: sourceURL)
+        }
+        try makePDFData(pageCount: 33).write(to: sourceURL, options: [.atomic])
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            scoreFileRemover: { _ in
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+            }
+        )
+
+        XCTAssertThrowsError(try model.importScore(from: sourceURL)) { error in
+            XCTAssertEqual(error as? NativeScoreImportService.ImportError, .cleanupFailed)
+            XCTAssertTrue(error.localizedDescription.contains("copied file remains"))
+        }
+
+        XCTAssertTrue(model.scores.isEmpty)
+        let storedFiles = (try? FileManager.default.contentsOfDirectory(at: scoreDirectory, includingPropertiesForKeys: nil)) ?? []
+        XCTAssertEqual(storedFiles.count, 1, "The failed removal is surfaced instead of being reported as successful cleanup.")
+    }
+
+    @MainActor
+    func testClearLocalPracticeDataFailureKeepsModelAndFile() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let model = AppModel(
+            persistenceStore: store,
+            scoreStorageDirectory: scoreDirectory,
+            scoreFileRemover: { _ in
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+            }
+        )
+        model.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Protected score")
+        let storedURL = try XCTUnwrap(model.scores.first.flatMap { model.storedScoreFileURL(for: $0) })
+
+        model.clearLocalPracticeData()
+
+        XCTAssertEqual(model.scores.count, 1)
+        XCTAssertEqual(model.sessions.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
+        XCTAssertEqual(
+            model.lastError,
+            .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't remove your imported score files, so your local practice data was kept. Try again."
+            )
+        )
+
+        let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        XCTAssertEqual(restored.scores.count, 1, "A score-cleanup failure must restore the snapshot cleared earlier in the transaction.")
+        XCTAssertEqual(restored.sessions.count, 1)
+    }
+
+    @MainActor
+    func testPersistenceClearFailureKeepsModelFilesAndRestorableSnapshot() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        let store = NativePersistenceStore.ephemeral(
+            fileURL: stateURL,
+            removeItem: { _ in
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+            }
+        )
+        let model = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        model.sessions = [makeSession(name: "Persistent recording", cents: [-2, 0, 3])]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Persistent score")
+        let score = try XCTUnwrap(model.scores.first)
+        let storedURL = try XCTUnwrap(model.storedScoreFileURL(for: score))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stateURL.path))
+
+        model.clearLocalPracticeData()
+
+        XCTAssertEqual(model.scores.first?.id, score.id)
+        XCTAssertEqual(model.sessions.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stateURL.path))
+        XCTAssertEqual(
+            model.lastError,
+            .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't clear its saved local data, so your practice data was kept. Try again."
+            )
+        )
+
+        let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        XCTAssertEqual(restored.scores.first?.id, score.id, "Failed clear must not claim success before stale state can reappear on launch.")
+        XCTAssertEqual(restored.sessions.count, 1)
     }
 
     @MainActor
@@ -891,6 +1181,19 @@ final class BrassTuneAppTests: XCTestCase {
             context.cgContext.strokePath()
         }
         return try XCTUnwrap(image.pngData())
+    }
+
+    private func makePDFData(pageCount: Int) -> Data {
+        let bounds = CGRect(x: 0, y: 0, width: 144, height: 144)
+        return UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
+            for pageNumber in 1...pageCount {
+                context.beginPage()
+                "Page \(pageNumber)".draw(
+                    at: CGPoint(x: 16, y: 16),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 12)]
+                )
+            }
+        }
     }
 
     private func testPitchClass(_ note: String) -> Int? {
