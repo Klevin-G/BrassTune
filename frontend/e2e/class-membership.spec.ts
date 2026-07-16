@@ -285,7 +285,9 @@ test('the latest class selection wins when detail responses arrive out of order'
 });
 
 test('joins a second class and keeps prior memberships available', async ({ page }) => {
-  const counters = await installSignedInClassFixture(page, { mutationDelayMs: 150 });
+  // Keep the mocked mutation pending long enough for every browser engine to
+  // render and expose the disabled busy state before the response resolves.
+  const counters = await installSignedInClassFixture(page, { mutationDelayMs: 1_000 });
   await page.goto('/ensemble');
   await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
 
