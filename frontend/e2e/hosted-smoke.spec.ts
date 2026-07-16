@@ -97,7 +97,9 @@ test.describe('hosted read-only smoke', () => {
       const response = await page.goto(routeURL(route));
       await assertNotProtectedPreview(response, page, route);
       expect(response?.status(), `${route} should not be behind auth or missing`).toBeLessThan(400);
-      await expect(page.getByRole('main')).toBeVisible();
+      await expect(page.locator('main .screen-container')).toBeVisible();
+      await expect(page.locator('.route-loading')).toHaveCount(0);
+      await expect(page.locator('.route-error')).toHaveCount(0);
       if (!route.startsWith('/auth/') && route !== '/') {
         const expectedPath = expectedRoutePaths.get(route) ?? route;
         await expect.poll(
