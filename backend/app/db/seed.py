@@ -3,7 +3,7 @@ import json
 import random
 from typing import Dict, List, Tuple
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile
@@ -25,25 +25,25 @@ def _sync_explicit_identity_sequences(db: Session) -> None:
     # explicit IDs. The demo fixtures intentionally use stable user/group IDs,
     # so advance those two owned sequences to at least the current table maxima
     # without rewinding an already higher sequence value.
-    for table_name in ("users", "groups"):
+    for model in (User, Group):
+        sequence_name = db.execute(
+            text("SELECT pg_get_serial_sequence(:table_name, 'id')"),
+            {"table_name": f"public.{model.__tablename__}"},
+        ).scalar_one_or_none()
+        if sequence_name is None:
+            continue
+        maximum_id = db.query(func.max(model.id)).scalar()
+        last_value = db.execute(
+            text("SELECT pg_sequence_last_value(CAST(:sequence_name AS regclass))"),
+            {"sequence_name": sequence_name},
+        ).scalar_one_or_none()
         db.execute(
-            text(
-                f"""
-                WITH identity_state AS (
-                    SELECT
-                        pg_get_serial_sequence('public.{table_name}', 'id')::regclass AS sequence_name,
-                        COALESCE((SELECT MAX(id) FROM public.{table_name}), 1) AS maximum_id,
-                        EXISTS (SELECT 1 FROM public.{table_name}) AS has_rows
-                )
-                SELECT setval(
-                    sequence_name,
-                    GREATEST(maximum_id, COALESCE(pg_sequence_last_value(sequence_name), 1)),
-                    has_rows OR pg_sequence_last_value(sequence_name) IS NOT NULL
-                )
-                FROM identity_state
-                WHERE sequence_name IS NOT NULL
-                """
-            )
+            text("SELECT setval(CAST(:sequence_name AS regclass), :value, :is_called)"),
+            {
+                "sequence_name": sequence_name,
+                "value": max(maximum_id or 1, last_value or 1),
+                "is_called": maximum_id is not None or last_value is not None,
+            },
         )
 
 
