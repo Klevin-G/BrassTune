@@ -25,13 +25,16 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 - In-app privacy, terms, support, data export, and account deletion surfaces exist.
 - Account deletion can be initiated in app.
 - Local clear/delete controls remove imported score metadata and copied local score files.
-- The redesigned app has four focused tabs: Play-Along, Tuner, Progress, and Settings. Home/More/Coach/Audio Lab/demo Ensemble surfaces are removed from shipping navigation.
-- Native Play-Along uses the live pitch stream for written-pitch-class matching, sustained-note grading, median cents, per-note feedback, percentage, and stars.
+- The redesigned app has five focused tabs: **Tuner** (the default), Play-Along, Progress, Class, and Settings. Home/More/Coach/Audio Lab/demo Ensemble surfaces are not shipping navigation.
+- The Class tab is a top-level, teacher-managed class surface; it is not hidden inside Settings.
+- The native String Catalog supports 12 production locales: `en`, `es`, `zh-Hans`, `zh-Hant`, `ar`, `fr`, `de`, `ru`, `pt-BR`, `ja`, `ko`, and `vi`. `System Default` is a preference, not a locale.
+- Native practice includes eight local-first features: custom Play-Along exercises, guided warm-up, metronome presets, weekly goals, weak-transition drills, short reflections, drone/interval practice, and offline practice packs.
+- Native Play-Along uses the live pitch stream under the shared scorer contract: centered is within ±5 cents, accepted progression is within ±15 cents, minimum hold is 2 seconds, and only centered notes contribute to the in-tune percentage and stars.
 - Shipping Tuner and Play-Along behavior is real-microphone only. Deterministic pitch and score fixtures require explicit UI-test launch flags and are filtered from normal restored state.
 - Native metronome scope exists: audible-by-default click output at volume `0.6`, visual pulse, haptic option, mute, volume, meter, subdivision, and tap tempo. Output is temporarily muted only during an active live recording.
 - Native score scope includes PDF/image/Photos import, thumbnails, page selection, rotate/crop/enhance preview, a full-resolution zoomable page viewer (PDFKit for PDFs, memory-safe ImageIO decoding for images), annotations, metadata + original-file export, and local delete. The synthetic score is UI-test-only.
 - Adaptive system light/dark surfaces are implemented. Custom iOS 26 Liquid Glass is availability-gated and limited to floating transports, primary Start/Record actions, and the score viewer top controls, with iOS 17–25 fallbacks.
-- The current source targets Swift 6 and iOS 17+. This Windows integration run verified the native design-token rules, but it could not run `swift`, `xcodebuild`, or CoreSimulator. Earlier branch-specific `BrassTuneCore`, app-unit, and UI-smoke results do not validate the resolved integration revision; rerun the commands in `TEST_MATRIX.md` on macOS/Xcode before release claims.
+- The current source targets Swift 6 and iOS 17+. Current local macOS evidence records `3` BrassTuneCore tests, `91` native unit tests, `5` UI-smoke tests, and Debug and Release simulator builds. This is local, unsigned simulator evidence only; it does not establish a signed archive, deployed provider state, or App Store readiness.
 
 ## Owner Decisions Required
 
@@ -61,8 +64,7 @@ Official Apple sources checked on 2026-06-18, refreshed for this run on 2026-06-
 
 ## Not Yet Complete
 
-- Release-configuration build/archive validation beyond the passing simulator unit and UI-smoke runs.
-- Signed archive validation/export.
+- Signed archive/export validation beyond the local unsigned Debug/Release simulator builds.
 - App Store Connect upload/TestFlight.
 - Third-party SDK privacy signature/manifest audit after final dependencies are pinned.
 - Required-reason API final audit after adding production Supabase Swift client.

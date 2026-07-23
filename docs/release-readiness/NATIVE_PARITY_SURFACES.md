@@ -1,6 +1,6 @@
 # Native Swift Parity Surfaces
 
-Updated: 2026-07-13
+Updated: 2026-07-23
 
 ## Scope
 
@@ -8,18 +8,24 @@ This document describes the integrated SwiftUI source under `swift/BrassTuneApp`
 
 ## Current Native Product Surface
 
-The app has four focused tabs with one primary home for each workflow:
+The app has five focused tabs with one primary home for each workflow. **Tuner is the default tab.**
 
-- **Play-Along** is the default tab and flagship action. A musician chooses from `12` major scales, `12` natural-minor scales, and `3` other exercises grouped in the native picker, starts the microphone inline, and holds each highlighted note steady. The grader uses the native pitch stream, matches written pitch classes across octave and enharmonic spelling, collects a sustained hold, and reports per-note cents, a plain-language rating, an overall percentage, and stars. A completed live exercise can save a real-microphone practice session.
-- **Tuner** is the live chromatic tuner. Its shipping UI has no source picker or Sample option. It begins with "Play a note" / "Listening..." and reports flat, in tune, or sharp with a single tuning meter. The first tap of **Start listening** requests microphone access; denied permission produces an **Open iOS Settings** recovery action.
+- **Tuner** is the default live chromatic tuner. Its shipping UI has no source picker or Sample option. It begins with "Play a note" / "Listening..." and reports flat, in tune, or sharp with a single tuning meter. The first tap of **Start listening** requests microphone access; denied permission produces an **Open iOS Settings** recovery action.
+- **Play-Along** is the flagship exercise surface. A musician chooses from `12` major scales, `12` natural-minor scales, and `3` other exercises, starts the microphone inline, and holds each highlighted note steady. The shared scorer contract treats ±5 cents as centered and ±15 cents as accepted, requires a 2-second hold with confidence/sample/dropout safeguards, and counts only centered notes toward the in-tune percentage and stars. A completed live exercise can save a real-microphone practice session.
 - **Progress** replaces the duplicate Analytics, Coach, Progress, and session-summary surfaces. It shows a friendly zero state or local tuning metrics, a single practice suggestion, recent recordings, and a link to the complete practice history.
-- **Settings** owns instrument choice, advanced A4 reference pitch, metronome defaults and the full metronome, the sheet-music library, authenticated class join/switch/leave, local export/deletion, account state, and the single Privacy/Terms/Support entry points.
+- **Class** is the top-level teacher-managed membership surface. It presents class selection, join, switch, leave, and refresh flows for authenticated users.
+- **Settings** owns instrument choice, advanced A4 reference pitch, metronome defaults and the full metronome, the sheet-music library, local export/deletion, account state, and the single Privacy/Terms/Support entry points.
 
 Home-as-launcher, the More bento grid, standalone Analytics and Coach tabs, Audio Lab, `NativeToolShell`, duplicate legal tiles, and the demo Ensemble dead end are not shipping navigation surfaces.
 
+## Local-first Practice And Language Scope
+
+- The eight local-first practice features are custom Play-Along exercises, guided warm-up, metronome presets, weekly goals, weak-transition drills, short reflections, drone/interval practice, and offline practice packs.
+- The native String Catalog supports 12 production locales: `en`, `es`, `zh-Hans`, `zh-Hant`, `ar`, `fr`, `de`, `ru`, `pt-BR`, `ja`, `ko`, and `vi`. `System Default` is a preference rather than an additional locale. In-context linguistic and RTL review remains a human release gate.
+
 ## Authenticated Class Membership
 
-- Settings presents every class returned for the signed-in user instead of collapsing membership to one class. A musician can select or switch classes, open **Join another class**, and refresh the membership list after joining.
+- The Class tab presents every class returned for the signed-in user instead of collapsing membership to one class. A musician can select or switch classes, open **Join another class**, and refresh the membership list after joining.
 - Join codes are normalized before the authenticated API request. Leaving calls the self-scoped membership endpoint for the selected class and refreshes the authoritative list after success.
 - The UI uses explicit backend `viewer_role`, `viewer_can_leave`, and `viewer_can_manage` capabilities. It does not infer authorization from join-code visibility. Owners are not offered self-leave when the backend reports that they cannot leave.
 - Class loading is generation-aware so an older in-flight response cannot replace a newer post-join result. Validation details remain user-visible, while view-lifecycle cancellation is not presented as a network failure.
@@ -51,9 +57,9 @@ Home-as-launcher, the More bento grid, standalone Analytics and Coach tabs, Audi
 
 ## Current Validation Boundary
 
-The integration candidate includes source coverage for the four-tab information architecture, onboarding, fixture isolation, audible metronome defaults, the `27`-exercise grouped Play-Along catalog, enharmonic interval and grading behavior, class capability/API/race handling, destructive alerts, persistence, and audio behavior.
+The current local candidate has coverage for the five-tab information architecture, onboarding, fixture isolation, audible metronome defaults, the `27`-exercise grouped Play-Along catalog, the shared scorer contract, eight practice features, 12 production locales, class capability/API/race handling, destructive alerts, persistence, and audio behavior.
 
-The resolved integration tree passed `swift/BrassTuneApp/scripts/verify_design_tokens.py`, which verified `15` adaptive colors, `3` shared anchors, and the centralized glass fallback. This Windows merge environment cannot run `swift`, `xcodebuild`, or CoreSimulator, and earlier branch-specific results do not validate the resolved integration tree. Record native compile/test counts only after the commands below execute against the final integration revision.
+Current local macOS evidence is `3` BrassTuneCore tests, `91` native unit tests, `5` UI-smoke tests, and unsigned Debug and Release simulator builds. This records local execution only; preserve the exact revision with the evidence run before treating it as a release candidate.
 
 When an unrestricted macOS/Xcode environment is available, run:
 
@@ -69,7 +75,7 @@ Always discover an available simulator dynamically instead of hard-coding a devi
 
 ## Explicit Non-Claims
 
-- No simulator build, native unit-test pass, or UI-smoke pass is claimed for the resolved integration tree until the required Xcode commands run successfully.
+- Native evidence is local and unsigned; it does not validate the final pushed/deployed SHA.
 - No physical-device microphone, brass-room acoustic, interruption/route, haptic, metronome timing, speaker/headphone bleed, Files, or Photos validation is claimed.
 - No signed archive, Apple Developer signing, App Store Connect upload, TestFlight run, App Review, or App Store readiness is claimed.
 - Camera score capture remains absent; no camera capability or validation is implied.
