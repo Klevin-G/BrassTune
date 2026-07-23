@@ -57,9 +57,26 @@ export const supabaseConfigured = true;
 export const authProviders = { google: false, apple: false };
 export const supabase = {
   auth: {
+    get storageKey() {
+      if (localStorage.getItem('brasstune.e2eAuthStorageFailure') === 'true') {
+        throw new Error('storage unavailable');
+      }
+      return 'sb-brasstune-e2e-auth-token';
+    },
     getSession: async () => ({ data: { session } }),
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
-    signOut: async () => ({ error: null }),
+    signOut: async () => {
+      const calls = Number(localStorage.getItem('brasstune.e2eSignOutCalls') || '0') + 1;
+      localStorage.setItem('brasstune.e2eSignOutCalls', String(calls));
+      localStorage.setItem('brasstune.e2eSignOutStarted', 'true');
+      const delayMs = Number(localStorage.getItem('brasstune.e2eSignOutDelayMs') || '0');
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (localStorage.getItem('brasstune.e2eSignOutFailure') === 'true') {
+        return { error: new Error('network request failed') };
+      }
+      localStorage.setItem('brasstune.e2eSignOutFinished', 'true');
+      return { error: null };
+    },
     signInWithPassword: async () => ({ data: { session }, error: null }),
     signUp: async () => ({ data: { session }, error: null }),
   },
@@ -419,6 +436,41 @@ test('a restored session profile failure keeps recovery controls visible and ret
   expect(afterRetry.guest).toBe(beforeRetry.guest);
   expect(JSON.parse(afterRetry.guest ?? '{}').weeklyGoal.targetMinutes).toBe(37);
   expect(JSON.parse(afterRetry.account ?? '{}').weeklyGoal.targetMinutes).toBe(91);
+});
+
+test('unresolved identity recovery awaits one guest transition and keeps failures visible', async ({ page }) => {
+  await installSignedInClassFixture(page, { holdProfileUntilReleased: true });
+  await page.addInitScript(() => {
+    localStorage.setItem('brasstune.e2eSignOutDelayMs', '1200');
+    localStorage.setItem('brasstune.e2eSignOutFailure', 'true');
+    localStorage.setItem('brasstune.e2eAuthStorageFailure', 'true');
+  });
+
+  await page.goto('/practice');
+  const recoveryHeading = page.getByRole('heading', { name: 'We could not finish restoring your account' });
+  const guestButton = page.getByRole('button', { name: 'Continue as guest' });
+  await expect(recoveryHeading).toBeVisible();
+
+  await guestButton.click();
+  await expect(guestButton).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutStarted'))).toBe('true');
+  await expect(recoveryHeading).toBeVisible();
+  await expect(page.getByText('Live mic', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveText('Sign-out could not complete. Try again.');
+  await expect(guestButton).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutCalls'))).toBe('1');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBeNull();
+
+  await page.evaluate(() => {
+    localStorage.removeItem('brasstune.e2eSignOutFailure');
+    localStorage.removeItem('brasstune.e2eAuthStorageFailure');
+  });
+  await guestButton.click();
+  await expect(page.getByText('Live mic', { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutCalls'))).toBe('2');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutFinished'))).toBe('true');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBe('true');
+  await expect(recoveryHeading).toHaveCount(0);
 });
 
 test('switching Supabase users clears the prior profile and class data before reloading', async ({ page }) => {

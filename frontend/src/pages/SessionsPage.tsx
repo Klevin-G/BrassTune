@@ -171,7 +171,7 @@ export function SessionsPage() {
 
       {loadState === 'loading' && !hasSessions ? (
         <SectionCard title={t('sessions.loading')} eyebrow={t('sessions.eyebrow')}>
-          <LoadingSkeleton rows={4} />
+          <LoadingSkeleton rows={4} label={t('sessions.loading')} />
         </SectionCard>
       ) : loadState === 'error' && !hasSessions ? (
         <SectionCard title={t('sessions.loadFailed')} eyebrow={t('sessionReview.connection')}>

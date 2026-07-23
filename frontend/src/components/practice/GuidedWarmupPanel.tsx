@@ -6,33 +6,126 @@ import { SectionCard } from '../ui/AppPrimitives';
 import { useI18n } from '../../i18n/LocaleContext';
 import type { MessageId } from '../../i18n/messages.base';
 
-export function GuidedWarmupPanel() {
+const GUIDED_WARMUP_MILLISECONDS = GUIDED_WARMUP_SECONDS * 1000;
+
+export interface WarmupTimerState {
+  elapsedMilliseconds: number;
+  running: boolean;
+  visible: boolean;
+  activeSinceMilliseconds: number | null;
+}
+
+export type WarmupTimerEvent =
+  | { type: 'start'; visible: boolean }
+  | { type: 'pause' }
+  | { type: 'reset' }
+  | { type: 'visibility'; visible: boolean }
+  | { type: 'tick' };
+
+export function updateWarmupTimer(
+  state: WarmupTimerState,
+  event: WarmupTimerEvent,
+  nowMilliseconds: number,
+): WarmupTimerState {
+  const segmentMilliseconds = state.activeSinceMilliseconds == null
+    ? 0
+    : Math.max(0, nowMilliseconds - state.activeSinceMilliseconds);
+  let elapsedMilliseconds = Math.min(
+    GUIDED_WARMUP_MILLISECONDS,
+    state.elapsedMilliseconds + segmentMilliseconds,
+  );
+  let running = state.running;
+  let visible = state.visible;
+
+  if (event.type === 'start') {
+    if (elapsedMilliseconds >= GUIDED_WARMUP_MILLISECONDS) elapsedMilliseconds = 0;
+    running = true;
+    visible = event.visible;
+  } else if (event.type === 'pause') {
+    running = false;
+  } else if (event.type === 'reset') {
+    elapsedMilliseconds = 0;
+    running = false;
+  } else if (event.type === 'visibility') {
+    visible = event.visible;
+  }
+
+  if (elapsedMilliseconds >= GUIDED_WARMUP_MILLISECONDS) running = false;
+  return {
+    elapsedMilliseconds,
+    running,
+    visible,
+    activeSinceMilliseconds: running && visible ? nowMilliseconds : null,
+  };
+}
+
+const systemWarmupClock = () => Date.now();
+
+export function GuidedWarmupPanel({ nowMilliseconds = systemWarmupClock }: { nowMilliseconds?: () => number } = {}) {
   const { library, setWarmupProgress, recordRecent, recordActivity } = usePracticeLibrary();
   const { t, formatNumber } = useI18n();
-  const [elapsed, setElapsed] = useState(library.warmup.elapsedSeconds);
-  const [running, setRunning] = useState(false);
+  const [timer, setTimer] = useState<WarmupTimerState>(() => ({
+    elapsedMilliseconds: library.warmup.elapsedSeconds * 1000,
+    running: false,
+    visible: typeof document === 'undefined' || !document.hidden,
+    activeSinceMilliseconds: null,
+  }));
+  const elapsed = Math.floor(timer.elapsedMilliseconds / 1000);
+  const running = timer.running;
   const completionRecordedRef = useRef(elapsed >= GUIDED_WARMUP_SECONDS);
+  const persistedElapsedRef = useRef(library.warmup.elapsedSeconds);
   const position = warmupStepAt(elapsed);
   const step = GUIDED_WARMUP_STEPS[position.index];
   const complete = elapsed >= GUIDED_WARMUP_SECONDS;
 
   useEffect(() => {
     if (running) return;
-    setElapsed(library.warmup.elapsedSeconds);
+    if (library.warmup.elapsedSeconds === persistedElapsedRef.current) return;
+    persistedElapsedRef.current = library.warmup.elapsedSeconds;
+    completionRecordedRef.current = library.warmup.elapsedSeconds >= GUIDED_WARMUP_SECONDS;
+    setTimer((current) => {
+      const elapsedMilliseconds = library.warmup.elapsedSeconds * 1000;
+      return current.elapsedMilliseconds === elapsedMilliseconds
+        ? current
+        : { ...current, elapsedMilliseconds, activeSinceMilliseconds: null };
+    });
   }, [library.warmup.elapsedSeconds, running]);
 
   useEffect(() => {
-    if (!running) return undefined;
-    const timer = window.setInterval(() => {
-      setElapsed((current) => Math.min(GUIDED_WARMUP_SECONDS, current + 1));
+    if (!running || !timer.visible) return undefined;
+    const intervalId = window.setInterval(() => {
+      const tickAt = nowMilliseconds();
+      setTimer((current) => updateWarmupTimer(current, { type: 'tick' }, tickAt));
     }, 1000);
-    return () => window.clearInterval(timer);
-  }, [running]);
+    return () => window.clearInterval(intervalId);
+  }, [nowMilliseconds, running, timer.visible]);
 
   useEffect(() => {
+    const updateVisibility = (visible: boolean) => {
+      const changedAt = nowMilliseconds();
+      setTimer((current) => updateWarmupTimer(
+        current,
+        { type: 'visibility', visible },
+        changedAt,
+      ));
+    };
+    const handleVisibility = () => updateVisibility(!document.hidden);
+    const handlePageHide = () => updateVisibility(false);
+    const handlePageShow = () => updateVisibility(!document.hidden);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [nowMilliseconds]);
+
+  useEffect(() => {
+    persistedElapsedRef.current = elapsed;
     setWarmupProgress({ elapsedSeconds: elapsed, stepIndex: position.index });
     if (elapsed >= GUIDED_WARMUP_SECONDS) {
-      setRunning(false);
       if (!completionRecordedRef.current) {
         completionRecordedRef.current = true;
         recordActivity(5);
@@ -43,16 +136,20 @@ export function GuidedWarmupPanel() {
   const start = () => {
     if (complete) {
       completionRecordedRef.current = false;
-      setElapsed(0);
     }
     recordRecent({ kind: 'warmup', id: 'guided-5', label: '5-minute warm-up', href: '/practice#warmup' });
-    setRunning(true);
+    const startedAt = nowMilliseconds();
+    setTimer((current) => updateWarmupTimer(
+      current,
+      { type: 'start', visible: !document.hidden },
+      startedAt,
+    ));
   };
 
   const reset = () => {
-    setRunning(false);
     completionRecordedRef.current = false;
-    setElapsed(0);
+    const resetAt = nowMilliseconds();
+    setTimer((current) => updateWarmupTimer(current, { type: 'reset' }, resetAt));
   };
 
   const remaining = Math.max(0, GUIDED_WARMUP_SECONDS - elapsed);
@@ -63,7 +160,16 @@ export function GuidedWarmupPanel() {
         <p>{complete ? t('warmup.completeBody') : t(`warmup.${step.id}.instruction` as MessageId)}</p>
         <progress max={GUIDED_WARMUP_SECONDS} value={elapsed} aria-label={t('warmup.progress', { elapsed, total: GUIDED_WARMUP_SECONDS })} />
         <div className="practice-actions">
-          <button className="primary-button" type="button" onClick={running ? () => setRunning(false) : start}>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={running
+              ? () => {
+                const pausedAt = nowMilliseconds();
+                setTimer((current) => updateWarmupTimer(current, { type: 'pause' }, pausedAt));
+              }
+              : start}
+          >
             {running ? <Pause size={18} /> : <Play size={18} />}
             {running ? t('common.pause') : elapsed > 0 && !complete ? t('common.resume') : complete ? t('common.repeat') : t('warmup.start')}
           </button>

@@ -1,16 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   PRACTICE_LIBRARY_VERSION,
+  claimSavedPracticeSessionMinutes,
   emptyPracticeLibrary,
   normalizeMetronomePreset,
   ownerWorkspaceKey,
   practiceLibraryLimits,
   readPracticeLibrary,
+  reconcilePracticeLibraryWeek,
   recordPracticeActivity,
+  millisecondsUntilNextPracticeWeek,
   removeCustomExercise,
   removeMetronomePreset,
   resolvePracticeOwner,
   upsertById,
+  upsertCustomExercise,
   writePracticeLibrary,
   type CustomExercise,
   type MetronomePreset,
@@ -20,7 +24,9 @@ import {
   type PracticeTarget,
   type PracticeWorkspace,
   type WarmupProgress,
+  type SavedPracticeSessionActivity,
 } from '../domain/practiceLibrary';
+import { recordPracticeActivity as recordPracticeStreakActivity } from '../domain/practiceStreak';
 import { useI18n } from '../i18n/LocaleContext';
 import { useAuth } from './AuthContext';
 
@@ -38,6 +44,7 @@ interface PracticeLibraryState {
   recordRecent: (target: PracticeTarget) => void;
   setWeeklyGoal: (minutes: number, sessions?: number) => void;
   recordActivity: (minutes: number) => void;
+  recordSavedSession: (session: SavedPracticeSessionActivity) => boolean;
   saveReflection: (text: string, sessionId?: string) => PracticeReflection | null;
   updateReflection: (id: string, text: string) => boolean;
   deleteReflection: (id: string) => void;
@@ -96,14 +103,17 @@ function UnresolvedIdentityRecovery({
   retry,
   signOut,
   continueAsGuest,
+  onGuestTransitionState,
 }: {
   retry: () => Promise<void>;
   signOut: () => Promise<void>;
-  continueAsGuest: () => void;
+  continueAsGuest: () => Promise<void>;
+  onGuestTransitionState: (state: 'idle' | 'pending' | 'failed') => void;
 }) {
   const { t } = useI18n();
   const [busyAction, setBusyAction] = useState<'retry' | 'sign-out' | 'guest' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const guestTransition = useRef(continueAsGuest);
 
   const retryProfile = async () => {
     if (busyAction) return;
@@ -116,16 +126,32 @@ function UnresolvedIdentityRecovery({
     }
   };
 
-  const leaveAccount = async (asGuest: boolean) => {
+  const leaveAccount = async () => {
     if (busyAction) return;
-    setBusyAction(asGuest ? 'guest' : 'sign-out');
+    setBusyAction('sign-out');
     setActionError(null);
     try {
       await signOut();
+      onGuestTransitionState('idle');
     } catch {
-      if (!asGuest) setActionError(t('settings.signOutFailed'));
+      setActionError(t('settings.signOutFailed'));
     } finally {
-      if (asGuest) continueAsGuest();
+      setBusyAction(null);
+    }
+  };
+
+  const enterGuest = async () => {
+    if (busyAction) return;
+    setBusyAction('guest');
+    setActionError(null);
+    onGuestTransitionState('pending');
+    try {
+      await guestTransition.current();
+      onGuestTransitionState('idle');
+    } catch {
+      setActionError(t('settings.signOutFailed'));
+      onGuestTransitionState('failed');
+    } finally {
       setBusyAction(null);
     }
   };
@@ -142,10 +168,10 @@ function UnresolvedIdentityRecovery({
           <button className="primary-button" type="button" disabled={busyAction != null} onClick={() => void retryProfile()}>
             {busyAction === 'retry' ? t('auth.restore') : t('auth.tryAgain')}
           </button>
-          <button className="ghost-button" type="button" disabled={busyAction != null} onClick={() => void leaveAccount(false)}>
+          <button className="ghost-button" type="button" disabled={busyAction != null} onClick={() => void leaveAccount()}>
             {t('settings.signOut')}
           </button>
-          <button className="ghost-button" type="button" disabled={busyAction != null} onClick={() => void leaveAccount(true)}>
+          <button className="ghost-button" type="button" disabled={busyAction != null} onClick={() => void enterGuest()}>
             {t('auth.continueGuest')}
           </button>
         </div>
@@ -154,16 +180,26 @@ function UnresolvedIdentityRecovery({
   );
 }
 
-export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
+const systemPracticeClock = () => new Date();
+
+export function PracticeLibraryProvider({
+  children,
+  now = systemPracticeClock,
+}: {
+  children: ReactNode;
+  now?: () => Date;
+}) {
   const auth = useAuth();
   const { t } = useI18n();
   const ownerId = resolvePracticeOwner({ loading: auth.loading, hasAuthSession: auth.hasAuthSession, isSignedIn: auth.isSignedIn, profileId: auth.profile?.id });
   const [loadedState, setLoadedState] = useState<LoadedPracticeState>(() => ({
     ownerId,
-    library: ownerId ? readPracticeLibrary(localStorage, ownerId) : emptyPracticeLibrary(),
+    library: ownerId ? readPracticeLibrary(localStorage, ownerId, now()) : emptyPracticeLibrary(now()),
     workspace: ownerId ? readWorkspace(ownerId) : null,
   }));
   const [storageError, setStorageError] = useState<string | null>(null);
+  const [guestRecoveryState, setGuestRecoveryState] = useState<'idle' | 'pending' | 'failed'>('idle');
+  const claimedSavedSessionKeysRef = useRef(new Set<string>());
   const ownerReady = ownerId != null && loadedState.ownerId === ownerId;
   const library = loadedState.library;
   const workspace = loadedState.workspace;
@@ -171,11 +207,11 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setLoadedState({
       ownerId,
-      library: ownerId ? readPracticeLibrary(localStorage, ownerId) : emptyPracticeLibrary(),
+      library: ownerId ? readPracticeLibrary(localStorage, ownerId, now()) : emptyPracticeLibrary(now()),
       workspace: ownerId ? readWorkspace(ownerId) : null,
     });
     setStorageError(null);
-  }, [ownerId]);
+  }, [now, ownerId]);
 
   const updateLibrary = useCallback((update: (current: PracticeLibrary) => PracticeLibrary) => {
     setLoadedState((current) => {
@@ -187,17 +223,58 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     });
   }, [ownerId]);
 
+  const reconcileDisplayedWeek = useCallback(() => {
+    const currentDate = now();
+    setLoadedState((current) => {
+      if (!ownerId || current.ownerId !== ownerId) return current;
+      const next = reconcilePracticeLibraryWeek(current.library, currentDate);
+      if (next === current.library) return current;
+      const saved = writePracticeLibrary(localStorage, ownerId, next);
+      setStorageError(saved ? null : 'This device is out of browser storage. Your weekly practice progress could not be updated.');
+      return saved ? { ...current, library: next } : current;
+    });
+  }, [now, ownerId]);
+
+  useEffect(() => {
+    if (!ownerId || !ownerReady) return undefined;
+    let rolloverTimer: number | undefined;
+    const scheduleRollover = () => {
+      if (rolloverTimer != null) window.clearTimeout(rolloverTimer);
+      rolloverTimer = window.setTimeout(() => {
+        reconcileDisplayedWeek();
+        scheduleRollover();
+      }, millisecondsUntilNextPracticeWeek(now()));
+    };
+    const reconcileAndReschedule = () => {
+      reconcileDisplayedWeek();
+      scheduleRollover();
+    };
+    const handleVisibility = () => {
+      if (!document.hidden) reconcileAndReschedule();
+    };
+
+    scheduleRollover();
+    window.addEventListener('focus', reconcileAndReschedule);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      if (rolloverTimer != null) window.clearTimeout(rolloverTimer);
+      window.removeEventListener('focus', reconcileAndReschedule);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [now, ownerId, ownerReady, reconcileDisplayedWeek]);
+
   const saveExercise = useCallback((exercise: Omit<CustomExercise, 'id' | 'createdAt'> & { id?: string }) => {
-    const item: CustomExercise = {
+    const draft = {
       id: exercise.id ?? createId('exercise'),
       name: exercise.name.trim().slice(0, 60),
       notes: exercise.notes.slice(0, 32),
       source: exercise.source,
       createdAt: new Date().toISOString(),
     };
-    updateLibrary((current) => ({ ...current, customExercises: upsertById(current.customExercises, item, practiceLibraryLimits.customExercises) }));
+    const item = upsertCustomExercise(library, draft).item;
+    updateLibrary((current) => upsertCustomExercise(current, draft).library);
     return item;
-  }, [updateLibrary]);
+  }, [library, updateLibrary]);
 
   const deleteExercise = useCallback((id: string) => {
     updateLibrary((current) => removeCustomExercise(current, id));
@@ -253,8 +330,17 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
   }, [updateLibrary]);
 
   const recordActivity = useCallback((minutes: number) => {
-    updateLibrary((current) => recordPracticeActivity(current, minutes));
-  }, [updateLibrary]);
+    updateLibrary((current) => recordPracticeActivity(current, minutes, now()));
+  }, [now, updateLibrary]);
+
+  const recordSavedSession = useCallback((session: SavedPracticeSessionActivity) => {
+    if (!ownerId) return false;
+    const minutes = claimSavedPracticeSessionMinutes(claimedSavedSessionKeysRef.current, ownerId, session);
+    if (minutes == null) return false;
+    recordPracticeStreakActivity(ownerId, minutes);
+    updateLibrary((current) => recordPracticeActivity(current, minutes, now()));
+    return true;
+  }, [now, ownerId, updateLibrary]);
 
   const saveReflection = useCallback((text: string, sessionId?: string) => {
     const trimmed = text.trim().slice(0, 280);
@@ -327,6 +413,7 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     recordRecent,
     setWeeklyGoal,
     recordActivity,
+    recordSavedSession,
     saveReflection,
     updateReflection,
     deleteReflection,
@@ -334,7 +421,7 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     startWorkspace,
     moveWorkspace,
     exitWorkspace,
-  }), [deleteExercise, deleteMetronomePreset, deleteReflection, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
+  }), [deleteExercise, deleteMetronomePreset, deleteReflection, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, recordSavedSession, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
 
   const gateState = practiceLibraryGateState({
     loading: auth.loading,
@@ -342,17 +429,18 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     hasProfile: auth.profile != null,
     ownerReady,
   });
-  if (gateState === 'loading') {
-    return <div className="route-loading" role="status">{t('loading.session')}</div>;
-  }
-  if (gateState === 'recovery') {
+  if (gateState === 'recovery' || guestRecoveryState !== 'idle') {
     return (
       <UnresolvedIdentityRecovery
         retry={auth.refreshProfile}
         signOut={auth.signOut}
         continueAsGuest={auth.continueAsGuest}
+        onGuestTransitionState={setGuestRecoveryState}
       />
     );
+  }
+  if (gateState === 'loading') {
+    return <div className="route-loading" role="status">{t('loading.session')}</div>;
   }
   return <PracticeLibraryContext.Provider value={value}>{children}</PracticeLibraryContext.Provider>;
 }

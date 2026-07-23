@@ -290,9 +290,9 @@ export function EmptyActionState({
   );
 }
 
-export function LoadingSkeleton({ rows = 3 }: { rows?: number }) {
+export function LoadingSkeleton({ rows = 3, label }: { rows?: number; label: string }) {
   return (
-    <div className="loading-skeleton" aria-label="Loading">
+    <div className="loading-skeleton" role="status" aria-live="polite" aria-label={label}>
       {Array.from({ length: rows }).map((_, index) => (
         <span key={index} />
       ))}

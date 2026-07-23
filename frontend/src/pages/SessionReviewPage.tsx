@@ -109,7 +109,7 @@ export function SessionReviewPage() {
     return (
       <ScreenContainer>
         <SectionCard title={t('sessionReview.loading')}>
-          <LoadingSkeleton rows={4} />
+          <LoadingSkeleton rows={4} label={t('sessionReview.loading')} />
         </SectionCard>
       </ScreenContainer>
     );

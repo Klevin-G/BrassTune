@@ -286,7 +286,7 @@ export function PlayAlongPage() {
         setPhase('idle');
         setError(t('playAlong.micError'));
       } else {
-        practiceLibrary.recordRecent({ kind: 'play-along', id: exercise.id, label: exercise.label, href: `/practice/play-along?exercise=${encodeURIComponent(exercise.id)}` });
+        practiceLibrary.recordRecent({ kind: 'play-along', id: exercise.id, label: localizedExerciseLabel, href: `/practice/play-along?exercise=${encodeURIComponent(exercise.id)}` });
       }
     } finally {
       if (generation === startGenerationRef.current) startInProgressRef.current = false;
@@ -418,7 +418,12 @@ export function PlayAlongPage() {
               {error}
             </p>
           )}
-          <CustomExerciseBuilder onSaved={selectExercise} />
+          <CustomExerciseBuilder
+            onSaved={selectExercise}
+            onDeleted={(id) => {
+              if (exerciseId === id) selectExercise(EXERCISES[0].id);
+            }}
+          />
         </SectionCard>
       )}
 

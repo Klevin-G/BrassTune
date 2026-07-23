@@ -126,8 +126,38 @@ describe('web localization', () => {
       zhHant['packs.daily.drone.label'],
       zhHant['onboarding.tunerBody'],
     ].join(' ')).not.toMatch(/無人機/);
-    expect(zhHans['tuning.concertNote']).toBe('音乐会音高 {note}');
-    expect(zhHant['tuning.concertNote']).toBe('音樂會音高 {note}');
+    expect(zhHans['tuning.concertNote']).toBe('实际音高 {note}');
+    expect(zhHant['tuning.concertNote']).toBe('實際音高 {note}');
+    expect([
+      zhHans['playAlong.majorLabel'],
+      zhHans['playAlong.minorLabel'],
+      zhHans['drone.interval'],
+      zhHans['drone.interval.unison'],
+      zhHans['drone.interval.fourth'],
+      zhHans['drone.interval.fifth'],
+    ]).toEqual(['{note}大调', '{note}小调', '音程', '同度', '纯四度', '纯五度']);
+    expect([
+      zhHant['playAlong.majorLabel'],
+      zhHant['playAlong.minorLabel'],
+      zhHant['drone.interval'],
+      zhHant['drone.interval.unison'],
+      zhHant['drone.interval.fourth'],
+      zhHant['drone.interval.fifth'],
+    ]).toEqual(['{note}大調', '{note}小調', '音程', '同度', '完全四度', '完全五度']);
+    expect([
+      zhHans['sessionReview.driftSharp'],
+      zhHans['sessionReview.driftFlat'],
+      zhHans['sessionReview.sharpFlat'],
+      zhHans['sessionReview.centsHelp'],
+      zhHans['progress.howSharpFlat'],
+    ].join(' ')).not.toMatch(/犀利|平平|尖锐|扁平|锋利/);
+    expect([
+      zhHant['sessionReview.driftSharp'],
+      zhHant['sessionReview.driftFlat'],
+      zhHant['sessionReview.sharpFlat'],
+      zhHant['sessionReview.centsHelp'],
+      zhHant['progress.howSharpFlat'],
+    ].join(' ')).not.toMatch(/犀利|平平|尖銳|扁平|鋒利/);
     expect(zhHant['progress.centsHelp']).toBe('音分表示音符偏高或偏低的程度。越接近零越好。');
 
     expect(ar['tuning.concertNote']).toBe('النغمة الكونشرتية {note}');
@@ -140,16 +170,137 @@ describe('web localization', () => {
 
     expect(de['score.captureFailed']).toBe('Die Seite konnte nicht aufgenommen werden. Versuchen Sie es erneut.');
     expect(ja['score.captureFailed']).toBe('ページを取り込めませんでした。もう一度お試しください。');
+    expect(ja['practice.droneIntervals']).toBe('持続音と音程');
     expect(ja['drone.interval']).toBe('音程');
+    expect(ja['reflection.title']).toBe('短い練習の振り返り');
+    expect([ja['practice.droneIntervals'], ja['reflection.title']].join(' ')).not.toMatch(/インターバル|簡単な/);
     expect(ko['score.captureFailed']).toBe('페이지를 촬영하지 못했습니다. 다시 시도하세요.');
-    expect(ko['drone.interval']).toBe('음정 간격');
+    expect([
+      ko['practice.droneIntervals'],
+      ko['drone.interval'],
+      ko['drone.interval.unison'],
+      ko['drone.interval.third'],
+      ko['drone.interval.fourth'],
+      ko['drone.interval.fifth'],
+      ko['reflection.title'],
+    ]).toEqual(['지속음과 음정', '음정', '완전1도', '장3도', '완전4도', '완전5도', '짧은 연습 돌아보기']);
+    expect([
+      ko['sessionReview.driftSharp'],
+      ko['sessionReview.driftFlat'],
+      ko['sessionReview.centsHelp'],
+      ko['progress.howSharpFlat'],
+    ].join(' ')).not.toMatch(/날카로운|평평한|플랫하게|샤프 또는 플랫/);
 
     expect(ru['sessionReview.driftSharp']).toBe('Вы имели тенденцию играть выше.');
     expect(ru['sessionReview.driftFlat']).toBe('Вы имели тенденцию играть ниже.');
     expect(ptBr['metronome.timeSignature']).toBe('Compasso');
     expect(vi['practice.droneIntervals']).toBe('Âm nền và quãng');
     expect(vi['drone.interval']).toBe('Quãng');
+    expect(vi['tuning.concertNote']).toBe('Cao độ thực {note}');
+    expect([
+      vi['playAlong.majorLabel'],
+      vi['playAlong.minorLabel'],
+      vi['warmup.buzz.title'],
+      vi['warmup.slur.title'],
+      vi['drone.interval.unison'],
+      vi['drone.interval.third'],
+      vi['drone.interval.fourth'],
+      vi['drone.interval.fifth'],
+    ]).toEqual([
+      '{note} trưởng',
+      '{note} thứ',
+      'Rung môi nhẹ nhàng',
+      'Luyến môi thư giãn',
+      'Đồng âm',
+      'Quãng ba trưởng',
+      'Quãng bốn đúng',
+      'Quãng năm đúng',
+    ]);
+    expect([
+      vi['tuning.concertNote'],
+      vi['playAlong.majorLabel'],
+      vi['playAlong.minorLabel'],
+      vi['warmup.buzz.title'],
+      vi['warmup.slur.title'],
+    ].join(' ')).not.toMatch(/Buổi hòa nhạc|chính|thứ yếu|Tiếng vang|^Thư giãn$/);
     expect(vi['score.captureFailed']).toBe('Không thể chụp trang. Hãy thử lại.');
+  });
+
+  it('uses practice-reflection language instead of physical reflection or reflex terms', async () => {
+    const [zhHans, zhHant, vi, ko, ja] = await Promise.all(
+      (['zh-Hans', 'zh-Hant', 'vi', 'ko', 'ja'] as const)
+        .map((locale) => loadMessagesForLocale(locale)),
+    );
+    const reflectionKeys = [
+      'reflection.title',
+      'reflection.eyebrow',
+      'reflection.prompt',
+      'reflection.save',
+      'reflection.saved',
+      'reflection.list',
+      'reflection.edit',
+      'reflection.saveChanges',
+      'reflection.cancel',
+      'reflection.delete',
+      'settings.setupDownloaded',
+    ] as const;
+    const reflectionCopy = (messages: Awaited<ReturnType<typeof loadMessagesForLocale>>) => (
+      reflectionKeys.map((key) => messages[key]).join(' ')
+    );
+
+    expect([
+      zhHans['reflection.save'],
+      zhHans['reflection.list'],
+      zhHans['reflection.edit'],
+      zhHans['reflection.delete'],
+    ]).toEqual(['保存练习心得', '已保存的练习心得', '编辑练习心得', '删除练习心得']);
+    expect([
+      zhHant['reflection.save'],
+      zhHant['reflection.list'],
+      zhHant['reflection.edit'],
+      zhHant['reflection.delete'],
+    ]).toEqual(['儲存練習心得', '已儲存的練習心得', '編輯練習心得', '刪除練習心得']);
+    expect([
+      vi['reflection.save'],
+      vi['reflection.list'],
+      vi['reflection.edit'],
+      vi['reflection.delete'],
+    ]).toEqual([
+      'Lưu ghi chú luyện tập',
+      'Ghi chú luyện tập đã lưu',
+      'Chỉnh sửa ghi chú luyện tập',
+      'Xóa ghi chú luyện tập',
+    ]);
+    expect([
+      ko['reflection.save'],
+      ko['reflection.list'],
+      ko['reflection.edit'],
+      ko['reflection.delete'],
+    ]).toEqual(['연습 소감 저장', '저장한 연습 소감', '연습 소감 편집', '연습 소감 삭제']);
+    expect([
+      ja['reflection.save'],
+      ja['reflection.list'],
+      ja['reflection.edit'],
+      ja['reflection.delete'],
+    ]).toEqual(['練習メモを保存', '保存した練習メモ', '練習メモを編集', '練習メモを削除']);
+
+    expect(reflectionCopy(zhHans)).not.toMatch(/反射|倒影/);
+    expect(reflectionCopy(zhHant)).not.toMatch(/反射|倒影/);
+    expect(reflectionCopy(vi)).not.toMatch(/phản xạ|phản ánh/i);
+    expect(reflectionCopy(ko)).not.toMatch(/반사|반영/);
+    expect(reflectionCopy(ja)).not.toMatch(/反射|反省|反映|リフレクション/);
+
+    for (const messages of [zhHans, zhHant, vi, ko, ja]) {
+      expect([
+        messages['onboarding.inTune'],
+        messages['onboarding.sharp'],
+        messages['onboarding.flat'],
+      ]).toEqual([
+        messages['tuning.inTune'],
+        messages['tuning.sharp'],
+        messages['tuning.flat'],
+      ]);
+    }
   });
 
   it('uses musical rather than literal translations for slurs, pitch, drones, scores, and notes', async () => {
@@ -163,7 +314,7 @@ describe('web localization', () => {
       ru: ['Расслабленное легато', 'Бурдон и интервалы', 'Партитуры'],
       'pt-BR': ['Ligaduras relaxadas', 'Som contínuo e intervalos', 'Partituras'],
       ja: ['やさしいバズィング', '持続音と音程', '音符'],
-      ko: ['편안한 슬러 연습', '지속음과 음정 간격', '악보'],
+      ko: ['편안한 슬러 연습', '지속음과 음정', '악보'],
       vi: ['Đúng cao độ', 'Âm nền và quãng', 'Bản nhạc'],
     } as const;
     for (const locale of productionLocales.filter((value) => value !== 'en')) {

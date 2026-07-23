@@ -42,6 +42,62 @@ test('mobile practice home exposes resumable warm-up, drone, goals, packs, and v
   expect(consoleErrors).toEqual([]);
 });
 
+test('guided warm-up excludes hidden time, tolerates repeated visibility events, and completes once', async ({ page }) => {
+  await page.addInitScript({
+    content: `
+      (() => {
+        const NativeDate = Date;
+        let currentTime = new NativeDate(2026, 6, 23, 12, 0, 0).getTime();
+        let pageHidden = false;
+        class MutableDate extends NativeDate {
+          constructor(...args) {
+            super(...(args.length > 0 ? args : [currentTime]));
+          }
+          static now() { return currentTime; }
+        }
+        window.Date = MutableDate;
+        Object.defineProperty(document, 'hidden', {
+          configurable: true,
+          get: () => pageHidden
+        });
+        window.__advanceWarmupTime = (milliseconds) => { currentTime += milliseconds; };
+        window.__setWarmupHidden = (hidden) => {
+          pageHidden = hidden;
+          document.dispatchEvent(new Event('visibilitychange'));
+        };
+      })();
+    `,
+  });
+
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Start warm-up' }).click();
+  await page.evaluate(() => {
+    (window as unknown as { __advanceWarmupTime: (milliseconds: number) => void }).__advanceWarmupTime(10_000);
+  });
+  await expect(page.locator('.practice-time')).toHaveText('4:50', { timeout: 3_000 });
+
+  await page.evaluate(() => {
+    (window as unknown as { __setWarmupHidden: (hidden: boolean) => void }).__setWarmupHidden(true);
+    (window as unknown as { __advanceWarmupTime: (milliseconds: number) => void }).__advanceWarmupTime(100_000);
+    (window as unknown as { __setWarmupHidden: (hidden: boolean) => void }).__setWarmupHidden(true);
+  });
+  await page.waitForTimeout(1_100);
+  await expect(page.locator('.practice-time')).toHaveText('4:50');
+
+  await page.evaluate(() => {
+    (window as unknown as { __setWarmupHidden: (hidden: boolean) => void }).__setWarmupHidden(false);
+    (window as unknown as { __advanceWarmupTime: (milliseconds: number) => void }).__advanceWarmupTime(290_000);
+  });
+  await expect(page.getByText('Warm-up complete')).toBeVisible({ timeout: 3_000 });
+  await expect(page.getByText(/5 of 60 minutes.*1 of 3 sessions/)).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as unknown as { __setWarmupHidden: (hidden: boolean) => void }).__setWarmupHidden(false);
+    (window as unknown as { __setWarmupHidden: (hidden: boolean) => void }).__setWarmupHidden(false);
+  });
+  await expect(page.getByText(/5 of 60 minutes.*1 of 3 sessions/)).toBeVisible();
+});
+
 test('Arabic tiny-phone tuner fits the viewport while keeping the pitch axis left-to-right', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('brasstune.locale', 'ar'));
   await page.setViewportSize({ width: 320, height: 568 });
@@ -144,9 +200,66 @@ export const supabase = { auth: {
   expect(await page.evaluate(() => localStorage.getItem('brasstune.practiceLibrary.v1.account%3A100'))).toContain('"targetMinutes":144');
 });
 
-test('custom play-along exercises validate, persist, and can be favorited', async ({ page }) => {
+test('an open practice tab reconciles its displayed goal when focus returns after Monday rollover', async ({ page }) => {
+  await page.addInitScript({
+    content: `
+      (() => {
+        const NativeDate = Date;
+        let currentTime = new NativeDate(2026, 6, 19, 23, 59, 30).getTime();
+        class MutableDate extends NativeDate {
+          constructor(...args) {
+            super(...(args.length > 0 ? args : [currentTime]));
+          }
+          static now() { return currentTime; }
+        }
+        window.Date = MutableDate;
+        window.__setPracticeTime = (value) => { currentTime = value; };
+        localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
+          version: 1,
+          customExercises: [],
+          metronomePresets: [],
+          favorites: [],
+          recents: [],
+          reflections: [],
+          warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-19T12:00:00.000Z' },
+          weeklyGoal: {
+            week: '2026-07-13',
+            targetMinutes: 180,
+            completedMinutes: 75,
+            targetSessions: 5,
+            completedSessions: 3
+          }
+        }));
+      })();
+    `,
+  });
+
+  await page.goto('/practice');
+  await expect(page.getByText('75 of 180 minutes')).toBeVisible();
+
+  await page.evaluate(() => {
+    const monday = new Date(2026, 6, 20, 0, 0, 5).getTime();
+    (window as unknown as { __setPracticeTime: (value: number) => void }).__setPracticeTime(monday);
+    window.dispatchEvent(new Event('focus'));
+  });
+
+  await expect(page.getByText('0 of 180 minutes')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const value = JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}');
+    return value.weeklyGoal;
+  })).toEqual({
+    week: '2026-07-20',
+    targetMinutes: 180,
+    completedMinutes: 0,
+    targetSessions: 5,
+    completedSessions: 0,
+  });
+});
+
+test('custom play-along exercises validate, edit in place, reload, and delete coherently', async ({ page }) => {
   await page.goto('/practice/play-along');
   await page.getByText('Build a custom exercise').click();
+  await expect(page.getByLabel('Exercise name')).toHaveAttribute('maxlength', '60');
   await page.getByLabel('Exercise name').fill('Lip slur check');
   await page.getByLabel('Notes').fill('C nope');
   await page.getByRole('button', { name: 'Save and select' }).click();
@@ -158,8 +271,41 @@ test('custom play-along exercises validate, persist, and can be favorited', asyn
   await page.getByRole('button', { name: 'Favorite', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Favorited', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
+  const original = await page.evaluate(() => {
+    const library = JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}');
+    return library.customExercises[0] as { id: string; createdAt: string };
+  });
+  await page.getByRole('button', { name: 'Edit: Lip slur check' }).click();
+  await expect(page.getByLabel('Exercise name')).toHaveValue('Lip slur check');
+  await expect(page.getByLabel('Notes')).toHaveValue('C E G Bb');
+  await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+  await page.getByLabel('Exercise name').fill('Lip slur focus');
+  await page.getByLabel('Notes').fill('C F G');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByText('Your custom exercise · 3 notes')).toBeVisible();
+  const edited = await page.evaluate(() => JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}'));
+  expect(edited.customExercises).toHaveLength(1);
+  expect(edited.customExercises[0]).toMatchObject({
+    id: original.id,
+    name: 'Lip slur focus',
+    notes: ['C', 'F', 'G'],
+    createdAt: original.createdAt,
+  });
+  expect(edited.favorites).toContainEqual(expect.objectContaining({ kind: 'play-along', id: original.id, label: 'Lip slur focus' }));
+
   await page.reload();
-  await expect(page.getByText('Your custom exercise · 4 notes')).toBeVisible();
+  await expect(page.getByText('Your custom exercise · 3 notes')).toBeVisible();
+  await page.getByText('Build a custom exercise').click();
+  await page.getByRole('button', { name: /Lip slur focus · 3 notes/ }).click();
+  await page.getByRole('button', { name: 'Delete Lip slur focus' }).click();
+  await expect(page.getByText('Lip slur focus')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^C major Start here$/i })).toHaveAttribute('aria-pressed', 'true');
+  const afterDelete = await page.evaluate(() => JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}'));
+  expect(afterDelete.customExercises).toEqual([]);
+  expect(afterDelete.favorites).not.toContainEqual(expect.objectContaining({ id: original.id }));
+  expect(afterDelete.recents).not.toContainEqual(expect.objectContaining({ id: original.id }));
+  await page.reload();
+  await expect(page.getByText('Lip slur focus')).toHaveCount(0);
 });
 
 test('named metronome presets persist and the production service worker entry is available', async ({ page, request }) => {
@@ -198,6 +344,51 @@ test('locale selection updates language, direction, manifest, Intl output, and p
   await page.locator('.practice-builder button').filter({ has: page.locator('svg') }).first().click();
   await expect(page.getByText(/A-G Warmup/).first()).toBeVisible();
   expect(await page.getByText(/A-G Warmup/).first().textContent()).toContain('A-G Warmup');
+});
+
+test('built-in shortcut labels follow the selected locale while custom titles and stored targets stay unchanged', async ({ page }) => {
+  await page.goto('/practice');
+  await page.evaluate(() => {
+    localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
+      version: 1,
+      customExercises: [{ id: 'custom-a-g', name: 'A-G Warmup', notes: ['A', 'B', 'C'], source: 'custom', createdAt: '2026-07-23T12:00:00.000Z' }],
+      metronomePresets: [],
+      favorites: [
+        { kind: 'warmup', id: 'guided-5', label: 'stale warm-up label', href: '/practice#warmup' },
+        { kind: 'play-along', id: 'custom-a-g', label: 'A-G Warmup', href: '/practice/play-along?exercise=custom-a-g' },
+      ],
+      recents: [{ kind: 'play-along', id: 'cmaj', label: 'stale scale label', href: '/practice/play-along?exercise=cmaj' }],
+      reflections: [],
+      warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-23T12:00:00.000Z' },
+      weeklyGoal: { week: '2026-07-20', targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
+    }));
+  });
+  await page.reload();
+
+  const shortcuts = page.locator('.practice-shortcut');
+  await expect(shortcuts.filter({ hasText: 'Guided 5-minute warm-up' })).toHaveCount(1);
+  await expect(shortcuts.filter({ hasText: 'C major' })).toHaveCount(1);
+  await expect(shortcuts.filter({ hasText: 'A-G Warmup' })).toHaveCount(1);
+
+  await page.goto('/settings');
+  await page.getByLabel('App language').selectOption('es');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'es');
+  await page.goto('/practice');
+  await expect(shortcuts.filter({ hasText: 'Calentamiento guiado de 5 minutos.' })).toHaveCount(1);
+  await expect(shortcuts.filter({ hasText: 'C mayor' })).toHaveCount(1);
+  await expect(shortcuts.filter({ hasText: 'A-G Warmup' })).toHaveCount(1);
+
+  const persistedTargets = await page.evaluate(() => {
+    const library = JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}');
+    return { favorites: library.favorites, recents: library.recents };
+  });
+  expect(persistedTargets).toMatchObject({
+    favorites: [
+      { id: 'guided-5', label: 'stale warm-up label' },
+      { id: 'custom-a-g', label: 'A-G Warmup' },
+    ],
+    recents: [{ id: 'cmaj', label: 'stale scale label' }],
+  });
 });
 
 test('a failed locale chunk atomically falls back to English and can retry', async ({ page }) => {

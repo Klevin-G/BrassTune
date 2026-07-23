@@ -1,5 +1,156 @@
 import { Buffer } from 'node:buffer';
 import { expect, test } from 'playwright/test';
+import type { Page, Route } from 'playwright/test';
+
+const signedInAuthModule = `
+const session = { access_token: 'audio-lifecycle-token', user: { id: 'audio-lifecycle-user' } };
+export const supabaseConfigured = true;
+export const authProviders = { google: false, apple: false };
+export const supabase = {
+  auth: {
+    getSession: async () => ({ data: { session } }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+    signOut: async () => ({ error: null }),
+  },
+};
+`;
+
+const stablePitchStreamModule = `
+const stream = { getTracks: () => [{ stop() {} }] };
+export function usePitchStream() {
+  return {
+    currentFrame: null,
+    history: [],
+    statusMessage: 'Listening. Play a steady note.',
+    micActive: true,
+    mediaStream: stream,
+    streamInfo: {},
+    startMicrophone: async () => stream,
+    stopMicrophone() {},
+    flushPendingFrames: async () => ({ flushed: 0, failed: 0 }),
+    finishPersistingFrames: async () => ({ flushed: 0, failed: 0 }),
+  };
+}
+`;
+
+const activeSession = {
+  id: 701,
+  user_id: 91,
+  instrument_id: 'trumpet',
+  name: 'Lifecycle take',
+  started_at: '2026-07-23T12:00:00.000Z',
+  ended_at: null,
+  created_at: '2026-07-23T12:00:00.000Z',
+  duration_seconds: 0,
+  reference_pitch_hz: 440,
+  notes_count: 0,
+  average_signed_cents: 0,
+  average_abs_cents: 0,
+  in_tune_percentage: 0,
+  audio_available: false,
+};
+
+async function installTunerRecordingFixture(page: Page, options: { failFirstStop?: boolean; pendingStart?: boolean } = {}) {
+  const calls = { starts: 0, uploads: 0, stops: 0 };
+  let resolveStart: (() => void) | undefined;
+  const startGate = options.pendingStart
+    ? new Promise<void>((resolve) => { resolveStart = resolve; })
+    : Promise.resolve();
+
+  await page.addInitScript(() => {
+    const state = { starts: 0, stops: 0 };
+    class FakeMediaRecorder {
+      static isTypeSupported() { return true; }
+      mimeType = 'audio/webm';
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      constructor(_stream: MediaStream, _options?: MediaRecorderOptions) {}
+      start() {
+        state.starts += 1;
+      }
+      stop() {
+        state.stops += 1;
+        this.ondataavailable?.({ data: new Blob(['recorded audio'], { type: this.mimeType }) });
+        this.onstop?.();
+      }
+    }
+    Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: FakeMediaRecorder });
+    (window as unknown as { __tunerRecorderTest: unknown }).__tunerRecorderTest = state;
+  });
+  await page.route('**/src/lib/supabase.ts*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: signedInAuthModule,
+  }));
+  await page.route('**/src/hooks/usePitchStream.ts*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: stablePitchStreamModule,
+  }));
+  await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const json = (body: unknown, status = 200) => route.fulfill({
+      status,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+
+    if (path === '/api/instruments') return json([]);
+    if (path === '/api/users/current') {
+      return json({
+        id: 91,
+        supabase_user_id: 'audio-lifecycle-user',
+        username: 'audio-lifecycle',
+        display_name: 'Audio Lifecycle',
+        email: 'audio@example.test',
+        role: 'student',
+        primary_instrument_id: 'trumpet',
+        onboarding_completed_at: '2026-07-23T10:00:00.000Z',
+      });
+    }
+    if (path === '/api/sessions/start' && request.method() === 'POST') {
+      calls.starts += 1;
+      await startGate;
+      return json(activeSession);
+    }
+    if (path === `/api/sessions/${activeSession.id}/audio` && request.method() === 'POST') {
+      calls.uploads += 1;
+      return json({
+        uploaded: true,
+        audio: { ...activeSession, audio_available: true, audio_mime_type: 'audio/webm' },
+      });
+    }
+    if (path === `/api/sessions/${activeSession.id}/stop` && request.method() === 'POST') {
+      calls.stops += 1;
+      if (options.failFirstStop && calls.stops === 1) {
+        return json({ detail: 'Temporary stop failure' }, 503);
+      }
+      return json({
+        ...activeSession,
+        ended_at: '2026-07-23T12:00:04.000Z',
+        duration_seconds: 4,
+        audio_available: true,
+      });
+    }
+    return json({ detail: 'Not found' }, 404);
+  });
+
+  return {
+    calls,
+    releaseStart: () => resolveStart?.(),
+  };
+}
+
+async function savedWeeklyCompletion(page: Page, ownerKey = 'account%3A91') {
+  return page.evaluate((key) => {
+    const raw = localStorage.getItem(`brasstune.practiceLibrary.v1.${key}`);
+    const weeklyGoal = raw ? JSON.parse(raw).weeklyGoal : null;
+    return weeklyGoal
+      ? { minutes: weeklyGoal.completedMinutes, sessions: weeklyGoal.completedSessions }
+      : { minutes: 0, sessions: 0 };
+  }, ownerKey);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -119,6 +270,122 @@ test('a user can retry and resume an AudioContext after automatic startup is una
 
   await expect.poll(() => page.evaluate(() => (window as unknown as { __audioContextTest: { resumeCalls: number } }).__audioContextTest.resumeCalls)).toBe(2);
   await expect(turnOnMic).toHaveCount(0);
+});
+
+test('idle Tuner switches to Drone immediately', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('brasstune.demoMode', 'true'));
+  await page.goto('/practice');
+
+  await page.getByRole('radio', { name: 'Drone / intervals' }).click();
+
+  await expect(page).toHaveURL(/tool=drone/);
+  await expect(page.getByRole('heading', { name: 'Drone and interval tone' })).toBeVisible();
+});
+
+test('Tuner finalizes one active MediaRecorder and cloud session before repeated Drone requests can hide controls', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page);
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+  await expect.poll(() => fixture.calls.starts).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __tunerRecorderTest: { starts: number } }
+  ).__tunerRecorderTest.starts)).toBe(1);
+
+  const drone = page.getByRole('radio', { name: 'Drone / intervals' });
+  await drone.evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+
+  await expect(page).toHaveURL(/tool=drone/);
+  await expect(page.getByRole('heading', { name: 'Drone and interval tone' })).toBeVisible();
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __tunerRecorderTest: { stops: number } }
+  ).__tunerRecorderTest.stops)).toBe(1);
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
+});
+
+test('Drone waits for a pending Tuner start and serializes rapid switch attempts through one finalization', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { pendingStart: true });
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect.poll(() => fixture.calls.starts).toBe(1);
+
+  const drone = page.getByRole('radio', { name: 'Drone / intervals' });
+  await drone.evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+  await expect(page).not.toHaveURL(/tool=drone/);
+  await expect(page.getByRole('button', { name: 'Starting your take' })).toBeVisible();
+
+  fixture.releaseStart();
+
+  await expect(page).toHaveURL(/tool=drone/);
+  await expect(page.getByRole('heading', { name: 'Drone and interval tone' })).toBeVisible();
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __tunerRecorderTest: { starts: number; stops: number } }
+  ).__tunerRecorderTest)).toEqual({ starts: 1, stops: 1 });
+});
+
+test('a failed Drone finalization keeps the Tuner stop control available for a successful retry', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { failFirstStop: true });
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+
+  await page.getByRole('radio', { name: 'Drone / intervals' }).click();
+
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect(page).not.toHaveURL(/tool=drone/);
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Cloud practice is unavailable');
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 0, sessions: 0 });
+
+  await page.getByRole('radio', { name: 'Drone / intervals' }).click();
+
+  await expect(page).toHaveURL(/tool=drone/);
+  await expect(page.getByRole('heading', { name: 'Drone and interval tone' })).toBeVisible();
+  await expect.poll(() => fixture.calls.stops).toBe(2);
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __tunerRecorderTest: { stops: number } }
+  ).__tunerRecorderTest.stops)).toBe(1);
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
+});
+
+test('Audio Lab accounts a successfully saved calibration take exactly once', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page);
+  await page.route('**/src/pages/AudioLabPage.tsx*', async (route) => {
+    const response = await route.fetch();
+    const source = await response.text();
+    const enabledSource = source.replace(
+      /const internalToolsEnabled = (?:false|import\.meta\.env\.VITE_ENABLE_INTERNAL_TOOLS === ['"]true['"])/,
+      'const internalToolsEnabled = true',
+    );
+    if (enabledSource === source) throw new Error('Audio Lab internal-tools test seam did not match the served module.');
+    await route.fulfill({ response, body: enabledSource });
+  });
+  await page.goto('/settings/audio-lab');
+  await expect(page.getByRole('heading', { name: 'Audio Calibration Lab' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+  await page.getByRole('button', { name: 'Stop and save' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Calibration take saved' })).toBeVisible();
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
 });
 
 test('Play-Along serializes repeated Start activation while permission is pending', async ({ page }) => {

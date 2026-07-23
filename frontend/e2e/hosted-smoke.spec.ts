@@ -1,5 +1,10 @@
 import { expect, test } from 'playwright/test';
 import type { Page, Response } from 'playwright/test';
+import {
+  approvedBrassTuneVercelOrigins,
+  installScopedVercelBypass,
+  scopedVercelBypassHeaders,
+} from './vercel-bypass';
 
 const apiBaseURL = process.env.E2E_API_BASE_URL;
 const wsBaseURL = process.env.E2E_WS_BASE_URL;
@@ -64,13 +69,7 @@ function routeURL(route: string) {
   return destination.toString();
 }
 
-if (hostedMode && vercelBypassSecret) {
-  test.use({
-    extraHTTPHeaders: {
-      'x-vercel-protection-bypass': vercelBypassSecret,
-    },
-  });
-}
+const approvedVercelOrigins = approvedBrassTuneVercelOrigins(webBaseURL, vercelShareURL);
 
 async function assertNotProtectedPreview(response: Response | null, page: Page, route: string) {
   if (response?.status() !== 401 && response?.status() !== 403) return;
@@ -100,6 +99,41 @@ async function startWithFreshAuthStorage(page: Page) {
 }
 
 test.describe('hosted read-only smoke', () => {
+  test.beforeEach(async ({ page }) => {
+    if (hostedMode && vercelBypassSecret) {
+      await installScopedVercelBypass(page, vercelBypassSecret, approvedVercelOrigins);
+    }
+  });
+
+  test('Vercel bypass credential is scoped to approved BrassTune page origins', () => {
+    const secret = 'test-only-bypass';
+    const approved = approvedBrassTuneVercelOrigins(
+      'https://brass-tune-123-kelvis-prject.vercel.app/share',
+      'https://unrelated.example.test/not-approved',
+    );
+    const incomingHeaders = {
+      Accept: 'text/html',
+      'X-Vercel-Protection-Bypass': 'must-be-replaced-or-removed',
+    };
+
+    const protectedPage = scopedVercelBypassHeaders(
+      'https://brass-tune-123-kelvis-prject.vercel.app/practice',
+      incomingHeaders,
+      secret,
+      approved,
+    );
+    expect(protectedPage['x-vercel-protection-bypass']).toBe(secret);
+
+    for (const url of [
+      'https://brasstune-u8qj.onrender.com/api/ready',
+      'https://redirect-target.example.test/after-vercel-redirect',
+      'https://cdn.example.test/app.js',
+    ]) {
+      const headers = scopedVercelBypassHeaders(url, incomingHeaders, secret, approved);
+      expect(Object.keys(headers).map((name) => name.toLowerCase())).not.toContain('x-vercel-protection-bypass');
+    }
+  });
+
   test('production exposes Google and email sign-in from fresh storage', async ({ page }) => {
     test.skip(!productionHostedAuth, 'Canonical production auth is not required for local or preview smoke runs.');
     await startWithFreshAuthStorage(page);

@@ -287,7 +287,7 @@ export function ProgressPage() {
           {rangeControls}
         </SectionCard>
         <SectionCard title={t('progress.loading')}>
-          <LoadingSkeleton rows={5} />
+          <LoadingSkeleton rows={5} label={t('progress.loading')} />
         </SectionCard>
       </ScreenContainer>
     );

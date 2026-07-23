@@ -2,18 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   PRACTICE_LIBRARY_VERSION,
   BUILT_IN_PRACTICE_PACKS,
+  claimSavedPracticeSessionMinutes,
   clearAccountPracticeState,
   currentWeekKey,
   emptyPracticeLibrary,
   normalizeMetronomePreset,
+  millisecondsUntilNextPracticeWeek,
   ownerPracticeKey,
   ownerWorkspaceKey,
   parseExerciseNotes,
   parsePracticeLibrary,
+  reconcilePracticeLibraryWeek,
   recordPracticeActivity,
   resolvePracticeOwner,
   removeCustomExercise,
   removeMetronomePreset,
+  upsertCustomExercise,
   writePracticeLibrary,
 } from './practiceLibrary';
 
@@ -75,6 +79,39 @@ describe('practice library storage', () => {
     });
   });
 
+  it('reconciles displayed progress at Monday and schedules the next local week boundary', () => {
+    const sunday = new Date(2026, 6, 19, 23, 59, 30);
+    const library = emptyPracticeLibrary(sunday);
+    library.weeklyGoal = {
+      week: '2026-07-13',
+      targetMinutes: 180,
+      completedMinutes: 75,
+      targetSessions: 5,
+      completedSessions: 3,
+    };
+
+    expect(millisecondsUntilNextPracticeWeek(sunday)).toBe(30_000);
+    expect(reconcilePracticeLibraryWeek(library, sunday)).toBe(library);
+
+    const monday = new Date(2026, 6, 20, 0, 0, 0);
+    expect(reconcilePracticeLibraryWeek(library, monday).weeklyGoal).toEqual({
+      week: '2026-07-20',
+      targetMinutes: 180,
+      completedMinutes: 0,
+      targetSessions: 5,
+      completedSessions: 0,
+    });
+    expect(millisecondsUntilNextPracticeWeek(monday)).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it('claims each saved session once per owner and derives a minimum one-minute activity', () => {
+    const claimed = new Set<string>();
+    expect(claimSavedPracticeSessionMinutes(claimed, 'guest', { id: 'take-1', duration_seconds: 0 })).toBe(1);
+    expect(claimSavedPracticeSessionMinutes(claimed, 'guest', { id: 'take-1', duration_seconds: 125 })).toBeNull();
+    expect(claimSavedPracticeSessionMinutes(claimed, 'account:42', { id: 'take-1', duration_seconds: 125 })).toBe(2);
+    expect(claimSavedPracticeSessionMinutes(claimed, 'account:42', { id: 'take-2', duration_seconds: Number.NaN })).toBe(1);
+  });
+
   it('ships routable built-in packs for the focused workspace', () => {
     expect(BUILT_IN_PRACTICE_PACKS).toHaveLength(2);
     expect(BUILT_IN_PRACTICE_PACKS.every((pack) => pack.steps.length > 0 && pack.steps.every((step) => step.href.startsWith('/')))).toBe(true);
@@ -110,6 +147,36 @@ describe('practice library storage', () => {
     expect(withoutPreset.metronomePresets).toEqual([]);
     expect(withoutPreset.favorites).toEqual([]);
     expect(withoutPreset.recents).toEqual([]);
+  });
+
+  it('updates a custom exercise in place while preserving creation data and shortcut references', () => {
+    const library = emptyPracticeLibrary();
+    library.customExercises = [{
+      id: 'custom-1',
+      name: 'Old slur',
+      notes: ['C', 'G'],
+      source: 'custom',
+      createdAt: '2026-07-20T12:00:00.000Z',
+    }];
+    library.favorites = [{ kind: 'play-along', id: 'custom-1', label: 'Old slur', href: '/practice/play-along?exercise=custom-1' }];
+    library.recents = [{ kind: 'play-along', id: 'custom-1', label: 'Old slur', href: '/practice/play-along?exercise=custom-1' }];
+
+    const result = upsertCustomExercise(library, {
+      id: 'custom-1',
+      name: ' Lip slur focus ',
+      notes: ['C', 'F', 'G'],
+      source: 'custom',
+    }, new Date('2026-07-23T12:00:00.000Z'));
+
+    expect(result.item).toMatchObject({
+      id: 'custom-1',
+      name: 'Lip slur focus',
+      notes: ['C', 'F', 'G'],
+      createdAt: '2026-07-20T12:00:00.000Z',
+    });
+    expect(result.library.customExercises).toHaveLength(1);
+    expect(result.library.favorites).toEqual([{ kind: 'play-along', id: 'custom-1', label: 'Lip slur focus', href: '/practice/play-along?exercise=custom-1' }]);
+    expect(result.library.recents).toEqual([{ kind: 'play-along', id: 'custom-1', label: 'Lip slur focus', href: '/practice/play-along?exercise=custom-1' }]);
   });
 
   it('clears an account library, workspace, and best scores while preserving guest state', () => {

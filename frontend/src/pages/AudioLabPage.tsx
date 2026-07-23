@@ -1,5 +1,5 @@
 import { Activity, Bug, Clipboard, Gauge, Mic, Radio, Save, Settings2, Waves } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { friendlyUserFacingError, getInstruments, pitchWebSocketUrl } from '../api/client';
 import { apiBase as runtimeApiBase, UNRESOLVED_BASE } from '../api/runtimeConfig';
@@ -13,6 +13,7 @@ import { usePitchStream } from '../hooks/usePitchStream';
 import { useSessionRecorder } from '../hooks/useSessionRecorder';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 
 function noteLabel(note?: string | null, octave?: number | null) {
   return note ? `${note}${octave}` : '--';
@@ -30,6 +31,7 @@ export function AudioLabPage() {
   const internalToolsEnabled = import.meta.env.VITE_ENABLE_INTERNAL_TOOLS === 'true';
   const { instrumentId, referencePitch, demoMode } = useAppSettings();
   const auth = useAuth();
+  const { recordSavedSession } = usePracticeLibrary();
   const [profiles, setProfiles] = useState<InstrumentProfile[]>([]);
   const [permissionState, setPermissionState] = useState('unknown');
   const [wsUrl, setWsUrl] = useState('');
@@ -40,6 +42,7 @@ export function AudioLabPage() {
   // build must read as 'unavailable', and dev same-origin as 'Not configured'.
   const apiBase = apiConfigured ? rawApiBase : rawApiBase === UNRESOLVED_BASE ? 'unavailable' : 'Not configured';
   const recorder = useSessionRecorder(instrumentId, referencePitch, { cloudEnabled: auth.isSignedIn });
+  const lastAccountedSessionIdRef = useRef<string | number | null>(null);
   const stream = usePitchStream({
     enabled: internalToolsEnabled,
     demoMode,
@@ -61,6 +64,13 @@ export function AudioLabPage() {
       }).catch(() => setPermissionState('unknown'));
     }
   }, []);
+
+  useEffect(() => {
+    const summary = recorder.lastSummary;
+    if (!summary || summary.id === lastAccountedSessionIdRef.current) return;
+    lastAccountedSessionIdRef.current = summary.id;
+    recordSavedSession(summary);
+  }, [recordSavedSession, recorder.lastSummary]);
 
   const profile = useMemo(() => profiles.find((item) => item.id === instrumentId) ?? null, [profiles, instrumentId]);
   const frame = stream.currentFrame;

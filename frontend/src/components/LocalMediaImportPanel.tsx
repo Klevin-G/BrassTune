@@ -7,6 +7,7 @@ import { analyzeLocalMediaFile } from '../domain/localMediaAnalysis';
 import type { PracticeSession } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
 import { useI18n } from '../i18n/LocaleContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 
 function bidiIsolate(value: string | number) {
   return `\u2068${value}\u2069`;
@@ -22,6 +23,7 @@ export function LocalMediaImportPanel({
   onImported?: (session: PracticeSession) => void;
 }) {
   const auth = useAuth();
+  const { recordSavedSession } = usePracticeLibrary();
   const { locale, t, formatNumber } = useI18n();
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -66,6 +68,7 @@ export function LocalMediaImportPanel({
         setStatus(t('localMedia.guestSaved', { seconds: formatNumber(Math.round(analysis.analyzedSeconds)), filename: bidiIsolate(file.name) }));
       }
       setSummary(stopped);
+      recordSavedSession(stopped);
       onImported?.(stopped);
       if (auth.isSignedIn) {
         setStatus(t('localMedia.analyzed', { seconds: formatNumber(Math.round(analysis.analyzedSeconds)), filename: bidiIsolate(file.name) }));

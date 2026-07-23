@@ -137,6 +137,47 @@ export function recordPracticeActivity(library: PracticeLibrary, minutes: number
   };
 }
 
+export interface SavedPracticeSessionActivity {
+  id: string | number;
+  duration_seconds?: number | null;
+}
+
+export function claimSavedPracticeSessionMinutes(
+  claimedSessionKeys: Set<string>,
+  ownerId: string,
+  session: SavedPracticeSessionActivity,
+): number | null {
+  const sessionKey = `${ownerId}:${String(session.id)}`;
+  if (claimedSessionKeys.has(sessionKey)) return null;
+  claimedSessionKeys.add(sessionKey);
+  const durationSeconds = typeof session.duration_seconds === 'number' && Number.isFinite(session.duration_seconds)
+    ? Math.max(0, session.duration_seconds)
+    : 0;
+  return Math.max(1, Math.round(durationSeconds / 60));
+}
+
+export function reconcilePracticeLibraryWeek(library: PracticeLibrary, now = new Date()): PracticeLibrary {
+  const weeklyGoal = reconcileWeeklyGoal(library.weeklyGoal, now);
+  if (
+    weeklyGoal.week === library.weeklyGoal.week
+    && weeklyGoal.targetMinutes === library.weeklyGoal.targetMinutes
+    && weeklyGoal.completedMinutes === library.weeklyGoal.completedMinutes
+    && weeklyGoal.targetSessions === library.weeklyGoal.targetSessions
+    && weeklyGoal.completedSessions === library.weeklyGoal.completedSessions
+  ) {
+    return library;
+  }
+  return { ...library, weeklyGoal };
+}
+
+export function millisecondsUntilNextPracticeWeek(now = new Date()): number {
+  const nextMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const mondayBasedDay = (nextMonday.getDay() + 6) % 7;
+  nextMonday.setDate(nextMonday.getDate() + (7 - mondayBasedDay));
+  nextMonday.setHours(0, 0, 0, 0);
+  return Math.max(1, nextMonday.getTime() - now.getTime());
+}
+
 export function emptyPracticeLibrary(now = new Date()): PracticeLibrary {
   return {
     version: PRACTICE_LIBRARY_VERSION,
@@ -317,6 +358,35 @@ export function writePracticeLibrary(storage: Pick<Storage, 'setItem'>, ownerId:
 
 export function upsertById<T extends { id: string }>(items: T[], item: T, limit: number): T[] {
   return [item, ...items.filter((existing) => existing.id !== item.id)].slice(0, limit);
+}
+
+export function upsertCustomExercise(
+  library: PracticeLibrary,
+  exercise: Omit<CustomExercise, 'createdAt'> & { createdAt?: string },
+  now = new Date(),
+): { library: PracticeLibrary; item: CustomExercise } {
+  const existing = library.customExercises.find((item) => item.id === exercise.id);
+  const item: CustomExercise = {
+    id: exercise.id.slice(0, 80),
+    name: exercise.name.trim().slice(0, 60),
+    notes: exercise.notes.slice(0, 32),
+    source: exercise.source,
+    createdAt: existing?.createdAt ?? exercise.createdAt ?? now.toISOString(),
+  };
+  const updateTargetLabel = (target: PracticeTarget): PracticeTarget => (
+    target.kind === 'play-along' && target.id === item.id
+      ? { ...target, label: item.name }
+      : target
+  );
+  return {
+    item,
+    library: {
+      ...library,
+      customExercises: upsertById(library.customExercises, item, LIMITS.customExercises),
+      favorites: library.favorites.map(updateTargetLabel),
+      recents: library.recents.map(updateTargetLabel),
+    },
+  };
 }
 
 export function removeCustomExercise(library: PracticeLibrary, id: string): PracticeLibrary {
