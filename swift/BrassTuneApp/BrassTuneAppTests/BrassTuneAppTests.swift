@@ -42,6 +42,29 @@ private final class InMemoryAuthSessionStore: @unchecked Sendable {
     var payload: String?
 }
 
+private final class PersistenceThreadObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Bool] = []
+
+    func recordWasMainThread(_ value: Bool) {
+        lock.lock()
+        values.append(value)
+        lock.unlock()
+    }
+
+    var observedMainThreadWrite: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return values.contains(true)
+    }
+
+    var writeCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return values.count
+    }
+}
+
 @MainActor
 private final class DeferredMicrophonePermission {
     private var requestObservedContinuation: CheckedContinuation<Void, Never>?
@@ -102,6 +125,104 @@ final class BrassTuneAppTests: XCTestCase {
         )
 
         XCTAssertEqual(events, ["cancel pending tuner start"])
+    }
+
+    @MainActor
+    func testFreshPracticeGoalAndPendingClassDestinationUseGrowthDefaults() {
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            )
+        )
+        model.enterGuestDemo(presentTutorial: false)
+
+        XCTAssertEqual(
+            model.practiceFeatures.weeklyGoal,
+            WeeklyPracticeGoal(targetMinutes: 15, targetSessions: 3)
+        )
+        model.requestClassDestination()
+        XCTAssertEqual(model.pendingDestination, .classes)
+        XCTAssertEqual(model.consumePendingDestination(), .classes)
+        XCTAssertNil(model.pendingDestination)
+    }
+
+    @MainActor
+    func testSnapshotEncodingAndWriteRunOffInteractiveMainThread() {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: stateURL) }
+        let observation = PersistenceThreadObservation()
+        let store = NativePersistenceStore.ephemeral(
+            fileURL: stateURL,
+            writeData: { data, url in
+                observation.recordWasMainThread(Thread.isMainThread)
+                try data.write(to: url, options: [.atomic])
+            }
+        )
+        let model = AppModel(persistenceStore: store)
+        model.enterGuestDemo(presentTutorial: false)
+        model.sessions = [makeSession(name: "Background persistence", cents: [0])]
+        model.flushPendingPersistence()
+
+        XCTAssertGreaterThan(observation.writeCount, 0)
+        XCTAssertFalse(observation.observedMainThreadWrite)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stateURL.path))
+    }
+
+    @MainActor
+    func testGuestSafetyPromptAppearsOnlyAfterFirstPersistedSuccessAndStaysHandled() async throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: stateURL) }
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let model = AppModel(persistenceStore: store)
+        model.enterGuestDemo(presentTutorial: false)
+        XCTAssertFalse(model.guestProgressSafetyPromptEligible)
+
+        model.sessions = [makeSession(name: "First persisted result", cents: [0])]
+        model.flushPendingPersistence()
+        for _ in 0..<50 where !model.guestProgressSafetyPromptEligible {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(model.guestProgressSafetyPromptEligible)
+        XCTAssertEqual(model.persistedPracticeSuccessSequence, 1)
+
+        model.markGuestProgressSafetyPromptHandled()
+        model.flushPendingPersistence()
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+        XCTAssertFalse(model.guestProgressSafetyPromptEligible)
+
+        model.sessions.append(makeSession(name: "Second persisted result", cents: [0]))
+        model.flushPendingPersistence()
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+        XCTAssertFalse(model.guestProgressSafetyPromptEligible)
+
+        let restored = AppModel(persistenceStore: store)
+        restored.enterGuestDemo(presentTutorial: false)
+        XCTAssertFalse(restored.guestProgressSafetyPromptEligible, "A handled prompt must not reappear at launch.")
+        restored.sessions.append(makeSession(name: "Third persisted result", cents: [0]))
+        restored.flushPendingPersistence()
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+        XCTAssertFalse(restored.guestProgressSafetyPromptEligible)
+    }
+
+    func testSuccessFeedbackRespectsPreferenceAndReduceMotion() {
+        XCTAssertTrue(nativeSuccessFeedbackAllowed(enabled: true, reduceMotion: false))
+        XCTAssertFalse(nativeSuccessFeedbackAllowed(enabled: false, reduceMotion: false))
+        XCTAssertFalse(nativeSuccessFeedbackAllowed(enabled: true, reduceMotion: true))
+    }
+
+    func testBuiltHostAppDeclaresFullScreenLaunchMetadata() throws {
+        let info = try XCTUnwrap(Bundle.main.infoDictionary)
+        XCTAssertEqual(info["UIRequiresFullScreen"] as? Bool, true)
+        XCTAssertNotNil(info["UILaunchScreen"] as? [String: Any])
     }
 
     @MainActor
@@ -787,6 +908,7 @@ final class BrassTuneAppTests: XCTestCase {
 
         XCTAssertFalse(model.tutorialCompleted)
         model.completeTutorial()
+        model.flushPendingPersistence()
 
         let restored = AppModel(persistenceStore: store)
         restored.enterGuestDemo(presentTutorial: false)
@@ -1214,6 +1336,7 @@ final class BrassTuneAppTests: XCTestCase {
         await model.restoreSession()
 
         XCTAssertEqual(model.authState, .signedIn(email: "offline@example.com"))
+        XCTAssertTrue(model.gatewayCompleted, "A valid restored session must bypass the welcome gateway.")
         XCTAssertNotNil(authService.restoreSession())
         XCTAssertEqual(model.lastError, .networkUnavailable)
         XCTAssertEqual(
@@ -1454,6 +1577,7 @@ final class BrassTuneAppTests: XCTestCase {
         let score = try XCTUnwrap(seedModel.scores.first)
         seedModel.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
         seedModel.attachScoreToLatestSession(scoreID: score.id)
+        seedModel.flushPendingPersistence()
 
         let failingStore = NativePersistenceStore.ephemeral(
             fileURL: stateURL,
@@ -1498,6 +1622,7 @@ final class BrassTuneAppTests: XCTestCase {
         let score = try XCTUnwrap(seedModel.scores.first)
         seedModel.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
         seedModel.attachScoreToLatestSession(scoreID: score.id)
+        seedModel.flushPendingPersistence()
 
         var writeCount = 0
         let transactionalStore = NativePersistenceStore.ephemeral(
@@ -1680,6 +1805,7 @@ final class BrassTuneAppTests: XCTestCase {
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Persistent score")
         let score = try XCTUnwrap(model.scores.first)
         let storedURL = try XCTUnwrap(model.storedScoreFileURL(for: score))
+        model.flushPendingPersistence()
         XCTAssertTrue(FileManager.default.fileExists(atPath: stateURL.path))
 
         model.clearLocalPracticeData()
@@ -1739,6 +1865,7 @@ final class BrassTuneAppTests: XCTestCase {
         model.setMetronomeVolume(0.7)
         model.sessions = [makeSession(name: "Saved recording", cents: [-2, 0, 3])]
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Saved score")
+        model.flushPendingPersistence()
 
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
         restored.enterGuestDemo(presentTutorial: false)
@@ -2165,6 +2292,118 @@ final class BrassTuneAppTests: XCTestCase {
             let recommendation = NativePitchAnalytics.recommendation(for: stats)
             XCTAssertEqual(recommendation.category, item["expected_category"] as? String)
             XCTAssertEqual(recommendation.relatedNote, item["expected_related_note"] as? String)
+        }
+    }
+
+    func testPitchTrendAndRecommendationUseInclusiveFiveCentCenteredBoundary() {
+        let cases: [(cents: Double, trend: String, recommendation: String)] = [
+            (-5.01, "Mostly flat", "Flat tendency"),
+            (-5.0, "Centered", "Good progress"),
+            (5.0, "Centered", "Good progress"),
+            (5.01, "Mostly sharp", "Sharp tendency"),
+        ]
+
+        for item in cases {
+            let trend = NativePitchAnalytics.classifyTrend(
+                averageSignedCents: item.cents,
+                standardDeviationCents: 0,
+                stabilityScore: 100
+            )
+            XCTAssertEqual(trend, item.trend, "Unexpected trend at \(item.cents) cents")
+            let stats = NativeNoteStatistics(
+                writtenNote: "C",
+                writtenOctave: 4,
+                noteLabel: "C4",
+                averageSignedCents: item.cents,
+                averageAbsoluteCents: abs(item.cents),
+                medianCents: item.cents,
+                standardDeviationCents: 0,
+                inTunePercentage: 100,
+                durationMs: 3_000,
+                sampleCount: 10,
+                eventCount: 1,
+                stabilityScore: 100,
+                trend: trend,
+                severity: "excellent",
+                problemSeverity: 0
+            )
+            XCTAssertEqual(
+                NativePitchAnalytics.recommendation(for: stats).category,
+                item.recommendation,
+                "Unexpected recommendation at \(item.cents) cents"
+            )
+        }
+    }
+
+    func testPitchStatisticsIgnoreNonpositiveDurationsUnlessEveryEventNeedsFallback() throws {
+        func event(durationMs: Int, signed: Double, absolute: Double? = nil) -> NativeNoteEvent {
+            NativeNoteEvent(
+                writtenNote: "C",
+                writtenOctave: 4,
+                startedAtMs: 0,
+                endedAtMs: durationMs,
+                durationMs: durationMs,
+                sampleCount: 1,
+                averageSignedCents: signed,
+                averageAbsoluteCents: absolute ?? abs(signed),
+                medianCents: signed,
+                standardDeviationCents: 0,
+                minimumCents: signed,
+                maximumCents: signed,
+                inTunePercentage: 100,
+                stabilityScore: 100
+            )
+        }
+
+        let mixed = try XCTUnwrap(NativePitchAnalytics.calculateNoteStatistics(events: [
+            event(durationMs: 1_000, signed: 10),
+            event(durationMs: 0, signed: 90),
+            event(durationMs: -500, signed: -90),
+        ]).first)
+        XCTAssertEqual(mixed.averageSignedCents, 10, accuracy: 0.000_001)
+        XCTAssertEqual(mixed.averageAbsoluteCents, 10, accuracy: 0.000_001)
+        XCTAssertEqual(mixed.durationMs, 1_000, accuracy: 0.000_001)
+
+        let fallback = try XCTUnwrap(NativePitchAnalytics.calculateNoteStatistics(events: [
+            event(durationMs: 0, signed: 10),
+            event(durationMs: 0, signed: 30),
+        ]).first)
+        XCTAssertEqual(fallback.averageSignedCents, 20, accuracy: 0.000_001)
+        XCTAssertEqual(fallback.averageAbsoluteCents, 20, accuracy: 0.000_001)
+        XCTAssertEqual(fallback.durationMs, 0, accuracy: 0.000_001)
+    }
+
+    func testProblemScoreRoundingMatchesSharedHalfUpCases() throws {
+        let data = try Data(contentsOf: try sharedFixtureURL(named: "problem_score_rounding_cases.json"))
+        let cases = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        for item in cases {
+            let values = try XCTUnwrap(item["note_stats"] as? [String: Any])
+            let averageAbsolute = try XCTUnwrap((values["avg_abs_cents"] as? NSNumber)?.doubleValue)
+            let deviation = try XCTUnwrap((values["stddev_cents"] as? NSNumber)?.doubleValue)
+            let inTune = try XCTUnwrap((values["in_tune_percentage"] as? NSNumber)?.doubleValue)
+            let event = NativeNoteEvent(
+                writtenNote: "C",
+                writtenOctave: 4,
+                startedAtMs: 0,
+                endedAtMs: 1_000,
+                durationMs: 1_000,
+                sampleCount: 10,
+                averageSignedCents: averageAbsolute,
+                averageAbsoluteCents: averageAbsolute,
+                medianCents: averageAbsolute,
+                standardDeviationCents: deviation,
+                minimumCents: averageAbsolute,
+                maximumCents: averageAbsolute,
+                inTunePercentage: inTune,
+                stabilityScore: 100
+            )
+            let stats = try XCTUnwrap(NativePitchAnalytics.calculateNoteStatistics(events: [event]).first)
+            XCTAssertEqual(
+                stats.problemSeverity,
+                try XCTUnwrap((item["expected_problem_severity"] as? NSNumber)?.doubleValue),
+                accuracy: 0.000_001,
+                item["name"] as? String ?? "rounding case"
+            )
         }
     }
 
@@ -2851,13 +3090,45 @@ final class BrassTuneAppTests: XCTestCase {
         let frameSize = try XCTUnwrap(root["frame_size"] as? Int)
         let harmonics = try XCTUnwrap(root["harmonic_amplitudes"] as? [NSNumber]).map(\.doubleValue)
         let thresholds = try XCTUnwrap(root["thresholds"] as? [String: Any])
+        let benchmarkPolicy = try XCTUnwrap(root["benchmark_policy"] as? [String: Any])
+        let benchmarkSemantics = try XCTUnwrap(root["benchmark_semantics_cases"] as? [[String: Any]])
         let onsetPolicy = try XCTUnwrap(root["synthetic_onset_protocol"] as? [String: Any])
         let cases = try XCTUnwrap(root["cases"] as? [[String: Any]])
+        let grossErrorCents = try XCTUnwrap(
+            (benchmarkPolicy["gross_octave_error_cents_inclusive"] as? NSNumber)?.doubleValue
+        )
+        XCTAssertEqual(
+            benchmarkPolicy["accuracy_definition"] as? String,
+            "nearest_midi_half_up_equals_expected_midi"
+        )
         var absoluteErrors: [Double] = []
         var crossPlatformDeltas: [Double] = []
         var onsetTimesMs: [Double] = []
-        var octaveCorrect = 0
+        var accurateNotes = 0
         var grossOctaveErrors = 0
+
+        func isAccurate(detectedMIDI: Double, expectedMIDI: Int) -> Bool {
+            Int(floor(detectedMIDI + 0.5)) == expectedMIDI
+        }
+
+        func isGrossOctaveError(detectedMIDI: Double, expectedMIDI: Int) -> Bool {
+            abs(detectedMIDI - Double(expectedMIDI)) * 100 >= grossErrorCents
+        }
+
+        for item in benchmarkSemantics {
+            let detectedMIDI = try XCTUnwrap((item["detected_midi"] as? NSNumber)?.doubleValue)
+            let expectedMIDI = try XCTUnwrap(item["expected_midi"] as? Int)
+            XCTAssertEqual(
+                isAccurate(detectedMIDI: detectedMIDI, expectedMIDI: expectedMIDI),
+                item["expected_accurate"] as? Bool,
+                item["name"] as? String ?? "benchmark accuracy semantics"
+            )
+            XCTAssertEqual(
+                isGrossOctaveError(detectedMIDI: detectedMIDI, expectedMIDI: expectedMIDI),
+                item["expected_gross_octave_error"] as? Bool,
+                item["name"] as? String ?? "gross octave semantics"
+            )
+        }
 
         func harmonicTone(frequency: Double, multiplier: Double) -> [Float] {
             (0..<frameSize).map { index in
@@ -2872,6 +3143,7 @@ final class BrassTuneAppTests: XCTestCase {
         for item in cases {
             let note = item["note"] as? String ?? "pitch case"
             let target = try XCTUnwrap((item["frequency_hz"] as? NSNumber)?.doubleValue)
+            let expectedMIDI = try XCTUnwrap(item["midi"] as? Int)
             let expectedPython = try XCTUnwrap((item["expected_python_signed_cents_error"] as? NSNumber)?.doubleValue)
             let frame = NativePitchDetector.frame(
                 samples: harmonicTone(frequency: target, multiplier: 1),
@@ -2882,10 +3154,13 @@ final class BrassTuneAppTests: XCTestCase {
             )
             let detected = try XCTUnwrap(frame.frequencyHz, "Native detector did not lock \(note)")
             let signedError = 1_200 * log2(detected / target)
+            let detectedMIDI = 69 + 12 * log2(detected / 440)
             absoluteErrors.append(abs(signedError))
             crossPlatformDeltas.append(abs(signedError - expectedPython))
-            if abs(signedError) < 50 { octaveCorrect += 1 }
-            if abs(signedError) >= 600 { grossOctaveErrors += 1 }
+            if isAccurate(detectedMIDI: detectedMIDI, expectedMIDI: expectedMIDI) { accurateNotes += 1 }
+            if isGrossOctaveError(detectedMIDI: detectedMIDI, expectedMIDI: expectedMIDI) {
+                grossOctaveErrors += 1
+            }
 
             let amplitudes = try XCTUnwrap(item["onset_amplitude_multipliers"] as? [NSNumber]).map(\.doubleValue)
             let onsetIndex = try XCTUnwrap(amplitudes.firstIndex(where: { $0 > 0 }))
@@ -2906,7 +3181,7 @@ final class BrassTuneAppTests: XCTestCase {
         }
 
         XCTAssertGreaterThanOrEqual(
-            Double(octaveCorrect) / Double(cases.count) * 100,
+            Double(accurateNotes) / Double(cases.count) * 100,
             (thresholds["steady_note_octave_accuracy_min_percent"] as? NSNumber)?.doubleValue ?? 99
         )
         XCTAssertLessThanOrEqual(
@@ -3117,6 +3392,7 @@ final class BrassTuneAppTests: XCTestCase {
         let accountScoreDirectory = NativeStorageNamespace.account(userID: "user-a").scoreDirectory(basedAt: scoreBaseDirectory)
         try FileManager.default.createDirectory(at: accountScoreDirectory, withIntermediateDirectories: true)
         try Data("score".utf8).write(to: accountScoreDirectory.appendingPathComponent("score.pdf"))
+        model.flushPendingPersistence()
         XCTAssertTrue(FileManager.default.fileExists(atPath: accountFile.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: accountScoreDirectory.path))
 

@@ -21,10 +21,11 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Play a note"].exists)
 
         openTab("العزف المصاحب", in: app)
-        let favorite = app.descendants(matching: .any)["playAlong.favorite"]
-        XCTAssertTrue(favorite.waitForExistence(timeout: 5))
-        XCTAssertTrue(favorite.label.contains("إضافة إلى المفضلة"))
-        XCTAssertFalse(favorite.label.contains("Add to favorites"))
+        let moreWays = app.descendants(matching: .any)["playAlong.moreWaysDisclosure"]
+        XCTAssertTrue(moreWays.waitForExistence(timeout: 5))
+        XCTAssertTrue(moreWays.label.contains("طرق أخرى للتدريب"))
+        XCTAssertFalse(moreWays.label.contains("More ways to practice"))
+        moreWays.tap()
 
         openTab("الإعدادات", in: app)
         let clearData = app.descendants(matching: .any)["settings.deleteAccount"]
@@ -41,14 +42,12 @@ final class BrassTuneAppUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
         assertAppFillsScreen(app)
-        for identifier in [
-            "gateway.continueAsGuest",
-            "gateway.signIn",
-            "gateway.createAccount",
-            "gateway.appleSignIn",
-        ] {
+        for identifier in ["gateway.continueAsGuest", "gateway.classCode"] {
             assertVisibleAndHittable(app.descendants(matching: .any)[identifier], in: app)
         }
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.accountConfigurationUnavailable"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.signIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.createAccount"].exists)
         keepScreenshot(named: "First run - account gateway", from: app)
         app.buttons["gateway.continueAsGuest"].tap()
 
@@ -81,6 +80,26 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
+    func testAuthUnavailableClassIntentShowsRecoveryInsteadOfDeadForm() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"]
+        app.launch()
+
+        let classCode = app.descendants(matching: .any)["gateway.classCode"]
+        XCTAssertTrue(classCode.waitForExistence(timeout: 8))
+        classCode.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.classIntent"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authUnavailable"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.email"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.password"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.submitAuth"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.passwordReset"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
+        XCTAssertTrue(app.buttons["Not now"].exists)
+    }
+
+    @MainActor
     func testLaunchPracticeAndSettingsSurfaces() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
@@ -93,7 +112,17 @@ final class BrassTuneAppUITests: XCTestCase {
             "Tuner should be the first tab"
         )
         openTab("Play-Along", in: app)
-        XCTAssertTrue(app.descendants(matching: .any)["playAlong.exercisePicker"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["playAlong.recommendation"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["playAlong.startWarmup"].exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "playAlong.startWarmup").count, 1)
+        let moreWays = app.descendants(matching: .any)["playAlong.moreWaysDisclosure"]
+        XCTAssertTrue(moreWays.waitForExistence(timeout: 5))
+        moreWays.tap()
+        let exercisePicker = app.descendants(matching: .any)["playAlong.exercisePicker"]
+        for _ in 0..<4 where !exercisePicker.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(exercisePicker.waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["playAlong.exerciseNotes"].exists)
 
         let playAlongStart = app.descendants(matching: .any)["playAlong.start"]
@@ -142,7 +171,9 @@ final class BrassTuneAppUITests: XCTestCase {
         openTab("Progress", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.progress"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["progress.metrics"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["progress.recommendation"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["progress.today"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["progress.thisWeek"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["progress.nextStep"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["progress.allSessions"].exists)
 
         openTab("Settings", in: app)
@@ -247,9 +278,10 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("Progress", in: app)
         XCTAssertTrue(
-            app.descendants(matching: .any)["progress.empty"].waitForExistence(timeout: 5),
+            app.descendants(matching: .any)["progress.today"].waitForExistence(timeout: 5),
             "Confirming the alert should clear local practice history"
         )
+        XCTAssertTrue(app.staticTexts["No practice saved today"].exists)
     }
 
     @MainActor
@@ -299,11 +331,10 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launch()
 
         openTab("Play-Along", in: app)
-        let quickStart = app.buttons["Quick start"]
-        XCTAssertTrue(quickStart.waitForExistence(timeout: 8))
-        quickStart.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["practice.quickStart.warmup"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["Guided five-minute warm-up"].exists)
+        let moreWays = app.descendants(matching: .any)["playAlong.moreWaysDisclosure"]
+        XCTAssertTrue(moreWays.waitForExistence(timeout: 8))
+        moreWays.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["playAlong.startWarmup"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["Create a Play-Along exercise"].exists)
         XCTAssertTrue(app.buttons["Offline practice packs"].exists)
         XCTAssertTrue(app.buttons["Add to favorites"].exists)
@@ -314,7 +345,7 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["exerciseBuilder.save"].exists)
         app.navigationBars.buttons["Play-Along"].tap()
 
-        let warmup = app.buttons["Guided five-minute warm-up"]
+        let warmup = app.descendants(matching: .any)["playAlong.startWarmup"]
         tapWhenSafelyVisible(warmup, in: app)
         XCTAssertTrue(app.navigationBars["Warm-up"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["warmup.start"].exists)
@@ -334,14 +365,12 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("Progress", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["progress.weeklyGoal"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["progress.weakTransition"].waitForExistence(timeout: 5))
-        XCTAssertTrue(
-            app.staticTexts
-                .matching(NSPredicate(format: "label CONTAINS[c] %@", "at least three attempts"))
-                .firstMatch
-                .waitForExistence(timeout: 5),
-            "The weak-transition card should explain the minimum evidence needed before generating a drill."
-        )
+        let goalSteppers = app.steppers.matching(identifier: "progress.weeklyGoal")
+        XCTAssertEqual(goalSteppers.count, 2)
+        XCTAssertTrue((0..<goalSteppers.count).map { goalSteppers.element(boundBy: $0).label }.contains { $0.contains("15 minutes") })
+        XCTAssertTrue((0..<goalSteppers.count).map { goalSteppers.element(boundBy: $0).label }.contains { $0.contains("3 sessions") })
+        XCTAssertFalse(app.descendants(matching: .any)["progress.weakTransition"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["progress.weakTransitionInsufficient"].exists)
 
         openTab("Settings", in: app)
         let metronomeLink = app.descendants(matching: .any)["settings.metronomeLink"]
@@ -364,11 +393,14 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launch()
 
         openTab("Play-Along", in: app)
-        let quickStart = app.buttons["Quick start"]
-        XCTAssertTrue(quickStart.waitForExistence(timeout: 8))
-        quickStart.tap()
+        let moreWays = app.descendants(matching: .any)["playAlong.moreWaysDisclosure"]
+        XCTAssertTrue(moreWays.waitForExistence(timeout: 8))
+        moreWays.tap()
 
         let builder = app.descendants(matching: .any)["practice.quickStart.builder"]
+        for _ in 0..<4 where !builder.exists {
+            app.swipeUp()
+        }
         tapWhenSafelyVisible(builder, in: app)
         let exerciseName = app.descendants(matching: .any)["exerciseBuilder.title"]
         XCTAssertTrue(exerciseName.waitForExistence(timeout: 5))
@@ -453,6 +485,8 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(recovery.isHittable)
         XCTAssertGreaterThanOrEqual(recovery.frame.height, 44)
         XCTAssertLessThan(recovery.frame.maxY, app.tabBars.firstMatch.frame.minY)
+        XCTAssertTrue(app.descendants(matching: .any)["microphone.retry"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["microphone.practiceWithoutListening"].exists)
     }
 
     @MainActor
@@ -475,12 +509,18 @@ final class BrassTuneAppUITests: XCTestCase {
             "gateway.continueAsGuest",
             "gateway.signIn",
             "gateway.createAccount",
-            "gateway.appleSignIn",
+            "gateway.classCode",
         ] {
             let control = app.descendants(matching: .any)[identifier]
             assertVisibleAndHittable(control, in: app)
         }
         keepScreenshot(named: "Maximum Dynamic Type - account gateway", from: app)
+
+        app.descendants(matching: .any)["gateway.signIn"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authAppleSignIn"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.passwordReset"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
+        app.buttons["Not now"].tap()
 
         let guestEntry = app.descendants(matching: .any)["gateway.continueAsGuest"]
         guestEntry.tap()
@@ -512,7 +552,7 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("Play-Along", in: app)
         assertAboveTabBar(
-            app.descendants(matching: .any)["playAlong.start"],
+            app.descendants(matching: .any)["playAlong.startWarmup"],
             tabBar: tabBar,
             in: app
         )
@@ -539,6 +579,43 @@ final class BrassTuneAppUITests: XCTestCase {
         let banner = app.descendants(matching: .any)["app.persistenceError"]
         XCTAssertTrue(banner.waitForExistence(timeout: 8))
         XCTAssertTrue(banner.label.contains("couldn't save"))
+    }
+
+    @MainActor
+    func testFirstPersistedGuestResultShowsOneTimeNonblockingSafetyPrompt() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
+        app.launch()
+
+        XCTAssertFalse(app.descendants(matching: .any)["guest.progressSafetyPrompt"].exists)
+        let start = app.descendants(matching: .any)["tuner.recordButton"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        start.tap()
+        let stop = app.descendants(matching: .any)["tuner.floating.stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
+        stop.tap()
+
+        let prompt = app.descendants(matching: .any)["guest.progressSafetyPrompt"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["guest.progressSafetyCreate"].exists)
+        let dismiss = app.descendants(matching: .any)["guest.progressSafetyDismiss"]
+        XCTAssertTrue(dismiss.exists)
+        XCTAssertTrue(app.tabBars.buttons["Tuner"].isHittable, "The prompt must not block practice navigation.")
+        dismiss.tap()
+        XCTAssertFalse(prompt.waitForExistence(timeout: 1))
+
+        start.tap()
+        XCTAssertTrue(stop.waitForExistence(timeout: 8))
+        stop.tap()
+        XCTAssertFalse(prompt.waitForExistence(timeout: 1), "The safety prompt must only appear once.")
+
+        openTab("Settings", in: app)
+        let haptics = app.switches["settings.successHaptics"]
+        XCTAssertTrue(haptics.waitForExistence(timeout: 5))
+        XCTAssertTrue(haptics.isEnabled)
+        XCTAssertTrue(app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Reduce Motion")
+        ).firstMatch.exists)
     }
 
     @MainActor

@@ -77,15 +77,19 @@ final class PracticeFeatureTests: XCTestCase {
 
     @MainActor
     func testSnapshotRoundTripPersistsAllLocalFeatureTypes() throws {
-        let model = makeModel()
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PracticeFeatureTests-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: stateURL) }
+        let model = makeModel(at: stateURL)
         _ = model.saveCustomExercise(title: "My notes", notes: ["C", "D", "E"])
         model.metronome = MetronomeSettings(bpm: 108, beatsPerMeasure: 3, beatUnit: 4, subdivision: .eighth, muted: false, visualOnly: false, hapticsEnabled: true, volume: 0.35)
         XCTAssertTrue(model.saveMetronomePreset(name: "Waltz"))
         model.updateWeeklyGoal(minutes: 90, sessions: 4)
         model.startOrResumeWarmup(now: Date(timeIntervalSince1970: 1_000))
         model.pauseWarmup(now: Date(timeIntervalSince1970: 1_045))
+        model.flushPendingPersistence()
 
-        let restored = makeModel(at: modelTestURL)
+        let restored = makeModel(at: stateURL)
         XCTAssertEqual(restored.practiceFeatures.customExercises.count, 1)
         XCTAssertEqual(restored.practiceFeatures.metronomePresets.first?.settings, model.metronome)
         XCTAssertEqual(restored.practiceFeatures.weeklyGoal, WeeklyPracticeGoal(targetMinutes: 90, targetSessions: 4))

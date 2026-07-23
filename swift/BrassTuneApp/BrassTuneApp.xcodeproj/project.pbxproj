@@ -28,6 +28,9 @@
 		1A0000010000000000000019 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000121 /* Localization.swift */; };
 		1A0000010000000000000020 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000122 /* Localizable.xcstrings */; };
 		1A0000010000000000000021 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000123 /* InfoPlist.xcstrings */; };
+		1A0000010000000000000022 /* WelcomeAuthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000124 /* WelcomeAuthViews.swift */; };
+		1A0000010000000000000023 /* FocusedPracticeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000125 /* FocusedPracticeViews.swift */; };
+		1A0000010000000000000024 /* NativePersistenceWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000126 /* NativePersistenceWriter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -71,6 +74,9 @@
 		1A0000010000000000000121 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
 		1A0000010000000000000122 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		1A0000010000000000000123 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
+		1A0000010000000000000124 /* WelcomeAuthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeAuthViews.swift; sourceTree = "<group>"; };
+		1A0000010000000000000125 /* FocusedPracticeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusedPracticeViews.swift; sourceTree = "<group>"; };
+		1A0000010000000000000126 /* NativePersistenceWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePersistenceWriter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,6 +126,9 @@
 				1A0000010000000000000118 /* PracticeFeatures.swift */,
 				1A0000010000000000000119 /* PracticeFeatureViews.swift */,
 				1A0000010000000000000121 /* Localization.swift */,
+				1A0000010000000000000124 /* WelcomeAuthViews.swift */,
+				1A0000010000000000000125 /* FocusedPracticeViews.swift */,
+				1A0000010000000000000126 /* NativePersistenceWriter.swift */,
 				1A0000010000000000000707 /* DesignSystem */,
 				1A0000010000000000000706 /* Resources */,
 			);
@@ -306,6 +315,9 @@
 				1A0000010000000000000016 /* PracticeFeatures.swift in Sources */,
 				1A0000010000000000000017 /* PracticeFeatureViews.swift in Sources */,
 				1A0000010000000000000019 /* Localization.swift in Sources */,
+				1A0000010000000000000022 /* WelcomeAuthViews.swift in Sources */,
+				1A0000010000000000000023 /* FocusedPracticeViews.swift in Sources */,
+				1A0000010000000000000024 /* NativePersistenceWriter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

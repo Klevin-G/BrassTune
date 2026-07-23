@@ -139,6 +139,19 @@ struct SettingsView: View {
             }
 
             BTCard {
+                BTSectionHeader(
+                    title: "Feedback",
+                    subtitle: "Choose whether BrassTune gives a subtle confirmation after saving practice."
+                )
+                Toggle("Success haptics", isOn: $model.successHapticsEnabled)
+                    .accessibilityIdentifier("settings.successHaptics")
+                Text("Reduce Motion also suppresses this feedback. Every saved result still includes a visible icon and text.")
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            BTCard {
                 BTSectionHeader(title: "Tools")
                 SettingsNavigationRow(title: "Metronome", systemImage: "metronome", identifier: "settings.metronomeLink") {
                     MetronomeView()

@@ -22,10 +22,10 @@ PRODUCTION_LOCALES = {
 # autonyms, standard loanwords, or placeholder-only metric layouts.
 ALLOWED_SOURCE_ECHOES = {
     "%@ BPM · %@ · %@", "%@ cents", "A4 %@ Hz", "BPM", "BrassTune", "Classes",
-    "Deutsch", "Email", "Español", "Euphonium", "Français", "Horn in F",
+    "5 minutes", "Apple", "Deutsch", "Email", "Español", "Euphonium", "Feedback", "Français", "Horn in F",
     "Instrument", "Local", "Meter", "Name", "Note %@", "Octave", "Original", "Page %@", "Photos",
     "Play-Along: %@.", "Português (Brasil)", "Status", "Student", "Subdivision",
-    "Tempo", "Triplet", "Trombone", "Tuba", "Version %@ (%@)", "Volume", "BPM %@",
+    "Tempo", "Trends", "Triplet", "Trombone", "Tuba", "Version %@ (%@)", "Volume", "BPM %@",
 }
 
 ALLOWED_DYNAMIC_LITERALS = {

@@ -20,6 +20,10 @@ enum AppAudioOwnershipHandoff {
     }
 }
 
+enum PendingAppDestination: Equatable {
+    case classes
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var config: AppConfig = .fromProcessEnvironment()
@@ -32,7 +36,8 @@ final class AppModel: ObservableObject {
     @Published var activeScoreID: ImportedScore.ID? { didSet { persistLocalData() } }
     @Published var recordingSource: PracticeSessionSource = NativeAudioEngine.defaultRecordingSource
     @Published var metronome = MetronomeSettings() { didSet { persistLocalData(); restartMetronomeIfNeeded() } }
-    @Published var practiceFeatures = PracticeFeatureState() { didSet { persistLocalData() } }
+    @Published var practiceFeatures = AppModel.freshPracticeFeatureState() { didSet { persistLocalData() } }
+    @Published var successHapticsEnabled = true { didSet { persistLocalData() } }
     @Published var appLanguage: AppLanguage = .system {
         didSet {
             NativeLocalization.language = AppLanguage.launchOverride ?? appLanguage
@@ -62,6 +67,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var authNoticeIsError = false
     @Published var lastError: UserVisibleError?
     @Published private(set) var persistenceErrorMessage: String?
+    @Published private(set) var guestProgressSafetyPromptEligible = false
+    @Published private(set) var persistedPracticeSuccessSequence = 0
+    @Published private(set) var pendingDestination: PendingAppDestination?
 
     let audioEngine: NativeAudioEngine
     let apiClient: APIClient
@@ -73,6 +81,7 @@ final class AppModel: ObservableObject {
     private let scoreFileRemover: (URL) throws -> Void
     private let pendingAccountPurgeStore: PendingDigestStore
     private let pendingCredentialRemovalStore: PendingDigestStore
+    private let persistenceWriter: NativePersistenceWriter
     private var activeStorageNamespace: NativeStorageNamespace = .guest
     private let metronomeOutput: NativeMetronomeOutput
     private var isRestoringLocalState = false
@@ -86,6 +95,9 @@ final class AppModel: ObservableObject {
     private var recordingStartToken: UUID?
     private var ensembleLoadGeneration = 0
     private var activeEnsembleLoadID: UUID?
+    private var persistenceWriteGeneration = 0
+    private var persistedSessionIDs = Set<PracticeSession.ID>()
+    private var guestProgressSafetyPromptHandled = false
     private let classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)?
 
     init(
@@ -108,6 +120,7 @@ final class AppModel: ObservableObject {
         self.scoreFileRemover = scoreFileRemover
         self.pendingAccountPurgeStore = pendingAccountPurgeStore
         self.pendingCredentialRemovalStore = pendingCredentialRemovalStore
+        self.persistenceWriter = NativePersistenceWriter()
         self.scoreImporter = NativeScoreImportService(
             storageDirectory: resolvedScoreStorageDirectory,
             removeItem: scoreFileRemover
@@ -127,6 +140,12 @@ final class AppModel: ObservableObject {
                 stopRecording: self.stopRecording
             )
         }
+    }
+
+    private static func freshPracticeFeatureState() -> PracticeFeatureState {
+        var state = PracticeFeatureState()
+        state.weeklyGoal = WeeklyPracticeGoal(targetMinutes: 15, targetSessions: 3)
+        return state
     }
 
     static let demoEnsembles = [
@@ -218,6 +237,13 @@ final class AppModel: ObservableObject {
         resetPlayAlong()
         recordingSource = NativeAudioEngine.defaultRecordingSource
         metronome = MetronomeSettings()
+        practiceFeatures = Self.freshPracticeFeatureState()
+        successHapticsEnabled = true
+        guestProgressSafetyPromptHandled = false
+        guestProgressSafetyPromptEligible = false
+        pendingDestination = nil
+        persistedPracticeSuccessSequence = 0
+        persistedSessionIDs = []
         stopMetronome()
         ensembles = NativeAudioEngine.testFixturesEnabled ? Self.demoEnsembles : []
         selectedEnsembleID = ensembles.first?.id
@@ -226,6 +252,8 @@ final class AppModel: ObservableObject {
             lastError = nil
         }
         if ProcessInfo.processInfo.arguments.contains("UITEST_PERSISTENCE_ERROR") {
+            persistenceWriter.flush()
+            persistenceWriteGeneration &+= 1
             persistenceErrorMessage = NativeLocalization.string("BrassTune couldn't save your latest changes on this device. Keep the app open, export your data if needed, and try again.")
         }
     }
@@ -250,6 +278,39 @@ final class AppModel: ObservableObject {
 
     func requestTutorialPresentation() {
         tutorialPresentationRequest &+= 1
+    }
+
+    func requestClassDestination() {
+        pendingDestination = .classes
+    }
+
+    func clearPendingDestination() {
+        pendingDestination = nil
+    }
+
+    func consumePendingDestination() -> PendingAppDestination? {
+        defer { pendingDestination = nil }
+        return pendingDestination
+    }
+
+    func clearAuthNotice() {
+        authNotice = nil
+        authNoticeIsError = false
+        lastError = nil
+    }
+
+    func markGuestProgressSafetyPromptHandled() {
+        guard !guestProgressSafetyPromptHandled else {
+            guestProgressSafetyPromptEligible = false
+            return
+        }
+        guestProgressSafetyPromptHandled = true
+        guestProgressSafetyPromptEligible = false
+        persistLocalData()
+    }
+
+    func flushPendingPersistence() {
+        persistenceWriter.flush()
     }
 
     func completeGateway() {
@@ -826,6 +887,10 @@ final class AppModel: ObservableObject {
     }
 
     private func finishRemoteAccountDeletion(accountDigest: String, providerCleanupQueued: Bool) {
+        // The account namespace must be durable before the purge begins, and no
+        // queued save may recreate its state file after deletion completes.
+        persistenceWriter.flush()
+        persistenceWriteGeneration &+= 1
         pendingAccountPurgeStore.enqueue(accountDigest)
         pendingCredentialRemovalStore.enqueue(accountDigest)
         let purged = retryPendingAccountPurge(accountDigest)
@@ -1171,6 +1236,8 @@ final class AppModel: ObservableObject {
 
     func deleteScore(id: ImportedScore.ID) {
         guard let deletedScore = scores.first(where: { $0.id == id }) else { return }
+        persistenceWriter.flush()
+        persistenceWriteGeneration &+= 1
         let preDeleteSnapshot = makeLocalSnapshot()
         let remainingScores = scores.filter { $0.id != id }
         let nextActiveScoreID = activeScoreID == id ? remainingScores.first?.id : activeScoreID
@@ -1245,7 +1312,9 @@ final class AppModel: ObservableObject {
             snapshotVersion: 4,
             practiceFeatures: practiceFeatures,
             gatewayCompleted: gatewayCompleted,
-            appLanguage: appLanguage
+            appLanguage: appLanguage,
+            successHapticsEnabled: successHapticsEnabled,
+            guestProgressSafetyPromptHandled: guestProgressSafetyPromptHandled
         )
     }
 
@@ -1494,6 +1563,8 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     private func clearLocalPracticeArtifacts() -> Bool {
+        persistenceWriter.flush()
+        persistenceWriteGeneration &+= 1
         let snapshot = makeLocalSnapshot()
         do {
             try persistenceStore.clear()
@@ -1528,7 +1599,9 @@ final class AppModel: ObservableObject {
         sessions.removeAll()
         scores.removeAll()
         activeScoreID = nil
-        practiceFeatures = PracticeFeatureState()
+        practiceFeatures = Self.freshPracticeFeatureState()
+        persistedSessionIDs = []
+        guestProgressSafetyPromptEligible = false
         isRestoringLocalState = false
         return true
     }
@@ -1555,12 +1628,16 @@ final class AppModel: ObservableObject {
         tutorialCompleted = snapshot.tutorialCompleted ?? false
         gatewayCompleted = snapshot.gatewayCompleted ?? (snapshot.tutorialCompleted ?? false)
         appLanguage = snapshot.appLanguage ?? .system
-        var restoredFeatures = snapshot.practiceFeatures ?? PracticeFeatureState()
+        var restoredFeatures = snapshot.practiceFeatures ?? Self.freshPracticeFeatureState()
         // Persisted checkpoints are resumable navigation state, never proof
         // that audio or a clock is still running after process restoration.
         restoredFeatures.warmupCheckpoint?.runningSince = nil
         restoredFeatures.workspaceCheckpoint?.blockRunningSince = nil
         practiceFeatures = restoredFeatures
+        successHapticsEnabled = snapshot.successHapticsEnabled ?? true
+        guestProgressSafetyPromptHandled = snapshot.guestProgressSafetyPromptHandled ?? false
+        guestProgressSafetyPromptEligible = false
+        persistedSessionIDs = Set(sessions.map(\.id))
         isRestoringLocalState = false
         let removedFixtures = sessions.count != snapshot.sessions.count || scores.count != snapshot.scores.count
         if needsMetronomeDefaultMigration || removedFixtures || snapshot.metronomeDefaultsVersion != 2 {
@@ -1570,16 +1647,50 @@ final class AppModel: ObservableObject {
 
     private func persistLocalData() {
         guard !isRestoringLocalState, persistenceAccessState.canPersist else { return }
-        do {
-            try persistenceStore.saveOrThrow(makeLocalSnapshot())
+        persistenceWriteGeneration &+= 1
+        let generation = persistenceWriteGeneration
+        let snapshot = makeLocalSnapshot()
+        let store = persistenceStore
+        persistenceWriter.save(
+            generation: generation,
+            snapshot: snapshot,
+            store: store
+        ) { [weak self] completedGeneration, result in
+            self?.handlePersistenceCompletion(
+                generation: completedGeneration,
+                snapshot: snapshot,
+                result: result
+            )
+        }
+    }
+
+    private func handlePersistenceCompletion(
+        generation: Int,
+        snapshot: NativeLocalSnapshot,
+        result: Result<Void, Error>
+    ) {
+        guard generation == persistenceWriteGeneration else { return }
+        switch result {
+        case .success:
             persistenceErrorMessage = nil
-        } catch {
+            let snapshotSessionIDs = Set(snapshot.sessions.map(\.id))
+            let newlyPersistedSessionIDs = snapshotSessionIDs.subtracting(persistedSessionIDs)
+            persistedSessionIDs = snapshotSessionIDs
+            guard !newlyPersistedSessionIDs.isEmpty else { return }
+            persistedPracticeSuccessSequence &+= 1
+            if activeStorageNamespace == .guest,
+               !guestProgressSafetyPromptHandled {
+                guestProgressSafetyPromptEligible = true
+            }
+        case .failure:
             persistenceErrorMessage = NativeLocalization.string("BrassTune couldn't save your latest changes on this device. Keep the app open, export your data if needed, and try again.")
         }
     }
 
     @discardableResult
     private func prepareStorageNamespace(_ namespace: NativeStorageNamespace) -> Bool {
+        persistenceWriter.flush()
+        persistenceWriteGeneration &+= 1
         persistenceAccessState = .restoringIdentity
         stopFeatureAudio()
         isRestoringLocalState = true
@@ -1589,7 +1700,11 @@ final class AppModel: ObservableObject {
         scores = []
         activeScoreID = nil
         metronome = MetronomeSettings()
-        practiceFeatures = PracticeFeatureState()
+        practiceFeatures = Self.freshPracticeFeatureState()
+        successHapticsEnabled = true
+        guestProgressSafetyPromptHandled = false
+        guestProgressSafetyPromptEligible = false
+        persistedSessionIDs = []
         gatewayCompleted = namespace != .guest
         tutorialCompleted = false
         appLanguage = .system
@@ -1624,6 +1739,8 @@ final class AppModel: ObservableObject {
     }
 
     private func transitionToUnauthenticated(_ state: AuthState) {
+        persistenceWriter.flush()
+        persistenceWriteGeneration &+= 1
         persistenceAccessState = .lockedSignedOut
         stopFeatureAudio()
         isRestoringLocalState = true
@@ -1633,7 +1750,12 @@ final class AppModel: ObservableObject {
         scores = []
         activeScoreID = nil
         metronome = MetronomeSettings()
-        practiceFeatures = PracticeFeatureState()
+        practiceFeatures = Self.freshPracticeFeatureState()
+        successHapticsEnabled = true
+        guestProgressSafetyPromptHandled = false
+        guestProgressSafetyPromptEligible = false
+        persistedSessionIDs = []
+        pendingDestination = nil
         gatewayCompleted = false
         tutorialCompleted = false
         appLanguage = .system
@@ -1770,7 +1892,7 @@ private extension NativeStorageNamespace {
     }
 }
 
-struct NativePersistenceStore {
+struct NativePersistenceStore: @unchecked Sendable {
     let fileURL: URL
     private let removeItem: (URL) throws -> Void
     private let writeData: (Data, URL) throws -> Void
@@ -1867,6 +1989,8 @@ struct NativeLocalSnapshot: Codable, Equatable {
     var practiceFeatures: PracticeFeatureState? = nil
     var gatewayCompleted: Bool? = nil
     var appLanguage: AppLanguage? = nil
+    var successHapticsEnabled: Bool? = nil
+    var guestProgressSafetyPromptHandled: Bool? = nil
 }
 
 struct NativeScoreImportService {
