@@ -99,8 +99,15 @@ struct BTScreen<Content: View>: View {
                 content
             }
             .padding(BTSpacing.lg)
-            .safeAreaPadding(.bottom, 96)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // Let the containing TabView contribute its real safe area instead of
+        // guessing a tab-bar height. The small inset gives the final row
+        // breathing room after it scrolls above floating iOS 26 chrome.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear
+                .frame(height: BTSpacing.lg)
+                .accessibilityHidden(true)
         }
         .background(BTTheme.background.ignoresSafeArea())
         .scrollContentBackground(.hidden)

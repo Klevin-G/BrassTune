@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 final class BrassTuneAppUITests: XCTestCase {
@@ -15,7 +16,7 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["الموالف"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["اعثر على المركز"].exists)
         XCTAssertEqual(app.descendants(matching: .any)["tuner.note"].label, "اعزف نغمة")
-        XCTAssertEqual(app.descendants(matching: .any)["tuner.verdict"].label, "جارٍ الاستماع…")
+        XCTAssertEqual(app.descendants(matching: .any)["tuner.verdict"].label, "جاهز")
         XCTAssertFalse(app.staticTexts["Find the center"].exists)
         XCTAssertFalse(app.staticTexts["Play a note"].exists)
 
@@ -39,9 +40,16 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["gateway.continueAsGuest"].exists)
-        XCTAssertTrue(app.buttons["gateway.signIn"].exists)
-        XCTAssertTrue(app.buttons["gateway.createAccount"].exists)
+        assertAppFillsScreen(app)
+        for identifier in [
+            "gateway.continueAsGuest",
+            "gateway.signIn",
+            "gateway.createAccount",
+            "gateway.appleSignIn",
+        ] {
+            assertVisibleAndHittable(app.descendants(matching: .any)[identifier], in: app)
+        }
+        keepScreenshot(named: "First run - account gateway", from: app)
         app.buttons["gateway.continueAsGuest"].tap()
 
         XCTAssertTrue(
@@ -49,11 +57,16 @@ final class BrassTuneAppUITests: XCTestCase {
             "The one-screen instrument setup should follow guest entry"
         )
         XCTAssertTrue(app.descendants(matching: .any)["onboarding.hero"].label.contains("Choose your instrument"))
-        XCTAssertTrue(app.descendants(matching: .any)["onboarding.hero"].label.contains("Step 1 of 1"))
-        XCTAssertTrue(app.descendants(matching: .any)["onboarding.instrumentPicker"].exists)
-        XCTAssertTrue(app.buttons["onboarding.startPractice"].exists)
-        XCTAssertTrue(app.buttons["onboarding.notNow"].exists)
-        tapWhenHittable(app.buttons["onboarding.startPractice"], in: app)
+        XCTAssertFalse(app.descendants(matching: .any)["onboarding.hero"].label.contains("Step"))
+        XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].exists)
+        XCTAssertFalse(app.tabBars.firstMatch.exists, "Instrument setup should replace the main app instead of covering a running Tuner")
+        XCTAssertFalse(app.descendants(matching: .any)["screen.tuner"].exists)
+        assertAppFillsScreen(app)
+        assertVisibleAndHittable(app.descendants(matching: .any)["onboarding.instrumentPicker"], in: app)
+        assertVisibleAndHittable(app.buttons["onboarding.startPractice"], in: app)
+        XCTAssertFalse(app.buttons["onboarding.notNow"].exists)
+        keepScreenshot(named: "First run - instrument setup", from: app)
+        app.buttons["onboarding.startPractice"].tap()
 
         XCTAssertTrue(
             app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 5),
@@ -106,7 +119,7 @@ final class BrassTuneAppUITests: XCTestCase {
         openTab("Tuner", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.descendants(matching: .any)["tuner.note"].label, "Play a note")
-        XCTAssertEqual(app.descendants(matching: .any)["tuner.verdict"].label, "Listening…")
+        XCTAssertEqual(app.descendants(matching: .any)["tuner.verdict"].label, "Ready")
         XCTAssertFalse(app.descendants(matching: .any)["practice.recordingSource"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["practice.microphonePermission"].exists)
         XCTAssertFalse(app.buttons["Request microphone permission"].exists)
@@ -146,11 +159,18 @@ final class BrassTuneAppUITests: XCTestCase {
             "A4 should live behind Advanced tuner settings"
         )
 
-        let soundToggle = app.switches["settings.metronomeSound"]
-        XCTAssertTrue(soundToggle.waitForExistence(timeout: 5))
-        XCTAssertNotEqual(soundToggle.value as? String, "0", "Metronome sound should be enabled by default")
         XCTAssertTrue(app.descendants(matching: .any)["settings.metronomeLink"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings.scoresLink"].waitForExistence(timeout: 5))
+
+        let reviewSetup = app.descendants(matching: .any)["settings.reopenOnboarding"]
+        tapWhenSafelyVisible(reviewSetup, in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
+        let cancelSetup = app.buttons["onboarding.cancel"]
+        XCTAssertTrue(cancelSetup.waitForExistence(timeout: 5))
+        cancelSetup.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].isSelected, "Canceling a setup review should return to Settings")
     }
 
     @MainActor
@@ -279,6 +299,9 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launch()
 
         openTab("Play-Along", in: app)
+        let quickStart = app.buttons["Quick start"]
+        XCTAssertTrue(quickStart.waitForExistence(timeout: 8))
+        quickStart.tap()
         XCTAssertTrue(app.descendants(matching: .any)["practice.quickStart.warmup"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["Guided five-minute warm-up"].exists)
         XCTAssertTrue(app.buttons["Create a Play-Along exercise"].exists)
@@ -370,6 +393,82 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
+    func testMaximumDynamicTypeKeepsGatewayAndInstrumentSetupReadableAndActionable() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "UITEST_RESET_STATE",
+            "UITEST_ENTRY_FLOW",
+            "UITEST_AUTH_EMPTY",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+        ]
+        app.launchEnvironment["BRASSTUNE_SUPABASE_URL"] = "https://ui-tests.invalid"
+        app.launchEnvironment["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"] = "sb_publishable_ui_tests"
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
+        assertAppFillsScreen(app)
+        for identifier in [
+            "gateway.continueAsGuest",
+            "gateway.signIn",
+            "gateway.createAccount",
+            "gateway.appleSignIn",
+        ] {
+            let control = app.descendants(matching: .any)[identifier]
+            assertVisibleAndHittable(control, in: app)
+        }
+        keepScreenshot(named: "Maximum Dynamic Type - account gateway", from: app)
+
+        let guestEntry = app.descendants(matching: .any)["gateway.continueAsGuest"]
+        guestEntry.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 8))
+        assertAppFillsScreen(app)
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
+        let instrument = app.descendants(matching: .any)["onboarding.instrumentPicker"]
+        let start = app.descendants(matching: .any)["onboarding.startPractice"]
+        XCTAssertTrue(instrument.waitForExistence(timeout: 8))
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        assertVisibleAndHittable(instrument, in: app)
+        assertVisibleAndHittable(start, in: app)
+        XCTAssertLessThan(
+            instrument.frame.maxY,
+            start.frame.minY,
+            "The menu-style instrument picker must not compress into the sticky setup action"
+        )
+        keepScreenshot(named: "Maximum Dynamic Type - instrument setup", from: app)
+    }
+
+    @MainActor
+    func testFloatingTabBarKeepsPlayAlongProgressAndSettingsActionsUnobscured() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
+        app.launch()
+
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 8))
+
+        openTab("Play-Along", in: app)
+        assertAboveTabBar(
+            app.descendants(matching: .any)["playAlong.start"],
+            tabBar: tabBar,
+            in: app
+        )
+
+        openTab("Progress", in: app)
+        assertAboveTabBar(
+            app.descendants(matching: .any)["progress.openTuner"],
+            tabBar: tabBar,
+            in: app
+        )
+
+        openTab("Settings", in: app)
+        let clearAllData = app.descendants(matching: .any)["settings.deleteAccount"]
+        bringSafelyIntoView(clearAllData, in: app)
+        XCTAssertTrue(clearAllData.isHittable)
+        XCTAssertLessThan(clearAllData.frame.maxY, tabBar.frame.minY)
+    }
+
+    @MainActor
     func testPersistenceFailureBannerHasLaunchCoverage() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE", "UITEST_PERSISTENCE_ERROR"]
@@ -448,13 +547,23 @@ final class BrassTuneAppUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        bringSafelyIntoView(element, in: app, file: file, line: line)
+        element.tap()
+    }
+
+    @MainActor
+    private func bringSafelyIntoView(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected reachable control", file: file, line: line)
         for _ in 0..<8 {
             let top = app.navigationBars.firstMatch.exists ? app.navigationBars.firstMatch.frame.maxY + 8 : 8
             let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY - 8 : app.frame.maxY - 8
             let frame = element.frame
             if frame.minY >= top, frame.maxY <= bottom, element.isHittable {
-                element.tap()
                 return
             }
             if frame.minY < top {
@@ -475,16 +584,55 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
-    private func assertTutorialCopy(
-        _ fragment: String,
+    private func assertAboveTabBar(
+        _ element: XCUIElement,
+        tabBar: XCUIElement,
         in app: XCUIApplication,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let match = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS[c] %@", fragment))
-            .firstMatch
-        XCTAssertTrue(match.waitForExistence(timeout: 5), "Missing tutorial explanation: \(fragment)", file: file, line: line)
+        XCTAssertTrue(element.waitForExistence(timeout: 8), "Expected sticky action", file: file, line: line)
+        XCTAssertTrue(element.isHittable, "Sticky action should be immediately hittable", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44, file: file, line: line)
+        XCTAssertLessThan(element.frame.maxY, tabBar.frame.minY, file: file, line: line)
+    }
+
+    @MainActor
+    private func assertAppFillsScreen(
+        _ app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "The app should own a window", file: file, line: line)
+        let screenSize = XCUIScreen.main.screenshot().image.size
+        XCTAssertEqual(window.frame.minX, 0, accuracy: 1, file: file, line: line)
+        XCTAssertEqual(window.frame.minY, 0, accuracy: 1, file: file, line: line)
+        XCTAssertEqual(window.frame.width, screenSize.width, accuracy: 1, file: file, line: line)
+        XCTAssertEqual(window.frame.height, screenSize.height, accuracy: 1, file: file, line: line)
+    }
+
+    @MainActor
+    private func assertVisibleAndHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected visible control", file: file, line: line)
+        XCTAssertTrue(element.isHittable, "Expected immediately hittable control", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44, file: file, line: line)
+        let windowFrame = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(element.frame.minY, windowFrame.minY, file: file, line: line)
+        XCTAssertLessThanOrEqual(element.frame.maxY, windowFrame.maxY, file: file, line: line)
+    }
+
+    @MainActor
+    private func keepScreenshot(named name: String, from app: XCUIApplication) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @MainActor

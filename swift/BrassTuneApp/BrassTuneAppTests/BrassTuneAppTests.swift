@@ -2349,10 +2349,10 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     func testInstrumentSetupHasAStableVoiceOverFocusAnnouncement() {
-        XCTAssertEqual(nativeTutorialSteps.count, 1)
-        let announcement = nativeTutorialAccessibilityAnnouncement(stepIndex: 0)
-        XCTAssertTrue(announcement.contains("Step 1 of 1"))
+        let announcement = instrumentSetupAccessibilityAnnouncement()
         XCTAssertTrue(announcement.contains("Choose your instrument"))
+        XCTAssertTrue(announcement.contains("written notes"))
+        XCTAssertFalse(announcement.contains("Step"))
     }
 
     func testPlayAlongLongSilenceResetsHoldAfterDropoutGrace() {
@@ -2420,23 +2420,46 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(grader.currentNoteName, "C")
     }
 
-    func testPlayAlongAcceptsIntermediateConfidenceWithoutRecordingValidity() {
+    func testPlayAlongRejectsInvalidOrUnstableCenteredFrames() {
         var grader = PlayAlongGrader(writtenNotes: ["C"], holdDurationMs: 300, minimumSamples: 3)
 
         for timestamp in stride(from: 0, through: 300, by: 100) {
-            let frame = makePlayAlongFrame(
+            let invalidFrame = makePlayAlongFrame(
                 note: "C",
                 cents: 3,
                 timestampMs: timestamp,
-                confidence: 0.7,
+                confidence: 0.99,
                 isValidForRecording: false
             )
-            XCTAssertFalse(frame.isValidForRecording)
-            grader.feed(frame)
+            XCTAssertFalse(invalidFrame.isValidForRecording)
+            grader.feed(invalidFrame)
         }
 
-        XCTAssertTrue(grader.isComplete)
-        XCTAssertEqual(grader.noteGrades.first?.rating, .excellent)
+        XCTAssertNil(grader.detectedNoteName)
+        XCTAssertNil(grader.detectedCents)
+        XCTAssertEqual(grader.heldFraction, 0)
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+        XCTAssertEqual(grader.currentNoteName, "C")
+
+        for timestamp in stride(from: 1_000, through: 1_300, by: 100) {
+            let unstableFrame = makePlayAlongFrame(
+                note: "C",
+                cents: 0,
+                timestampMs: timestamp,
+                confidence: 0.99,
+                isValidForRecording: true,
+                tuningStatus: .unstable
+            )
+            XCTAssertTrue(unstableFrame.isValidForRecording)
+            XCTAssertEqual(unstableFrame.tuningStatus, .unstable)
+            grader.feed(unstableFrame)
+        }
+
+        XCTAssertNil(grader.detectedNoteName)
+        XCTAssertNil(grader.detectedCents)
+        XCTAssertEqual(grader.heldFraction, 0)
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+        XCTAssertEqual(grader.currentNoteName, "C")
     }
 
     func testPlayAlongSkipMarksMissedAndAdvances() {
@@ -2582,7 +2605,7 @@ final class BrassTuneAppTests: XCTestCase {
         let localized: BTCopy = "Tuner"
         XCTAssertEqual(localized.resolved, "الموالف")
         XCTAssertEqual(BTCopy.verbatim("Arya's C# étude").resolved, "Arya's C# étude")
-        let announcement = nativeTutorialAccessibilityAnnouncement(stepIndex: 0)
+        let announcement = instrumentSetupAccessibilityAnnouncement()
         XCTAssertTrue(announcement.contains(AppLanguage.arabic.localized("Choose your instrument")))
         XCTAssertFalse(announcement.contains("Choose your instrument"))
     }
@@ -2661,7 +2684,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(playAlongFeedback(session), NativeLocalization.format("Play %@", "F"))
 
         for timestamp in stride(from: 0, through: 300, by: 100) {
-            session.feed(makePlayAlongFrame(note: "E#", cents: 2, timestampMs: timestamp, confidence: 0.9, frequencyHz: 349))
+            session.feed(makePlayAlongFrame(note: "E#", cents: 2, timestampMs: timestamp, confidence: 0.99, frequencyHz: 349))
         }
         XCTAssertTrue(session.isComplete)
         XCTAssertEqual(session.noteGrades.first?.writtenNoteName, "F")
@@ -3152,22 +3175,31 @@ final class BrassTuneAppTests: XCTestCase {
         note: String?,
         cents: Double?,
         timestampMs: Int,
-        confidence: Double = 0.9,
+        confidence: Double = 0.99,
         frequencyHz: Double? = 440,
         writtenOctave: Int = 4,
-        isValidForRecording: Bool? = nil
+        isValidForRecording: Bool? = nil,
+        tuningStatus: TuningStatus? = nil
     ) -> PitchFrame {
         let rms = note == nil ? 0 : 0.08
+        let resolvedTuningStatus = tuningStatus
+            ?? BrassTuneCore.tuningStatus(cents: cents, confidence: confidence, rms: rms)
         return PitchFrame(
             timestampMs: timestampMs,
             frequencyHz: frequencyHz,
             confidence: confidence,
             rms: rms,
             centsDeviation: cents,
-            tuningStatus: BrassTuneCore.tuningStatus(cents: cents, confidence: confidence, rms: rms),
+            tuningStatus: resolvedTuningStatus,
             writtenNoteName: note,
             writtenOctave: note == nil ? nil : writtenOctave,
-            isValidForRecording: isValidForRecording ?? (note != nil && cents != nil && confidence >= 0.95)
+            isValidForRecording: isValidForRecording
+                ?? (
+                    note != nil
+                    && cents != nil
+                    && confidence >= 0.95
+                    && [.flat, .inTune, .sharp].contains(resolvedTuningStatus)
+                )
         )
     }
 

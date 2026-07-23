@@ -3,10 +3,9 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var onboardingPresented: Bool
-    @State private var email = ""
-    @State private var password = ""
-    @State private var rawAppleNonce = ""
+    @State private var authMode: GatewayAuthMode?
     @State private var pendingDestructiveAction: DestructiveAction?
     @State private var advancedTunerExpanded = false
 
@@ -37,6 +36,45 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("settings.authNotice")
                 }
+
+                if accountActionsEnabled && !model.authState.usesRemoteAccount {
+                    Button {
+                        authMode = .signIn
+                    } label: {
+                        Label("Sign in", systemImage: "person.crop.circle.badge.checkmark")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("settings.signIn")
+
+                    Button {
+                        authMode = .createAccount
+                    } label: {
+                        Label("Create account", systemImage: "person.crop.circle.badge.plus")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("settings.createAccount")
+
+                    NativeAppleSignInButton(identifier: "settings.appleSignIn")
+                } else if !accountActionsEnabled {
+                    Text(verbatim: model.accountUnavailableMessage ?? NativeLocalization.string("Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device."))
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("settings.accountConfigurationUnavailable")
+                }
+
+                if model.authState.usesRemoteAccount {
+                    Button {
+                        Task { await model.signOut() }
+                    } label: {
+                        Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("settings.signOut")
+                }
             }
 
             BTCard {
@@ -47,7 +85,11 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings.instrumentPicker")
 
                 Button {
-                    withAnimation { advancedTunerExpanded.toggle() }
+                    if reduceMotion {
+                        advancedTunerExpanded.toggle()
+                    } else {
+                        withAnimation { advancedTunerExpanded.toggle() }
+                    }
                 } label: {
                     HStack {
                         Label("Advanced tuner settings", systemImage: "tuningfork")
@@ -97,50 +139,10 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Metronome defaults", subtitle: "Choose the beat you want when the metronome opens.")
-                Stepper(value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 30...240, step: 1) {
-                    Text(verbatim: NativeLocalization.format("Tempo: %@ BPM", String(model.metronome.bpm)))
-                }
-                    .accessibilityIdentifier("settings.metronomeBPM")
-                Picker("Meter", selection: Binding(get: { model.metronome.beatsPerMeasure }, set: { model.setMeter(beats: $0) })) {
-                    ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
-                        Text(verbatim: NativeLocalization.isolate("\(beats)/\(model.metronome.beatUnit)")).tag(beats)
-                    }
-                }
-                .accessibilityIdentifier("settings.metronomeMeter")
-                Picker("Subdivision", selection: Binding(get: { model.metronome.subdivision }, set: { model.metronome.subdivision = $0 })) {
-                    ForEach(MetronomeSubdivision.allCases) { subdivision in
-                        Text(verbatim: subdivision.title).tag(subdivision)
-                    }
-                }
-                .accessibilityIdentifier("settings.metronomeSubdivision")
-
-                Toggle("Play sound", isOn: Binding(
-                    get: { !model.metronome.visualOnly },
-                    set: { enabled in
-                        model.setMetronomeVolume(enabled ? max(0.6, model.metronome.volume) : 0)
-                    }
-                ))
-                .accessibilityIdentifier("settings.metronomeSound")
-
-                VStack(alignment: .leading, spacing: BTSpacing.xs) {
-                    Text("Volume")
-                        .font(.subheadline.weight(.semibold))
-                    Slider(
-                        value: Binding(get: { model.metronome.volume }, set: { model.setMetronomeVolume($0) }),
-                        in: 0.1...1
-                    )
-                    .disabled(model.metronome.visualOnly)
-                    .accessibilityIdentifier("settings.metronomeVolume")
-                }
-
-                SettingsNavigationRow(title: "Open metronome", systemImage: "metronome", identifier: "settings.metronomeLink") {
+                BTSectionHeader(title: "Tools")
+                SettingsNavigationRow(title: "Metronome", systemImage: "metronome", identifier: "settings.metronomeLink") {
                     MetronomeView()
                 }
-            }
-
-            BTCard {
-                BTSectionHeader(title: "Practice library", subtitle: "Add and organize scores for practice.")
                 SettingsNavigationRow(
                     title: "Sheet music",
                     systemImage: "music.note.list",
@@ -156,98 +158,6 @@ struct SettingsView: View {
                     identifier: "settings.practicePacksLink"
                 ) {
                     PracticePacksView()
-                }
-            }
-
-            if accountActionsEnabled && !model.authState.usesRemoteAccount {
-                BTCard {
-                    BTSectionHeader(title: "Sign in", subtitle: "Use your email or Apple account.")
-                    TextField("Email", text: $email)
-                        .textContentType(.emailAddress)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("settings.email")
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("settings.password")
-                    VStack(spacing: BTSpacing.md) {
-                        Button {
-                            Task { await model.signIn(email: email, password: password) }
-                        } label: {
-                            Text(verbatim: NativeLocalization.string(model.authOperationInProgress ? "Working…" : "Sign in"))
-                        }
-                        .buttonStyle(.bordered)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .disabled(model.authOperationInProgress)
-                        .accessibilityIdentifier("settings.signIn")
-
-                        Button {
-                            Task { await model.signUp(email: email, password: password) }
-                        } label: {
-                            Text(verbatim: NativeLocalization.string(model.authOperationInProgress ? "Working…" : "Create account"))
-                        }
-                        .buttonStyle(.bordered)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .disabled(model.authOperationInProgress)
-                        .accessibilityIdentifier("settings.createAccount")
-                    }
-                    Button {
-                        Task { await model.requestPasswordReset(email: email) }
-                    } label: {
-                        Label("Send password reset", systemImage: "envelope")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.authOperationInProgress)
-                    .accessibilityIdentifier("settings.passwordReset")
-                    SignInWithAppleButton(.signIn) { request in
-                        rawAppleNonce = AuthService.randomNonce()
-                        request.requestedScopes = [.email]
-                        request.nonce = AuthService.sha256(rawAppleNonce)
-                    } onCompletion: { result in
-                        handleAppleSignIn(result)
-                    }
-                    .frame(height: 44)
-                    .disabled(model.authOperationInProgress)
-                    .accessibilityIdentifier("settings.appleSignIn")
-                }
-            } else if !accountActionsEnabled {
-                BTCard {
-                    BTSectionHeader(
-                        title: "Guest mode",
-                        subtitle: .verbatim(
-                            model.accountUnavailableMessage
-                                ?? NativeLocalization.string("Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device.")
-                        )
-                    )
-                    .accessibilityIdentifier("settings.accountConfigurationUnavailable")
-                    if model.authState != .guest {
-                        Button {
-                            model.enterGuestDemo()
-                        } label: {
-                            Label("Continue as guest", systemImage: "person.crop.circle")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("settings.continueAsGuest")
-                    }
-                }
-            }
-
-            if model.authState.usesRemoteAccount {
-                BTCard {
-                    BTSectionHeader(title: "Sign out", subtitle: "Your practice history stays on this device.")
-                    Button {
-                        Task { await model.signOut() }
-                    } label: {
-                        Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("settings.signOut")
                 }
             }
 
@@ -295,17 +205,13 @@ struct SettingsView: View {
                 SettingsNavigationRow(title: "Support", systemImage: "questionmark.circle", identifier: "settings.supportLink") {
                     LegalDetailView(kind: .support)
                 }
-            }
-
-            BTCard {
-                BTSectionHeader(
-                    title: "About",
-                    subtitle: .verbatim(NativeLocalization.format(
-                        "Version %@ (%@)",
-                        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0",
-                        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-                    ))
-                )
+                Text(verbatim: NativeLocalization.format(
+                    "Version %@ (%@)",
+                    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0",
+                    Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+                ))
+                .font(.footnote)
+                .foregroundStyle(BTTheme.muted)
             }
 
             if let error = model.lastError {
@@ -318,6 +224,9 @@ struct SettingsView: View {
         .controlSize(.large)
         .navigationTitle("Settings")
         .accessibilityIdentifier("screen.settings")
+        .sheet(item: $authMode) { mode in
+            GatewayAuthForm(mode: mode)
+        }
         .alert(item: $pendingDestructiveAction) { action in
             Alert(
                 title: Text(verbatim: destructiveAlertTitle(for: action)),
@@ -393,6 +302,27 @@ struct SettingsView: View {
         }
     }
 
+}
+
+struct NativeAppleSignInButton: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var rawAppleNonce = ""
+    let identifier: String
+
+    var body: some View {
+        SignInWithAppleButton(.signIn) { request in
+            rawAppleNonce = AuthService.randomNonce()
+            request.requestedScopes = [.email]
+            request.nonce = AuthService.sha256(rawAppleNonce)
+        } onCompletion: { result in
+            handleAppleSignIn(result)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 50)
+        .disabled(model.authOperationInProgress || !model.accountFeaturesEnabled)
+        .accessibilityIdentifier(identifier)
+    }
+
     private func handleAppleSignIn(_ result: Result<ASAuthorization, Error>) {
         switch result {
         case .success(let authorization):
@@ -417,6 +347,7 @@ struct ClassesView: View {
     @EnvironmentObject private var model: AppModel
     @State private var joinCode = ""
     @State private var pendingLeave: EnsembleSummary?
+    @State private var authMode: GatewayAuthMode?
 
     var body: some View {
         BTScreen {
@@ -430,11 +361,22 @@ struct ClassesView: View {
                 joinCard
                 membershipContent
             } else {
-                BTEmptyState(
-                    title: "Sign in to use classes",
-                    message: "Return to Settings and sign in before joining a class.",
-                    systemImage: "person.crop.circle.badge.exclamationmark"
-                )
+                BTCard {
+                    BTSectionHeader(
+                        title: "Sign in to use classes",
+                        subtitle: "Sign in before using classes."
+                    )
+                    Button {
+                        authMode = .signIn
+                    } label: {
+                        Label("Sign in", systemImage: "person.crop.circle.badge.checkmark")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BTPrimaryButtonStyle())
+                    .accessibilityIdentifier("classes.signIn")
+
+                    NativeAppleSignInButton(identifier: "classes.appleSignIn")
+                }
                 .accessibilityIdentifier("classes.signInRequired")
             }
 
@@ -446,7 +388,8 @@ struct ClassesView: View {
                 .accessibilityIdentifier("classes.status")
             }
 
-            if let error = model.lastError {
+            if (model.testFixturesEnabled || model.authState.usesRemoteAccount),
+               let error = model.lastError {
                 BTCard {
                     Text(verbatim: error.localizedDescription)
                         .font(.footnote)
@@ -459,11 +402,16 @@ struct ClassesView: View {
         .controlSize(.large)
         .navigationTitle("Classes")
         .accessibilityIdentifier("screen.classes")
-        .task {
+        .task(id: model.authState.usesRemoteAccount) {
+            guard model.testFixturesEnabled || model.authState.usesRemoteAccount else { return }
             await model.loadEnsembles()
         }
         .refreshable {
+            guard model.testFixturesEnabled || model.authState.usesRemoteAccount else { return }
             await model.loadEnsembles()
+        }
+        .sheet(item: $authMode) { mode in
+            GatewayAuthForm(mode: mode)
         }
         .alert(item: $pendingLeave) { ensemble in
             Alert(
