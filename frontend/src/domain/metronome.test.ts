@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildScheduledTicks, clampBpm, nextRampBpm, normalizeTimeSignature, secondsPerTick, tapTempoBpm, ticksPerBar, timingStats } from './metronome';
+import metronomeCases from '../../../fixtures/metronome_cases.json';
+import { buildScheduledTicks, clampBpm, nextRampBpm, normalizeTimeSignature, secondsPerTick, tapTempoBpm, ticksPerBar, timingStats, type Subdivision } from './metronome';
 
 describe('metronome timing helpers', () => {
   it('bounds tempo and time signatures', () => {
@@ -18,6 +19,25 @@ describe('metronome timing helpers', () => {
     expect(ticks[0]).toMatchObject({ beatIndex: 0, subdivisionIndex: 0, accented: true });
     expect(ticks[2]).toMatchObject({ beatIndex: 1, subdivisionIndex: 0, accented: false });
     expect(ticks[6]).toMatchObject({ beatIndex: 0, subdivisionIndex: 0, accented: true });
+  });
+
+  it('treats BPM as the selected denominator beat in compound and cut time', () => {
+    const sevenEight = { numerator: 7, denominator: 8 };
+    for (const metronomeCase of metronomeCases.cases) {
+      expect(
+        secondsPerTick(
+          metronomeCase.bpm,
+          { numerator: metronomeCase.numerator, denominator: metronomeCase.denominator },
+          metronomeCase.subdivision as Subdivision,
+        ),
+        metronomeCase.name,
+      ).toBeCloseTo(metronomeCase.expected_seconds);
+    }
+
+    const ticks = buildScheduledTicks({ startTime: 0, bpm: 120, signature: sevenEight, subdivision: 'eighth', bars: 1 });
+    expect(ticks).toHaveLength(14);
+    expect(ticks[1].time).toBeCloseTo(0.25);
+    expect(ticks[2].time).toBeCloseTo(0.5);
   });
 
   it('derives tap tempo from recent taps', () => {

@@ -3,6 +3,38 @@ import XCTest
 @testable import BrassTuneApp
 
 final class PracticeFeatureTests: XCTestCase {
+    func testMetronomeIntervalMatchesSharedTimingContract() throws {
+        struct MetronomeCase: Decodable {
+            let name: String
+            let bpm: Int
+            let numerator: Int
+            let denominator: Int
+            let subdivision: MetronomeSubdivision
+            let expectedSeconds: TimeInterval
+
+            enum CodingKeys: String, CodingKey {
+                case name, bpm, numerator, denominator, subdivision
+                case expectedSeconds = "expected_seconds"
+            }
+        }
+        struct MetronomeContract: Decodable {
+            let cases: [MetronomeCase]
+        }
+
+        let data = try Data(contentsOf: try sharedFixtureURL(named: "metronome_cases.json"))
+        let contract = try JSONDecoder().decode(MetronomeContract.self, from: data)
+
+        for metronomeCase in contract.cases {
+            let settings = MetronomeSettings(
+                bpm: metronomeCase.bpm,
+                beatsPerMeasure: metronomeCase.numerator,
+                beatUnit: metronomeCase.denominator,
+                subdivision: metronomeCase.subdivision
+            )
+            XCTAssertEqual(settings.intervalSeconds, metronomeCase.expectedSeconds, accuracy: 0.000_001, metronomeCase.name)
+        }
+    }
+
     func testCustomExerciseValidationNormalizesAndBoundsNotes() throws {
         let exercise = try SavedPlayAlongExercise(title: "  Lip slur  ", writtenNotes: ["c", "F♯", "b♭"])
         XCTAssertEqual(exercise.title, "Lip slur")
@@ -246,5 +278,23 @@ final class PracticeFeatureTests: XCTestCase {
                 PlayAlongNoteGrade(writtenNoteName: "F#", medianCents: cents, sampleCount: cents == nil ? 0 : 10, rating: destinationRating),
             ]
         )
+    }
+
+    private func sharedFixtureURL(named name: String) throws -> URL {
+        let fileManager = FileManager.default
+        if let override = ProcessInfo.processInfo.environment["BRASSTUNE_SHARED_FIXTURES_DIR"] {
+            let url = URL(fileURLWithPath: override, isDirectory: true).appendingPathComponent(name)
+            if fileManager.fileExists(atPath: url.path) { return url }
+        }
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = repositoryRoot.appendingPathComponent("fixtures", isDirectory: true).appendingPathComponent(name)
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw XCTSkip("Shared fixture \(name) is not present in this isolated worktree.")
+        }
+        return url
     }
 }

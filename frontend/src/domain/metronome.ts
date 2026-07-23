@@ -33,13 +33,12 @@ export function subdivisionFactor(subdivision: Subdivision) {
   return 1;
 }
 
-export function secondsPerBeat(bpm: number, denominator = 4) {
-  const quarterNoteSeconds = 60 / clampBpm(bpm);
-  return quarterNoteSeconds * (4 / denominator);
+export function secondsPerBeat(bpm: number) {
+  return 60 / clampBpm(bpm);
 }
 
-export function secondsPerTick(bpm: number, signature: TimeSignature, subdivision: Subdivision) {
-  return secondsPerBeat(bpm, signature.denominator) / subdivisionFactor(subdivision);
+export function secondsPerTick(bpm: number, _signature: TimeSignature, subdivision: Subdivision) {
+  return secondsPerBeat(bpm) / subdivisionFactor(subdivision);
 }
 
 export function ticksPerBar(signature: TimeSignature, subdivision: Subdivision) {
