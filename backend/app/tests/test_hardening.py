@@ -171,6 +171,7 @@ def test_existing_sqlite_tombstone_config_adds_expand_phase(monkeypatch):
             {"verifier": "b" * 64},
         )
     monkeypatch.setattr(database_module, "engine", legacy_engine)
+    monkeypatch.setattr(database_module, "DATABASE_URL", "postgresql+psycopg://selected-by-ci")
 
     database_module.ensure_additive_columns()
     with legacy_engine.begin() as connection:
@@ -3011,7 +3012,7 @@ def test_postgres_expand_allows_old_writer_before_strict_contract():
             assert cursor.fetchone() == (42, "legacy-subject-42", "delete-user-42", {"practice_sessions": 2})
             cursor.execute(
                 "select count(*) from pg_constraint where "
-                "conrelid = %%s::regclass and conname = 'account_deletion_jobs_terminal_privacy_check'",
+                "conrelid = %s::regclass and conname = 'account_deletion_jobs_terminal_privacy_check'",
                 ("%s.account_deletion_jobs" % schema,),
             )
             assert cursor.fetchone()[0] == 0

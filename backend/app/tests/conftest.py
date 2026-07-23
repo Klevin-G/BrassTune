@@ -14,6 +14,10 @@ os.environ.setdefault("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.
 # or production database. PostgreSQL integration runs opt in through the
 # test-only variable below.
 _PYTEST_DATABASE_URL = os.getenv("BRASSTUNE_TEST_DATABASE_URL", "").strip()
+_PYTEST_TOMBSTONE_SECRET = (
+    os.getenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "").strip()
+    or "test-only-deletion-tombstone-key-32-bytes"
+)
 os.environ.pop("BRASSTUNE_DATABASE_URL", None)
 os.environ.pop("DATABASE_URL", None)
 if _PYTEST_DATABASE_URL:
@@ -31,5 +35,5 @@ def local_backend_env(monkeypatch):
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,https://brasstune.vercel.app")
-    monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "test-only-deletion-tombstone-key-32-bytes")
+    monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", _PYTEST_TOMBSTONE_SECRET)
     monkeypatch.delenv("BRASSTUNE_ALLOW_LOCAL_AUTH", raising=False)

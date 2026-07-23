@@ -185,7 +185,9 @@ def _ensure_sqlite_deletion_tombstone_enforcement_phase() -> None:
 
 
 def ensure_additive_columns() -> None:
-    if database_backend(DATABASE_URL) != "sqlite":
+    # Tests and maintenance callers may supply a scoped engine. Inspect the
+    # engine that will actually be mutated instead of the import-time URL.
+    if database_backend(str(engine.url)) != "sqlite":
         return
     additions = {
         "users": {
