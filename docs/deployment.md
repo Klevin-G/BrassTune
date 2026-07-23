@@ -53,6 +53,12 @@ VITE_SUPABASE_PUBLISHABLE_KEY=<publishable key only>
 
 Do not add `SUPABASE_SECRET_KEY`, Render deploy hooks, GitHub tokens, Apple keys, or database URLs to Vercel frontend env vars.
 
+Every frontend build embeds a full Git SHA in the
+`meta[name="brasstune-build-revision"]` DOM marker. Build resolution prefers an
+explicit `BRASSTUNE_FRONTEND_BUILD_SHA`, then Vercel's
+`VERCEL_GIT_COMMIT_SHA`, then `GITHUB_SHA`; builds without any revision source
+use `unknown` and cannot pass an exact-SHA hosted smoke.
+
 ## Render Backend
 
 `render.yaml` defines the FastAPI web service.
@@ -93,9 +99,11 @@ WebSocket rate/connection limits allow `0` only as a deliberate local/test
 disable; negative or invalid values fall back to safe defaults.
 
 Render's free web-service plan does not support pre-deploy commands. The start
-command therefore runs the read-only `python -m app.db.check_ready` gate before
-Uvicorn; an incomplete database schema or unsafe production configuration keeps
-the new instance from becoming live. This gate does not apply migrations.
+command therefore runs `python -m app.db.scrub_deletion_privacy` first, then the
+read-only `python -m app.db.check_ready` gate, before Uvicorn. A deletion privacy
+scrub failure, incomplete database schema, or unsafe production configuration
+keeps the new instance from becoming live. These startup gates do not apply
+migrations.
 
 Account-deletion privacy uses an explicit two-PR expand/contract rollout.
 `supabase db push` applies every pending migration, so the contract migration
@@ -259,6 +267,7 @@ defaulting to the dispatched `main` revision. It wraps:
 BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app \
 BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
 BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com \
+BRASSTUNE_EXPECTED_FRONTEND_SHA="$FRONTEND_SHA" \
 npm run smoke:hosted
 ```
 

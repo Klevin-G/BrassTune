@@ -13,6 +13,7 @@ const hostedMode = process.env.E2E_START_LOCAL_SERVERS === '0';
 const vercelShareURL = process.env.E2E_VERCEL_SHARE_URL;
 const vercelBypassSecret = process.env.E2E_VERCEL_AUTOMATION_BYPASS_SECRET || process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 const webBaseURL = process.env.E2E_BASE_URL;
+const expectedFrontendSha = process.env.BRASSTUNE_EXPECTED_FRONTEND_SHA?.trim().toLowerCase();
 const productionHostedAuth = hostedMode && webBaseURL
   ? new URL(webBaseURL).hostname === 'brasstune.vercel.app'
   : false;
@@ -159,6 +160,26 @@ test.describe('hosted read-only smoke', () => {
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Create account', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Forgot password?' })).toBeVisible();
+  });
+
+  test('deployed app exposes the expected immutable frontend build revision', async ({ page }) => {
+    test.skip(
+      !hostedMode && !expectedFrontendSha,
+      'Local smoke runs enforce frontend identity only when BRASSTUNE_EXPECTED_FRONTEND_SHA is set.',
+    );
+    const expectedRevision = expectedFrontendSha ?? '';
+    expect(
+      expectedRevision,
+      'Hosted smoke requires BRASSTUNE_EXPECTED_FRONTEND_SHA as a full 40-character Git commit SHA.',
+    ).toMatch(/^[0-9a-f]{40}$/);
+
+    const rootResponse = await page.goto(routeURL('/'));
+    await assertNotProtectedPreview(rootResponse, page, '/');
+    expect(rootResponse?.status(), 'Revision identity requires a loadable deployed root.').toBeLessThan(400);
+    await expect(
+      page.locator('meta[name="brasstune-build-revision"]'),
+      'The deployed page must expose its immutable build revision.',
+    ).toHaveAttribute('content', expectedRevision);
   });
 
   test('deployed app loads root and deep links without mixed content', async ({ page }) => {
