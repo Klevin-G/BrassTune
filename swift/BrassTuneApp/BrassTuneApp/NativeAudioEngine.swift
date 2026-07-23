@@ -12,8 +12,12 @@ final class NativeAudioEngine: ObservableObject {
     @Published private(set) var activeSource: PracticeSessionSource = .live
     @Published private(set) var audioNotice: String?
     @Published private(set) var routeChanged = false
+    @Published private(set) var tonePlaying = false
+    @Published private(set) var toneFrequencyHz: Double?
 
     private let engine = AVAudioEngine()
+    private let tonePlayer = AVAudioPlayerNode()
+    private var tonePlayerAttached = false
     private var fixtureStartedAt: Date?
     private var fixtureInstrumentId = "trumpet"
     private var fixtureReferencePitchHz = 440.0
@@ -38,8 +42,13 @@ final class NativeAudioEngine: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.routeChanged = true
-                self?.audioNotice = "Your audio output changed. Check your headphones or speaker before continuing."
+                guard let self else { return }
+                let wasPlayingTone = self.tonePlaying
+                if wasPlayingTone { self.stopTone() }
+                self.routeChanged = true
+                self.audioNotice = wasPlayingTone
+                    ? "The reference tone stopped because your audio output changed. Check your headphones or speaker before restarting."
+                    : "Your audio output changed. Check your headphones or speaker before continuing."
             }
         }
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -154,10 +163,74 @@ final class NativeAudioEngine: ObservableObject {
         return captured
     }
 
+    func startTone(frequencyHz: Double, volume: Double) throws {
+        guard frequencyHz.isFinite, (20...5_000).contains(frequencyHz) else {
+            throw NativeAudioEngineError.invalidToneFrequency
+        }
+        stopAndResetAudioEngine()
+        activeSource = .live
+        audioNotice = nil
+        routeChanged = false
+        let safeVolume = Float(min(0.5, max(0.05, volume)))
+
+        if Self.testFixturesEnabled {
+            tonePlaying = true
+            toneFrequencyHz = frequencyHz
+            return
+        }
+
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try session.setActive(true)
+
+        if !tonePlayerAttached {
+            engine.attach(tonePlayer)
+            tonePlayerAttached = true
+        }
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100),
+              let samples = buffer.floatChannelData?[0] else {
+            throw NativeAudioEngineError.outputUnavailable
+        }
+        buffer.frameLength = 44_100
+        let fadeFrames = 441
+        for frame in 0..<Int(buffer.frameLength) {
+            let phase = 2 * Double.pi * frequencyHz * Double(frame) / format.sampleRate
+            let fadeIn = min(1, Double(frame) / Double(fadeFrames))
+            let fadeOut = min(1, Double(Int(buffer.frameLength) - frame) / Double(fadeFrames))
+            samples[frame] = Float(sin(phase)) * safeVolume * Float(min(fadeIn, fadeOut))
+        }
+        engine.connect(tonePlayer, to: engine.mainMixerNode, format: format)
+        tonePlayer.scheduleBuffer(buffer, at: nil, options: .loops)
+        engine.prepare()
+        try engine.start()
+        tonePlayer.play()
+        tonePlaying = true
+        toneFrequencyHz = frequencyHz
+    }
+
+    func stopTone() {
+        guard tonePlaying || tonePlayer.isPlaying else { return }
+        tonePlayer.stop()
+        engine.stop()
+        tonePlaying = false
+        toneFrequencyHz = nil
+        if !recording {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
+    func setExternalAudioNotice(_ message: String?) {
+        audioNotice = message
+    }
+
     func stopAndResetAudioEngine() {
+        tonePlayer.stop()
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         recording = false
+        tonePlaying = false
+        toneFrequencyHz = nil
         fixtureStartedAt = nil
         liveStartedAt = nil
         liveCaptureID = nil
@@ -235,6 +308,8 @@ final class NativeAudioEngine: ObservableObject {
 
 enum NativeAudioEngineError: Error {
     case inputUnavailable
+    case outputUnavailable
+    case invalidToneFrequency
 }
 
 enum NativePitchDetector {

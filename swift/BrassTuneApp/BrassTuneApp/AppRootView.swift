@@ -34,6 +34,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 
 struct AppRootView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: AppTab = .playAlong
     @State private var onboardingPresented: Bool
     private let resetUITestState: Bool
@@ -47,7 +48,7 @@ struct AppRootView: View {
         uiTestMode = arguments.contains("UITEST_DEMO")
             || arguments.contains("UITEST_FIXTURES")
             || arguments.contains("UITEST_SETTINGS")
-        _onboardingPresented = State(initialValue: !uiTestMode)
+        _onboardingPresented = State(initialValue: false)
     }
 
     var body: some View {
@@ -103,11 +104,22 @@ struct AppRootView: View {
                             model.stopRecording()
                         }
                     }
+                    if oldTab != newTab {
+                        model.handlePracticeBackground()
+                    }
                 }
             }
         }
         .sheet(isPresented: $onboardingPresented) {
             OnboardingView(isPresented: $onboardingPresented, selectedTab: $selectedTab)
+        }
+        .onChange(of: model.tutorialPresentationRequest) { _, _ in
+            onboardingPresented = true
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                model.handlePracticeBackground()
+            }
         }
         .task {
             if resetUITestState {
@@ -115,49 +127,241 @@ struct AppRootView: View {
             }
             guard !uiTestMode else { return }
             await model.restoreSession()
+            if !model.tutorialCompleted {
+                onboardingPresented = true
+            }
         }
     }
+}
+
+private struct NativeTutorialStep: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let bullets: [String]
+    var showsInstrumentPicker = false
+}
+
+private let nativeTutorialSteps = [
+    NativeTutorialStep(
+        id: "instrument",
+        title: "Choose your instrument",
+        subtitle: "BrassTune uses your instrument to show the written notes you expect to see.",
+        systemImage: "music.note",
+        bullets: [
+            "Pick the horn you play now.",
+            "You can change it later in Settings.",
+        ],
+        showsInstrumentPicker: true
+    ),
+    NativeTutorialStep(
+        id: "playAlong",
+        title: "Play-Along",
+        subtitle: "Practice a scale or exercise one note at a time.",
+        systemImage: "music.note.list",
+        bullets: [
+            "Choose an exercise, tap Start listening, and play the highlighted note.",
+            "Hold the correct note steadily for two seconds. The ring pauses during a short sound dropout and resets for a different note.",
+            "Build custom exercises, favorite useful drills, revisit recent practice, or start the guided five-minute warm-up.",
+            "Offline packs open one focused block at a time, and completed results can generate weak-transition drills.",
+        ]
+    ),
+    NativeTutorialStep(
+        id: "tuner",
+        title: "Tuner and recordings",
+        subtitle: "Use the Tuner for live flat, centered, and sharp feedback.",
+        systemImage: "tuningfork",
+        bullets: [
+            "Tap Start listening and play a comfortable note into the microphone.",
+            "Use the meter and plain-language cue to move toward the center.",
+            "Tap Stop and save to keep the tuning result in your local practice history.",
+            "Open Drone and intervals to hear a written-note reference or practice the sound of an interval. Start quietly and use headphones when possible.",
+        ]
+    ),
+    NativeTutorialStep(
+        id: "progress",
+        title: "Progress and practice history",
+        subtitle: "See what is improving across the practice results saved on this device.",
+        systemImage: "chart.line.uptrend.xyaxis",
+        bullets: [
+            "Progress shows in-tune percentage, average distance, practice time, and a simple next step.",
+            "Open Practice history to review, share a text summary, or delete an individual result.",
+            "Set weekly minutes and session goals, then save a short reflection on any result.",
+        ]
+    ),
+    NativeTutorialStep(
+        id: "metronome",
+        title: "Metronome",
+        subtitle: "Open the metronome from Settings whenever you need a steady beat.",
+        systemImage: "metronome",
+        bullets: [
+            "Set the tempo, meter, subdivision, sound, volume, and optional haptic pulse.",
+            "Tap the beat to estimate a tempo, or use visual-only mode for silent practice.",
+            "Save the full setup as a named preset, then apply, rename, or delete it later.",
+        ]
+    ),
+    NativeTutorialStep(
+        id: "scores",
+        title: "Sheet music",
+        subtitle: "Keep local practice copies of music from Files or Photos.",
+        systemImage: "doc.text.image",
+        bullets: [
+            "Import a PDF or photo, choose a page, zoom in, rotate, crop, or improve contrast.",
+            "Add practice notes, set a target tempo, attach a score to your latest result, share it, or delete it locally.",
+        ]
+    ),
+    NativeTutorialStep(
+        id: "classes",
+        title: "Classes and accounts",
+        subtitle: "Accounts are optional for practice, but a signed-in account is required for Classes.",
+        systemImage: "person.3",
+        bullets: [
+            "Sign in with email or Apple when online accounts are configured, or keep practicing as a guest on this device.",
+            "In Classes, enter a teacher's code, switch between your classes, refresh the list, or leave when your role allows it.",
+        ]
+    ),
+    NativeTutorialStep(
+        id: "settings",
+        title: "Settings, privacy, and data",
+        subtitle: "Settings keeps your account, instrument, tools, local data, and help in one place.",
+        systemImage: "gearshape",
+        bullets: [
+            "Change your instrument, advanced A4 reference pitch, and metronome defaults.",
+            "Export local data, clear practice history, sign out, or delete your account and local files.",
+            "Open Privacy, Terms, or Support, and replay this tutorial at any time.",
+        ]
+    ),
+]
+
+func nativeTutorialAccessibilityAnnouncement(stepIndex: Int) -> String {
+    let index = min(max(0, stepIndex), nativeTutorialSteps.count - 1)
+    let step = nativeTutorialSteps[index]
+    return "Step \(index + 1) of \(nativeTutorialSteps.count). \(step.title). \(step.subtitle)"
 }
 
 struct OnboardingView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var isPresented: Bool
     @Binding var selectedTab: AppTab
+    @State private var stepIndex = 0
+    @AccessibilityFocusState private var tutorialHeaderFocused: Bool
+
+    private var step: NativeTutorialStep {
+        nativeTutorialSteps[min(max(0, stepIndex), nativeTutorialSteps.count - 1)]
+    }
+
+    private var isLastStep: Bool {
+        stepIndex == nativeTutorialSteps.count - 1
+    }
 
     var body: some View {
         NavigationStack {
             BTScreen {
                 BTPageHeader(
-                    eyebrow: "BrassTune",
-                    title: "Choose your instrument",
-                    subtitle: "Pick your instrument so tuning matches your horn."
+                    eyebrow: "Step \(stepIndex + 1) of \(nativeTutorialSteps.count)",
+                    title: step.title,
+                    subtitle: step.subtitle
                 )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(nativeTutorialAccessibilityAnnouncement(stepIndex: stepIndex))
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($tutorialHeaderFocused)
                 .accessibilityIdentifier("onboarding.hero")
 
                 BTCard {
-                    Picker("Instrument", selection: $model.selectedInstrumentId) {
-                        instrumentPickerOptions()
+                    Image(systemName: step.systemImage)
+                        .font(.largeTitle)
+                        .foregroundStyle(BTTheme.accent)
+                        .accessibilityHidden(true)
+
+                    ForEach(step.bullets, id: \.self) { bullet in
+                        Label {
+                            Text(bullet)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(BTTheme.success)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
-                    .pickerStyle(.inline)
-                    .accessibilityIdentifier("onboarding.instrumentPicker")
+
+                    if step.showsInstrumentPicker {
+                        Picker("Instrument", selection: $model.selectedInstrumentId) {
+                            instrumentPickerOptions()
+                        }
+                        .pickerStyle(.inline)
+                        .accessibilityIdentifier("onboarding.instrumentPicker")
+                    }
                 }
 
-                Button {
-                    model.enterGuestDemo()
-                    selectedTab = .playAlong
-                    isPresented = false
-                } label: {
-                    Label("Start", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
+                ProgressView(value: Double(stepIndex + 1), total: Double(nativeTutorialSteps.count))
+                    .tint(BTTheme.accent)
+                    .accessibilityLabel("Tutorial progress")
+                    .accessibilityValue("Step \(stepIndex + 1) of \(nativeTutorialSteps.count)")
+                    .accessibilityIdentifier("onboarding.progress")
+
+                HStack(spacing: BTSpacing.md) {
+                    if stepIndex > 0 {
+                        Button {
+                            stepIndex -= 1
+                        } label: {
+                            Label("Back", systemImage: "chevron.left")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("onboarding.back")
+                    }
+
+                    Button {
+                        if isLastStep {
+                            model.completeTutorial()
+                            selectedTab = .playAlong
+                            isPresented = false
+                        } else {
+                            stepIndex += 1
+                        }
+                    } label: {
+                        Label(isLastStep ? "Finish tutorial" : "Next", systemImage: isLastStep ? "checkmark" : "chevron.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                    .accessibilityIdentifier(isLastStep ? "onboarding.startPractice" : "onboarding.next")
                 }
-                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
-                .accessibilityIdentifier("onboarding.startPractice")
             }
             .navigationTitle("Welcome")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Not now") {
+                        // Dismissing is intentionally not completion. A first-time
+                        // user will see the tutorial again on the next launch.
+                        isPresented = false
+                    }
+                    .accessibilityIdentifier("onboarding.notNow")
+                }
+            }
         }
         // Open at full height so the primary "Start" action is always visible
         // (at .medium it fell below the fold on smaller devices).
         .presentationDetents([.large])
+        .onAppear {
+            stepIndex = 0
+            moveVoiceOverToCurrentStep()
+        }
+        .onChange(of: stepIndex) { _, _ in
+            moveVoiceOverToCurrentStep()
+        }
+    }
+
+    private func moveVoiceOverToCurrentStep() {
+        let announcement = nativeTutorialAccessibilityAnnouncement(stepIndex: stepIndex)
+        tutorialHeaderFocused = false
+        DispatchQueue.main.async {
+            tutorialHeaderFocused = true
+            if UIAccessibility.isVoiceOverRunning {
+                UIAccessibility.post(notification: .screenChanged, argument: announcement)
+            }
+        }
     }
 }
 
@@ -175,6 +379,7 @@ struct PlayAlongView: View {
 
             switch model.playAlongPhase {
             case .idle:
+                PracticeQuickStartCard()
                 exercisePicker
                 startButton
                 microphoneRecovery
@@ -200,6 +405,12 @@ struct PlayAlongView: View {
         }
         .navigationTitle("Play-Along")
         .accessibilityIdentifier("screen.playAlong")
+        .onChange(of: model.playAlongSession?.currentNoteIndex) { oldIndex, newIndex in
+            guard oldIndex != nil, newIndex != nil, oldIndex != newIndex,
+                  UIAccessibility.isVoiceOverRunning,
+                  let announcement = playAlongAdvanceAnnouncement(for: model.playAlongSession) else { return }
+            UIAccessibility.post(notification: .announcement, argument: announcement)
+        }
     }
 
     private var exercisePicker: some View {
@@ -234,6 +445,8 @@ struct PlayAlongView: View {
                 }
             }
             .accessibilityIdentifier("playAlong.exerciseNotes")
+
+            SelectedExerciseFavoriteButton()
         }
     }
 
@@ -267,6 +480,14 @@ struct PlayAlongView: View {
                 .foregroundStyle(BTTheme.muted)
         }
     }
+}
+
+func playAlongAdvanceAnnouncement(for session: PlayAlongSession?) -> String? {
+    guard let session else { return nil }
+    if let note = session.currentNoteName {
+        return "Next note is \(note). Hold it steady for two seconds."
+    }
+    return "Exercise complete. Your results are ready."
 }
 
 private struct PlayAlongLiveView: View {
@@ -484,6 +705,15 @@ struct TunerView: View {
             )
 
             TunerReadout(frame: activeFrame)
+
+            NavigationLink {
+                DroneIntervalView()
+            } label: {
+                Label("Open drone and interval tuning", systemImage: "waveform")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTSecondaryButtonStyle())
+            .accessibilityIdentifier("tuner.droneIntervalLink")
 
             if !audioEngine.recording {
                 Button {
@@ -840,6 +1070,8 @@ struct SessionDetailView: View {
                         .foregroundStyle(BTTheme.muted)
                 }
 
+                PracticeReflectionCard(sessionID: session.id)
+
                 BTCard {
                     BTSectionHeader(title: "Share", subtitle: "Send a text summary when you want feedback.")
                     ShareLink(item: session.exportText) {
@@ -893,6 +1125,9 @@ struct ProgressTabView: View {
                     title: "Your progress",
                     subtitle: "See how your tuning changes as you practice."
                 )
+
+                WeeklyGoalCard()
+                WeakTransitionCard()
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 145), spacing: BTSpacing.md)],
@@ -976,6 +1211,8 @@ struct ProgressTabView: View {
                     title: "Your progress",
                     subtitle: "Your practice results will appear here."
                 )
+                WeeklyGoalCard()
+                WeakTransitionCard()
                 BTEmptyState(
                     title: "Ready for your first note?",
                     message: "Start the tuner and save a short recording.",
@@ -1155,6 +1392,8 @@ struct MetronomeView: View {
                     .accessibilityIdentifier("metronome.volume")
 
             }
+
+            MetronomePresetsCard()
         }
         .navigationTitle("Metronome")
         .accessibilityIdentifier("screen.metronome")

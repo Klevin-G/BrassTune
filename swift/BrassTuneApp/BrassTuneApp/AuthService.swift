@@ -5,11 +5,34 @@ import Security
 
 @MainActor
 final class AuthService: NSObject {
-    private let service = "com.brasstune.auth"
-    private let account = "current-session"
+    private let session: URLSession
+    private let readSessionPayload: () -> String?
+    private let saveSessionPayload: (String) throws -> Void
+    private let deleteSessionPayload: () -> Void
+
+    init(
+        session: URLSession = .shared,
+        service: String = "com.brasstune.auth",
+        account: String = "current-session",
+        readSessionPayload: (() -> String?)? = nil,
+        saveSessionPayload: ((String) throws -> Void)? = nil,
+        deleteSessionPayload: (() -> Void)? = nil
+    ) {
+        self.session = session
+        self.readSessionPayload = readSessionPayload ?? {
+            KeychainStore.read(service: service, account: account)
+        }
+        self.saveSessionPayload = saveSessionPayload ?? { payload in
+            try KeychainStore.save(payload, service: service, account: account)
+        }
+        self.deleteSessionPayload = deleteSessionPayload ?? {
+            KeychainStore.delete(service: service, account: account)
+        }
+        super.init()
+    }
 
     func restoreSession() -> AuthSession? {
-        guard let payload = KeychainStore.read(service: service, account: account),
+        guard let payload = readSessionPayload(),
               let data = payload.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(AuthSession.self, from: data)
     }
@@ -58,11 +81,18 @@ final class AuthService: NSObject {
     }
 
     func refreshStoredSession(config: AppConfig) async throws -> AuthSession? {
-        guard let existing = restoreSession(), let refreshToken = existing.refreshToken else {
-            return restoreSession()
+        guard let existing = restoreSession() else { return nil }
+        guard config.hasUsableSupabaseAuthConfiguration else {
+            throw UserVisibleError.missingAuthConfiguration
         }
         if let expiresAt = existing.expiresAt, expiresAt.timeIntervalSinceNow > 60 {
             return existing
+        }
+        guard let refreshToken = existing.refreshToken, !refreshToken.isEmpty else {
+            if isProvablyUnexpired(existing) {
+                return existing
+            }
+            throw Self.expiredSessionError
         }
         let response = try await requestAuth(
             config: config,
@@ -75,7 +105,7 @@ final class AuthService: NSObject {
         return try store(response: response, fallbackEmail: existing.email)
     }
 
-    func signInWithApple(identityToken: Data, rawNonce: String, config: AppConfig) async throws -> AuthSession {
+    func signInWithApple(identityToken: Data, rawNonce: String, config: AppConfig) async throws -> AppleSignInResult {
         guard let token = String(data: identityToken, encoding: .utf8), !token.isEmpty else {
             throw UserVisibleError.authenticationFailed
         }
@@ -90,11 +120,12 @@ final class AuthService: NSObject {
                 "nonce": rawNonce
             ]
         )
-        return try store(response: response, fallbackEmail: response.user?.email ?? "Apple user")
+        let session = try store(response: response, fallbackEmail: response.user?.email ?? "Apple user")
+        return AppleSignInResult(session: session, isNewUser: Self.appleNewUserSignal(from: response.user))
     }
 
     func signOut() {
-        KeychainStore.delete(service: service, account: account)
+        deleteSessionPayload()
     }
 
     func deleteStoredAuth() {
@@ -118,11 +149,17 @@ final class AuthService: NSObject {
     }
 
     func validAccessToken(config: AppConfig) async throws -> String? {
-        guard let existing = restoreSession() else { return nil }
-        if let expiresAt = existing.expiresAt, expiresAt.timeIntervalSinceNow <= 60 {
-            return try await refreshStoredSession(config: config)?.accessToken
-        }
-        return existing.accessToken
+        try await refreshStoredSession(config: config)?.accessToken
+    }
+
+    func unexpiredStoredSession() -> AuthSession? {
+        guard let existing = restoreSession(), isProvablyUnexpired(existing) else { return nil }
+        return existing
+    }
+
+    private func isProvablyUnexpired(_ session: AuthSession) -> Bool {
+        guard !session.accessToken.isEmpty, let expiresAt = session.expiresAt else { return false }
+        return expiresAt.timeIntervalSinceNow > 0
     }
 
     private func store(response: SupabaseAuthResponse, fallbackEmail: String) throws -> AuthSession {
@@ -135,7 +172,7 @@ final class AuthService: NSObject {
         )
         let data = try JSONEncoder().encode(session)
         guard let payload = String(data: data, encoding: .utf8) else { throw UserVisibleError.malformedResponse }
-        try KeychainStore.save(payload, service: service, account: account)
+        try saveSessionPayload(payload)
         return session
     }
 
@@ -147,9 +184,9 @@ final class AuthService: NSObject {
         body: [String: String],
         expiredSessionFailure: Bool = false
     ) async throws -> SupabaseAuthResponse {
-        guard let supabaseURL = config.supabaseURL,
-              let publishableKey = config.supabasePublishableKey,
-              !publishableKey.isEmpty else {
+        guard config.hasUsableSupabaseAuthConfiguration,
+              let supabaseURL = config.supabaseURL,
+              let publishableKey = config.supabasePublishableKey else {
             throw UserVisibleError.missingAuthConfiguration
         }
         var components = URLComponents(url: supabaseURL.appending(path: path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))), resolvingAgainstBaseURL: false)
@@ -169,7 +206,7 @@ final class AuthService: NSObject {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch let error as URLError where error.code == .timedOut {
@@ -180,6 +217,15 @@ final class AuthService: NSObject {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 401
             if expiredSessionFailure {
+                if statusCode == 408
+                    || statusCode == 425
+                    || statusCode == 429
+                    || (500...599).contains(statusCode) {
+                    throw UserVisibleError.apiRequestFailed(
+                        statusCode: statusCode,
+                        message: "The account service couldn't refresh your sign-in right now. Your saved session will be retried later."
+                    )
+                }
                 throw UserVisibleError.apiRequestFailed(
                     statusCode: statusCode,
                     message: "Your sign-in expired. Sign in again, then retry."
@@ -195,6 +241,29 @@ final class AuthService: NSObject {
             }
             throw UserVisibleError.malformedResponse
         }
+    }
+
+    private static let expiredSessionError = UserVisibleError.apiRequestFailed(
+        statusCode: 401,
+        message: "Your sign-in expired. Sign in again, then retry."
+    )
+
+    private static func appleNewUserSignal(from user: SupabaseAuthUser?) -> Bool? {
+        guard let createdAt = parseSupabaseDate(user?.createdAt),
+              let lastSignInAt = parseSupabaseDate(user?.lastSignInAt) else {
+            return nil
+        }
+        let ageAtSignIn = lastSignInAt.timeIntervalSince(createdAt)
+        guard ageAtSignIn >= -1 else { return nil }
+        return ageAtSignIn <= 5
+    }
+
+    private static func parseSupabaseDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        return ISO8601DateFormatter().date(from: value)
     }
 }
 
@@ -243,6 +312,13 @@ struct AuthSession: Codable, Equatable {
     let expiresAt: Date?
 }
 
+struct AppleSignInResult: Equatable {
+    let session: AuthSession
+    /// `nil` means the server omitted timestamps needed to distinguish a new
+    /// identity from a returning one. The app intentionally tours that case.
+    let isNewUser: Bool?
+}
+
 struct SupabaseAuthResponse: Decodable {
     let accessToken: String?
     let refreshToken: String?
@@ -259,4 +335,12 @@ struct SupabaseAuthResponse: Decodable {
 
 struct SupabaseAuthUser: Decodable {
     let email: String?
+    let createdAt: String?
+    let lastSignInAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case email
+        case createdAt = "created_at"
+        case lastSignInAt = "last_sign_in_at"
+    }
 }

@@ -30,6 +30,13 @@ struct SettingsView: View {
                     BTStatusPill(text: model.authState.displayTitle, tint: model.authState.usesRemoteAccount ? BTTheme.success : BTTheme.warning)
                         .accessibilityIdentifier("settings.accountStatus")
                 }
+                if let notice = model.authNotice {
+                    Label(notice, systemImage: model.authNoticeIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(model.authNoticeIsError ? BTTheme.danger : BTTheme.success)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("settings.authNotice")
+                }
             }
 
             BTCard {
@@ -135,6 +142,14 @@ struct SettingsView: View {
                 ) {
                     ClassesView()
                 }
+                SettingsNavigationRow(
+                    title: "Offline practice packs",
+                    systemImage: "shippingbox",
+                    detail: "\(model.practicePacks.count)",
+                    identifier: "settings.practicePacksLink"
+                ) {
+                    PracticePacksView()
+                }
             }
 
             if accountActionsEnabled && !model.authState.usesRemoteAccount {
@@ -152,16 +167,18 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("settings.password")
                     HStack(spacing: BTSpacing.md) {
-                        Button("Sign in") {
+                        Button(model.authOperationInProgress ? "Working…" : "Sign in") {
                             Task { await model.signIn(email: email, password: password) }
                         }
                         .buttonStyle(.bordered)
+                        .disabled(model.authOperationInProgress)
                         .accessibilityIdentifier("settings.signIn")
 
-                        Button("Create account") {
+                        Button(model.authOperationInProgress ? "Working…" : "Create account") {
                             Task { await model.signUp(email: email, password: password) }
                         }
                         .buttonStyle(.bordered)
+                        .disabled(model.authOperationInProgress)
                         .accessibilityIdentifier("settings.createAccount")
                     }
                     Button {
@@ -171,6 +188,7 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    .disabled(model.authOperationInProgress)
                     .accessibilityIdentifier("settings.passwordReset")
                     SignInWithAppleButton(.signIn) { request in
                         rawAppleNonce = AuthService.randomNonce()
@@ -180,11 +198,16 @@ struct SettingsView: View {
                         handleAppleSignIn(result)
                     }
                     .frame(height: 44)
+                    .disabled(model.authOperationInProgress)
                     .accessibilityIdentifier("settings.appleSignIn")
                 }
             } else if !accountActionsEnabled {
                 BTCard {
-                    BTSectionHeader(title: "Guest mode", subtitle: "You're practicing as a guest. Your data stays on this device.")
+                    BTSectionHeader(
+                        title: "Guest mode",
+                        subtitle: model.accountUnavailableMessage ?? "Online accounts aren't available in this build."
+                    )
+                    .accessibilityIdentifier("settings.accountConfigurationUnavailable")
                     if model.authState != .guest {
                         Button {
                             model.enterGuestDemo()
@@ -241,6 +264,7 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .disabled(model.authOperationInProgress)
                 .accessibilityIdentifier("settings.deleteAccount")
             }
 

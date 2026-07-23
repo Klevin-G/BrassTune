@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
     @Published var activeScoreID: ImportedScore.ID? { didSet { persistLocalData() } }
     @Published var recordingSource: PracticeSessionSource = NativeAudioEngine.defaultRecordingSource
     @Published var metronome = MetronomeSettings() { didSet { persistLocalData(); restartMetronomeIfNeeded() } }
+    @Published var practiceFeatures = PracticeFeatureState() { didSet { persistLocalData() } }
     @Published private(set) var metronomeRunning = false
     @Published private(set) var metronomeTick = 0
     @Published private(set) var recordingStartInProgress = false
@@ -29,6 +30,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var ensemblesLoading = false
     @Published private(set) var ensembleMutationInProgress = false
     @Published private(set) var ensembleStatusMessage: String?
+    @Published private(set) var tutorialCompleted = false { didSet { persistLocalData() } }
+    @Published private(set) var tutorialPresentationRequest = 0
+    @Published private(set) var authOperationInProgress = false
+    @Published private(set) var authNotice: String?
+    @Published private(set) var authNoticeIsError = false
     @Published var lastError: UserVisibleError?
 
     let audioEngine = NativeAudioEngine()
@@ -100,11 +106,16 @@ final class AppModel: ObservableObject {
     }
 
     var playAlongExercises: [PlayAlongExercise] {
-        PlayAlongExercise.library
+        var exercises = PlayAlongExercise.library + practiceFeatures.customExercises.map(\.exercise)
+        if let generated = weakTransitionInsight?.exercise,
+           !exercises.contains(where: { $0.id == generated.id }) {
+            exercises.append(generated)
+        }
+        return exercises
     }
 
     var selectedPlayAlongExercise: PlayAlongExercise {
-        PlayAlongExercise.library.first { $0.id == selectedPlayAlongExerciseID } ?? .defaultExercise
+        playAlongExercises.first { $0.id == selectedPlayAlongExerciseID } ?? .defaultExercise
     }
 
     var metronomeTemporarilyMutedForRecording: Bool {
@@ -127,16 +138,23 @@ final class AppModel: ObservableObject {
     }
 
     var accountFeaturesEnabled: Bool {
-        config.supabaseURL != nil && !(config.supabasePublishableKey ?? "").isEmpty
+        config.hasUsableSupabaseAuthConfiguration
     }
 
     var accountUnavailableMessage: String? {
-        accountFeaturesEnabled ? nil : "You're practicing as a guest. Your data stays on this device."
+        accountFeaturesEnabled
+            ? nil
+            : "Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device."
     }
 
     func resetForUITesting() {
         authService.deleteStoredAuth()
         authState = .guest
+        tutorialCompleted = false
+        tutorialPresentationRequest = 0
+        authOperationInProgress = false
+        authNotice = nil
+        authNoticeIsError = false
         selectedInstrumentId = "trumpet"
         referencePitchHz = 440.0
         let clearedLocalArtifacts = clearLocalPracticeArtifacts()
@@ -152,12 +170,25 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func enterGuestDemo() {
+    func enterGuestDemo(presentTutorial: Bool = true) {
         authState = .guest
         ensembles.removeAll()
         selectedEnsembleID = nil
         ensembleStatusMessage = nil
+        authNotice = nil
+        authNoticeIsError = false
         lastError = nil
+        if presentTutorial {
+            requestTutorialPresentation()
+        }
+    }
+
+    func requestTutorialPresentation() {
+        tutorialPresentationRequest &+= 1
+    }
+
+    func completeTutorial() {
+        tutorialCompleted = true
     }
 
     func signOut() {
@@ -166,18 +197,48 @@ final class AppModel: ObservableObject {
         ensembles.removeAll()
         selectedEnsembleID = nil
         ensembleStatusMessage = nil
+        authNotice = nil
+        authNoticeIsError = false
         lastError = nil
     }
 
     func restoreSession() async {
+        guard authService.restoreSession() != nil else { return }
+        guard config.hasUsableSupabaseAuthConfiguration else {
+            authService.signOut()
+            authState = .signedOut
+            ensembles.removeAll()
+            selectedEnsembleID = nil
+            setAuthFailure(UserVisibleError.missingAuthConfiguration)
+            return
+        }
         do {
             if let session = try await authService.refreshStoredSession(config: config) {
                 authState = .signedIn(email: session.email)
+                lastError = nil
             }
+        } catch is CancellationError {
+            return
         } catch {
-            if let session = authService.restoreSession() {
+            if Self.isOfflineAuthFailure(error), let session = authService.unexpiredStoredSession() {
                 authState = .signedIn(email: session.email)
+                lastError = (error as? UserVisibleError) ?? .networkUnavailable
+                authNotice = "You're offline. BrassTune kept your unexpired sign-in for local practice; online account features may be unavailable."
+                authNoticeIsError = true
+                return
             }
+            if Self.isRetryableAuthRefreshFailure(error) {
+                authState = .signedOut
+                ensembles.removeAll()
+                selectedEnsembleID = nil
+                setAuthFailure(error)
+                return
+            }
+            authService.signOut()
+            authState = .signedOut
+            ensembles.removeAll()
+            selectedEnsembleID = nil
+            setAuthFailure(error)
         }
     }
 
@@ -383,44 +444,118 @@ final class AppModel: ObservableObject {
     }
 
     func signIn(email: String, password: String) async {
+        guard beginAuthOperation() else { return }
+        defer { authOperationInProgress = false }
         do {
             let session = try await authService.signIn(email: email, password: password, config: config)
             authState = .signedIn(email: session.email)
+            lastError = nil
+            setAuthNotice("Signed in.")
         } catch {
-            lastError = (error as? UserVisibleError) ?? .authenticationFailed
+            setAuthFailure(error)
         }
     }
 
     func signUp(email: String, password: String) async {
+        guard beginAuthOperation() else { return }
+        defer { authOperationInProgress = false }
         do {
             let session = try await authService.signUp(email: email, password: password, config: config)
             authState = .signedIn(email: session.email)
+            lastError = nil
+            setAuthNotice("Account created. Here's a quick tour of BrassTune.")
+            requestTutorialPresentation()
         } catch UserVisibleError.emailConfirmationRequired {
             authState = .emailConfirmationRequired(email: email)
+            lastError = nil
+            setAuthNotice("Account created. Check your email to confirm it, then use this tour to get started.")
+            requestTutorialPresentation()
         } catch {
-            lastError = (error as? UserVisibleError) ?? .authenticationFailed
+            setAuthFailure(error)
         }
     }
 
     func requestPasswordReset(email: String) async {
+        guard beginAuthOperation() else { return }
+        defer { authOperationInProgress = false }
         do {
             try await authService.requestPasswordReset(email: email, config: config)
+            lastError = nil
+            setAuthNotice("Password reset email sent. Check your inbox.")
         } catch {
-            lastError = (error as? UserVisibleError) ?? .authenticationFailed
+            setAuthFailure(error)
         }
     }
 
     func completeAppleSignIn(identityToken: Data, rawNonce: String) async {
+        guard beginAuthOperation() else { return }
+        defer { authOperationInProgress = false }
         do {
-            let session = try await authService.signInWithApple(identityToken: identityToken, rawNonce: rawNonce, config: config)
-            authState = .signedIn(email: session.email)
+            let result = try await authService.signInWithApple(identityToken: identityToken, rawNonce: rawNonce, config: config)
+            authState = .signedIn(email: result.session.email)
+            lastError = nil
+            switch result.isNewUser {
+            case true:
+                setAuthNotice("Apple account created. Here's a quick tour of BrassTune.")
+                requestTutorialPresentation()
+            case false:
+                setAuthNotice("Signed in with Apple.")
+            case nil:
+                // Some providers omit account-age timestamps. Touring the
+                // unknown case guarantees a newly created identity is not left
+                // without help; known returning accounts are not interrupted.
+                setAuthNotice("Signed in with Apple. Here's a quick tour you can finish or dismiss.")
+                requestTutorialPresentation()
+            }
         } catch {
-            lastError = (error as? UserVisibleError) ?? .authenticationFailed
+            setAuthFailure(error)
         }
+    }
+
+    private func beginAuthOperation() -> Bool {
+        guard !authOperationInProgress else { return false }
+        authOperationInProgress = true
+        authNotice = nil
+        authNoticeIsError = false
+        lastError = nil
+        return true
+    }
+
+    private func setAuthNotice(_ message: String) {
+        authNotice = message
+        authNoticeIsError = false
+    }
+
+    private func setAuthFailure(_ error: Error) {
+        let visible = (error as? UserVisibleError) ?? .authenticationFailed
+        lastError = visible
+        authNotice = visible.localizedDescription
+        authNoticeIsError = true
+    }
+
+    private static func isOfflineAuthFailure(_ error: Error) -> Bool {
+        guard let visible = error as? UserVisibleError else { return false }
+        switch visible {
+        case .networkUnavailable, .timeout:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isRetryableAuthRefreshFailure(_ error: Error) -> Bool {
+        if isOfflineAuthFailure(error) { return true }
+        guard let visible = error as? UserVisibleError,
+              case .apiRequestFailed(let statusCode, _) = visible else { return false }
+        return statusCode == 408
+            || statusCode == 425
+            || statusCode == 429
+            || (500...599).contains(statusCode)
     }
 
     func deleteSession(id: PracticeSession.ID) {
         sessions.removeAll { $0.id == id }
+        practiceFeatures.reflections.removeAll { $0.sessionID == id }
     }
 
     func exportDataText() -> String {
@@ -432,6 +567,11 @@ final class AppModel: ObservableObject {
             "Sessions: \(sessions.count)",
             "Scores: \(scores.count)",
             "Metronome: \(metronome.bpm) BPM, \(metronome.meterLabel), sound \(metronome.visualOnly ? "off" : "on")",
+            "Custom exercises: \(practiceFeatures.customExercises.count)",
+            "Metronome presets: \(practiceFeatures.metronomePresets.count)",
+            "Weekly goal: \(practiceFeatures.weeklyGoal.targetMinutes) minutes and \(practiceFeatures.weeklyGoal.targetSessions) sessions",
+            "Practice reflections: \(practiceFeatures.reflections.count)",
+            "Offline practice packs: \(practicePacks.count)",
         ]
         let analytics = analyticsSnapshot
         if analytics.hasSessions {
@@ -454,14 +594,25 @@ final class AppModel: ObservableObject {
     func deleteAccount(confirmation: String) async {
         guard confirmation.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "delete my account" else {
             lastError = .accountDeletionRequiresConfirmation
+            authNotice = lastError?.localizedDescription
+            authNoticeIsError = true
             return
         }
         await deleteAccount()
     }
 
     func deleteAccount() async {
-        if let token = authService.accessToken() {
+        guard beginAuthOperation() else { return }
+        defer { authOperationInProgress = false }
+        let deletedRemoteAccount = authState.usesRemoteAccount
+        if deletedRemoteAccount {
             do {
+                guard let token = try await authService.validAccessToken(config: config), !token.isEmpty else {
+                    throw UserVisibleError.apiRequestFailed(
+                        statusCode: 401,
+                        message: "Your sign-in expired. Sign in again before deleting your account."
+                    )
+                }
                 let body = try JSONSerialization.data(withJSONObject: ["confirmation": "delete my account"])
                 _ = try await apiClient.request(
                     BackendDeletionResponse.self,
@@ -472,7 +623,7 @@ final class AppModel: ObservableObject {
                     bearerToken: token
                 )
             } catch {
-                lastError = (error as? UserVisibleError) ?? .networkUnavailable
+                setAuthFailure(error)
                 return
             }
         }
@@ -486,6 +637,7 @@ final class AppModel: ObservableObject {
         authState = .signedOut
         if clearedLocalArtifacts {
             lastError = nil
+            setAuthNotice(deletedRemoteAccount ? "Account and local practice data deleted." : "Local app data cleared.")
         }
     }
 
@@ -574,7 +726,7 @@ final class AppModel: ObservableObject {
         }
         lastError = nil
         if let exerciseID,
-           PlayAlongExercise.library.contains(where: { $0.id == exerciseID }) {
+           playAlongExercises.contains(where: { $0.id == exerciseID }) {
             selectedPlayAlongExerciseID = exerciseID
         }
         if audioEngine.recording {
@@ -588,6 +740,9 @@ final class AppModel: ObservableObject {
         if NativeAudioEngine.testFixturesEnabled {
             playAlongSession = PlayAlongSession(exercise: selectedPlayAlongExercise)
             playAlongPhase = .running
+            recordPracticeStart(
+                PracticeShortcut(kind: .playAlongExercise, referenceID: selectedPlayAlongExercise.id, title: selectedPlayAlongExercise.title)
+            )
             startPlayAlongFixture(exercise: selectedPlayAlongExercise)
             return
         }
@@ -608,6 +763,9 @@ final class AppModel: ObservableObject {
             }
             playAlongSession = PlayAlongSession(exercise: selectedPlayAlongExercise)
             playAlongPhase = .running
+            recordPracticeStart(
+                PracticeShortcut(kind: .playAlongExercise, referenceID: selectedPlayAlongExercise.id, title: selectedPlayAlongExercise.title)
+            )
             if metronomeRunning {
                 metronomeOutput.stop()
             }
@@ -820,7 +978,10 @@ final class AppModel: ObservableObject {
             scores: scores,
             activeScoreID: activeScoreID,
             metronome: metronome,
-            metronomeDefaultsVersion: 2
+            metronomeDefaultsVersion: 2,
+            tutorialCompleted: tutorialCompleted,
+            snapshotVersion: 3,
+            practiceFeatures: practiceFeatures
         )
     }
 
@@ -962,10 +1123,12 @@ final class AppModel: ObservableObject {
         playAlongUsesFixture = true
         playAlongFixtureTask = Task { [weak self] in
             for (noteIndex, note) in exercise.writtenNotes.enumerated() {
-                for frameIndex in 0...5 {
+                // Preserve the production two-second confirmed-hold contract in
+                // fixture timestamps while accelerating wall-clock UI-test time.
+                for frameIndex in 0...20 {
                     guard !Task.isCancelled else { return }
                     let frame = PitchFrame(
-                        timestampMs: noteIndex * 1_000 + frameIndex * 100,
+                        timestampMs: noteIndex * 2_500 + frameIndex * 100,
                         frequencyHz: 440,
                         confidence: 0.98,
                         rms: 0.08,
@@ -976,7 +1139,7 @@ final class AppModel: ObservableObject {
                         isValidForRecording: true
                     )
                     self?.consumePlayAlongFrame(frame)
-                    try? await Task.sleep(nanoseconds: 35_000_000)
+                    try? await Task.sleep(nanoseconds: 10_000_000)
                 }
             }
         }
@@ -986,6 +1149,13 @@ final class AppModel: ObservableObject {
         guard playAlongPhase == .running, session.isComplete else { return }
         playAlongSession = session
         playAlongGrade = session.grade
+        if let grade = session.grade {
+            practiceFeatures.playAlongAttempts.insert(
+                PlayAlongAttemptSummary(exercise: session.exercise, noteGrades: grade.noteGrades),
+                at: 0
+            )
+            practiceFeatures.playAlongAttempts = Array(practiceFeatures.playAlongAttempts.prefix(200))
+        }
         // Complete the state transition before stopping capture because the
         // engine republishes its last real frame as it closes.
         playAlongPhase = .completed
@@ -1071,6 +1241,7 @@ final class AppModel: ObservableObject {
         sessions.removeAll()
         scores.removeAll()
         activeScoreID = nil
+        practiceFeatures = PracticeFeatureState()
         isRestoringLocalState = false
         return true
     }
@@ -1094,6 +1265,13 @@ final class AppModel: ObservableObject {
             ? snapshot.activeScoreID
             : scores.first?.id
         metronome = needsMetronomeDefaultMigration ? MetronomeSettings() : snapshot.metronome
+        tutorialCompleted = snapshot.tutorialCompleted ?? false
+        var restoredFeatures = snapshot.practiceFeatures ?? PracticeFeatureState()
+        // Persisted checkpoints are resumable navigation state, never proof
+        // that audio or a clock is still running after process restoration.
+        restoredFeatures.warmupCheckpoint?.runningSince = nil
+        restoredFeatures.workspaceCheckpoint?.blockRunningSince = nil
+        practiceFeatures = restoredFeatures
         isRestoringLocalState = false
         let removedFixtures = sessions.count != snapshot.sessions.count || scores.count != snapshot.scores.count
         if needsMetronomeDefaultMigration || removedFixtures || snapshot.metronomeDefaultsVersion != 2 {
@@ -1204,6 +1382,9 @@ struct NativeLocalSnapshot: Codable, Equatable {
     var activeScoreID: ImportedScore.ID?
     var metronome: MetronomeSettings
     var metronomeDefaultsVersion: Int? = nil
+    var tutorialCompleted: Bool? = nil
+    var snapshotVersion: Int? = nil
+    var practiceFeatures: PracticeFeatureState? = nil
 }
 
 struct NativeScoreImportService {

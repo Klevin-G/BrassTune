@@ -33,14 +33,75 @@ struct AppConfig: Equatable {
     var supabaseURL: URL?
     var supabasePublishableKey: String?
 
-    static func fromProcessEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> AppConfig {
+    var hasUsableSupabaseAuthConfiguration: Bool {
+        guard let supabaseURL,
+              supabaseURL.scheme?.lowercased() == "https",
+              let host = supabaseURL.host,
+              !host.isEmpty,
+              supabaseURL.user == nil,
+              supabaseURL.password == nil,
+              let key = Self.runtimeValue(supabasePublishableKey),
+              Self.isPublicClientKey(key) else {
+            return false
+        }
+        return true
+    }
+
+    static func fromProcessEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleInfo: [String: Any]? = nil
+    ) -> AppConfig {
+        let info = bundleInfo ?? Bundle.main.infoDictionary ?? [:]
         let apiBaseURL = environment["BRASSTUNE_API_BASE_URL"].flatMap(URL.init(string:)) ?? local.apiBaseURL
+        let supabaseURLValue = runtimeValue(environment["BRASSTUNE_SUPABASE_URL"])
+            ?? runtimeValue(info["BRASSTUNE_SUPABASE_URL"] as? String)
+        let publishableKey = runtimeValue(environment["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"])
+            ?? runtimeValue(info["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"] as? String)
         return AppConfig(
             environment: environment["BRASSTUNE_ENV"].flatMap(AppEnvironment.init(rawValue:)) ?? .local,
             apiBaseURL: apiBaseURL,
-            supabaseURL: environment["BRASSTUNE_SUPABASE_URL"].flatMap(URL.init(string:)),
-            supabasePublishableKey: environment["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"]
+            supabaseURL: supabaseURLValue.flatMap(URL.init(string:)),
+            supabasePublishableKey: publishableKey
         )
+    }
+
+    private static func runtimeValue(_ raw: String?) -> String? {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              !value.contains("$("),
+              !value.contains("${") else {
+            return nil
+        }
+        return value
+    }
+
+    private static func isPublicClientKey(_ key: String) -> Bool {
+        let lowercase = key.lowercased()
+        guard !lowercase.hasPrefix("sb_secret_"),
+              !lowercase.contains("service_role") else {
+            return false
+        }
+        if lowercase.hasPrefix("sb_publishable_"), key.count > "sb_publishable_".count {
+            return true
+        }
+        let parts = key.split(separator: ".", omittingEmptySubsequences: false)
+        if parts.count >= 2,
+           let payload = decodeBase64URL(String(parts[1])),
+           let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+           let role = (object["role"] as? String)?.lowercased() {
+            return role == "anon"
+        }
+        return false
+    }
+
+    private static func decodeBase64URL(_ value: String) -> Data? {
+        var normalized = value.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = normalized.count % 4
+        if remainder != 0 {
+            normalized += String(repeating: "=", count: 4 - remainder)
+        }
+        return Data(base64Encoded: normalized)
     }
 
     static let local = AppConfig(
@@ -588,12 +649,14 @@ struct PlayAlongGrader: Equatable {
 
     private var firstMatchTimestampMs: Int?
     private var lastMatchTimestampMs: Int?
-    private var lastTimestampMs = 0
+    private var previousFrameTimestampMs: Int?
+    private var previousFrameMatched = false
+    private var confirmedHoldDurationMs = 0
     private var centsSamples: [TimedCentsSample] = []
 
     init(
         writtenNotes: [String],
-        holdDurationMs: Int = 450,
+        holdDurationMs: Int = 2_000,
         minimumConfidence: Double = 0.65,
         minimumSamples: Int = 5,
         attackTrimMs: Int = 120,
@@ -617,13 +680,12 @@ struct PlayAlongGrader: Equatable {
     }
 
     var heldFraction: Double {
-        guard let firstMatchTimestampMs else { return 0 }
-        return min(1, max(0, Double(lastTimestampMs - firstMatchTimestampMs) / Double(holdDurationMs)))
+        guard firstMatchTimestampMs != nil else { return 0 }
+        return min(1, max(0, Double(confirmedHoldDurationMs) / Double(holdDurationMs)))
     }
 
     mutating func feed(_ frame: PitchFrame) {
         guard !isComplete else { return }
-        lastTimestampMs = max(lastTimestampMs, frame.timestampMs)
         detectedNoteName = frame.writtenNoteName
         detectedCents = frame.centsDeviation
 
@@ -636,16 +698,19 @@ struct PlayAlongGrader: Equatable {
         if matchesTarget, let cents = frame.centsDeviation {
             if let lastMatchTimestampMs,
                frame.timestampMs - lastMatchTimestampMs > maximumDropoutMs {
-                firstMatchTimestampMs = nil
-                centsSamples.removeAll(keepingCapacity: true)
+                resetCurrentHold()
             }
             if firstMatchTimestampMs == nil {
                 firstMatchTimestampMs = frame.timestampMs
             }
+            if previousFrameMatched, let previousFrameTimestampMs {
+                confirmedHoldDurationMs += max(0, frame.timestampMs - previousFrameTimestampMs)
+            }
             lastMatchTimestampMs = frame.timestampMs
+            previousFrameTimestampMs = frame.timestampMs
+            previousFrameMatched = true
             centsSamples.append(TimedCentsSample(timestampMs: frame.timestampMs, cents: cents))
-            if let firstMatchTimestampMs,
-               frame.timestampMs - firstMatchTimestampMs >= holdDurationMs,
+            if confirmedHoldDurationMs >= holdDurationMs,
                centsSamples.count >= minimumSamples {
                 finalizeCurrentNote(wasPlayed: true)
             }
@@ -654,15 +719,16 @@ struct PlayAlongGrader: Equatable {
                   Self.pitchClass(detected) != Self.pitchClass(target) {
             // A confidently played different note restarts this target. Brief
             // silence and low-confidence dropouts do not erase a good hold.
-            firstMatchTimestampMs = nil
-            lastMatchTimestampMs = nil
-            centsSamples.removeAll(keepingCapacity: true)
-        } else if !confident,
-                  let lastMatchTimestampMs,
-                  frame.timestampMs - lastMatchTimestampMs > maximumDropoutMs {
-            firstMatchTimestampMs = nil
-            self.lastMatchTimestampMs = nil
-            centsSamples.removeAll(keepingCapacity: true)
+            resetCurrentHold()
+        } else {
+            // Silence and low-confidence frames pause confirmed hold time. They
+            // preserve progress inside the grace window but never fill the ring.
+            previousFrameTimestampMs = frame.timestampMs
+            previousFrameMatched = false
+            if let lastMatchTimestampMs,
+               frame.timestampMs - lastMatchTimestampMs > maximumDropoutMs {
+                resetCurrentHold()
+            }
         }
     }
 
@@ -691,13 +757,20 @@ struct PlayAlongGrader: Equatable {
             )
         )
         currentNoteIndex += 1
-        firstMatchTimestampMs = nil
-        lastMatchTimestampMs = nil
-        centsSamples.removeAll(keepingCapacity: true)
+        resetCurrentHold()
         if isComplete {
             detectedNoteName = nil
             detectedCents = nil
         }
+    }
+
+    private mutating func resetCurrentHold() {
+        firstMatchTimestampMs = nil
+        lastMatchTimestampMs = nil
+        previousFrameTimestampMs = nil
+        previousFrameMatched = false
+        confirmedHoldDurationMs = 0
+        centsSamples.removeAll(keepingCapacity: true)
     }
 
     private static func pitchClass(_ noteName: String?) -> Int? {
@@ -742,7 +815,7 @@ struct PlayAlongSession: Equatable {
     init(
         exercise: PlayAlongExercise,
         startedAt: Date = Date(),
-        holdDurationMs: Int = 450,
+        holdDurationMs: Int = 2_000,
         minimumConfidence: Double = 0.65,
         minimumSamples: Int = 5,
         attackTrimMs: Int = 120

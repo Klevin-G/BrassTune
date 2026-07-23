@@ -37,6 +37,10 @@ private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private final class InMemoryAuthSessionStore: @unchecked Sendable {
+    var payload: String?
+}
+
 final class BrassTuneAppTests: XCTestCase {
     // MARK: - Shipping defaults and local model behavior
 
@@ -130,7 +134,417 @@ final class BrassTuneAppTests: XCTestCase {
         let model = makeModel()
 
         XCTAssertFalse(model.accountFeaturesEnabled)
+        XCTAssertEqual(
+            model.accountUnavailableMessage,
+            "Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device."
+        )
+    }
+
+    @MainActor
+    func testRuntimeAccountConfigFailsClosedUnlessURLAndPublishableKeyAreBothPresent() {
+        let model = makeModel()
+        let apiURL = URL(string: "https://api.example.test")!
+        let supabaseURL = URL(string: "https://project.supabase.co")!
+
+        model.config = AppConfig(environment: .production, apiBaseURL: apiURL, supabaseURL: supabaseURL, supabasePublishableKey: nil)
+        XCTAssertFalse(model.accountFeaturesEnabled)
         XCTAssertNotNil(model.accountUnavailableMessage)
+
+        model.config = AppConfig(environment: .production, apiBaseURL: apiURL, supabaseURL: nil, supabasePublishableKey: "sb_publishable_test")
+        XCTAssertFalse(model.accountFeaturesEnabled)
+
+        model.config = AppConfig(environment: .production, apiBaseURL: apiURL, supabaseURL: supabaseURL, supabasePublishableKey: "sb_publishable_test")
+        XCTAssertTrue(model.accountFeaturesEnabled)
+        XCTAssertNil(model.accountUnavailableMessage)
+    }
+
+    @MainActor
+    func testRuntimeConfigReadsPublicArchiveInfoAndRejectsUnresolvedOrSecretValues() {
+        let valid = AppConfig.fromProcessEnvironment(
+            [:],
+            bundleInfo: [
+                "BRASSTUNE_SUPABASE_URL": "https://project.supabase.co",
+                "BRASSTUNE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_test",
+            ]
+        )
+        XCTAssertEqual(valid.supabaseURL, URL(string: "https://project.supabase.co"))
+        XCTAssertEqual(valid.supabasePublishableKey, "sb_publishable_test")
+        XCTAssertTrue(valid.hasUsableSupabaseAuthConfiguration)
+
+        let unresolved = AppConfig.fromProcessEnvironment(
+            [:],
+            bundleInfo: [
+                "BRASSTUNE_SUPABASE_URL": "$(BRASSTUNE_SUPABASE_URL)",
+                "BRASSTUNE_SUPABASE_PUBLISHABLE_KEY": "$(BRASSTUNE_SUPABASE_PUBLISHABLE_KEY)",
+            ]
+        )
+        XCTAssertNil(unresolved.supabaseURL)
+        XCTAssertNil(unresolved.supabasePublishableKey)
+        XCTAssertFalse(unresolved.hasUsableSupabaseAuthConfiguration)
+
+        let secretLike = AppConfig(
+            environment: .production,
+            apiBaseURL: URL(string: "https://api.example.test")!,
+            supabaseURL: URL(string: "https://project.supabase.co")!,
+            supabasePublishableKey: "sb_secret_forbidden"
+        )
+        XCTAssertFalse(secretLike.hasUsableSupabaseAuthConfiguration)
+
+        let environmentOverride = AppConfig.fromProcessEnvironment(
+            [
+                "BRASSTUNE_SUPABASE_URL": "https://override.supabase.co",
+                "BRASSTUNE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_override",
+            ],
+            bundleInfo: [
+                "BRASSTUNE_SUPABASE_URL": "https://bundle.supabase.co",
+                "BRASSTUNE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_bundle",
+            ]
+        )
+        XCTAssertEqual(environmentOverride.supabaseURL, URL(string: "https://override.supabase.co"))
+        XCTAssertEqual(environmentOverride.supabasePublishableKey, "sb_publishable_override")
+    }
+
+    @MainActor
+    func testTutorialCompletionPersistsAndExplicitGuestEntryRequestsReplay() {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let model = AppModel(persistenceStore: store)
+
+        XCTAssertFalse(model.tutorialCompleted)
+        model.completeTutorial()
+
+        let restored = AppModel(persistenceStore: store)
+        XCTAssertTrue(restored.tutorialCompleted)
+        XCTAssertEqual(restored.tutorialPresentationRequest, 0)
+
+        restored.enterGuestDemo()
+        XCTAssertEqual(restored.authState, .guest)
+        XCTAssertEqual(restored.tutorialPresentationRequest, 1)
+        XCTAssertTrue(restored.tutorialCompleted, "Replaying the tutorial must not erase prior completion.")
+    }
+
+    @MainActor
+    func testPasswordResetClearsStaleErrorShowsSuccessAndGuardsDuplicateSubmission() async throws {
+        let session = makeStubSession()
+        let authService = AuthService(session: session)
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+        model.config = AppConfig(
+            environment: .production,
+            apiBaseURL: URL(string: "https://api.example.test")!,
+            supabaseURL: URL(string: "https://project.supabase.co")!,
+            supabasePublishableKey: "sb_publishable_test"
+        )
+        model.lastError = .authenticationFailed
+        nonisolated(unsafe) var requestCount = 0
+        StubURLProtocol.handler = { request in
+            requestCount += 1
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data("{}".utf8),
+                delayNanoseconds: 150_000_000
+            )
+        }
+
+        async let first: Void = model.requestPasswordReset(email: "player@example.com")
+        try await Task.sleep(nanoseconds: 20_000_000)
+        async let duplicate: Void = model.requestPasswordReset(email: "player@example.com")
+        _ = await (first, duplicate)
+
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertFalse(model.authOperationInProgress)
+        XCTAssertNil(model.lastError)
+        XCTAssertEqual(model.authNotice, "Password reset email sent. Check your inbox.")
+        XCTAssertFalse(model.authNoticeIsError)
+        StubURLProtocol.handler = nil
+    }
+
+    @MainActor
+    func testNewAccountAwaitingConfirmationRequestsTutorial() async {
+        let session = makeStubSession()
+        let authService = AuthService(session: session)
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+        model.config = AppConfig(
+            environment: .production,
+            apiBaseURL: URL(string: "https://api.example.test")!,
+            supabaseURL: URL(string: "https://project.supabase.co")!,
+            supabasePublishableKey: "sb_publishable_test"
+        )
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"user":{"email":"new@example.com"}}"#.utf8)
+            )
+        }
+
+        await model.signUp(email: "new@example.com", password: "long-enough-password")
+
+        XCTAssertEqual(model.authState, .emailConfirmationRequired(email: "new@example.com"))
+        XCTAssertEqual(model.tutorialPresentationRequest, 1)
+        XCTAssertNil(model.lastError)
+        XCTAssertEqual(model.authNotice, "Account created. Check your email to confirm it, then use this tour to get started.")
+        StubURLProtocol.handler = nil
+    }
+
+    @MainActor
+    func testSignedInRemoteDeletionWithoutUsableTokenFailsClosed() async {
+        let networkSession = makeStubSession()
+        let authService = makeIsolatedAuthService(session: networkSession)
+        defer {
+            authService.signOut()
+            StubURLProtocol.handler = nil
+        }
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let localSession = makeSession(name: "Keep me", cents: [-2, 0, 3])
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+        model.config = makeAuthConfig()
+        model.authState = .signedIn(email: "player@example.com")
+        model.sessions = [localSession]
+        nonisolated(unsafe) var requestCount = 0
+        StubURLProtocol.handler = { request in
+            requestCount += 1
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"deleted":true}"#.utf8)
+            )
+        }
+
+        await model.deleteAccount()
+
+        XCTAssertEqual(requestCount, 0, "Deletion must not reach the backend without a usable account token.")
+        XCTAssertEqual(model.authState, .signedIn(email: "player@example.com"))
+        XCTAssertEqual(model.sessions, [localSession])
+        XCTAssertEqual(
+            model.lastError,
+            .apiRequestFailed(statusCode: 401, message: "Your sign-in expired. Sign in again before deleting your account.")
+        )
+        XCTAssertEqual(model.authNotice, "Your sign-in expired. Sign in again before deleting your account.")
+        XCTAssertTrue(model.authNoticeIsError)
+    }
+
+    @MainActor
+    func testTerminalRefreshFailureClearsExpiredStoredSessionAndSignsOut() async throws {
+        let networkSession = makeStubSession()
+        let authService = makeIsolatedAuthService(session: networkSession)
+        defer {
+            authService.signOut()
+            StubURLProtocol.handler = nil
+        }
+        let config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-60,"user":{"email":"player@example.com"}}"#.utf8)
+            )
+        }
+        _ = try await authService.signIn(email: "player@example.com", password: "password", config: config)
+
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"message":"refresh token is no longer valid"}"#.utf8)
+            )
+        }
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+        model.config = config
+
+        await model.restoreSession()
+
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNil(authService.restoreSession())
+        XCTAssertEqual(
+            model.lastError,
+            .apiRequestFailed(statusCode: 401, message: "Your sign-in expired. Sign in again, then retry.")
+        )
+        XCTAssertTrue(model.authNoticeIsError)
+    }
+
+    @MainActor
+    func testCachedRemoteSessionIsRejectedAndClearedBeforeUseWhenRuntimeConfigIsInvalid() async throws {
+        let networkSession = makeStubSession()
+        let authService = makeIsolatedAuthService(session: networkSession)
+        defer {
+            authService.signOut()
+            StubURLProtocol.handler = nil
+        }
+        let validConfig = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"cached-token","refresh_token":"refresh-token","expires_in":3600,"user":{"email":"cached@example.com"}}"#.utf8)
+            )
+        }
+        _ = try await authService.signIn(email: "cached@example.com", password: "password", config: validConfig)
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+        model.config = .local
+
+        await model.restoreSession()
+
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNil(authService.restoreSession())
+        XCTAssertEqual(model.lastError, .missingAuthConfiguration)
+        XCTAssertTrue(model.authNoticeIsError)
+    }
+
+    @MainActor
+    func testRetryableRefreshResponsesPreserveStoredSessionButKeepUIFailClosed() async throws {
+        for statusCode in [429, 503] {
+            let networkSession = makeStubSession()
+            let authService = makeIsolatedAuthService(session: networkSession)
+            let config = makeAuthConfig()
+            StubURLProtocol.handler = { request in
+                .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-60,"user":{"email":"retry@example.com"}}"#.utf8)
+                )
+            }
+            _ = try await authService.signIn(email: "retry@example.com", password: "password", config: config)
+            StubURLProtocol.handler = { request in
+                .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: nil)!,
+                    data: Data()
+                )
+            }
+            let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+            model.config = config
+
+            await model.restoreSession()
+
+            XCTAssertEqual(model.authState, .signedOut)
+            XCTAssertNotNil(authService.restoreSession(), "Retryable \(statusCode) failures must remain resumable.")
+            XCTAssertEqual(
+                model.lastError,
+                .apiRequestFailed(
+                    statusCode: statusCode,
+                    message: "The account service couldn't refresh your sign-in right now. Your saved session will be retried later."
+                )
+            )
+            XCTAssertTrue(model.authNoticeIsError)
+            authService.signOut()
+        }
+        StubURLProtocol.handler = nil
+    }
+
+    @MainActor
+    func testOfflineRefreshFallbackRequiresProvablyUnexpiredAccessToken() async throws {
+        let networkSession = makeStubSession()
+        let authService = makeIsolatedAuthService(session: networkSession)
+        defer {
+            authService.signOut()
+            StubURLProtocol.handler = nil
+        }
+        let config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"still-live-token","refresh_token":"refresh-token","expires_in":30,"user":{"email":"offline@example.com"}}"#.utf8)
+            )
+        }
+        _ = try await authService.signIn(email: "offline@example.com", password: "password", config: config)
+        StubURLProtocol.handler = { _ in throw URLError(.notConnectedToInternet) }
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+        model.config = config
+
+        await model.restoreSession()
+
+        XCTAssertEqual(model.authState, .signedIn(email: "offline@example.com"))
+        XCTAssertNotNil(authService.restoreSession())
+        XCTAssertEqual(model.lastError, .networkUnavailable)
+        XCTAssertEqual(
+            model.authNotice,
+            "You're offline. BrassTune kept your unexpired sign-in for local practice; online account features may be unavailable."
+        )
+        XCTAssertTrue(model.authNoticeIsError)
+    }
+
+    @MainActor
+    func testExpiredOfflineRefreshPreservesRetryableSessionButStaysSignedOut() async throws {
+        let networkSession = makeStubSession()
+        let authService = makeIsolatedAuthService(session: networkSession)
+        defer {
+            authService.signOut()
+            StubURLProtocol.handler = nil
+        }
+        let config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-30,"user":{"email":"offline@example.com"}}"#.utf8)
+            )
+        }
+        _ = try await authService.signIn(email: "offline@example.com", password: "password", config: config)
+        StubURLProtocol.handler = { _ in throw URLError(.notConnectedToInternet) }
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+        model.config = config
+
+        await model.restoreSession()
+
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNotNil(authService.restoreSession())
+        XCTAssertEqual(model.lastError, .networkUnavailable)
+        XCTAssertTrue(model.authNoticeIsError)
+    }
+
+    @MainActor
+    func testAppleIdentityAgeControlsTutorialWithoutInterruptingKnownReturningUsers() async {
+        let timestamps: [(created: String?, last: String?, expectedRequest: Int, expectedNotice: String)] = [
+            (
+                "2026-07-16T19:00:00.000Z",
+                "2026-07-16T19:00:00.000Z",
+                1,
+                "Apple account created. Here's a quick tour of BrassTune."
+            ),
+            (
+                "2026-06-01T19:00:00.000Z",
+                "2026-07-16T19:00:00.000Z",
+                0,
+                "Signed in with Apple."
+            ),
+            (
+                nil,
+                nil,
+                1,
+                "Signed in with Apple. Here's a quick tour you can finish or dismiss."
+            ),
+        ]
+
+        for expectation in timestamps {
+            let networkSession = makeStubSession()
+            let authService = makeIsolatedAuthService(session: networkSession)
+            let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
+            model.config = makeAuthConfig()
+            var user: [String: String] = ["email": "apple@example.com"]
+            user["created_at"] = expectation.created
+            user["last_sign_in_at"] = expectation.last
+            let payload: [String: Any] = [
+                "access_token": "apple-access-token",
+                "refresh_token": "apple-refresh-token",
+                "expires_in": 3_600,
+                "user": user,
+            ]
+            StubURLProtocol.handler = { request in
+                .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: try JSONSerialization.data(withJSONObject: payload)
+                )
+            }
+
+            await model.completeAppleSignIn(identityToken: Data("apple-id-token".utf8), rawNonce: "nonce")
+
+            XCTAssertEqual(model.authState, .signedIn(email: "apple@example.com"))
+            XCTAssertEqual(model.tutorialPresentationRequest, expectation.expectedRequest)
+            XCTAssertEqual(model.authNotice, expectation.expectedNotice)
+            XCTAssertNil(model.lastError)
+            authService.signOut()
+        }
+        StubURLProtocol.handler = nil
     }
 
     @MainActor
@@ -612,6 +1026,24 @@ final class BrassTuneAppTests: XCTestCase {
 
     // MARK: - Play-Along web parity
 
+    func testPlayAlongUsesTwoSecondDefaultAndDoesNotAdvanceEarly() {
+        var grader = PlayAlongGrader(writtenNotes: ["C", "D"])
+
+        XCTAssertEqual(grader.holdDurationMs, 2_000)
+        for timestamp in stride(from: 0, through: 1_750, by: 250) {
+            grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: timestamp))
+        }
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 1_999))
+
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+        XCTAssertEqual(grader.currentNoteName, "C")
+        XCTAssertEqual(grader.heldFraction, 1_999.0 / 2_000.0, accuracy: 0.000_1)
+
+        grader.feed(makePlayAlongFrame(note: "C", cents: 5, timestampMs: 2_000))
+        XCTAssertEqual(grader.noteGrades.count, 1)
+        XCTAssertEqual(grader.currentNoteName, "D")
+    }
+
     func testPlayAlongRatingUsesWebCentsThresholds() {
         XCTAssertEqual(PlayAlongNoteRating(cents: 5), .excellent)
         XCTAssertEqual(PlayAlongNoteRating(cents: -5), .excellent)
@@ -863,9 +1295,69 @@ final class BrassTuneAppTests: XCTestCase {
         grader.feed(makePlayAlongFrame(note: nil, cents: nil, timestampMs: 100, confidence: 0.1, frequencyHz: nil))
         grader.feed(makePlayAlongFrame(note: "C", cents: 8, timestampMs: 200))
         grader.feed(makePlayAlongFrame(note: "C", cents: 8, timestampMs: 440))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 8, timestampMs: 640))
 
         XCTAssertTrue(grader.isComplete)
         XCTAssertEqual(grader.noteGrades.first?.rating, .good)
+    }
+
+    func testPlayAlongPausesVisibleProgressDuringBriefDropout() {
+        var grader = PlayAlongGrader(writtenNotes: ["C"], holdDurationMs: 400, minimumSamples: 3)
+
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 0))
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 100))
+        let beforeDropout = grader.heldFraction
+        grader.feed(makePlayAlongFrame(note: nil, cents: nil, timestampMs: 200, confidence: 0.1, frequencyHz: nil))
+        let duringDropout = grader.heldFraction
+        grader.feed(makePlayAlongFrame(note: "C", cents: 4, timestampMs: 250))
+
+        XCTAssertEqual(beforeDropout, 0.25, accuracy: 0.001)
+        XCTAssertEqual(duringDropout, beforeDropout, accuracy: 0.001)
+        XCTAssertEqual(grader.heldFraction, beforeDropout, accuracy: 0.001)
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+    }
+
+    func testPlayAlongVoiceOverAnnouncementNamesNextNoteAndCompletion() {
+        let exercise = PlayAlongExercise(
+            id: "announcement-test",
+            title: "Announcement test",
+            detail: "Two notes",
+            difficulty: "Test",
+            category: .practicePattern,
+            writtenNotes: ["C", "D"]
+        )
+        var session = PlayAlongSession(exercise: exercise, holdDurationMs: 100, minimumSamples: 2, attackTrimMs: 0)
+        session.feed(makePlayAlongFrame(note: "C", cents: 0, timestampMs: 0))
+        session.feed(makePlayAlongFrame(note: "C", cents: 0, timestampMs: 100))
+
+        XCTAssertEqual(playAlongAdvanceAnnouncement(for: session), "Next note is D. Hold it steady for two seconds.")
+
+        session.feed(makePlayAlongFrame(note: "D", cents: 0, timestampMs: 200))
+        session.feed(makePlayAlongFrame(note: "D", cents: 0, timestampMs: 300))
+        XCTAssertEqual(playAlongAdvanceAnnouncement(for: session), "Exercise complete. Your results are ready.")
+    }
+
+    func testEveryTutorialStepHasAStableVoiceOverFocusAnnouncement() {
+        let titles = [
+            "Choose your instrument",
+            "Play-Along",
+            "Tuner and recordings",
+            "Progress and practice history",
+            "Metronome",
+            "Sheet music",
+            "Classes and accounts",
+            "Settings, privacy, and data",
+        ]
+
+        for (index, title) in titles.enumerated() {
+            let announcement = nativeTutorialAccessibilityAnnouncement(stepIndex: index)
+            XCTAssertTrue(announcement.contains("Step \(index + 1) of 8"))
+            XCTAssertTrue(announcement.contains(title))
+        }
+        XCTAssertEqual(
+            Set(titles.indices.map { nativeTutorialAccessibilityAnnouncement(stepIndex: $0) }).count,
+            titles.count
+        )
     }
 
     func testPlayAlongLongSilenceResetsHoldAfterDropoutGrace() {
@@ -1094,6 +1586,28 @@ final class BrassTuneAppTests: XCTestCase {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
         return AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+    }
+
+    @MainActor
+    private func makeIsolatedAuthService(session: URLSession) -> AuthService {
+        let store = InMemoryAuthSessionStore()
+        return AuthService(
+            session: session,
+            service: "com.brasstune.tests.\(UUID().uuidString)",
+            account: "current-session",
+            readSessionPayload: { store.payload },
+            saveSessionPayload: { store.payload = $0 },
+            deleteSessionPayload: { store.payload = nil }
+        )
+    }
+
+    private func makeAuthConfig() -> AppConfig {
+        AppConfig(
+            environment: .production,
+            apiBaseURL: URL(string: "https://api.example.test")!,
+            supabaseURL: URL(string: "https://project.supabase.co")!,
+            supabasePublishableKey: "sb_publishable_test"
+        )
     }
 
     private func makeSession(

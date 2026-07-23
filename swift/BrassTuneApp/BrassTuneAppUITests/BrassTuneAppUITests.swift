@@ -6,7 +6,7 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
-    func testOnboardingOnlyAsksForInstrumentAndStart() throws {
+    func testFirstRunTutorialCoversEveryNativeFeatureAndCompletionPersists() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_RESET_STATE"]
         app.launch()
@@ -15,23 +15,65 @@ final class BrassTuneAppUITests: XCTestCase {
             app.descendants(matching: .any)["onboarding.hero"].waitForExistence(timeout: 8),
             "Onboarding should open for a normal first launch"
         )
-        XCTAssertTrue(app.staticTexts["Choose your instrument"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.hero"].label.contains("Choose your instrument"))
         XCTAssertTrue(app.descendants(matching: .any)["onboarding.instrumentPicker"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["onboarding.startPractice"].exists)
+        XCTAssertTrue(app.buttons["onboarding.next"].exists)
+        XCTAssertTrue(app.buttons["onboarding.notNow"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["settings.referencePitchStepper"].exists)
-        XCTAssertFalse(app.staticTexts["How BrassTune records"].exists)
-        XCTAssertFalse(app.staticTexts["No lock means confidence is too low to save. Unstable pitch means lock exists but cents vary too much."].exists)
-        XCTAssertEqual(
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "physical-device")).count,
-            0
+
+        app.buttons["onboarding.notNow"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.playAlong"].waitForExistence(timeout: 5))
+
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["onboarding.hero"].waitForExistence(timeout: 8),
+            "Not now must not mark the tutorial complete"
         )
 
-        app.descendants(matching: .any)["onboarding.startPractice"].tap()
+        let tutorialSteps = [
+            (title: "Choose your instrument", copy: "Pick the horn you play now"),
+            (title: "Play-Along", copy: "Hold the correct note steadily for two seconds"),
+            (title: "Tuner and recordings", copy: "Tap Stop and save"),
+            (title: "Progress and practice history", copy: "Open Practice history to review"),
+            (title: "Metronome", copy: "Set the tempo, meter, subdivision"),
+            (title: "Sheet music", copy: "Import a PDF or photo"),
+            (title: "Classes and accounts", copy: "enter a teacher's code"),
+            (title: "Settings, privacy, and data", copy: "replay this tutorial at any time"),
+        ]
+        for (index, step) in tutorialSteps.enumerated() {
+            let hero = app.descendants(matching: .any)["onboarding.hero"]
+            XCTAssertTrue(hero.waitForExistence(timeout: 5), "Missing tutorial step: \(step.title)")
+            XCTAssertTrue(hero.label.contains("Step \(index + 1) of 8"), "VoiceOver focus label must include tutorial progress.")
+            XCTAssertTrue(hero.label.contains(step.title), "VoiceOver focus label must name the current tutorial step.")
+            assertTutorialCopy(step.copy, in: app)
+            XCTAssertTrue(app.descendants(matching: .any)["onboarding.progress"].exists)
+            if index == 0 {
+                XCTAssertTrue(app.descendants(matching: .any)["onboarding.instrumentPicker"].exists)
+            } else {
+                XCTAssertTrue(app.buttons["onboarding.back"].exists)
+            }
+            if index < tutorialSteps.count - 1 {
+                XCTAssertTrue(app.buttons["onboarding.next"].exists)
+                tapWhenHittable(app.buttons["onboarding.next"], in: app)
+            } else {
+                XCTAssertTrue(app.buttons["onboarding.startPractice"].exists)
+            }
+        }
+
+        tapWhenHittable(app.buttons["onboarding.startPractice"], in: app)
 
         XCTAssertTrue(
             app.descendants(matching: .any)["screen.playAlong"].waitForExistence(timeout: 5),
-            "Start should lead to the flagship Play-Along tab"
+            "Finishing should lead to the flagship Play-Along tab"
         )
+
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.playAlong"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.descendants(matching: .any)["onboarding.hero"].exists, "Completion must persist across relaunch")
     }
 
     @MainActor
@@ -59,6 +101,10 @@ final class BrassTuneAppUITests: XCTestCase {
             waitForAnyElement([targetNote, score], timeout: 3),
             "UITEST_FIXTURES should drive the same Play-Along grader without exposing a source picker"
         )
+        if targetNote.exists {
+            XCTAssertTrue(app.descendants(matching: .any)["playAlong.holdProgress"].exists)
+            XCTAssertTrue(app.descendants(matching: .any)["playAlong.feedback"].exists)
+        }
         XCTAssertTrue(score.waitForExistence(timeout: 8), "The deterministic exercise should complete")
         XCTAssertTrue(score.label.contains("100"), "Centered fixture notes should receive a real 100% grader result")
         XCTAssertFalse(app.descendants(matching: .any)["practice.recordingSource"].exists)
@@ -96,6 +142,8 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("Settings", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["settings.accountConfigurationUnavailable"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "aren't configured in this build")).firstMatch.exists)
 
         let advancedTuner = app.descendants(matching: .any)["settings.advancedTunerSettings"]
         XCTAssertTrue(advancedTuner.waitForExistence(timeout: 5))
@@ -171,6 +219,60 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
+    func testLocalPracticeToolboxIsReachableFromFourTabs() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["practice.quickStart.warmup"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["Guided five-minute warm-up"].exists)
+        XCTAssertTrue(app.buttons["Create a Play-Along exercise"].exists)
+        XCTAssertTrue(app.buttons["Offline practice packs"].exists)
+        XCTAssertTrue(app.buttons["Add to favorites"].exists)
+
+        let builder = app.buttons["Create a Play-Along exercise"]
+        tapWhenSafelyVisible(builder, in: app)
+        XCTAssertTrue(app.navigationBars["Exercise builder"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["exerciseBuilder.save"].exists)
+        app.navigationBars.buttons["Play-Along"].tap()
+
+        let warmup = app.buttons["Guided five-minute warm-up"]
+        tapWhenSafelyVisible(warmup, in: app)
+        XCTAssertTrue(app.navigationBars["Warm-up"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["warmup.start"].exists)
+        app.navigationBars.buttons["Play-Along"].tap()
+
+        let packs = app.buttons["Offline practice packs"]
+        tapWhenSafelyVisible(packs, in: app)
+        XCTAssertTrue(app.navigationBars["Practice packs"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["practicePack.open.pack-daily-foundations"].exists)
+
+        openTab("Tuner", in: app)
+        let droneLink = app.descendants(matching: .any)["tuner.droneIntervalLink"]
+        XCTAssertTrue(droneLink.waitForExistence(timeout: 5))
+        droneLink.tap()
+        XCTAssertTrue(app.navigationBars["Drone and intervals"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["drone.toggle"].exists)
+
+        openTab("Progress", in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["progress.weeklyGoal"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["progress.weakTransition"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS[c] %@", "at least three attempts"))
+                .firstMatch
+                .waitForExistence(timeout: 5),
+            "The weak-transition card should explain the minimum evidence needed before generating a drill."
+        )
+
+        openTab("Settings", in: app)
+        let metronomeLink = app.descendants(matching: .any)["settings.metronomeLink"]
+        tapWhenSafelyVisible(metronomeLink, in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["screen.metronome"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.savePreset"].exists)
+    }
+
+    @MainActor
     private func assertFourTabInformationArchitecture(in app: XCUIApplication) {
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(tabBar.waitForExistence(timeout: 8))
@@ -214,6 +316,67 @@ final class BrassTuneAppUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
         return elements.contains(where: \.exists)
+    }
+
+    @MainActor
+    private func tapWhenHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected tutorial control", file: file, line: line)
+        for _ in 0..<5 where !element.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(element.isHittable, "Tutorial control should be reachable by scrolling", file: file, line: line)
+        element.tap()
+    }
+
+    @MainActor
+    private func tapWhenSafelyVisible(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "Expected reachable control", file: file, line: line)
+        for _ in 0..<8 {
+            let top = app.navigationBars.firstMatch.exists ? app.navigationBars.firstMatch.frame.maxY + 8 : 8
+            let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY - 8 : app.frame.maxY - 8
+            let frame = element.frame
+            if frame.minY >= top, frame.maxY <= bottom, element.isHittable {
+                element.tap()
+                return
+            }
+            if frame.minY < top {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.42))
+                    .press(
+                        forDuration: 0.05,
+                        thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+                    )
+            } else {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.68))
+                    .press(
+                        forDuration: 0.05,
+                        thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+                    )
+            }
+        }
+        XCTFail("Control never entered the unobscured area between the navigation and tab bars", file: file, line: line)
+    }
+
+    @MainActor
+    private func assertTutorialCopy(
+        _ fragment: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let match = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", fragment))
+            .firstMatch
+        XCTAssertTrue(match.waitForExistence(timeout: 5), "Missing tutorial explanation: \(fragment)", file: file, line: line)
     }
 
     @MainActor
