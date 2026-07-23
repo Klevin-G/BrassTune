@@ -437,12 +437,14 @@ def add_session_samples_batch(session_id: int, frames: List[PitchFrameIn], db: S
 
 @router.post("/sessions/{session_id}/stop")
 def stop_practice_session(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    _require_session_access(db, session_id, auth)
+    existing = _require_session_access(db, session_id, auth)
+    was_active = existing.ended_at is None
     session = stop_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     result = session_to_dict(session)
-    record_event(db, "session_completed", auth.user.id, {"session_id": session_id, "duration_seconds": result["duration_seconds"], "notes_count": result["notes_count"]})
+    if was_active:
+        record_event(db, "session_completed", auth.user.id, {"session_id": session_id, "duration_seconds": result["duration_seconds"], "notes_count": result["notes_count"]})
     return result
 
 

@@ -202,6 +202,7 @@ async def pitch_socket(websocket: WebSocket):
     account_key = None
     account_acquired = False
     pending_frames = defaultdict(list)
+    socket_created_session_ids: set[int] = set()
     frame_budget = _AudioFrameBudget()
     unauthenticated_errors = 0
 
@@ -245,12 +246,6 @@ async def pitch_socket(websocket: WebSocket):
             if frames:
                 save_pitch_frames(db, session_id, frames)
                 pending_frames[session_id] = []
-
-        def can_write_session(session_id: int) -> bool:
-            session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
-            if session is None:
-                return False
-            return auth.user.role == "admin" or session.user_id == auth.user.id
 
         def session_for_write(session_id: int) -> Optional[PracticeSession]:
             session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
@@ -343,6 +338,10 @@ async def pitch_socket(websocket: WebSocket):
                     await _send_error(websocket, "Too many session starts. Wait a moment before trying again.", "rate_limited")
                     continue
                 try:
+                    # Persist buffered frames before start_session finalizes an
+                    # older active session during a mode switch.
+                    for pending_session_id in list(pending_frames.keys()):
+                        flush_session(pending_session_id)
                     session = start_session(
                         db,
                         request.instrument_id,
@@ -354,6 +353,8 @@ async def pitch_socket(websocket: WebSocket):
                     db.rollback()
                     await _send_error(websocket, exc.detail, error_code_for_status(exc.status_code))
                     continue
+                socket_created_session_ids.clear()
+                socket_created_session_ids.add(session.id)
                 await websocket.send_json({"type": "session_started", "session": {"id": session.id, "name": session.name}})
             elif msg_type == "stop_session":
                 raw_session_id = message.get("session_id")
@@ -379,6 +380,7 @@ async def pitch_socket(websocket: WebSocket):
                 if session is None:
                     await _send_error(websocket, "Session not found.", "not_found")
                 else:
+                    socket_created_session_ids.discard(session.id)
                     await websocket.send_json({"type": "session_stopped", "session": {"id": session.id, "average_abs_cents": session.average_abs_cents}})
             elif msg_type == "audio_frame":
                 try:
@@ -415,8 +417,16 @@ async def pitch_socket(websocket: WebSocket):
                     )
                     frame = detected.to_dict()
                     if payload.session_id:
-                        if not can_write_session(payload.session_id):
-                            await _send_error(websocket, "You do not have access to this session.", "permission_denied")
+                        try:
+                            writable_session = session_for_write(payload.session_id)
+                        except HTTPException as exc:
+                            await _send_error(websocket, exc.detail, error_code_for_status(exc.status_code))
+                            continue
+                        if writable_session is None:
+                            await _send_error(websocket, "Session not found.", "not_found")
+                            continue
+                        if writable_session.ended_at is not None:
+                            await _send_error(websocket, "Practice session has already ended.", "conflict")
                             continue
                         if not _can_track_pending_session(pending_frames, payload.session_id):
                             await _send_error(websocket, "Too many pending sessions on this WebSocket connection.", "rate_limited")
@@ -444,6 +454,11 @@ async def pitch_socket(websocket: WebSocket):
                         frames = pending_frames.get(session_id, [])
                         if frames:
                             save_pitch_frames(db, session_id, frames)
+                    except Exception:
+                        db.rollback()
+                for session_id in list(socket_created_session_ids):
+                    try:
+                        stop_session(db, session_id)
                     except Exception:
                         db.rollback()
                 db.close()

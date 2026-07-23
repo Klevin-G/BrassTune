@@ -64,7 +64,7 @@ from app.schemas.schemas import (
 )
 from app.services.audio_storage import AudioReplaceResult, delete_audio_for_session, prepare_audio_upload, replace_audio_for_session, reserve_audio_upload, retry_audio_storage_jobs
 from app.services.serializers import session_to_dict
-from app.services.session_service import save_pitch_frames
+from app.services.session_service import save_pitch_frames, start_session
 
 WEBM_AUDIO_BYTES = b"\x1a\x45\xdf\xa3webm-audio-bytes"
 
@@ -919,6 +919,112 @@ def test_batch_save_commits_multiple_pitch_frames():
         assert len(samples) == 2
     finally:
         db.close()
+
+
+def test_start_session_fails_closed_when_owner_is_missing():
+    db = _test_db()
+    try:
+        with pytest.raises(HTTPException) as missing_owner:
+            start_session(db, "trumpet", "No owner", 440.0, user_id=999_999)
+        assert missing_owner.value.status_code == 404
+        assert db.query(User).count() == 0
+        assert db.query(PracticeSession).count() == 0
+    finally:
+        db.close()
+
+
+def test_start_session_finalizes_previous_active_session_for_owner():
+    db = _test_db()
+    try:
+        user = User(id=901, username="session-owner-901", name="Session Owner", primary_instrument_id="trumpet")
+        db.add(user)
+        db.commit()
+
+        first = start_session(db, "trumpet", "First", 440.0, user_id=user.id)
+        second = start_session(db, "trumpet", "Second", 440.0, user_id=user.id)
+        db.refresh(first)
+
+        assert first.ended_at is not None
+        assert second.ended_at is None
+        assert (
+            db.query(PracticeSession)
+            .filter(
+                PracticeSession.user_id == user.id,
+                PracticeSession.ended_at.is_(None),
+            )
+            .count()
+            == 1
+        )
+    finally:
+        db.close()
+
+
+def test_stopped_session_rejects_new_pitch_samples():
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        stopped = client.post(f"/api/sessions/{session['id']}/stop")
+        frame = frequency_to_pitch_frame(
+            midi_to_frequency(60),
+            MIN_RECORDING_CONFIDENCE,
+            0.1,
+            0,
+            "trumpet",
+            440.0,
+        ).to_dict()
+        response = client.post(f"/api/sessions/{session['id']}/samples", json=frame)
+
+    assert stopped.status_code == 200
+    assert response.status_code == 409
+    assert response.json()["code"] == "conflict"
+    assert "ended" in response.json()["detail"].lower()
+
+
+def test_repeated_stop_preserves_original_end_timestamp():
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        first = client.post(f"/api/sessions/{session['id']}/stop")
+        second = client.post(f"/api/sessions/{session['id']}/stop")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["ended_at"] == first.json()["ended_at"]
+    db = SessionLocal()
+    try:
+        completion_events = [
+            event
+            for event in db.query(UsageEvent).filter(UsageEvent.event_name == "session_completed").all()
+            if event.properties.get("session_id") == session["id"]
+        ]
+        assert len(completion_events) == 1
+    finally:
+        db.close()
+
+
+def test_websocket_disconnect_finalizes_socket_created_session():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_json(
+                {
+                    "type": "start_session",
+                    "instrument_id": "trumpet",
+                    "name": "Disconnected practice",
+                    "reference_pitch_hz": 440,
+                }
+            )
+            started = websocket.receive_json()
+            assert started["type"] == "session_started"
+            session_id = started["session"]["id"]
+
+        session = client.get(f"/api/sessions/{session_id}")
+
+    assert session.status_code == 200
+    assert session.json()["ended_at"] is not None
 
 
 def test_saved_pitch_frames_are_canonicalized_server_side():

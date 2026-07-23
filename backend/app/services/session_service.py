@@ -47,7 +47,9 @@ def start_session(db: Session, instrument_id: str, name: Optional[str], referenc
     profile = require_instrument_profile(instrument_id)
     # Lock the owner row so concurrent HTTP/WebSocket starts for one account
     # serialize around the quota check on PostgreSQL.
-    user = db.query(User).filter(User.id == user_id).with_for_update().first() or get_or_create_default_user(db)
+    user = db.query(User).filter(User.id == user_id).with_for_update().first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Account not found.")
     max_sessions = _positive_int_env("BRASSTUNE_MAX_SESSIONS_PER_USER", 5000)
     if max_sessions:
         session_count = int(
@@ -61,6 +63,21 @@ def start_session(db: Session, instrument_id: str, name: Optional[str], referenc
                 status_code=409,
                 detail="Session storage limit reached. Delete old cloud sessions before starting another.",
             )
+    # A mode switch or dropped client must not leave overlapping active
+    # sessions. Finalize any stranded session in the same owner-locked
+    # transaction before creating its replacement.
+    active_sessions = (
+        db.query(PracticeSession)
+        .filter(
+            PracticeSession.user_id == user.id,
+            PracticeSession.ended_at.is_(None),
+        )
+        .with_for_update()
+        .all()
+    )
+    ended_at = dt.datetime.utcnow()
+    for active_session in active_sessions:
+        _finalize_session(db, active_session, ended_at=ended_at)
     session = PracticeSession(
         user_id=user.id,
         instrument_id=instrument_id,
@@ -120,9 +137,19 @@ def _sample_from_frame(session: PracticeSession, frame: Dict[str, object]) -> Op
 
 
 def save_pitch_frames(db: Session, session_id: int, frames: List[Dict[str, object]]) -> List[PitchSample]:
-    session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
+    # Serialize sample persistence with stop/finalization on PostgreSQL. The
+    # winner commits first; the other operation then observes the durable
+    # active/ended state instead of inserting after completion.
+    session = (
+        db.query(PracticeSession)
+        .filter(PracticeSession.id == session_id)
+        .with_for_update()
+        .first()
+    )
     if session is None:
         return []
+    if session.ended_at is not None:
+        raise HTTPException(status_code=409, detail="Practice session has already ended.")
     samples = []
     for frame in frames:
         sample = _sample_from_frame(session, frame)
@@ -139,7 +166,7 @@ def save_pitch_frames(db: Session, session_id: int, frames: List[Dict[str, objec
     return samples
 
 
-def rebuild_note_events(db: Session, session: PracticeSession) -> List[NoteEvent]:
+def _replace_note_events(db: Session, session: PracticeSession) -> List[NoteEvent]:
     db.query(NoteEvent).filter(NoteEvent.session_id == session.id).delete()
     db.flush()
     samples = db.query(PitchSample).filter(PitchSample.session_id == session.id).order_by(PitchSample.timestamp_ms.asc()).all()
@@ -169,18 +196,25 @@ def rebuild_note_events(db: Session, session: PracticeSession) -> List[NoteEvent
         )
         db.add(event)
         events.append(event)
+    return events
+
+
+def rebuild_note_events(db: Session, session: PracticeSession) -> List[NoteEvent]:
+    events = _replace_note_events(db, session)
     db.commit()
     for event in events:
         db.refresh(event)
     return events
 
 
-def stop_session(db: Session, session_id: int) -> Optional[PracticeSession]:
-    session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
-    if session is None:
-        return None
-    session.ended_at = dt.datetime.utcnow()
-    events = rebuild_note_events(db, session)
+def _finalize_session(
+    db: Session,
+    session: PracticeSession,
+    *,
+    ended_at: Optional[dt.datetime] = None,
+) -> PracticeSession:
+    session.ended_at = ended_at or dt.datetime.utcnow()
+    events = _replace_note_events(db, session)
     summary = compute_session_summary(
         [
             {
@@ -201,6 +235,21 @@ def stop_session(db: Session, session_id: int) -> Optional[PracticeSession]:
     session.average_abs_cents = float(summary["average_abs_cents"])
     session.in_tune_percentage = float(summary["in_tune_percentage"])
     db.add(session)
+    return session
+
+
+def stop_session(db: Session, session_id: int) -> Optional[PracticeSession]:
+    session = (
+        db.query(PracticeSession)
+        .filter(PracticeSession.id == session_id)
+        .with_for_update()
+        .first()
+    )
+    if session is None:
+        return None
+    if session.ended_at is not None:
+        return session
+    _finalize_session(db, session)
     db.commit()
     db.refresh(session)
     return session
