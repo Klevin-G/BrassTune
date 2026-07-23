@@ -632,7 +632,7 @@
 
   .topbar > .select-wrap {
     min-width: 0;
-    max-width: 148px;
+    max-width: 180px;
   }
 
   .topbar > .select-wrap select {
