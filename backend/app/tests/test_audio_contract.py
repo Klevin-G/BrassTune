@@ -1,5 +1,6 @@
 import json
 import math
+import statistics
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ from app.core.music.theory import (
     transpose_concert_to_written,
 )
 from app.core.recommendations.rules import generate_note_recommendation
-from app.core.pitch.detector import yin_pitch
+from app.core.pitch.detector import PitchDetector, yin_pitch
 from app.core.sessions.segmentation import segment_note_events
 
 
@@ -45,6 +46,108 @@ def test_portable_play_along_contract_is_complete_for_python_and_swift_loaders()
         (85, 2),
         (95, 3),
     ]
+    assert contract["schema_version"] == 2
+    assert "synthetic" in contract["temporal_evidence_kind"]
+    assert {case["name"] for case in contract["temporal_cases"]} == {
+        "exact two-second boundary",
+        "brief confidence dropout pauses without filling or resetting",
+        "long confidence dropout exceeds grace and resets",
+        "confident wrong note resets accumulated hold",
+        "attack transient is trimmed before scoring",
+        "median scoring rejects a single detector outlier",
+    }
+
+
+def _play_along_rating(cents):
+    if cents is None:
+        return "missed"
+    if abs(cents) <= 5:
+        return "excellent"
+    if abs(cents) <= 15:
+        return "close"
+    return "off"
+
+
+def _evaluate_play_along_timeline(case, policy):
+    note_index = 0
+    first_match_ms = None
+    last_match_ms = None
+    previous_frame_ms = None
+    previous_matched = False
+    held_ms = 0
+    cents_samples = []
+    results = []
+    checkpoints = {item["after_frame_index"]: item for item in case["checkpoints"]}
+
+    def reset():
+        nonlocal first_match_ms, last_match_ms, previous_frame_ms, previous_matched, held_ms, cents_samples
+        first_match_ms = None
+        last_match_ms = None
+        previous_frame_ms = None
+        previous_matched = False
+        held_ms = 0
+        cents_samples = []
+
+    for frame_index, frame in enumerate(case["frames"]):
+        timestamp_ms = frame["timestamp_ms"]
+        target = case["notes"][note_index]
+        confident = frame["confidence"] >= policy["minimum_confidence"] and frame["written_note"] is not None
+        matches = confident and frame["written_note"] == target and frame["cents"] is not None and math.isfinite(frame["cents"])
+
+        if matches:
+            if last_match_ms is not None and timestamp_ms - last_match_ms > policy["maximum_dropout_ms"]:
+                reset()
+            if first_match_ms is None:
+                first_match_ms = timestamp_ms
+            if previous_matched and previous_frame_ms is not None:
+                held_ms += max(0, timestamp_ms - previous_frame_ms)
+            last_match_ms = timestamp_ms
+            previous_frame_ms = timestamp_ms
+            previous_matched = True
+            cents_samples.append((timestamp_ms, frame["cents"]))
+
+            if held_ms >= policy["hold_ms"] and len(cents_samples) >= policy["minimum_samples"]:
+                sustained = [
+                    cents
+                    for sample_ms, cents in cents_samples
+                    if sample_ms - first_match_ms >= policy["attack_trim_ms"]
+                ]
+                source = sustained if len(sustained) >= min(policy["minimum_samples"], 3) else [item[1] for item in cents_samples]
+                scored = statistics.median(source)
+                if abs(scored) <= policy["accepted_cents_inclusive"]:
+                    results.append(
+                        {
+                            "name": target,
+                            "median_cents": round(scored, 1),
+                            "sample_count": len(cents_samples),
+                            "rating": _play_along_rating(scored),
+                        }
+                    )
+                    note_index += 1
+                reset()
+        elif confident and frame["written_note"] != target:
+            reset()
+        else:
+            previous_frame_ms = timestamp_ms
+            previous_matched = False
+            if last_match_ms is not None and timestamp_ms - last_match_ms > policy["maximum_dropout_ms"]:
+                reset()
+
+        checkpoint = checkpoints.get(frame_index)
+        if checkpoint:
+            assert case["notes"][note_index] == checkpoint["expected_current_note"], case["name"]
+            assert held_ms == checkpoint["expected_held_ms"], case["name"]
+            assert len(results) == checkpoint["expected_result_count"], case["name"]
+            assert (note_index >= len(case["notes"])) is checkpoint["expected_done"], case["name"]
+
+    return results
+
+
+def test_play_along_temporal_fixture_has_self_consistent_reference_outcomes():
+    """Python owns no Play-Along runtime; this is the portable fixture's reference oracle."""
+    contract = fixture("play_along_contract.json")
+    for case in contract["temporal_cases"]:
+        assert _evaluate_play_along_timeline(case, contract["policy"]) == case["expected_results"], case["name"]
 
 
 def test_pitch_math_fixture_uses_cross_language_half_up_midpoint_rounding():
@@ -137,20 +240,24 @@ def _p95(values):
     return ordered[max(0, math.ceil(len(ordered) * 0.95) - 1)]
 
 
-def test_synthetic_pitch_quality_gate_is_executable_not_physical_mic_evidence():
-    contract = fixture("pitch_quality_contract.json")
+def _harmonic_tone(contract, frequency_hz, amplitude_multiplier=1):
     sample_rate = contract["sample_rate_hz"]
     frame_size = contract["frame_size"]
-    amplitudes = contract["harmonic_amplitudes"]
     time_axis = np.arange(frame_size, dtype=np.float64) / sample_rate
+    return sum(
+        amplitude * amplitude_multiplier * np.sin(2 * np.pi * frequency_hz * (index + 1) * time_axis)
+        for index, amplitude in enumerate(contract["harmonic_amplitudes"])
+    ).astype(np.float32)
+
+
+def test_synthetic_steady_pitch_quality_gate_is_executable_not_physical_mic_evidence():
+    contract = fixture("pitch_quality_contract.json")
+    sample_rate = contract["sample_rate_hz"]
     signed_errors = []
     correct = 0
     gross_octave_errors = 0
     for case in contract["cases"]:
-        samples = sum(
-            amplitude * np.sin(2 * np.pi * case["frequency_hz"] * (index + 1) * time_axis)
-            for index, amplitude in enumerate(amplitudes)
-        ).astype(np.float32)
+        samples = _harmonic_tone(contract, case["frequency_hz"])
         frequency, confidence = yin_pitch(samples, sample_rate, 30, 1500)
         assert confidence > 0.95, case["note"]
         midi = 69 + 12 * math.log2(frequency / 440)
@@ -166,4 +273,40 @@ def test_synthetic_pitch_quality_gate_is_executable_not_physical_mic_evidence():
     assert gross_octave_errors / len(signed_errors) * 100 <= thresholds["gross_octave_error_max_percent"]
     assert np.median(absolute_errors) <= thresholds["median_abs_cents_error_max"]
     assert _p95(absolute_errors) <= thresholds["p95_abs_cents_error_max"]
-    assert frame_size / sample_rate * 1000 <= thresholds["onset_p95_ms_max"]
+
+
+def test_synthetic_onset_p95_measures_time_to_first_detector_lock():
+    contract = fixture("pitch_quality_contract.json")
+    protocol = contract["synthetic_onset_protocol"]
+    assert "synthetic" in protocol["evidence_kind"]
+    assert "not physical microphone" in protocol["evidence_kind"]
+    frame_duration_ms = contract["frame_size"] / contract["sample_rate_hz"] * 1000
+    onset_latencies_ms = []
+
+    for case in contract["cases"]:
+        detector = PitchDetector(contract["sample_rate_hz"], contract["frame_size"])
+        onset_frame = next(index for index, amplitude in enumerate(case["onset_amplitude_multipliers"]) if amplitude > 0)
+        first_lock_frame = None
+        for frame_index, amplitude in enumerate(case["onset_amplitude_multipliers"]):
+            estimate = detector.estimate(
+                _harmonic_tone(contract, case["frequency_hz"], amplitude),
+                contract["sample_rate_hz"],
+                30,
+                1500,
+            )
+            frequency_hz = float(estimate["frequency_hz"])
+            cents_error = math.inf if frequency_hz <= 0 else abs(1200 * math.log2(frequency_hz / case["frequency_hz"]))
+            if (
+                frequency_hz > 0
+                and float(estimate["confidence"]) >= protocol["lock_confidence_min"]
+                and cents_error <= protocol["lock_frequency_tolerance_cents_max"]
+            ):
+                first_lock_frame = frame_index
+                break
+
+        assert first_lock_frame is not None, case["note"]
+        assert first_lock_frame >= onset_frame, case["note"]
+        onset_latencies_ms.append((first_lock_frame - onset_frame + 1) * frame_duration_ms)
+
+    assert len(onset_latencies_ms) == len(contract["cases"])
+    assert _p95(onset_latencies_ms) <= contract["thresholds"]["onset_p95_ms_max"]

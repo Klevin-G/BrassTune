@@ -1,6 +1,7 @@
 {
-  "schema_version": 1,
-  "swift_expectation": "Swift PlayAlongGrader and PlayAlongGrade must load these values and produce the same rating, acceptance, hold, and star results.",
+  "schema_version": 2,
+  "swift_expectation": "Swift PlayAlongGrader and PlayAlongGrade must load these values and produce the same rating, acceptance, hold, temporal checkpoint, median, and star results.",
+  "temporal_evidence_kind": "synthetic deterministic pitch-frame timelines; not physical microphone or detector-latency evidence",
   "policy": {
     "centered_cents_inclusive": 5,
     "accepted_cents_inclusive": 15,
@@ -55,6 +56,158 @@
       "expected_in_tune_percent": 100,
       "expected_average_abs_cents": 3,
       "expected_stars": 3
+    }
+  ],
+  "temporal_cases": [
+    {
+      "name": "exact two-second boundary",
+      "notes": ["C", "D"],
+      "frames": [
+        { "timestamp_ms": 0, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 250, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 500, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 750, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1000, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1250, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1500, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1750, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1999, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 2000, "written_note": "C", "cents": 4, "confidence": 0.9 }
+      ],
+      "checkpoints": [
+        { "after_frame_index": 8, "expected_current_note": "C", "expected_held_ms": 1999, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 9, "expected_current_note": "D", "expected_held_ms": 0, "expected_result_count": 1, "expected_done": false }
+      ],
+      "expected_results": [
+        { "name": "C", "median_cents": 4, "sample_count": 10, "rating": "excellent" }
+      ]
+    },
+    {
+      "name": "brief confidence dropout pauses without filling or resetting",
+      "notes": ["C", "D"],
+      "frames": [
+        { "timestamp_ms": 0, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 250, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 300, "written_note": null, "cents": null, "confidence": 0.1 },
+        { "timestamp_ms": 400, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 650, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 900, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 1150, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 1400, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 1650, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 1900, "written_note": "C", "cents": 8, "confidence": 0.9 },
+        { "timestamp_ms": 2150, "written_note": "C", "cents": 8, "confidence": 0.9 }
+      ],
+      "checkpoints": [
+        { "after_frame_index": 1, "expected_current_note": "C", "expected_held_ms": 250, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 2, "expected_current_note": "C", "expected_held_ms": 250, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 3, "expected_current_note": "C", "expected_held_ms": 250, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 10, "expected_current_note": "D", "expected_held_ms": 0, "expected_result_count": 1, "expected_done": false }
+      ],
+      "expected_results": [
+        { "name": "C", "median_cents": 8, "sample_count": 10, "rating": "close" }
+      ]
+    },
+    {
+      "name": "long confidence dropout exceeds grace and resets",
+      "notes": ["C", "D"],
+      "frames": [
+        { "timestamp_ms": 0, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 250, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 300, "written_note": null, "cents": null, "confidence": 0.1 },
+        { "timestamp_ms": 550, "written_note": null, "cents": null, "confidence": 0.1 },
+        { "timestamp_ms": 600, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 850, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1100, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1350, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1600, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1850, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 2100, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 2350, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 2599, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 2600, "written_note": "C", "cents": 4, "confidence": 0.9 }
+      ],
+      "checkpoints": [
+        { "after_frame_index": 2, "expected_current_note": "C", "expected_held_ms": 250, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 3, "expected_current_note": "C", "expected_held_ms": 0, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 12, "expected_current_note": "C", "expected_held_ms": 1999, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 13, "expected_current_note": "D", "expected_held_ms": 0, "expected_result_count": 1, "expected_done": false }
+      ],
+      "expected_results": [
+        { "name": "C", "median_cents": 4, "sample_count": 10, "rating": "excellent" }
+      ]
+    },
+    {
+      "name": "confident wrong note resets accumulated hold",
+      "notes": ["C", "D"],
+      "frames": [
+        { "timestamp_ms": 0, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 250, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 300, "written_note": "E", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 500, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 750, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 1000, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 1250, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 1500, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 1750, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 2000, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 2250, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 2499, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 2500, "written_note": "C", "cents": 5, "confidence": 0.9 }
+      ],
+      "checkpoints": [
+        { "after_frame_index": 1, "expected_current_note": "C", "expected_held_ms": 250, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 2, "expected_current_note": "C", "expected_held_ms": 0, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 11, "expected_current_note": "C", "expected_held_ms": 1999, "expected_result_count": 0, "expected_done": false },
+        { "after_frame_index": 12, "expected_current_note": "D", "expected_held_ms": 0, "expected_result_count": 1, "expected_done": false }
+      ],
+      "expected_results": [
+        { "name": "C", "median_cents": 5, "sample_count": 10, "rating": "excellent" }
+      ]
+    },
+    {
+      "name": "attack transient is trimmed before scoring",
+      "notes": ["C", "D"],
+      "frames": [
+        { "timestamp_ms": 0, "written_note": "C", "cents": 45, "confidence": 0.9 },
+        { "timestamp_ms": 80, "written_note": "C", "cents": 30, "confidence": 0.9 },
+        { "timestamp_ms": 200, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 450, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 700, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 950, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1200, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1450, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1700, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 1950, "written_note": "C", "cents": 4, "confidence": 0.9 },
+        { "timestamp_ms": 2000, "written_note": "C", "cents": 4, "confidence": 0.9 }
+      ],
+      "checkpoints": [
+        { "after_frame_index": 10, "expected_current_note": "D", "expected_held_ms": 0, "expected_result_count": 1, "expected_done": false }
+      ],
+      "expected_results": [
+        { "name": "C", "median_cents": 4, "sample_count": 11, "rating": "excellent" }
+      ]
+    },
+    {
+      "name": "median scoring rejects a single detector outlier",
+      "notes": ["C", "D"],
+      "frames": [
+        { "timestamp_ms": 0, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 250, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 500, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 750, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 1000, "written_note": "C", "cents": 60, "confidence": 0.9 },
+        { "timestamp_ms": 1250, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 1500, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 1750, "written_note": "C", "cents": 5, "confidence": 0.9 },
+        { "timestamp_ms": 2000, "written_note": "C", "cents": 5, "confidence": 0.9 }
+      ],
+      "checkpoints": [
+        { "after_frame_index": 8, "expected_current_note": "D", "expected_held_ms": 0, "expected_result_count": 1, "expected_done": false }
+      ],
+      "expected_results": [
+        { "name": "C", "median_cents": 5, "sample_count": 9, "rating": "excellent" }
+      ]
     }
   ]
 }
