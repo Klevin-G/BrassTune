@@ -95,15 +95,49 @@ disable; negative or invalid values fall back to safe defaults.
 Render's free web-service plan does not support pre-deploy commands. The start
 command therefore runs the read-only `python -m app.db.check_ready` gate before
 Uvicorn; an incomplete database schema or unsafe production configuration keeps
-the new instance from becoming live. This gate does not apply migrations. Apply
-pending Supabase migrations as a separate controlled release step before the
-Render deployment:
+the new instance from becoming live. This gate does not apply migrations.
+
+Account-deletion privacy uses an explicit two-PR expand/contract rollout.
+`supabase db push` applies every pending migration, so the contract migration
+must not exist in PR1:
+
+1. Merge PR1 with the additive storage and account-deletion **expand** migration
+   through `20260723021828_account_deletion_privacy_tombstones.sql`. PR1 must
+   not contain
+   `20260723052642_enforce_account_deletion_terminal_privacy.sql`.
+2. At the PR1 `main` SHA, inspect and apply all linked pending migrations.
+   Dispatch `target=backend` for that exact SHA and wait for Render readiness
+   and `/api/version` to report it. The privacy-aware backend startup path
+   initializes `deleted_identity_tombstone_config.enforcement_phase` as
+   `expand` and scrubs legacy completed deletion jobs. Retain the successful
+   Render deployment ID and PR1 SHA as the post-contract rollback target.
+3. Add the reserved
+   `20260723052642_enforce_account_deletion_terminal_privacy.sql` contract
+   migration in PR2, review it, and merge PR2.
+4. At the PR2 `main` SHA, confirm the retained PR1 Render artifact and completed
+   expand cleanup, then inspect and apply all linked pending migrations. The
+   contract migration must fail closed if the compatible backend has not
+   completed the required cleanup.
+5. Dispatch `target=backend` at the exact PR2 SHA, then dispatch
+   `target=frontend` at the same PR2 SHA. The frontend workflow must verify that
+   the canonical Vercel alias and provider `githubCommitSha` both identify the
+   PR2 SHA before hosted smoke runs.
+
+Use the Supabase commands once at the PR1 boundary while the contract file is
+absent, and again at the PR2 boundary after it is merged:
 
 ```bash
 supabase migration list --linked
 supabase db push --linked --dry-run
 supabase db push --linked
 ```
+
+Before the contract migration, the previous backend remains a viable rollback.
+After contract enforcement, the only approved backend rollback target is the
+retained privacy-aware PR1 Render deployment; a pre-PR1 backend that writes
+unscrubbed completed deletion jobs is incompatible. Roll the frontend back
+independently when needed. Never reverse the contract migration without data and
+constraint review.
 
 The remainder of the Render start command uses `--no-proxy-headers`, a 256 KiB
 WebSocket transport message cap, a 16-message WebSocket queue, a 100-connection
@@ -184,10 +218,12 @@ Use secret stores only. Do not commit values.
 - `RENDER_KEEPALIVE_URL` if overriding the default liveness URL
 
 The manual deployment workflow lives at `.github/workflows/deploy.yml`.
-Use `workflow_dispatch` with `target=frontend`, `backend`, or `all`. The backend
-job disables Render auto-deploy, then calls Render's authenticated deploy API
-with the workflow commit SHA. This prevents a push-triggered build from racing
-the exact-SHA release. Do not replace it with an unpinned deploy hook.
+Use `workflow_dispatch` with exactly one target, `backend` or `frontend`, and
+follow the two-PR sequence above: PR1 expand -> PR1 backend -> PR2 contract ->
+PR2 backend -> PR2 frontend. The backend job disables Render auto-deploy, then
+calls Render's authenticated deploy API with the workflow commit SHA. This
+prevents a push-triggered build from racing the exact-SHA release. Do not
+replace it with an unpinned deploy hook.
 
 Before requesting that exact deploy, the backend job requires the GitHub
 Production secret `BRASSTUNE_DELETION_TOMBSTONE_SECRET` and upserts it through
@@ -199,7 +235,23 @@ pins `PYTHON_VERSION=3.11.15`, then deletes the legacy
 `204` and already-absent `404` responses are accepted; every other response
 blocks deployment.
 
-The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It runs after a successful `Deploy` workflow and can also be manually dispatched. For `workflow_run`, both smoke jobs explicitly check out the deploy run's `head_sha`; a manual dispatch checks out its own `github.sha`. It wraps:
+The frontend deploy stores a token-free `production-deployment-evidence`
+artifact containing the immutable Vercel deployment ID/URL, canonical alias,
+provider revision metadata, and readiness state. The backend deploy stores the
+same artifact name with its Render deployment ID and a freshly captured
+`/api/version` revision after the backend readiness wait passes. Provider tokens
+are never written to either artifact.
+
+The hosted production smoke workflow lives at
+`.github/workflows/production-smoke.yml`. It runs after a successful `Deploy`
+workflow and can also be manually dispatched. A workflow-triggered smoke first
+downloads and validates the deploy run's evidence artifact against
+`workflow_run.head_sha`, then checks out that exact revision. Backend deploys
+run the exact-SHA protocol smoke only. Frontend deploys require exact frontend
+artifact evidence and the protocol smoke independently verifies that the live
+backend reports the same revision before browser smoke runs. A manual dispatch
+selects `deployed_target` and accepts explicit full frontend and backend SHAs,
+defaulting to the dispatched `main` revision. It wraps:
 
 ```bash
 BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app \

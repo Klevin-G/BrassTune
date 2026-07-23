@@ -21,7 +21,24 @@ on:
         required: false
         default: wss://brasstune-u8qj.onrender.com
         type: string
+      deployed_target:
+        description: Service whose completed deployment is being verified
+        required: true
+        default: frontend
+        type: choice
+        options:
+          - frontend
+          - backend
+      expected_frontend_sha:
+        description: Exact frontend revision for a manual frontend smoke (defaults to this main revision)
+        required: false
+        type: string
+      expected_backend_sha:
+        description: Exact backend revision for a manual smoke (defaults to this main revision)
+        required: false
+        type: string
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -29,11 +46,123 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release_evidence:
+    name: release-evidence
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+    outputs:
+      target: ${{ steps.verify.outputs.target }}
+      release_sha: ${{ steps.verify.outputs.release_sha }}
+      frontend_sha: ${{ steps.verify.outputs.frontend_sha }}
+      backend_sha: ${{ steps.verify.outputs.backend_sha }}
+    steps:
+      - name: Download deployment evidence
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: production-deployment-evidence
+          path: ${{ runner.temp }}/deployment-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Verify deployment evidence
+        id: verify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          EVIDENCE_PATH: ${{ runner.temp }}/deployment-evidence/production-deployment-evidence.json
+          MANUAL_TARGET: ${{ github.event.inputs.deployed_target }}
+          MANUAL_FRONTEND_SHA: ${{ github.event.inputs.expected_frontend_sha }}
+          MANUAL_BACKEND_SHA: ${{ github.event.inputs.expected_backend_sha }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const fail = (message) => {
+            console.error(`::error::${message}`);
+            process.exit(1);
+          };
+          const normalizeSha = (value, label) => {
+            const sha = String(value ?? '').trim().toLowerCase();
+            if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(sha)) {
+              fail(`${label} must be a full 40- or 64-character Git object ID.`);
+            }
+            return sha;
+          };
+
+          let target;
+          let releaseSha;
+          let frontendSha = '';
+          let backendSha;
+
+          if (process.env.EVENT_NAME === 'workflow_run') {
+            if (!fs.existsSync(process.env.EVIDENCE_PATH)) fail('Deploy workflow did not publish release evidence.');
+            const evidence = JSON.parse(fs.readFileSync(process.env.EVIDENCE_PATH, 'utf8'));
+            target = evidence.target;
+            releaseSha = normalizeSha(evidence.commit_sha, 'Deployment evidence revision');
+            const workflowSha = normalizeSha(process.env.WORKFLOW_RUN_HEAD_SHA, 'Deploy workflow revision');
+            if (releaseSha !== workflowSha) fail('Deployment evidence revision does not match the Deploy workflow revision.');
+
+            if (target === 'frontend') {
+              const providerSha = normalizeSha(evidence.provider_metadata_sha, 'Vercel provider revision');
+              if (providerSha !== releaseSha) fail('Vercel provider revision does not match deployment evidence.');
+              if (!/^dpl_[A-Za-z0-9]+$/.test(String(evidence.deployment_id ?? ''))) {
+                fail('Frontend evidence has an invalid Vercel deployment ID.');
+              }
+              if (evidence.canonical_deployment_id !== evidence.deployment_id) {
+                fail('Canonical Vercel alias evidence does not resolve to the recorded deployment ID.');
+              }
+              if (evidence.canonical_alias !== 'https://brasstune.vercel.app') {
+                fail('Frontend evidence does not identify the canonical BrassTune alias.');
+              }
+              if (evidence.ready_state !== 'READY' || evidence.target_environment !== 'production') {
+                fail('Frontend evidence is not a READY production Vercel deployment.');
+              }
+              frontendSha = releaseSha;
+              backendSha = releaseSha;
+            } else if (target === 'backend') {
+              if (!/^dep-[A-Za-z0-9]+$/.test(String(evidence.render_deployment_id ?? ''))) {
+                fail('Backend evidence has an invalid Render deployment ID.');
+              }
+              const reportedSha = normalizeSha(evidence.reported_backend_sha, 'Render reported backend revision');
+              if (reportedSha !== releaseSha) fail('Render reported revision does not match deployment evidence.');
+              backendSha = releaseSha;
+            } else {
+              fail('Deployment evidence target must be frontend or backend.');
+            }
+          } else {
+            target = process.env.MANUAL_TARGET || 'frontend';
+            if (target === 'frontend') {
+              frontendSha = normalizeSha(process.env.MANUAL_FRONTEND_SHA || process.env.GITHUB_SHA, 'Expected frontend revision');
+              backendSha = normalizeSha(process.env.MANUAL_BACKEND_SHA || frontendSha, 'Expected backend revision');
+              if (frontendSha !== backendSha) fail('Frontend smoke requires frontend and backend at the same release revision.');
+              releaseSha = frontendSha;
+            } else if (target === 'backend') {
+              backendSha = normalizeSha(process.env.MANUAL_BACKEND_SHA || process.env.GITHUB_SHA, 'Expected backend revision');
+              releaseSha = backendSha;
+            } else {
+              fail('Manual deployed target must be frontend or backend.');
+            }
+          }
+
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `target=${target}\nrelease_sha=${releaseSha}\nfrontend_sha=${frontendSha}\nbackend_sha=${backendSha}\n`,
+          );
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `Smoke target: **${target}** at exact revision \`${releaseSha}\`.\n`,
+          );
+          console.log(`Accepted ${target} release evidence for exact revision ${releaseSha}.`);
+          NODE
+
   smoke:
     name: protocol-smoke
+    needs: release_evidence
     runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 10
-    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
     environment: production
     env:
       BRASSTUNE_WEB_BASE_URL: ${{ github.event.inputs.web_base_url || vars.BRASSTUNE_WEB_BASE_URL || 'https://brasstune.vercel.app' }}
@@ -41,11 +170,11 @@ jobs:
       BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
       BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
-      BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.event.workflow_run.head_sha || vars.BRASSTUNE_EXPECTED_BACKEND_SHA || github.sha }}
+      BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ needs.release_evidence.outputs.backend_sha }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ needs.release_evidence.outputs.release_sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
@@ -54,10 +183,10 @@ jobs:
 
   browser-smoke:
     name: browser-smoke
-    needs: smoke
+    needs: [release_evidence, smoke]
     runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || vars.BRASSTUNE_FRONTEND_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 20
-    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+    if: ${{ needs.release_evidence.outputs.target == 'frontend' }}
     environment: production
     env:
       CI: "true"
@@ -67,10 +196,12 @@ jobs:
       BRASSTUNE_WS_BASE_URL: ${{ github.event.inputs.ws_base_url || vars.BRASSTUNE_WS_BASE_URL || 'wss://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_WEB_ACCESS_URL: ${{ vars.BRASSTUNE_WEB_ACCESS_URL }}
       BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.BRASSTUNE_VERCEL_AUTOMATION_BYPASS_SECRET }}
+      BRASSTUNE_EXPECTED_FRONTEND_SHA: ${{ needs.release_evidence.outputs.frontend_sha }}
+      BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ needs.release_evidence.outputs.backend_sha }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ needs.release_evidence.outputs.release_sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"

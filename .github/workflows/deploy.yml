@@ -147,11 +147,137 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: .github/tools/vercel-cli/node_modules/.bin/vercel build --prod --token="$VERCEL_TOKEN"
       - name: Deploy frontend
+        id: deploy_frontend
+        shell: bash
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: .github/tools/vercel-cli/node_modules/.bin/vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        run: |
+          set -euo pipefail
+
+          deployment_result="${RUNNER_TEMP}/vercel-deployment.json"
+          .github/tools/vercel-cli/node_modules/.bin/vercel deploy --prebuilt --prod --yes \
+            --format=json \
+            --meta "githubCommitSha=${GITHUB_SHA}" \
+            --token="$VERCEL_TOKEN" >"$deployment_result"
+
+          DEPLOYMENT_RESULT="$deployment_result" node <<'NODE'
+          const fs = require('node:fs');
+
+          const payload = JSON.parse(fs.readFileSync(process.env.DEPLOYMENT_RESULT, 'utf8'));
+          const deployment = payload.payload?.deployment ?? payload.deployment ?? payload;
+          const id = String(deployment.id ?? '');
+          const url = String(deployment.url ?? '');
+
+          if (!/^dpl_[A-Za-z0-9]+$/.test(id)) {
+            console.error('::error::Vercel did not return a valid deployment ID.');
+            process.exit(1);
+          }
+          try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.vercel.app')) throw new Error();
+          } catch {
+            console.error('::error::Vercel did not return a valid HTTPS deployment URL.');
+            process.exit(1);
+          }
+          if (deployment.readyState !== 'READY' || deployment.target !== 'production') {
+            console.error('::error::Vercel deployment was not returned as READY production.');
+            process.exit(1);
+          }
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_id=${id}\ndeployment_url=${url}\n`);
+          console.log(`Captured production deployment ${id} for exact revision verification.`);
+          NODE
+      - name: Verify canonical Vercel revision
+        id: verify_frontend
+        shell: bash
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          DEPLOYMENT_ID: ${{ steps.deploy_frontend.outputs.deployment_id }}
+          DEPLOYMENT_URL: ${{ steps.deploy_frontend.outputs.deployment_url }}
+          CANONICAL_FRONTEND_ALIAS: https://brasstune.vercel.app
+        run: |
+          set -euo pipefail
+
+          deployment_metadata="${RUNNER_TEMP}/vercel-deployment-metadata.json"
+          canonical_inspection="${RUNNER_TEMP}/vercel-canonical-inspection.json"
+          evidence_path="${RUNNER_TEMP}/production-deployment-evidence.json"
+
+          .github/tools/vercel-cli/node_modules/.bin/vercel api "/v13/deployments/${DEPLOYMENT_ID}" \
+            --raw --token="$VERCEL_TOKEN" >"$deployment_metadata"
+          .github/tools/vercel-cli/node_modules/.bin/vercel inspect "$CANONICAL_FRONTEND_ALIAS" \
+            --format=json --token="$VERCEL_TOKEN" >"$canonical_inspection"
+
+          DEPLOYMENT_METADATA="$deployment_metadata" \
+          CANONICAL_INSPECTION="$canonical_inspection" \
+          EVIDENCE_PATH="$evidence_path" \
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const fail = (message) => {
+            console.error(`::error::${message}`);
+            process.exit(1);
+          };
+          const metadata = JSON.parse(fs.readFileSync(process.env.DEPLOYMENT_METADATA, 'utf8'));
+          const canonical = JSON.parse(fs.readFileSync(process.env.CANONICAL_INSPECTION, 'utf8'));
+          const expectedSha = process.env.GITHUB_SHA.toLowerCase();
+          const providerSha = String(metadata.meta?.githubCommitSha ?? '').toLowerCase();
+          const canonicalHostname = new URL(process.env.CANONICAL_FRONTEND_ALIAS).hostname;
+          const deploymentHostname = new URL(process.env.DEPLOYMENT_URL).hostname;
+          const metadataHostname = String(metadata.url ?? '');
+          const aliases = Array.isArray(canonical.aliases) ? canonical.aliases : [];
+
+          if (metadata.id !== process.env.DEPLOYMENT_ID || canonical.id !== process.env.DEPLOYMENT_ID) {
+            fail('Canonical Vercel alias does not resolve to the deployment created by this workflow.');
+          }
+          if (metadata.readyState !== 'READY' || canonical.readyState !== 'READY') {
+            fail('Canonical Vercel deployment is not READY.');
+          }
+          if (metadata.target !== 'production' || canonical.target !== 'production') {
+            fail('Canonical Vercel deployment is not a production deployment.');
+          }
+          if (metadataHostname !== deploymentHostname || canonical.url !== deploymentHostname) {
+            fail('Vercel deployment URL identity changed during canonical verification.');
+          }
+          if (!aliases.includes(canonicalHostname)) {
+            fail('Canonical Vercel alias is absent from the verified deployment aliases.');
+          }
+          if (providerSha !== expectedSha) {
+            fail(`Vercel provider revision ${providerSha || '<missing>'} does not match workflow revision ${expectedSha}.`);
+          }
+
+          const evidence = {
+            schema_version: 1,
+            target: 'frontend',
+            commit_sha: expectedSha,
+            provider_metadata_sha: providerSha,
+            deployment_id: metadata.id,
+            deployment_url: process.env.DEPLOYMENT_URL,
+            canonical_alias: process.env.CANONICAL_FRONTEND_ALIAS,
+            canonical_deployment_id: canonical.id,
+            ready_state: metadata.readyState,
+            target_environment: metadata.target,
+            verified_at: new Date().toISOString(),
+          };
+          fs.writeFileSync(process.env.EVIDENCE_PATH, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `evidence_path=${process.env.EVIDENCE_PATH}\n`);
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `Verified Vercel deployment \`${metadata.id}\` and canonical alias ` +
+              `\`${canonicalHostname}\` at exact revision \`${expectedSha}\`.\n`,
+          );
+          console.log(`Verified canonical Vercel alias at exact revision ${expectedSha}.`);
+          NODE
+      - name: Store frontend deployment evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-deployment-evidence
+          path: ${{ steps.verify_frontend.outputs.evidence_path }}
+          if-no-files-found: error
+          retention-days: 30
       - name: Remove Vercel environment artifacts
         if: always()
         shell: bash
@@ -169,7 +295,6 @@ jobs:
       BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.sha }}
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
-      BRASSTUNE_DELETION_TOMBSTONE_SECRET: ${{ secrets.BRASSTUNE_DELETION_TOMBSTONE_SECRET }}
       BRASSTUNE_RENDER_PYTHON_VERSION: "3.11.15"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -184,6 +309,8 @@ jobs:
             --output /dev/null
       - name: Synchronize deletion tombstone key to Render
         shell: bash
+        env:
+          BRASSTUNE_DELETION_TOMBSTONE_SECRET: ${{ secrets.BRASSTUNE_DELETION_TOMBSTONE_SECRET }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -261,15 +388,78 @@ jobs:
           delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX
           delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX
       - name: Trigger exact Render deploy
+        id: trigger_backend
+        shell: bash
         run: |
+          set -euo pipefail
+          deployment_response="${RUNNER_TEMP}/render-deployment.json"
           curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
             --request POST \
             --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
             --header "Authorization: Bearer ${RENDER_API_KEY}" \
             --header "Content-Type: application/json" \
-            --data "{\"commitId\":\"${GITHUB_SHA}\",\"clearCache\":\"do_not_clear\"}"
+            --data "{\"commitId\":\"${GITHUB_SHA}\",\"clearCache\":\"do_not_clear\"}" \
+            --output "$deployment_response"
+          RENDER_DEPLOYMENT_RESPONSE="$deployment_response" node <<'NODE'
+          const fs = require('node:fs');
+
+          const payload = JSON.parse(fs.readFileSync(process.env.RENDER_DEPLOYMENT_RESPONSE, 'utf8'));
+          const id = String(payload.id ?? '');
+          if (!/^dep-[A-Za-z0-9]+$/.test(id)) {
+            console.error('::error::Render did not return a valid deployment ID.');
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_id=${id}\n`);
+          console.log(`Captured Render deployment ${id} for exact revision verification.`);
+          NODE
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
       - name: Wait for Render backend release
         run: npm run wait:backend-release
+      - name: Record backend deployment evidence
+        id: record_backend
+        shell: bash
+        env:
+          RENDER_DEPLOYMENT_ID: ${{ steps.trigger_backend.outputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          version_response="${RUNNER_TEMP}/render-version.json"
+          evidence_path="${RUNNER_TEMP}/production-deployment-evidence.json"
+          curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
+            --url "${BRASSTUNE_API_BASE_URL%/}/api/version" \
+            --header "Accept: application/json" \
+            --output "$version_response"
+          VERSION_RESPONSE="$version_response" EVIDENCE_PATH="$evidence_path" node <<'NODE'
+          const fs = require('node:fs');
+
+          const version = JSON.parse(fs.readFileSync(process.env.VERSION_RESPONSE, 'utf8'));
+          const expectedSha = process.env.GITHUB_SHA.toLowerCase();
+          const reportedSha = String(version.commit_sha ?? '').toLowerCase();
+          if (reportedSha !== expectedSha) {
+            console.error(
+              `::error::Render /api/version revision ${reportedSha || '<missing>'} ` +
+                `does not match workflow revision ${expectedSha}.`,
+            );
+            process.exit(1);
+          }
+          const evidence = {
+            schema_version: 1,
+            target: 'backend',
+            commit_sha: expectedSha,
+            reported_backend_sha: reportedSha,
+            render_deployment_id: process.env.RENDER_DEPLOYMENT_ID,
+            api_base_url: process.env.BRASSTUNE_API_BASE_URL,
+            verification: 'Render readiness passed and /api/version matched the exact workflow revision',
+            verified_at: new Date().toISOString(),
+          };
+          fs.writeFileSync(process.env.EVIDENCE_PATH, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `evidence_path=${process.env.EVIDENCE_PATH}\n`);
+          NODE
+      - name: Store backend deployment evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-deployment-evidence
+          path: ${{ steps.record_backend.outputs.evidence_path }}
+          if-no-files-found: error
+          retention-days: 30

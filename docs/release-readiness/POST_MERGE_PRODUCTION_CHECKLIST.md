@@ -2,7 +2,20 @@
 
 Use this only after the current integration pull request is merged into `main`. Do not tag or promote production from this checklist without owner approval.
 
-Precondition: the final integration head must have reviewed Backend, Frontend, Security, Swift, and exact-SHA preview results, or any external CI/service blocker must be recorded explicitly before merge. Production Supabase migrations must be applied in order, then Render must be owner-deployed to that backend commit before the capability-aware frontend is promoted and final hosted smoke can pass.
+Precondition: the final integration head must have reviewed Backend, Frontend, Security, Swift, and exact-SHA preview results, or any external CI/service blocker must be recorded explicitly before merge. The release intentionally spans two pull requests because `supabase db push` applies every pending migration. PR1 contains the database expand and compatible backend but no contract migration. PR2 adds the contract and promotes the final exact-SHA backend and frontend. Do not combine both migrations in one push.
+
+## Ordered Production Rollout
+
+1. Merge PR1 with additive migrations through `20260723021828_account_deletion_privacy_tombstones.sql` (expand). Confirm PR1 does not contain `20260723052642_enforce_account_deletion_terminal_privacy.sql`.
+2. Record the PR1 `main` SHA. Inspect, dry-run, and apply all linked pending migrations while the contract file is absent.
+3. Dispatch `.github/workflows/deploy.yml` with `target=backend` at the PR1 SHA. Require the Render wait and exact `/api/version` protocol to pass.
+4. Confirm the privacy-aware backend initialized `deleted_identity_tombstone_config.enforcement_phase` as `expand` and scrubbed legacy terminal jobs. Retain the successful Render deployment ID and PR1 SHA as the post-contract rollback target.
+5. Add the reserved `20260723052642_enforce_account_deletion_terminal_privacy.sql` contract migration in PR2, review it, and merge PR2.
+6. Record the PR2 `main` SHA. Confirm the retained PR1 Render artifact and completed expand cleanup, then inspect, dry-run, and apply all linked pending migrations. The contract must fail closed if the compatibility checks are not satisfied.
+7. Dispatch `.github/workflows/deploy.yml` first with `target=backend` and then with `target=frontend`, both at the exact PR2 SHA. Require Vercel evidence to show `READY`, production, matching deployment/canonical-alias IDs, and provider `githubCommitSha` equal to the PR2 SHA.
+8. Allow `.github/workflows/production-smoke.yml` to consume the frontend deploy run's token-free evidence artifact. Require exact backend protocol smoke and strict hosted browser smoke to pass before declaring rollout complete.
+
+Rollback boundary: before contract, the pre-PR1 backend can be restored. After contract, the retained privacy-aware PR1 Render deployment is the only approved backend rollback target; never redeploy a backend that writes unsanitized terminal deletion rows. The frontend can be rolled back independently to its previous known-good Vercel deployment.
 
 ## Confirm Deployed State
 
@@ -13,7 +26,7 @@ Precondition: the final integration head must have reviewed Backend, Frontend, S
    git pull --ff-only origin main
    git rev-parse HEAD
    ```
-2. Confirm Vercel production deployment is ready for the merged `main` commit in the Vercel dashboard or GitHub deployment status.
+2. Confirm the frontend deploy's `production-deployment-evidence` artifact identifies the merged `main` SHA, the immutable Vercel deployment ID/URL, and canonical `https://brasstune.vercel.app` alias. Dashboard status alone is insufficient.
 3. Confirm Render backend deploy state and commit in Render. The backend service is `https://brasstune-u8qj.onrender.com`.
 4. Confirm the owner has recorded remaining external blockers in `HUMAN_ACTIONS.md`.
 5. Confirm production deploy uses the repo-root GitHub workflow path. The root `vercel.json` builds `frontend`; do not assume the GitHub production deploy should run from `frontend`.
@@ -83,16 +96,16 @@ npm run e2e:hosted:strict
 
 GitHub workflow check:
 
-1. Run `.github/workflows/production-smoke.yml` with default production URLs.
-2. Confirm the run passes root, Render health, CORS, and WebSocket app-level response.
+1. Prefer the automatic `workflow_run` smoke so it consumes the exact deploy run's evidence artifact. For a manual run, select `deployed_target` and supply full expected SHAs when they differ from the dispatched `main` SHA.
+2. Confirm a backend deployment runs protocol smoke only; confirm a frontend deployment passes artifact verification, exact backend protocol, root, CORS, WebSocket, and strict browser smoke.
 3. If production is behind deployment protection or a different URL, set `BRASSTUNE_WEB_ACCESS_URL` as a GitHub variable and rerun without exposing tokens in logs.
 
 ## Rollback Confirmation
 
 1. If production health, CORS, WebSocket, legal routes, export, auth, or account deletion fail, stop rollout.
 2. Vercel rollback: promote the previous known-good deployment or redeploy the previous commit.
-3. Render rollback: redeploy the previous known-good backend deploy or previous backend commit.
-4. Database rollback: do not reverse migrations without data review. Prefer forward fixes unless a reversible migration has been reviewed.
+3. Render rollback before contract: redeploy the previous known-good backend commit. After contract: redeploy only the retained privacy-aware PR1 Render deployment, identified by its recorded deploy ID and SHA; the pre-PR1 backend is incompatible.
+4. Database rollback: do not reverse or relax the contract migration without data and constraint review. Prefer forward fixes.
 5. Record incident start/end time, impacted surfaces, whether user data was affected, and owner-approved customer communication.
 
 ## Remaining External Gates To Record
