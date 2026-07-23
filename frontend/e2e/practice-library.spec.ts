@@ -384,8 +384,11 @@ test('locale selection updates language, direction, manifest, Intl output, and p
 });
 
 test('built-in shortcut labels follow the selected locale while custom titles and stored targets stay unchanged', async ({ page }) => {
-  await page.goto('/practice');
-  await page.evaluate(() => {
+  await page.addInitScript(() => {
+    localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestAccess', 'true');
+    localStorage.setItem('brasstune.demoMode', 'true');
+    sessionStorage.setItem('e2e.practiceLibrary.initialized', 'true');
     localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
       version: 1,
       customExercises: [{ id: 'custom-a-g', name: 'A-G Warmup', notes: ['A', 'B', 'C'], source: 'custom', createdAt: '2026-07-23T12:00:00.000Z' }],
@@ -400,7 +403,7 @@ test('built-in shortcut labels follow the selected locale while custom titles an
       weeklyGoal: { week: '2026-07-20', targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
     }));
   });
-  await page.reload();
+  await page.goto('/practice');
 
   const shortcuts = page.locator('.practice-shortcut');
   await expect(shortcuts.filter({ hasText: 'Guided 5-minute warm-up' })).toHaveCount(1);
