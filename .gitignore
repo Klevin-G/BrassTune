@@ -16,6 +16,7 @@ swift/**/.swiftpm/
 swift/**/*.xcodeproj/project.xcworkspace/
 swift/**/*.xcodeproj/xcuserdata/
 .DS_Store
+.idea/
 .pytest_cache/
 .env
 .env.local
