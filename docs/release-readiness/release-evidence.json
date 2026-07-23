@@ -1,8 +1,10 @@
 {
   "schema_version": 1,
   "generated_at": "2026-07-23",
-  "phase": "pr1_exact_head_verified_not_deployed",
-  "candidate_sha": "2106768f177c64a1475c6168eed6d9a172633435",
+  "phase": "pr1_candidate_test_only_successor_not_deployed",
+  "candidate_sha": "e1b3f61351d62e1438ac457c31b1a8d40691a1d5",
+  "full_gate_predecessor_sha": "2106768f177c64a1475c6168eed6d9a172633435",
+  "candidate_delta": "Playwright seed-once persistence coverage only; production application code is identical to the full-gate predecessor",
   "heavy_gate_base_sha": "8ee07d63ddf201efc59f4b8c0b8d661cfd491082",
   "artifact_bundle": "/Users/aryasalem/Downloads/BrassTune-safety-bundles/20260723T094812Z-gates-8ee07d6",
   "branch": "arya/ux-parity-localization-20260722",
@@ -23,6 +25,7 @@
     "native_simulator_builds": "4 passed with launch/plist/localization/black-band checks"
   },
   "ci_gates": {
+    "basis_sha": "2106768f177c64a1475c6168eed6d9a172633435",
     "backend": {
       "run_id": 30002610359,
       "status": "success",
@@ -48,12 +51,13 @@
     "audio_scorer": "approved after explicit denominator-beat contract",
     "source_deploy_preflight": "approved",
     "postgresql_ci_fix": "approved; no P0-P2",
-    "final_exact_artifact": "pending for the documentation-only successor"
+    "final_gate": "P2 false-positive persistence fixture identified and fixed in candidate e1b3f61; rereview pending",
+    "final_exact_artifact": "pending for the final documentation-only successor"
   },
   "vercel_preview": {
     "deployment_id": "dpl_7xmSMfo1bX3dX9WQEXGxPhfpa2VJ",
-    "candidate_sha": "2106768f177c64a1475c6168eed6d9a172633435",
-    "status": "exact_head_preview_not_production"
+    "source_sha": "2106768f177c64a1475c6168eed6d9a172633435",
+    "status": "production-identical predecessor preview; not production"
   },
   "supabase": {
     "linked_project_ref": "yznziwewxrlwnwiynlvl",

@@ -3,9 +3,9 @@
 Date: 2026-07-23
 
 Branch: `arya/ux-parity-localization-20260722`
-Exact code head: `2106768f177c64a1475c6168eed6d9a172633435`
+Candidate code head: `e1b3f61351d62e1438ac457c31b1a8d40691a1d5`
 
-Current status: [PR #11](https://github.com/Klevin-G/BrassTune/pull/11) is open and pushed. Its exact head passed recorded local gates and GitHub Actions Backend [30002610359](https://github.com/Klevin-G/BrassTune/actions/runs/30002610359), Security [30002610363](https://github.com/Klevin-G/BrassTune/actions/runs/30002610363), Frontend [30002610356](https://github.com/Klevin-G/BrassTune/actions/runs/30002610356), and Swift [30002610369](https://github.com/Klevin-G/BrassTune/actions/runs/30002610369). It is not merged, migrated, or deployed. Production, physical-device, signing, TestFlight, and App Store gates remain separate.
+Current status: [PR #11](https://github.com/Klevin-G/BrassTune/pull/11) is open. Production-identical predecessor `2106768f177c64a1475c6168eed6d9a172633435` passed recorded local gates and GitHub Actions Backend [30002610359](https://github.com/Klevin-G/BrassTune/actions/runs/30002610359), Security [30002610363](https://github.com/Klevin-G/BrassTune/actions/runs/30002610363), Frontend [30002610356](https://github.com/Klevin-G/BrassTune/actions/runs/30002610356), and Swift [30002610369](https://github.com/Klevin-G/BrassTune/actions/runs/30002610369). Candidate `e1b3f61` changes only the Playwright persistence fixture and passed the focused mobile-WebKit check `10/10`; final candidate-head checks remain the PR merge gate. Nothing is merged, migrated, or deployed.
 
 | Topic | Canonical file | Purpose |
 |---|---|---|

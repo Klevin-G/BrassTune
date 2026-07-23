@@ -2,22 +2,22 @@
 
 Updated: 2026-07-23
 
-Exact code head: `2106768f177c64a1475c6168eed6d9a172633435`
+Candidate code head: `e1b3f61351d62e1438ac457c31b1a8d40691a1d5`
 Branch/PR: `arya/ux-parity-localization-20260722`, [PR #11](https://github.com/Klevin-G/BrassTune/pull/11) (open and pushed)
 
 ## Decision
 
-The exact code head has passed the recorded local and GitHub Actions gates. It is a reviewed PR1 candidate only: it has not been merged, migrated, or deployed. This document does not make a hosted, physical-device, signing, TestFlight, or App Store claim.
+Production-identical predecessor `2106768f177c64a1475c6168eed6d9a172633435` passed the recorded local and GitHub Actions gates. Candidate `e1b3f61` adds only a Playwright seed-once regression guard after final review found the earlier fixture could mask persistence mutation; its focused mobile-WebKit check passed `10/10`. Final candidate-head checks remain required before merge. This is a PR1 candidate only, not a hosted, physical-device, signing, TestFlight, or App Store claim.
 
 ## Evidence
 
 | Surface | Result | Boundary |
 |---|---|---|
-| Backend | Local: `223 passed`, `4` PostgreSQL-only skips. [CI run 30002610359](https://github.com/Klevin-G/BrassTune/actions/runs/30002610359): PostgreSQL suite `226 passed`, `1 skipped`; readiness green. | CI/local evidence; no production database change. |
+| Backend | Local: `223 passed`, `4` PostgreSQL-only skips. Predecessor [CI run 30002610359](https://github.com/Klevin-G/BrassTune/actions/runs/30002610359): PostgreSQL suite `226 passed`, `1 skipped`; readiness green. | Candidate delta is Playwright-only; no production database change. |
 | Security | [CI run 30002610363](https://github.com/Klevin-G/BrassTune/actions/runs/30002610363) succeeded; recorded Bandit and dependency-audit checks are clean. | Does not authorize a provider change. |
-| Frontend | Local: `39` files / `199` unit tests, production build, `11` locale chunks, and dependency audit (`0` findings) passed; full E2E `398 passed`, `7` intended skips in `4.9m`; focused mobile-WebKit `10/10`. [CI run 30002610356](https://github.com/Klevin-G/BrassTune/actions/runs/30002610356): `398 passed`, `7 skipped` in `20.7m`. | Browser automation only. |
+| Frontend | Local: `39` files / `199` unit tests, production build, `11` locale chunks, dependency audit (`0` findings), and full E2E `398 passed`, `7` intended skips in `4.9m`. Predecessor [CI run 30002610356](https://github.com/Klevin-G/BrassTune/actions/runs/30002610356): `398 passed`, `7 skipped` in `20.7m`. Candidate seed-once persistence coverage: mobile-WebKit `10/10`. | Browser automation only; final candidate-head CI is still required. |
 | Native | [CI run 30002610369](https://github.com/Klevin-G/BrassTune/actions/runs/30002610369) succeeded. Recorded local simulator evidence includes Core `3/3`, app units `113/113`, UI `9/9`, four builds, and launch/black-band checks. | Unsigned simulator evidence only. |
-| Vercel preview | `dpl_7xmSMfo1bX3dX9WQEXGxPhfpa2VJ` is the exact-head preview. | Preview is not a production deployment or hosted-release smoke. |
+| Vercel preview | `dpl_7xmSMfo1bX3dX9WQEXGxPhfpa2VJ` is the exact preview of production-identical predecessor `2106768`. | Preview is not a production deployment or hosted-release smoke. |
 
 Independent security, audio/scorer, PostgreSQL-fix, deployment-preflight, and artifact reviews reported no P0-P2 blocker at their reviewed revisions. The heavy-gate evidence bundle is `/Users/aryasalem/Downloads/BrassTune-safety-bundles/20260723T094812Z-gates-8ee07d6`; a fresh checksum-backed bundle and independent artifact review are required for the documentation-only successor before merge.
 

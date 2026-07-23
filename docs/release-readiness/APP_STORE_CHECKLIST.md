@@ -1,6 +1,6 @@
 # Apple App Store Checklist
 
-Updated: 2026-07-23. Exact code head: `2106768f177c64a1475c6168eed6d9a172633435`. This is an implementation and simulator checklist, not an App Store readiness decision.
+Updated: 2026-07-23. Candidate code head: `e1b3f61351d62e1438ac457c31b1a8d40691a1d5`. This is an implementation and simulator checklist, not an App Store readiness decision.
 
 ## Implemented local artifacts
 
@@ -14,7 +14,7 @@ Updated: 2026-07-23. Exact code head: `2106768f177c64a1475c6168eed6d9a172633435`
 ## Current evidence
 
 - Local: BrassTuneCore `3/3`, app units `113/113`, UI smoke `9/9`, four simulator builds, launch screenshots, plist checks, localization, and black-band checks.
-- Exact-head GitHub Actions [Swift run 30002610369](https://github.com/Klevin-G/BrassTune/actions/runs/30002610369) succeeded.
+- GitHub Actions [Swift run 30002610369](https://github.com/Klevin-G/BrassTune/actions/runs/30002610369) succeeded on production-identical predecessor `2106768f177c64a1475c6168eed6d9a172633435`; the successor changes only Playwright coverage.
 
 This is unsigned simulator/CI evidence. It does not establish physical-device microphone quality, configured native production auth/API settings, signing, archive/export validity, TestFlight, or App Store acceptance.
 
