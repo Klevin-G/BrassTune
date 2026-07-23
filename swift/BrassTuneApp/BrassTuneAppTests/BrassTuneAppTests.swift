@@ -295,6 +295,14 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(Set(arabicForms.keys), Set(["zero", "one", "two", "few", "many", "other"]))
         XCTAssertEqual(AppLanguage.english.practiceSessionCountLabel(1), "1 practice session")
         XCTAssertEqual(AppLanguage.english.practiceSessionCountLabel(2), "2 practice sessions")
+        let pagesPlural = try XCTUnwrap(strings["%lld pages"] as? [String: Any])
+        let pagesLocalizations = try XCTUnwrap(pagesPlural["localizations"] as? [String: Any])
+        XCTAssertEqual(Set(pagesLocalizations.keys), expectedLocales)
+        let originalLanguage = NativeLocalization.language
+        defer { NativeLocalization.language = originalLanguage }
+        NativeLocalization.language = .english
+        XCTAssertEqual(NativeLocalization.pageCountLabel(1), "1 page")
+        XCTAssertEqual(NativeLocalization.pageCountLabel(2), "2 pages")
 
         func value(_ key: String, _ locale: String) throws -> String {
             let entry = try XCTUnwrap(strings[key] as? [String: Any], key)
@@ -437,7 +445,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(model.authState, .emailConfirmationRequired(email: "new@example.com"))
         XCTAssertEqual(model.tutorialPresentationRequest, 1)
         XCTAssertNil(model.lastError)
-        XCTAssertEqual(model.authNotice, "Account created. Check your email to confirm it, then use this tour to get started.")
+        XCTAssertEqual(model.authNotice, "Check your email to confirm this BrassTune account before signing in.")
         StubURLProtocol.handler = nil
     }
 
@@ -446,7 +454,7 @@ final class BrassTuneAppTests: XCTestCase {
         let networkSession = makeStubSession()
         let authService = makeIsolatedAuthService(session: networkSession)
         defer {
-            authService.signOut()
+            try? authService.signOut()
             StubURLProtocol.handler = nil
         }
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
@@ -483,7 +491,7 @@ final class BrassTuneAppTests: XCTestCase {
             let authService = makeIsolatedAuthService(session: makeStubSession())
             let config = makeAuthConfig()
             defer {
-                authService.signOut()
+                try? authService.signOut()
                 StubURLProtocol.handler = nil
             }
             nonisolated(unsafe) var logoutRequest: URLRequest?
@@ -530,7 +538,7 @@ final class BrassTuneAppTests: XCTestCase {
         let authService = makeIsolatedAuthService(session: makeStubSession())
         let config = makeAuthConfig()
         defer {
-            authService.signOut()
+            try? authService.signOut()
             StubURLProtocol.handler = nil
             try? FileManager.default.removeItem(at: stateURL)
             try? FileManager.default.removeItem(at: NativeStorageNamespace.account(userID: "user-a").stateFile(basedAt: stateURL))
@@ -639,7 +647,7 @@ final class BrassTuneAppTests: XCTestCase {
         let networkSession = makeStubSession()
         let authService = makeIsolatedAuthService(session: networkSession)
         defer {
-            authService.signOut()
+            try? authService.signOut()
             StubURLProtocol.handler = nil
         }
         let config = makeAuthConfig()
@@ -681,7 +689,7 @@ final class BrassTuneAppTests: XCTestCase {
         let networkSession = makeStubSession()
         let authService = makeIsolatedAuthService(session: networkSession)
         defer {
-            authService.signOut()
+            try? authService.signOut()
             StubURLProtocol.handler = nil
         }
         let validConfig = makeAuthConfig()
@@ -742,7 +750,7 @@ final class BrassTuneAppTests: XCTestCase {
                 )
             )
             XCTAssertTrue(model.authNoticeIsError)
-            authService.signOut()
+            try? authService.signOut()
         }
         StubURLProtocol.handler = nil
     }
@@ -752,7 +760,7 @@ final class BrassTuneAppTests: XCTestCase {
         let networkSession = makeStubSession()
         let authService = makeIsolatedAuthService(session: networkSession)
         defer {
-            authService.signOut()
+            try? authService.signOut()
             StubURLProtocol.handler = nil
         }
         let config = makeAuthConfig()
@@ -785,7 +793,7 @@ final class BrassTuneAppTests: XCTestCase {
         let networkSession = makeStubSession()
         let authService = makeIsolatedAuthService(session: networkSession)
         defer {
-            authService.signOut()
+            try? authService.signOut()
             StubURLProtocol.handler = nil
         }
         let config = makeAuthConfig()
@@ -818,7 +826,7 @@ final class BrassTuneAppTests: XCTestCase {
                 "2026-07-16T19:00:00.000Z",
                 "2026-07-16T19:00:00.000Z",
                 1,
-                "Apple account created. Here's a quick tour of BrassTune."
+                "Signed in with Apple."
             ),
             (
                 "2026-06-01T19:00:00.000Z",
@@ -830,7 +838,7 @@ final class BrassTuneAppTests: XCTestCase {
                 nil,
                 nil,
                 1,
-                "Signed in with Apple. Here's a quick tour you can finish or dismiss."
+                "Signed in with Apple."
             ),
         ]
 
@@ -862,7 +870,7 @@ final class BrassTuneAppTests: XCTestCase {
             XCTAssertEqual(model.tutorialPresentationRequest, expectation.expectedRequest)
             XCTAssertEqual(model.authNotice, expectation.expectedNotice)
             XCTAssertNil(model.lastError)
-            authService.signOut()
+            try? authService.signOut()
         }
         StubURLProtocol.handler = nil
     }
@@ -1438,6 +1446,48 @@ final class BrassTuneAppTests: XCTestCase {
             XCTAssertEqual(summary.averageAbsoluteCents, item["expected_average_abs_cents"] as? Double)
             XCTAssertEqual(summary.stars, item["expected_stars"] as? Int)
         }
+
+        for item in try XCTUnwrap(root["temporal_cases"] as? [[String: Any]]) {
+            let name = item["name"] as? String ?? "temporal case"
+            let notes = try XCTUnwrap(item["notes"] as? [String])
+            let frames = try XCTUnwrap(item["frames"] as? [[String: Any]])
+            let checkpoints = try XCTUnwrap(item["checkpoints"] as? [[String: Any]])
+            var grader = PlayAlongGrader(writtenNotes: notes)
+
+            for (index, frame) in frames.enumerated() {
+                let note = frame["written_note"] is NSNull ? nil : frame["written_note"] as? String
+                let cents = frame["cents"] is NSNull ? nil : (frame["cents"] as? NSNumber)?.doubleValue
+                grader.feed(makePlayAlongFrame(
+                    note: note,
+                    cents: cents,
+                    timestampMs: try XCTUnwrap(frame["timestamp_ms"] as? Int),
+                    confidence: try XCTUnwrap((frame["confidence"] as? NSNumber)?.doubleValue),
+                    frequencyHz: note == nil ? nil : 440
+                ))
+
+                for checkpoint in checkpoints where checkpoint["after_frame_index"] as? Int == index {
+                    let expectedNote = checkpoint["expected_current_note"] is NSNull ? nil : checkpoint["expected_current_note"] as? String
+                    XCTAssertEqual(grader.currentNoteName, expectedNote, name)
+                    XCTAssertEqual(
+                        grader.heldFraction * Double(grader.holdDurationMs),
+                        try XCTUnwrap((checkpoint["expected_held_ms"] as? NSNumber)?.doubleValue),
+                        accuracy: 0.001,
+                        name
+                    )
+                    XCTAssertEqual(grader.noteGrades.count, checkpoint["expected_result_count"] as? Int, name)
+                    XCTAssertEqual(grader.isComplete, checkpoint["expected_done"] as? Bool, name)
+                }
+            }
+
+            let expectedResults = try XCTUnwrap(item["expected_results"] as? [[String: Any]])
+            XCTAssertEqual(grader.noteGrades.count, expectedResults.count, name)
+            for (actual, expected) in zip(grader.noteGrades, expectedResults) {
+                XCTAssertEqual(actual.writtenNoteName, expected["name"] as? String, name)
+                XCTAssertEqual(actual.medianCents, (expected["median_cents"] as? NSNumber)?.doubleValue, name)
+                XCTAssertEqual(actual.sampleCount, expected["sample_count"] as? Int, name)
+                XCTAssertEqual(actual.rating.rawValue, expected["rating"] as? String, name)
+            }
+        }
     }
 
     func testPlayAlongOnlyAdvancesWhenPostAttackMedianIsAccepted() {
@@ -1701,7 +1751,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(member.viewerRoleLabel, "Assistant")
     }
 
-    func testAPIClientPreservesFastAPIValidationMessagesAndCancellation() async throws {
+    func testAPIClientNormalizesBackendValidationMessagesAndPreservesCancellation() async throws {
         let session = makeStubSession()
         let client = APIClient(session: session)
         let baseURL = AppConfig.approvedProductionAPIOrigin
@@ -1720,7 +1770,7 @@ final class BrassTuneAppTests: XCTestCase {
                 error,
                 .apiRequestFailed(
                     statusCode: 422,
-                    message: "Class code must contain 4-16 characters Instrument is not supported"
+                    message: NativeLocalization.string("The class service could not complete this request.")
                 )
             )
         }
@@ -1805,7 +1855,7 @@ final class BrassTuneAppTests: XCTestCase {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-class-expiry-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-class-expiry-\(UUID().uuidString)", isDirectory: true)
         defer {
-            authService.signOut()
+            try? authService.signOut()
             StubURLProtocol.handler = nil
             try? FileManager.default.removeItem(at: stateURL)
             try? FileManager.default.removeItem(at: NativeStorageNamespace.account(userID: "class-user").stateFile(basedAt: stateURL))
@@ -2209,7 +2259,417 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertFalse(noLock.isValidForRecording)
     }
 
+    func testDesignSystemCopyLocalizesLiteralsAndPreservesUserText() {
+        let previous = NativeLocalization.language
+        defer { NativeLocalization.language = previous }
+        NativeLocalization.language = .arabic
+
+        let localized: BTCopy = "Tuner"
+        XCTAssertEqual(localized.resolved, "الموالف")
+        XCTAssertEqual(BTCopy.verbatim("Arya's C# étude").resolved, "Arya's C# étude")
+        let announcement = nativeTutorialAccessibilityAnnouncement(stepIndex: 0)
+        XCTAssertTrue(announcement.contains(AppLanguage.arabic.localized("Choose your instrument")))
+        XCTAssertFalse(announcement.contains("Choose your instrument"))
+    }
+
+    @MainActor
+    func testAudioSessionCoordinatorDeactivatesOnlyAfterFinalOwner() throws {
+        var activationCount = 0
+        var deactivationCount = 0
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { activationCount += 1 },
+            deactivateSession: { deactivationCount += 1 }
+        )
+
+        try coordinator.acquire(.capture) { }
+        try coordinator.acquire(.metronome) { }
+        XCTAssertEqual(activationCount, 1)
+        coordinator.release(.capture)
+        XCTAssertEqual(deactivationCount, 0)
+        coordinator.release(.metronome)
+        XCTAssertEqual(deactivationCount, 1)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+
+        XCTAssertThrowsError(
+            try coordinator.acquire(.capture, configure: { }, setup: {
+                throw NativeAudioEngineError.inputUnavailable
+            })
+        )
+        XCTAssertTrue(coordinator.activeOwners.isEmpty, "Failed capture setup must not strand audio-session ownership.")
+        XCTAssertEqual(deactivationCount, 2)
+
+        let metronomeOutput = NativeMetronomeOutput(audioSessionCoordinator: coordinator)
+        try coordinator.acquire(.capture) { }
+        metronomeOutput.playTick(settings: MetronomeSettings(), accent: false)
+        XCTAssertEqual(coordinator.activeOwners, [.capture], "A metronome timer must not acquire or reconfigure the session while capture owns measurement mode.")
+        coordinator.release(.capture)
+        XCTAssertEqual(deactivationCount, 3)
+
+        let engine = NativeAudioEngine(audioSessionCoordinator: coordinator)
+        try coordinator.acquire(.capture) { }
+        engine.stopAndResetAudioEngine()
+        XCTAssertEqual(deactivationCount, 4, "Stopping capture must release and deactivate its final session owner.")
+
+        try coordinator.acquire(.metronome) { }
+        metronomeOutput.stop()
+        XCTAssertEqual(deactivationCount, 5, "Stopping the metronome must release and deactivate its final session owner.")
+
+        try coordinator.acquire(.metronome) { }
+        var mutedSettings = MetronomeSettings()
+        mutedSettings.muted = true
+        metronomeOutput.playTick(settings: mutedSettings, accent: false)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty, "Switching to muted output must release metronome ownership immediately.")
+        XCTAssertEqual(deactivationCount, 6)
+
+        try coordinator.acquire(.metronome) { }
+        var visualSettings = MetronomeSettings()
+        visualSettings.visualOnly = true
+        metronomeOutput.playTick(settings: visualSettings, accent: false)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty, "Switching to visual-only output must release metronome ownership immediately.")
+        XCTAssertEqual(deactivationCount, 7)
+    }
+
+    func testPlayAlongHidesLowConfidenceFeedbackAndAcceptsEnharmonics() {
+        let exercise = PlayAlongExercise(
+            id: "enharmonic-test",
+            title: "Enharmonic test",
+            detail: "Test",
+            difficulty: "Beginner",
+            category: .practicePattern,
+            writtenNotes: ["F"]
+        )
+        var session = PlayAlongSession(exercise: exercise, holdDurationMs: 300, minimumSamples: 3, attackTrimMs: 0)
+        session.feed(makePlayAlongFrame(note: "F", cents: 0, timestampMs: 0, confidence: 0.2, frequencyHz: 349))
+        XCTAssertNil(session.detectedNoteName)
+        XCTAssertNil(session.detectedCents)
+        XCTAssertEqual(session.heldFraction, 0)
+        XCTAssertEqual(playAlongFeedback(session), NativeLocalization.format("Play %@", "F"))
+
+        for timestamp in stride(from: 0, through: 300, by: 100) {
+            session.feed(makePlayAlongFrame(note: "E#", cents: 2, timestampMs: timestamp, confidence: 0.9, frequencyHz: 349))
+        }
+        XCTAssertTrue(session.isComplete)
+        XCTAssertEqual(session.noteGrades.first?.writtenNoteName, "F")
+        XCTAssertEqual(session.noteGrades.first?.rating, .excellent)
+    }
+
+    func testSharedSyntheticPitchQualityContractMatchesNativeDetector() throws {
+        // This is deterministic synthetic harmonic/onset evidence only. It is
+        // not physical microphone, audio-I/O, or real-player attack evidence.
+        let data = try Data(contentsOf: try sharedFixtureURL(named: "pitch_quality_contract.json"))
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let sampleRate = try XCTUnwrap((root["sample_rate_hz"] as? NSNumber)?.doubleValue)
+        let frameSize = try XCTUnwrap(root["frame_size"] as? Int)
+        let harmonics = try XCTUnwrap(root["harmonic_amplitudes"] as? [NSNumber]).map(\.doubleValue)
+        let thresholds = try XCTUnwrap(root["thresholds"] as? [String: Any])
+        let onsetPolicy = try XCTUnwrap(root["synthetic_onset_protocol"] as? [String: Any])
+        let cases = try XCTUnwrap(root["cases"] as? [[String: Any]])
+        var absoluteErrors: [Double] = []
+        var crossPlatformDeltas: [Double] = []
+        var onsetTimesMs: [Double] = []
+        var octaveCorrect = 0
+        var grossOctaveErrors = 0
+
+        func harmonicTone(frequency: Double, multiplier: Double) -> [Float] {
+            (0..<frameSize).map { index in
+                let time = Double(index) / sampleRate
+                let sample = harmonics.enumerated().reduce(0.0) { partial, item in
+                    partial + item.element * sin(2 * .pi * frequency * Double(item.offset + 1) * time)
+                }
+                return Float(sample * multiplier)
+            }
+        }
+
+        for item in cases {
+            let note = item["note"] as? String ?? "pitch case"
+            let target = try XCTUnwrap((item["frequency_hz"] as? NSNumber)?.doubleValue)
+            let expectedPython = try XCTUnwrap((item["expected_python_signed_cents_error"] as? NSNumber)?.doubleValue)
+            let frame = NativePitchDetector.frame(
+                samples: harmonicTone(frequency: target, multiplier: 1),
+                sampleRate: sampleRate,
+                timestampMs: 0,
+                instrumentId: "fixture-wide-range",
+                referencePitchHz: 440
+            )
+            let detected = try XCTUnwrap(frame.frequencyHz, "Native detector did not lock \(note)")
+            let signedError = 1_200 * log2(detected / target)
+            absoluteErrors.append(abs(signedError))
+            crossPlatformDeltas.append(abs(signedError - expectedPython))
+            if abs(signedError) < 50 { octaveCorrect += 1 }
+            if abs(signedError) >= 600 { grossOctaveErrors += 1 }
+
+            let amplitudes = try XCTUnwrap(item["onset_amplitude_multipliers"] as? [NSNumber]).map(\.doubleValue)
+            let onsetIndex = try XCTUnwrap(amplitudes.firstIndex(where: { $0 > 0 }))
+            let lockIndex = try XCTUnwrap(amplitudes.indices.first { index in
+                let onsetFrame = NativePitchDetector.frame(
+                    samples: harmonicTone(frequency: target, multiplier: amplitudes[index]),
+                    sampleRate: sampleRate,
+                    timestampMs: index,
+                    instrumentId: "fixture-wide-range",
+                    referencePitchHz: 440
+                )
+                guard let locked = onsetFrame.frequencyHz else { return false }
+                let lockError = abs(1_200 * log2(locked / target))
+                return onsetFrame.confidence >= ((onsetPolicy["lock_confidence_min"] as? NSNumber)?.doubleValue ?? 0.55)
+                    && lockError <= ((onsetPolicy["lock_frequency_tolerance_cents_max"] as? NSNumber)?.doubleValue ?? 50)
+            }, "Native detector never locked synthetic onset \(note)")
+            onsetTimesMs.append(Double(lockIndex - onsetIndex + 1) * Double(frameSize) / sampleRate * 1_000)
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            Double(octaveCorrect) / Double(cases.count) * 100,
+            (thresholds["steady_note_octave_accuracy_min_percent"] as? NSNumber)?.doubleValue ?? 99
+        )
+        XCTAssertLessThanOrEqual(
+            Double(grossOctaveErrors) / Double(cases.count) * 100,
+            (thresholds["gross_octave_error_max_percent"] as? NSNumber)?.doubleValue ?? 0.5
+        )
+        XCTAssertLessThanOrEqual(median(absoluteErrors), (thresholds["median_abs_cents_error_max"] as? NSNumber)?.doubleValue ?? 3)
+        XCTAssertLessThanOrEqual(percentile95(absoluteErrors), (thresholds["p95_abs_cents_error_max"] as? NSNumber)?.doubleValue ?? 8)
+        XCTAssertLessThanOrEqual(percentile95(crossPlatformDeltas), (thresholds["cross_platform_p95_cents_delta_max"] as? NSNumber)?.doubleValue ?? 5)
+        XCTAssertLessThanOrEqual(percentile95(onsetTimesMs), (thresholds["onset_p95_ms_max"] as? NSNumber)?.doubleValue ?? 300)
+    }
+
+    func testSyntheticPitchQualityMedianGateRejectsThreeToEightCentOnlyErrors() {
+        let errors = [3.1, 3.8, 4.6, 5.4, 6.3, 7.2, 7.9]
+        XCTAssertLessThanOrEqual(percentile95(errors), 8, "The p95 gate alone would allow this regression.")
+        XCTAssertGreaterThan(median(errors), 3, "The median gate must reject a detector that is consistently 3–8 cents wrong.")
+    }
+
+    @MainActor
+    func testQueuedRemoteDeletionPurgesLocallySignsOutAndNeverRetriesDelete() async throws {
+        let authService = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? authService.signOut(); StubURLProtocol.handler = nil }
+        var backendDeleteCount = 0
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.host == AppConfig.approvedProductionAPIOrigin.host {
+                backendDeleteCount += 1
+                return .init(response: response, data: Data(#"{"deleted":false,"deletion_status":"external_cleanup_queued"}"#.utf8))
+            }
+            return .init(
+                response: response,
+                data: Data(#"{"access_token":"access-user-a","refresh_token":"refresh-user-a","expires_in":3600,"user":{"id":"user-a","email":"a@example.com"}}"#.utf8)
+            )
+        }
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreBaseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        var pendingPurgeDigests: [String] = []
+        var pendingCredentialDigests: [String] = []
+        let purgeStore = PendingDigestStore(load: { pendingPurgeDigests }, save: { pendingPurgeDigests = $0 })
+        let credentialStore = PendingDigestStore(load: { pendingCredentialDigests }, save: { pendingCredentialDigests = $0 })
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreBaseDirectory,
+            pendingAccountPurgeStore: purgeStore,
+            pendingCredentialRemovalStore: credentialStore,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        model.config = makeAuthConfig()
+        await model.signIn(email: "a@example.com", password: "password")
+        let session = makeSession(name: "Keep until confirmed", cents: [0])
+        model.sessions = [session]
+        let namespace = NativeStorageNamespace.account(userID: "user-a")
+        let accountFile = namespace.stateFile(basedAt: stateURL)
+        let accountScoreDirectory = namespace.scoreDirectory(basedAt: scoreBaseDirectory)
+        try FileManager.default.createDirectory(at: accountScoreDirectory, withIntermediateDirectories: true)
+        try Data("score".utf8).write(to: accountScoreDirectory.appendingPathComponent("score.pdf"))
+
+        await model.deleteAccount()
+
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertNil(authService.restoreSession())
+        XCTAssertTrue(model.authNotice?.localizedCaseInsensitiveContains("queued") == true)
+        XCTAssertFalse(model.authNoticeIsError)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountFile.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountScoreDirectory.path))
+        XCTAssertTrue(pendingPurgeDigests.isEmpty)
+        XCTAssertTrue(pendingCredentialDigests.isEmpty)
+        XCTAssertEqual(backendDeleteCount, 1)
+
+        let relaunchedModel = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreBaseDirectory,
+            pendingAccountPurgeStore: purgeStore,
+            pendingCredentialRemovalStore: credentialStore,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        relaunchedModel.config = makeAuthConfig()
+        await relaunchedModel.restoreSession()
+
+        XCTAssertEqual(relaunchedModel.authState, .guest)
+        XCTAssertNil(authService.restoreSession())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountFile.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountScoreDirectory.path))
+        XCTAssertTrue(pendingPurgeDigests.isEmpty)
+        XCTAssertTrue(pendingCredentialDigests.isEmpty)
+        XCTAssertEqual(backendDeleteCount, 1, "The backend owns queued provider cleanup; the client must not issue an unreachable second DELETE.")
+    }
+
+    @MainActor
+    func testQueuedRemoteDeletionRetriesFailedCredentialRemovalWithoutRestoringAccountData() async throws {
+        let authStore = InMemoryAuthSessionStore()
+        var failCredentialDeletion = true
+        let authService = AuthService(
+            session: makeStubSession(),
+            service: "com.brasstune.tests.\(UUID().uuidString)",
+            account: "current-session",
+            readSessionPayload: { authStore.payload },
+            saveSessionPayload: { authStore.payload = $0 },
+            deleteSessionPayload: {
+                if failCredentialDeletion { throw UserVisibleError.secureStorageDeletionFailed }
+                authStore.payload = nil
+            }
+        )
+        defer { failCredentialDeletion = false; try? authService.signOut(); StubURLProtocol.handler = nil }
+        var backendDeleteCount = 0
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.host == AppConfig.approvedProductionAPIOrigin.host {
+                backendDeleteCount += 1
+                return .init(response: response, data: Data(#"{"deleted":false,"deletion_status":"external_cleanup_queued"}"#.utf8))
+            }
+            return .init(
+                response: response,
+                data: Data(#"{"access_token":"access-user-a","refresh_token":"refresh-user-a","expires_in":3600,"user":{"id":"user-a","email":"a@example.com"}}"#.utf8)
+            )
+        }
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreBaseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        var pendingCredentialDigests: [String] = []
+        let credentialStore = PendingDigestStore(load: { pendingCredentialDigests }, save: { pendingCredentialDigests = $0 })
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreBaseDirectory,
+            pendingCredentialRemovalStore: credentialStore,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        model.config = makeAuthConfig()
+        await model.signIn(email: "a@example.com", password: "password")
+        model.sessions = [makeSession(name: "Must not return", cents: [0])]
+        let namespace = NativeStorageNamespace.account(userID: "user-a")
+        let accountFile = namespace.stateFile(basedAt: stateURL)
+
+        await model.deleteAccount()
+
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNotNil(authService.restoreSession(), "The injected Keychain deletion failure must be observable, not silently treated as success.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountFile.path))
+        XCTAssertEqual(pendingCredentialDigests.count, 1)
+        XCTAssertTrue(pendingCredentialDigests.allSatisfy { $0.count == 64 && $0.allSatisfy(\.isHexDigit) })
+        XCTAssertTrue(model.authNotice?.localizedCaseInsensitiveContains("queued") == true)
+        XCTAssertTrue(model.authNotice?.localizedCaseInsensitiveContains("saved sign-in") == true)
+        XCTAssertTrue(model.authNoticeIsError)
+
+        failCredentialDeletion = false
+        let relaunchedModel = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreBaseDirectory,
+            pendingCredentialRemovalStore: credentialStore,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        relaunchedModel.config = makeAuthConfig()
+        await relaunchedModel.restoreSession()
+
+        XCTAssertEqual(relaunchedModel.authState, .signedOut)
+        XCTAssertNil(authService.restoreSession())
+        XCTAssertTrue(relaunchedModel.sessions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountFile.path))
+        XCTAssertTrue(pendingCredentialDigests.isEmpty)
+        XCTAssertEqual(backendDeleteCount, 1)
+    }
+
+    @MainActor
+    func testRemoteDeletionRetriesDigestOnlyPurgeOnRelaunch() async throws {
+        let authService = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? authService.signOut(); StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.host == AppConfig.approvedProductionAPIOrigin.host {
+                return .init(response: response, data: Data(#"{"deleted":true}"#.utf8))
+            }
+            return .init(
+                response: response,
+                data: Data(#"{"access_token":"access-user-a","refresh_token":"refresh-user-a","expires_in":3600,"user":{"id":"user-a","email":"a@example.com"}}"#.utf8)
+            )
+        }
+
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreBaseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        var failRemoval = true
+        var pendingDigests: [String] = []
+        let store = NativePersistenceStore.ephemeral(
+            fileURL: stateURL,
+            removeItem: { url in
+                if failRemoval { throw CocoaError(.fileWriteUnknown) }
+                try FileManager.default.removeItem(at: url)
+            }
+        )
+        let pendingStore = PendingDigestStore(
+            load: { pendingDigests },
+            save: { pendingDigests = $0 }
+        )
+        let model = AppModel(
+            persistenceStore: store,
+            scoreStorageDirectory: scoreBaseDirectory,
+            pendingAccountPurgeStore: pendingStore,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        model.config = makeAuthConfig()
+        await model.signIn(email: "a@example.com", password: "password")
+        model.sessions = [makeSession(name: "Delete eventually", cents: [1])]
+        let accountFile = NativeStorageNamespace.account(userID: "user-a").stateFile(basedAt: stateURL)
+        let accountScoreDirectory = NativeStorageNamespace.account(userID: "user-a").scoreDirectory(basedAt: scoreBaseDirectory)
+        try FileManager.default.createDirectory(at: accountScoreDirectory, withIntermediateDirectories: true)
+        try Data("score".utf8).write(to: accountScoreDirectory.appendingPathComponent("score.pdf"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: accountFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: accountScoreDirectory.path))
+
+        await model.deleteAccount()
+
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNil(authService.restoreSession())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: accountFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: accountScoreDirectory.path))
+        XCTAssertEqual(pendingDigests.count, 1)
+        XCTAssertTrue(pendingDigests.allSatisfy { $0.count == 64 && $0.allSatisfy(\.isHexDigit) })
+
+        failRemoval = false
+        _ = AppModel(
+            persistenceStore: store,
+            scoreStorageDirectory: scoreBaseDirectory,
+            pendingAccountPurgeStore: pendingStore,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountFile.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountScoreDirectory.path))
+        XCTAssertTrue(pendingDigests.isEmpty)
+    }
+
     // MARK: - Helpers
+
+    private func median(_ values: [Double]) -> Double {
+        let sorted = values.sorted()
+        guard !sorted.isEmpty else { return .infinity }
+        let midpoint = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[midpoint - 1] + sorted[midpoint]) / 2
+        }
+        return sorted[midpoint]
+    }
+
+    private func percentile95(_ values: [Double]) -> Double {
+        let sorted = values.sorted()
+        guard !sorted.isEmpty else { return .infinity }
+        return sorted[max(0, Int(ceil(Double(sorted.count) * 0.95)) - 1)]
+    }
 
     @MainActor
     private func makeModel() -> AppModel {

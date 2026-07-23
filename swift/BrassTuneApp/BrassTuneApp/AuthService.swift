@@ -8,7 +8,7 @@ final class AuthService: NSObject {
     private let session: URLSession
     private let readSessionPayload: () -> String?
     private let saveSessionPayload: (String) throws -> Void
-    private let deleteSessionPayload: () -> Void
+    private let deleteSessionPayload: () throws -> Void
 
     init(
         session: URLSession = .shared,
@@ -16,7 +16,7 @@ final class AuthService: NSObject {
         account: String = "current-session",
         readSessionPayload: (() -> String?)? = nil,
         saveSessionPayload: ((String) throws -> Void)? = nil,
-        deleteSessionPayload: (() -> Void)? = nil
+        deleteSessionPayload: (() throws -> Void)? = nil
     ) {
         self.session = session
         self.readSessionPayload = readSessionPayload ?? {
@@ -26,7 +26,7 @@ final class AuthService: NSObject {
             try KeychainStore.save(payload, service: service, account: account)
         }
         self.deleteSessionPayload = deleteSessionPayload ?? {
-            KeychainStore.delete(service: service, account: account)
+            try KeychainStore.delete(service: service, account: account)
         }
         super.init()
     }
@@ -40,7 +40,7 @@ final class AuthService: NSObject {
             // Legacy/corrupt payloads may not contain the stable user ID that
             // now defines the local storage namespace. Fail closed and remove
             // the unusable token instead of leaving it recoverable in Keychain.
-            deleteSessionPayload()
+            try? deleteSessionPayload()
             return nil
         }
     }
@@ -132,46 +132,54 @@ final class AuthService: NSObject {
         return AppleSignInResult(session: session, isNewUser: Self.appleNewUserSignal(from: response.user))
     }
 
-    func signOut() {
-        deleteSessionPayload()
+    func signOut() throws {
+        do {
+            try deleteSessionPayload()
+        } catch {
+            throw UserVisibleError.secureStorageDeletionFailed
+        }
     }
 
-    /// Revokes the current Supabase access token before removing the local
-    /// Keychain payload. Local removal is guaranteed even when the device is
-    /// offline, so a failed network request never leaves a reusable token here.
+    /// Revokes the current Supabase access token, then always attempts local
+    /// Keychain removal. Secure-storage deletion failures are surfaced so the
+    /// caller can preserve a bounded retry marker instead of claiming success.
     func signOut(config: AppConfig) async throws {
         let existing = restoreSession()
-        defer { deleteSessionPayload() }
-        guard let existing else { return }
-        guard config.hasUsableAccountConfiguration,
-              let supabaseURL = config.supabaseURL,
-              let publishableKey = config.supabasePublishableKey else {
-            throw UserVisibleError.missingAuthConfiguration
-        }
-        let url = supabaseURL.appending(path: "auth/v1/logout")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 15
-        request.setValue(publishableKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(existing.accessToken)", forHTTPHeaderField: "Authorization")
-        do {
-            let (_, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                throw UserVisibleError.authenticationFailed
+        var remoteError: Error?
+        if let existing {
+            guard config.hasUsableAccountConfiguration,
+                  let supabaseURL = config.supabaseURL,
+                  let publishableKey = config.supabasePublishableKey else {
+                try signOut()
+                throw UserVisibleError.missingAuthConfiguration
             }
-        } catch let visible as UserVisibleError {
-            throw visible
-        } catch let error as URLError where error.code == .timedOut {
-            throw UserVisibleError.timeout
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw UserVisibleError.networkUnavailable
+            let url = supabaseURL.appending(path: "auth/v1/logout")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.setValue(publishableKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(existing.accessToken)", forHTTPHeaderField: "Authorization")
+            do {
+                let (_, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    throw UserVisibleError.authenticationFailed
+                }
+            } catch let visible as UserVisibleError {
+                remoteError = visible
+            } catch let error as URLError where error.code == .timedOut {
+                remoteError = UserVisibleError.timeout
+            } catch is CancellationError {
+                remoteError = CancellationError()
+            } catch {
+                remoteError = UserVisibleError.networkUnavailable
+            }
         }
+        try signOut()
+        if let remoteError { throw remoteError }
     }
 
-    func deleteStoredAuth() {
-        signOut()
+    func deleteStoredAuth() throws {
+        try signOut()
     }
 
     func appleNonce() -> String {
@@ -268,12 +276,12 @@ final class AuthService: NSObject {
                     || (500...599).contains(statusCode) {
                     throw UserVisibleError.apiRequestFailed(
                         statusCode: statusCode,
-                        message: "The account service couldn't refresh your sign-in right now. Your saved session will be retried later."
+                        message: NativeLocalization.string("The account service couldn't refresh your sign-in right now. Your saved session will be retried later.")
                     )
                 }
                 throw UserVisibleError.apiRequestFailed(
                     statusCode: statusCode,
-                    message: "Your sign-in expired. Sign in again, then retry."
+                    message: NativeLocalization.string("Your sign-in expired. Sign in again, then retry.")
                 )
             }
             throw UserVisibleError.authenticationFailed
@@ -288,10 +296,12 @@ final class AuthService: NSObject {
         }
     }
 
-    private static let expiredSessionError = UserVisibleError.apiRequestFailed(
-        statusCode: 401,
-        message: "Your sign-in expired. Sign in again, then retry."
-    )
+    private static var expiredSessionError: UserVisibleError {
+        .apiRequestFailed(
+            statusCode: 401,
+            message: NativeLocalization.string("Your sign-in expired. Sign in again, then retry.")
+        )
+    }
 
     private static func appleNewUserSignal(from user: SupabaseAuthUser?) -> Bool? {
         guard let createdAt = parseSupabaseDate(user?.createdAt),
@@ -317,7 +327,7 @@ enum KeychainStore {
 
     static func save(_ value: String, service: String, account: String) throws {
         let data = Data(value.utf8)
-        delete(service: service, account: account)
+        try delete(service: service, account: account)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -343,13 +353,16 @@ enum KeychainStore {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete(service: String, account: String) {
+    static func delete(service: String, account: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw UserVisibleError.secureStorageDeletionFailed
+        }
     }
 }
 

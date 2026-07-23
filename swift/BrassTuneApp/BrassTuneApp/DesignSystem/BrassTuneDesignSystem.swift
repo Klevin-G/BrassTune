@@ -1,6 +1,32 @@
 import SwiftUI
 import UIKit
 
+/// Makes the localization intent of design-system copy explicit. String
+/// literals are catalog keys; dynamic or user-authored values must opt into
+/// `.verbatim(...)` at the call site. This prevents `Text(variable)` from
+/// silently bypassing the selected in-app language.
+enum BTCopy: ExpressibleByStringLiteral, Equatable, Hashable {
+    case localized(String)
+    case verbatim(String)
+
+    init(stringLiteral value: String) {
+        self = .localized(value)
+    }
+
+    var resolved: String {
+        switch self {
+        case .localized(let key): return NativeLocalization.string(key)
+        case .verbatim(let value): return value
+        }
+    }
+}
+
+private extension Text {
+    init(_ copy: BTCopy) {
+        self.init(verbatim: copy.resolved)
+    }
+}
+
 enum BTSpacing {
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
@@ -201,15 +227,15 @@ struct BTCard<Content: View>: View {
 }
 
 struct BTPageHeader: View {
-    let eyebrow: String
-    let title: String
-    let subtitle: String
-    var trailing: String?
+    let eyebrow: BTCopy
+    let title: BTCopy
+    let subtitle: BTCopy
+    var trailing: BTCopy?
 
     var body: some View {
         HStack(alignment: .top, spacing: BTSpacing.lg) {
             VStack(alignment: .leading, spacing: BTSpacing.sm) {
-                Text(eyebrow.uppercased())
+                Text(verbatim: eyebrow.resolved.uppercased())
                     .font(.caption.weight(.bold))
                     .foregroundStyle(BTTheme.accentSoft)
                 Text(title)
@@ -231,8 +257,8 @@ struct BTPageHeader: View {
 }
 
 struct BTSectionHeader: View {
-    let title: String
-    var subtitle: String?
+    let title: BTCopy
+    var subtitle: BTCopy?
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.xs) {
@@ -251,9 +277,9 @@ struct BTSectionHeader: View {
 }
 
 struct BTMetricTile: View {
-    let title: String
-    let value: String
-    var detail: String?
+    let title: BTCopy
+    let value: BTCopy
+    var detail: BTCopy?
     var tint: Color = BTTheme.accent
     var interactive: Bool = false
 
@@ -282,7 +308,7 @@ struct BTMetricTile: View {
 }
 
 struct BTStatusPill: View {
-    let text: String
+    let text: BTCopy
     var tint: Color = BTTheme.accent
 
     var body: some View {
@@ -296,20 +322,24 @@ struct BTStatusPill: View {
                 Capsule().stroke(tint.opacity(0.28), lineWidth: 1)
             }
             .clipShape(Capsule())
-            .accessibilityLabel(text)
+            .accessibilityLabel(Text(text))
     }
 }
 
 struct BTEmptyState: View {
-    let title: String
-    let message: String
+    let title: BTCopy
+    let message: BTCopy
     var systemImage: String = "music.note"
 
     var body: some View {
         BTCard {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-                .foregroundStyle(BTTheme.accent)
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: systemImage)
+            }
+            .font(.headline)
+            .foregroundStyle(BTTheme.accent)
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(BTTheme.muted)
@@ -406,8 +436,8 @@ struct BTSecondaryButtonStyle: ButtonStyle {
 }
 
 struct BTInsightTile: View {
-    let title: String
-    let detail: String
+    let title: BTCopy
+    let detail: BTCopy
     let systemImage: String
     var tint: Color = BTTheme.accent
     var interactive: Bool = false

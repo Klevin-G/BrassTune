@@ -6,6 +6,33 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
+    func testArabicLaunchRendersCatalogCopyInsteadOfEnglishRuntimeStrings() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE", "UITEST_RTL"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["الموالف"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["اعثر على المركز"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["tuner.note"].label, "اعزف نغمة")
+        XCTAssertEqual(app.descendants(matching: .any)["tuner.verdict"].label, "جارٍ الاستماع…")
+        XCTAssertFalse(app.staticTexts["Find the center"].exists)
+        XCTAssertFalse(app.staticTexts["Play a note"].exists)
+
+        openTab("العزف المصاحب", in: app)
+        let favorite = app.descendants(matching: .any)["playAlong.favorite"]
+        XCTAssertTrue(favorite.waitForExistence(timeout: 5))
+        XCTAssertTrue(favorite.label.contains("إضافة إلى المفضلة"))
+        XCTAssertFalse(favorite.label.contains("Add to favorites"))
+
+        openTab("الإعدادات", in: app)
+        let clearData = app.descendants(matching: .any)["settings.deleteAccount"]
+        XCTAssertTrue(clearData.waitForExistence(timeout: 5))
+        XCTAssertTrue(clearData.label.contains("مسح جميع بيانات التطبيق"))
+        XCTAssertFalse(clearData.label.contains("Clear all app data"))
+    }
+
+    @MainActor
     func testFirstRunGatewayAndInstrumentSetupLeadToTunerAndPersist() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW"]
@@ -124,6 +151,15 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertNotEqual(soundToggle.value as? String, "0", "Metronome sound should be enabled by default")
         XCTAssertTrue(app.descendants(matching: .any)["settings.metronomeLink"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings.scoresLink"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testClassLegalAndClearAllDataSurfaces() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
+        app.launch()
+
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
         openTab("Class", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.classes"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["classes.activePicker"].waitForExistence(timeout: 5))
@@ -135,6 +171,32 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["settings.privacyLink"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings.termsLink"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings.supportLink"].waitForExistence(timeout: 5))
+
+        let clearAllData = app.descendants(matching: .any)["settings.deleteAccount"]
+        XCTAssertTrue(clearAllData.waitForExistence(timeout: 5))
+        clearAllData.tap()
+        assertDestructiveAlert(
+            title: "Clear all app data?",
+            destructiveButton: "Clear all data",
+            in: app,
+            confirm: false
+        )
+    }
+
+    @MainActor
+    func testClearLocalPracticeDataCancelAndConfirmFlow() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
+        app.launch()
+
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
+        let tunerStart = app.descendants(matching: .any)["tuner.recordButton"]
+        XCTAssertTrue(tunerStart.waitForExistence(timeout: 5))
+        tunerStart.tap()
+        let floatingStop = app.descendants(matching: .any)["tuner.floating.stop"]
+        XCTAssertTrue(floatingStop.waitForExistence(timeout: 8))
+        floatingStop.tap()
+        openTab("Settings", in: app)
 
         let clearData = app.descendants(matching: .any)["settings.clearLocalData"]
         XCTAssertTrue(clearData.waitForExistence(timeout: 5))
@@ -167,17 +229,6 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["progress.empty"].waitForExistence(timeout: 5),
             "Confirming the alert should clear local practice history"
-        )
-
-        openTab("Settings", in: app)
-        let clearAllData = app.descendants(matching: .any)["settings.deleteAccount"]
-        XCTAssertTrue(clearAllData.waitForExistence(timeout: 5))
-        clearAllData.tap()
-        assertDestructiveAlert(
-            title: "Clear all app data?",
-            destructiveButton: "Clear all data",
-            in: app,
-            confirm: false
         )
     }
 

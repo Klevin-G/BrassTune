@@ -87,6 +87,10 @@ enum NativeLocalization {
         )
     }
 
+    static func pageCountLabel(_ count: Int) -> String {
+        String(localized: "\(count) pages", locale: language.locale)
+    }
+
     /// Unicode FSI/PDI keeps notes, numbers, emails, file types, and user text
     /// readable when embedded in Arabic or another right-to-left sentence.
     static func isolate(_ value: String) -> String {

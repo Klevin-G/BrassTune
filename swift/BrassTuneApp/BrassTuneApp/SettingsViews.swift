@@ -25,13 +25,13 @@ struct SettingsView: View {
         BTScreen {
             BTCard {
                 HStack {
-                    BTSectionHeader(title: "Account", subtitle: accountStatusMessage)
+                    BTSectionHeader(title: "Account", subtitle: .verbatim(accountStatusMessage))
                     Spacer()
-                    BTStatusPill(text: model.authState.displayTitle, tint: model.authState.usesRemoteAccount ? BTTheme.success : BTTheme.warning)
+                    BTStatusPill(text: .verbatim(model.authState.displayTitle), tint: model.authState.usesRemoteAccount ? BTTheme.success : BTTheme.warning)
                         .accessibilityIdentifier("settings.accountStatus")
                 }
                 if let notice = model.authNotice {
-                    Label(notice, systemImage: model.authNoticeIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    Label { Text(verbatim: notice) } icon: { Image(systemName: model.authNoticeIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill") }
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(model.authNoticeIsError ? BTTheme.danger : BTTheme.success)
                         .fixedSize(horizontal: false, vertical: true)
@@ -68,7 +68,9 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Stepper("A4 \(model.referencePitchHz, specifier: "%.1f") Hz", value: $model.referencePitchHz, in: 430...450, step: 0.5)
+                        Stepper(value: $model.referencePitchHz, in: 430...450, step: 0.5) {
+                            Text(verbatim: NativeLocalization.format("A4 %@ Hz", String(format: "%.1f", model.referencePitchHz)))
+                        }
                             .accessibilityIdentifier("settings.referencePitchStepper")
                     }
                     .padding(.top, BTSpacing.sm)
@@ -88,7 +90,7 @@ struct SettingsView: View {
                 BTSectionHeader(title: "Language", subtitle: "Follow the system language or choose a BrassTune language explicitly.")
                 Picker("Language", selection: $model.appLanguage) {
                     ForEach(AppLanguage.allCases) { language in
-                        Text(language.displayName).tag(language)
+                        Text(verbatim: language.displayName).tag(language)
                     }
                 }
                 .accessibilityIdentifier("settings.languagePicker")
@@ -96,7 +98,9 @@ struct SettingsView: View {
 
             BTCard {
                 BTSectionHeader(title: "Metronome defaults", subtitle: "Choose the beat you want when the metronome opens.")
-                Stepper("Tempo: \(model.metronome.bpm) BPM", value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 30...240, step: 1)
+                Stepper(value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 30...240, step: 1) {
+                    Text(verbatim: NativeLocalization.format("Tempo: %@ BPM", String(model.metronome.bpm)))
+                }
                     .accessibilityIdentifier("settings.metronomeBPM")
                 Picker("Meter", selection: Binding(get: { model.metronome.beatsPerMeasure }, set: { model.setMeter(beats: $0) })) {
                     ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
@@ -106,7 +110,7 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings.metronomeMeter")
                 Picker("Subdivision", selection: Binding(get: { model.metronome.subdivision }, set: { model.metronome.subdivision = $0 })) {
                     ForEach(MetronomeSubdivision.allCases) { subdivision in
-                        Text(subdivision.title).tag(subdivision)
+                        Text(verbatim: subdivision.title).tag(subdivision)
                     }
                 }
                 .accessibilityIdentifier("settings.metronomeSubdivision")
@@ -170,16 +174,20 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("settings.password")
                     VStack(spacing: BTSpacing.md) {
-                        Button(model.authOperationInProgress ? "Working…" : "Sign in") {
+                        Button {
                             Task { await model.signIn(email: email, password: password) }
+                        } label: {
+                            Text(verbatim: NativeLocalization.string(model.authOperationInProgress ? "Working…" : "Sign in"))
                         }
                         .buttonStyle(.bordered)
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .disabled(model.authOperationInProgress)
                         .accessibilityIdentifier("settings.signIn")
 
-                        Button(model.authOperationInProgress ? "Working…" : "Create account") {
+                        Button {
                             Task { await model.signUp(email: email, password: password) }
+                        } label: {
+                            Text(verbatim: NativeLocalization.string(model.authOperationInProgress ? "Working…" : "Create account"))
                         }
                         .buttonStyle(.bordered)
                         .frame(maxWidth: .infinity, minHeight: 44)
@@ -210,7 +218,10 @@ struct SettingsView: View {
                 BTCard {
                     BTSectionHeader(
                         title: "Guest mode",
-                        subtitle: model.accountUnavailableMessage ?? "Online accounts aren't available in this build."
+                        subtitle: .verbatim(
+                            model.accountUnavailableMessage
+                                ?? NativeLocalization.string("Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device.")
+                        )
                     )
                     .accessibilityIdentifier("settings.accountConfigurationUnavailable")
                     if model.authState != .guest {
@@ -258,14 +269,14 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("settings.clearLocalData")
 
-                Text(deletionHelpText)
+                Text(verbatim: deletionHelpText)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(role: .destructive) {
                     pendingDestructiveAction = .deleteAccount
                 } label: {
-                    Label(deleteButtonTitle, systemImage: "trash")
+                    Label { Text(verbatim: deleteButtonTitle) } icon: { Image(systemName: "trash") }
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -289,17 +300,17 @@ struct SettingsView: View {
             BTCard {
                 BTSectionHeader(
                     title: "About",
-                    subtitle: NativeLocalization.format(
+                    subtitle: .verbatim(NativeLocalization.format(
                         "Version %@ (%@)",
                         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0",
                         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-                    )
+                    ))
                 )
             }
 
             if let error = model.lastError {
                 BTCard {
-                    BTSectionHeader(title: "Status", subtitle: error.localizedDescription)
+                    BTSectionHeader(title: "Status", subtitle: .verbatim(error.localizedDescription))
                 }
                 .accessibilityIdentifier("settings.status")
             }
@@ -309,9 +320,9 @@ struct SettingsView: View {
         .accessibilityIdentifier("screen.settings")
         .alert(item: $pendingDestructiveAction) { action in
             Alert(
-                title: Text(destructiveAlertTitle(for: action)),
-                message: Text(destructiveAlertMessage(for: action)),
-                primaryButton: .destructive(Text(destructiveButtonTitle(for: action))) {
+                title: Text(verbatim: destructiveAlertTitle(for: action)),
+                message: Text(verbatim: destructiveAlertMessage(for: action)),
+                primaryButton: .destructive(Text(verbatim: destructiveButtonTitle(for: action))) {
                     performDestructiveAction(action)
                 },
                 secondaryButton: .cancel()
@@ -333,7 +344,7 @@ struct SettingsView: View {
     }
 
     private var deleteButtonTitle: String {
-        model.authState.usesRemoteAccount ? "Delete account" : "Clear all app data"
+        NativeLocalization.string(model.authState.usesRemoteAccount ? "Delete account" : "Clear all app data")
     }
 
     private var deletionHelpText: String {
@@ -348,7 +359,7 @@ struct SettingsView: View {
         case .clearPracticeData:
             return NativeLocalization.string("Delete practice data?")
         case .deleteAccount:
-            return model.authState.usesRemoteAccount ? "Delete your account?" : "Clear all app data?"
+            return NativeLocalization.string(model.authState.usesRemoteAccount ? "Delete your account?" : "Clear all app data?")
         }
     }
 
@@ -369,7 +380,7 @@ struct SettingsView: View {
         case .clearPracticeData:
             return NativeLocalization.string("Delete practice data")
         case .deleteAccount:
-            return model.authState.usesRemoteAccount ? "Delete account" : "Clear all data"
+            return NativeLocalization.string(model.authState.usesRemoteAccount ? "Delete account" : "Clear all data")
         }
     }
 
@@ -429,7 +440,7 @@ struct ClassesView: View {
 
             if let message = model.ensembleStatusMessage {
                 BTCard(tint: BTTheme.surfaceWarm) {
-                    Label(message, systemImage: "checkmark.circle.fill")
+                    Label { Text(verbatim: message) } icon: { Image(systemName: "checkmark.circle.fill") }
                         .foregroundStyle(BTTheme.success)
                 }
                 .accessibilityIdentifier("classes.status")
@@ -437,7 +448,7 @@ struct ClassesView: View {
 
             if let error = model.lastError {
                 BTCard {
-                    Text(error.localizedDescription)
+                    Text(verbatim: error.localizedDescription)
                         .font(.footnote)
                         .foregroundStyle(BTTheme.danger)
                         .fixedSize(horizontal: false, vertical: true)
@@ -456,7 +467,7 @@ struct ClassesView: View {
         }
         .alert(item: $pendingLeave) { ensemble in
             Alert(
-                title: Text(NativeLocalization.format("Leave %@?", ensemble.name)),
+                title: Text(verbatim: NativeLocalization.format("Leave %@?", ensemble.name)),
                 message: Text("Your other classes and practice history will stay available."),
                 primaryButton: .destructive(Text("Leave class")) {
                     Task { await model.leaveEnsemble(id: ensemble.id) }
@@ -481,7 +492,7 @@ struct ClassesView: View {
                     }
                 }
             } label: {
-                Label(model.ensembleMutationInProgress ? "Joining…" : "Join class", systemImage: "person.badge.plus")
+                Label { Text(verbatim: NativeLocalization.string(model.ensembleMutationInProgress ? "Joining…" : "Join class")) } icon: { Image(systemName: "person.badge.plus") }
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(BTPrimaryButtonStyle())
@@ -513,7 +524,7 @@ struct ClassesView: View {
                     set: { model.selectedEnsembleID = $0 }
                 )) {
                     ForEach(model.ensembles) { ensemble in
-                        Text(ensemble.name).tag(ensemble.id)
+                        Text(verbatim: ensemble.name).tag(ensemble.id)
                     }
                 }
                 .accessibilityIdentifier("classes.activePicker")
@@ -523,9 +534,9 @@ struct ClassesView: View {
                 BTCard(tint: model.selectedEnsembleID == ensemble.id ? BTTheme.surfaceWarm : BTTheme.surface) {
                     HStack(alignment: .top, spacing: BTSpacing.md) {
                         VStack(alignment: .leading, spacing: BTSpacing.xs) {
-                            Text(ensemble.name)
+                            Text(verbatim: ensemble.name)
                                 .font(.headline)
-                            Text(ensemble.viewerRoleLabel)
+                            Text(verbatim: ensemble.viewerRoleLabel)
                                 .font(.subheadline)
                                 .foregroundStyle(BTTheme.muted)
                         }
@@ -547,9 +558,9 @@ struct ClassesView: View {
                         .disabled(model.ensembleMutationInProgress)
                         .accessibilityIdentifier("classes.leave.\(ensemble.id)")
                     } else {
-                        Text(ensemble.viewerCanManage
+                        Text(verbatim: NativeLocalization.string(ensemble.viewerCanManage
                             ? "Manage this class from its director tools."
-                            : "This class role cannot leave through self-service.")
+                            : "This class role cannot leave through self-service."))
                             .font(.footnote)
                             .foregroundStyle(BTTheme.muted)
                     }
@@ -579,11 +590,11 @@ private struct SettingsNavigationRow<Destination: View>: View {
             destination
         } label: {
             HStack(spacing: BTSpacing.md) {
-                Label(title, systemImage: systemImage)
+                Label { Text(verbatim: NativeLocalization.string(title)) } icon: { Image(systemName: systemImage) }
                     .font(.headline)
                 Spacer()
                 if let detail {
-                    Text(detail)
+                    Text(verbatim: detail)
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -650,14 +661,14 @@ struct LegalDetailView: View {
 }
 
 private struct LegalCard: View {
-    let title: String
-    let messages: [String]
+    let title: BTCopy
+    let messages: [BTCopy]
 
     var body: some View {
         BTCard {
             BTSectionHeader(title: title)
             ForEach(messages, id: \.self) { message in
-                Text(message)
+                Text(verbatim: message.resolved)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

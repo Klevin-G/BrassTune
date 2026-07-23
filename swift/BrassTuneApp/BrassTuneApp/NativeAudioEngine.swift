@@ -4,6 +4,71 @@ import Foundation
 import UIKit
 
 @MainActor
+final class NativeAudioSessionCoordinator {
+    enum Owner: Hashable { case capture, tone, metronome }
+
+    static let shared = NativeAudioSessionCoordinator()
+
+    private var owners: Set<Owner> = []
+    private let activateSession: () throws -> Void
+    private let deactivateSession: () throws -> Void
+
+    init(
+        activateSession: @escaping () throws -> Void = {
+            try AVAudioSession.sharedInstance().setActive(true)
+        },
+        deactivateSession: @escaping () throws -> Void = {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    ) {
+        self.activateSession = activateSession
+        self.deactivateSession = deactivateSession
+    }
+
+    func acquire(_ owner: Owner, configure: () throws -> Void) throws {
+        // Capture owns the stricter `.measurement` session. A late visual
+        // metronome timer must never downgrade that mode while the microphone
+        // is starting or recording.
+        if owner != .metronome || !owners.contains(.capture) {
+            try configure()
+        }
+        guard owners.insert(owner).inserted else { return }
+        if owners.count == 1 {
+            do { try activateSession() }
+            catch {
+                owners.remove(owner)
+                throw error
+            }
+        }
+    }
+
+    /// Acquires ownership, then runs setup while guaranteeing that a failed
+    /// setup cannot strand the owner or leave the shared session active.
+    func acquire(
+        _ owner: Owner,
+        configure: () throws -> Void,
+        setup: () throws -> Void
+    ) throws {
+        try acquire(owner, configure: configure)
+        do {
+            try setup()
+        } catch {
+            release(owner)
+            throw error
+        }
+    }
+
+    func release(_ owner: Owner) {
+        guard owners.remove(owner) != nil, owners.isEmpty else { return }
+        try? deactivateSession()
+    }
+
+    var activeOwners: Set<Owner> { owners }
+
+    func isActive(_ owner: Owner) -> Bool { owners.contains(owner) }
+}
+
+@MainActor
 final class NativeAudioEngine: ObservableObject {
     @Published private(set) var recording = false
     @Published private(set) var permissionDenied = false
@@ -29,6 +94,7 @@ final class NativeAudioEngine: ObservableObject {
     private let pitchProcessingQueue = DispatchQueue(label: "com.brasstune.native.pitch-processing", qos: .userInitiated)
     private var routeChangeObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
+    private let audioSessionCoordinator: NativeAudioSessionCoordinator
 
     static var defaultRecordingSource: PracticeSessionSource {
         NativeTestFixtures.areEnabled ? .sample : .live
@@ -36,7 +102,8 @@ final class NativeAudioEngine: ObservableObject {
 
     static var testFixturesEnabled: Bool { NativeTestFixtures.areEnabled }
 
-    init() {
+    init(audioSessionCoordinator: NativeAudioSessionCoordinator = .shared) {
+        self.audioSessionCoordinator = audioSessionCoordinator
         routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: nil,
@@ -192,8 +259,9 @@ final class NativeAudioEngine: ObservableObject {
         }
 
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try session.setActive(true)
+        try audioSessionCoordinator.acquire(.tone) {
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        }
 
         if !tonePlayerAttached {
             engine.attach(tonePlayer)
@@ -202,6 +270,7 @@ final class NativeAudioEngine: ObservableObject {
         guard let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100),
               let samples = buffer.floatChannelData?[0] else {
+            audioSessionCoordinator.release(.tone)
             throw NativeAudioEngineError.outputUnavailable
         }
         buffer.frameLength = 44_100
@@ -219,7 +288,11 @@ final class NativeAudioEngine: ObservableObject {
         engine.connect(tonePlayer, to: engine.mainMixerNode, format: format)
         tonePlayer.scheduleBuffer(buffer, at: nil, options: .loops)
         engine.prepare()
-        try engine.start()
+        do { try engine.start() }
+        catch {
+            audioSessionCoordinator.release(.tone)
+            throw error
+        }
         tonePlayer.play()
         tonePlaying = true
         toneFrequencyHz = frequencyHz
@@ -233,9 +306,7 @@ final class NativeAudioEngine: ObservableObject {
         tonePlaying = false
         toneFrequencyHz = nil
         toneFrequenciesHz = []
-        if !recording {
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        }
+        audioSessionCoordinator.release(.tone)
     }
 
     func setExternalAudioNotice(_ message: String?) {
@@ -254,59 +325,65 @@ final class NativeAudioEngine: ObservableObject {
         liveStartedAt = nil
         liveCaptureID = nil
         liveStartRequestID = nil
+        audioSessionCoordinator.release(.capture)
+        audioSessionCoordinator.release(.tone)
     }
 
     private func configureAndStartLiveEngine(instrumentId: String, referencePitchHz: Double) throws {
         stopAndResetAudioEngine()
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .measurement,
-            options: [.allowBluetoothHFP, .defaultToSpeaker, .mixWithOthers]
-        )
-        try session.setPreferredIOBufferDuration(0.03)
-        try session.setActive(true)
-
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
-            audioNotice = NativeLocalization.string("BrassTune can't hear a microphone.")
-            throw NativeAudioEngineError.inputUnavailable
-        }
-
         let startedAt = Date()
         let captureID = UUID()
-        frames.removeAll()
-        currentFrame = nil
-        activeSource = .live
-        liveStartedAt = startedAt
-        liveCaptureID = captureID
-        audioNotice = nil
-        routeChanged = false
-
         let processingQueue = pitchProcessingQueue
         do {
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-                let timestampMs = Int(max(0, Date().timeIntervalSince(startedAt) * 1000))
-                let sampleRate = buffer.format.sampleRate
-                guard let samples = NativePitchDetector.samples(from: buffer), let self else { return }
-                processingQueue.async { [weak self] in
-                    let frame = NativePitchDetector.frame(
-                        samples: samples,
-                        sampleRate: sampleRate,
-                        timestampMs: timestampMs,
-                        instrumentId: instrumentId,
-                        referencePitchHz: referencePitchHz
-                    )
-                    Task { @MainActor in
-                        self?.appendLiveFrame(frame, captureID: captureID)
+            try audioSessionCoordinator.acquire(.capture, configure: {
+                try session.setCategory(
+                    .playAndRecord,
+                    mode: .measurement,
+                    options: [.allowBluetoothHFP, .defaultToSpeaker, .mixWithOthers]
+                )
+                try session.setPreferredIOBufferDuration(0.03)
+            }, setup: {
+                let inputNode = engine.inputNode
+                let inputFormat = inputNode.outputFormat(forBus: 0)
+                guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
+                    throw NativeAudioEngineError.inputUnavailable
+                }
+
+                frames.removeAll()
+                currentFrame = nil
+                activeSource = .live
+                liveStartedAt = startedAt
+                liveCaptureID = captureID
+                audioNotice = nil
+                routeChanged = false
+
+                inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+                    let timestampMs = Int(max(0, Date().timeIntervalSince(startedAt) * 1000))
+                    let sampleRate = buffer.format.sampleRate
+                    guard let samples = NativePitchDetector.samples(from: buffer), let self else { return }
+                    processingQueue.async { [weak self] in
+                        let frame = NativePitchDetector.frame(
+                            samples: samples,
+                            sampleRate: sampleRate,
+                            timestampMs: timestampMs,
+                            instrumentId: instrumentId,
+                            referencePitchHz: referencePitchHz
+                        )
+                        Task { @MainActor in
+                            self?.appendLiveFrame(frame, captureID: captureID)
+                        }
                     }
                 }
-            }
-            try engine.start()
+                try engine.start()
+            })
         } catch {
             stopAndResetAudioEngine()
-            audioNotice = NativeLocalization.string("BrassTune couldn't start the microphone. Check your audio input and try again.")
+            if case NativeAudioEngineError.inputUnavailable = error {
+                audioNotice = NativeLocalization.string("BrassTune can't hear a microphone.")
+            } else {
+                audioNotice = NativeLocalization.string("BrassTune couldn't start the microphone. Check your audio input and try again.")
+            }
             throw error
         }
 
@@ -502,6 +579,11 @@ final class NativeMetronomeOutput {
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private var isPrepared = false
+    private let audioSessionCoordinator: NativeAudioSessionCoordinator
+
+    init(audioSessionCoordinator: NativeAudioSessionCoordinator = .shared) {
+        self.audioSessionCoordinator = audioSessionCoordinator
+    }
 
     func playTick(settings: MetronomeSettings, accent: Bool) {
         if settings.hapticsEnabled {
@@ -509,7 +591,15 @@ final class NativeMetronomeOutput {
                 .impactOccurred(intensity: accent ? 0.85 : 0.55)
         }
 
-        guard !settings.visualOnly, !settings.muted, settings.volume > 0 else { return }
+        guard !audioSessionCoordinator.isActive(.capture) else {
+            stop()
+            return
+        }
+
+        guard !settings.visualOnly, !settings.muted, settings.volume > 0 else {
+            stop()
+            return
+        }
         do {
             try prepareIfNeeded()
             player.volume = Float(min(1, max(0, settings.volume)))
@@ -524,6 +614,8 @@ final class NativeMetronomeOutput {
 
     func stop() {
         player.stop()
+        engine.stop()
+        audioSessionCoordinator.release(.metronome)
     }
 
     private func prepareIfNeeded() throws {
@@ -534,11 +626,16 @@ final class NativeMetronomeOutput {
         }
         if !engine.isRunning {
             let session = AVAudioSession.sharedInstance()
-            if session.category != .playAndRecord || session.mode != .measurement {
-                try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
+            try audioSessionCoordinator.acquire(.metronome) {
+                if session.category != .playAndRecord || session.mode != .measurement {
+                    try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
+                }
             }
-            try session.setActive(true)
-            try engine.start()
+            do { try engine.start() }
+            catch {
+                audioSessionCoordinator.release(.metronome)
+                throw error
+            }
         }
     }
 

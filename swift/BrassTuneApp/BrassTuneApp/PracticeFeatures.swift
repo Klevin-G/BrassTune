@@ -99,6 +99,26 @@ struct PracticeShortcut: Codable, Equatable, Identifiable {
     let referenceID: String
     var title: String
     var lastStartedAt: Date? = nil
+
+    var displayTitle: String {
+        switch kind {
+        case .playAlongExercise:
+            if let builtIn = PlayAlongExercise.library.first(where: { $0.id == referenceID }) {
+                return builtIn.displayTitle
+            }
+        case .guidedWarmup:
+            if referenceID == GuidedWarmupPlan.fiveMinute.id {
+                return GuidedWarmupPlan.fiveMinute.displayTitle
+            }
+        case .practicePack:
+            if let builtIn = PracticePack.builtIns.first(where: { $0.id == referenceID }) {
+                return builtIn.displayName
+            }
+        case .drone:
+            return NativeLocalization.string(title)
+        }
+        return title
+    }
 }
 
 // MARK: - Guided warm-up
@@ -109,12 +129,17 @@ struct GuidedWarmupStep: Codable, Equatable, Identifiable {
     let instruction: String
     let durationSeconds: TimeInterval
     let exerciseID: String?
+
+    var displayTitle: String { NativeLocalization.string(title) }
+    var displayInstruction: String { NativeLocalization.string(instruction) }
 }
 
 struct GuidedWarmupPlan: Codable, Equatable, Identifiable {
     let id: String
     let title: String
     let steps: [GuidedWarmupStep]
+
+    var displayTitle: String { NativeLocalization.string(title) }
 
     var durationSeconds: TimeInterval {
         steps.reduce(0) { $0 + $1.durationSeconds }
@@ -180,7 +205,7 @@ enum PracticeReflectionMood: String, Codable, CaseIterable, Identifiable {
     case challenging
 
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { NativeLocalization.string(rawValue.capitalized) }
 }
 
 struct PracticeReflection: Codable, Equatable, Identifiable {
@@ -415,6 +440,13 @@ enum PracticePitchMath {
             "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11, "Cb": 11,
         ][normalized]
     }
+
+    static func matchesPitchClass(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs, let rhs,
+              let lhsClass = pitchClass(for: lhs),
+              let rhsClass = pitchClass(for: rhs) else { return false }
+        return lhsClass == rhsClass
+    }
 }
 
 // MARK: - Offline practice packs and focused workspace
@@ -424,6 +456,8 @@ enum PracticePackBlockKind: String, Codable, CaseIterable {
     case playAlong
     case metronome
     case drone
+
+    var title: String { NativeLocalization.string(rawValue.capitalized) }
 }
 
 struct PracticePackBlock: Codable, Equatable, Identifiable {
@@ -463,6 +497,17 @@ struct PracticePack: Codable, Equatable, Identifiable {
     var detail: String
     var blocks: [PracticePackBlock]
     var isBuiltIn: Bool
+
+    var displayName: String { isBuiltIn ? NativeLocalization.string(name) : name }
+    var displayDetail: String { isBuiltIn ? NativeLocalization.string(detail) : detail }
+
+    func displayTitle(for block: PracticePackBlock) -> String {
+        isBuiltIn ? NativeLocalization.string(block.title) : block.title
+    }
+
+    func displayInstruction(for block: PracticePackBlock) -> String {
+        isBuiltIn ? NativeLocalization.string(block.instruction) : block.instruction
+    }
 
     static let builtIns: [PracticePack] = [
         PracticePack(

@@ -377,6 +377,22 @@ struct PlayAlongExercise: Codable, Equatable, Identifiable {
     let category: PlayAlongExerciseCategory
     let writtenNotes: [String]
 
+    var isBuiltIn: Bool {
+        Self.library.contains { $0.id == id }
+    }
+
+    var displayTitle: String {
+        isBuiltIn ? NativeLocalization.string(title) : title
+    }
+
+    var displayDetail: String {
+        isBuiltIn ? NativeLocalization.string(detail) : detail
+    }
+
+    var displayDifficulty: String {
+        isBuiltIn ? NativeLocalization.string(difficulty) : difficulty
+    }
+
     static let library: [PlayAlongExercise] = [
         PlayAlongExercise(
             id: "cmaj",
@@ -750,13 +766,12 @@ struct PlayAlongGrader: Equatable {
 
     mutating func feed(_ frame: PitchFrame) {
         guard !isComplete else { return }
-        detectedNoteName = frame.writtenNoteName
-        detectedCents = frame.centsDeviation
-
         guard let target = currentNoteName else { return }
         let confident = frame.confidence >= minimumConfidence && frame.frequencyHz != nil
+        detectedNoteName = confident ? frame.writtenNoteName : nil
+        detectedCents = confident ? frame.centsDeviation : nil
         let matchesTarget = confident
-            && Self.pitchClass(frame.writtenNoteName) == Self.pitchClass(target)
+            && PracticePitchMath.matchesPitchClass(frame.writtenNoteName, target)
             && frame.centsDeviation != nil
 
         if matchesTarget, let cents = frame.centsDeviation {
@@ -787,7 +802,7 @@ struct PlayAlongGrader: Equatable {
             }
         } else if confident,
                   let detected = frame.writtenNoteName,
-                  Self.pitchClass(detected) != Self.pitchClass(target) {
+                  !PracticePitchMath.matchesPitchClass(detected, target) {
             // A confidently played different note restarts this target. Brief
             // silence and low-confidence dropouts do not erase a good hold.
             resetCurrentHold()
@@ -1020,7 +1035,7 @@ struct ImportedScore: Codable, Equatable, Identifiable {
     }
 
     var pageCountLabel: String {
-        pages.count == 1 ? "1 page" : "\(pages.count) pages"
+        NativeLocalization.pageCountLabel(pages.count)
     }
 
     var exportText: String {
@@ -1081,11 +1096,16 @@ struct NativeNoteStatistics: Equatable {
     let trend: String
     let severity: String
     let problemSeverity: Double
+
+    var displayTrend: String { NativeLocalization.string(trend) }
+    var displaySeverity: String { NativeLocalization.string(severity) }
 }
 
 struct NativePracticeRecommendation: Equatable {
     let category: String
     let relatedNote: String
+
+    var displayCategory: String { NativeLocalization.string(category) }
 }
 
 enum NativePitchAnalytics {
@@ -1552,6 +1572,7 @@ enum UserVisibleError: LocalizedError, Equatable {
     case missingAuthConfiguration
     case authenticationFailed
     case secureStorageUnavailable
+    case secureStorageDeletionFailed
     case emailConfirmationRequired
     case microphoneUnavailable
     case apiRequestFailed(statusCode: Int, message: String)
@@ -1567,6 +1588,7 @@ enum UserVisibleError: LocalizedError, Equatable {
         case .missingAuthConfiguration: return NativeLocalization.string("Account sign-in isn't available right now. You can keep practicing as a guest.")
         case .authenticationFailed: return NativeLocalization.string("BrassTune could not complete authentication.")
         case .secureStorageUnavailable: return NativeLocalization.string("BrassTune couldn't securely save your sign-in on this device. Check device storage and try again.")
+        case .secureStorageDeletionFailed: return NativeLocalization.string("BrassTune couldn't remove the saved sign-in from this device. Restart the app to retry before using a shared device.")
         case .emailConfirmationRequired: return NativeLocalization.string("Check your email to confirm this BrassTune account before signing in.")
         case .microphoneUnavailable: return NativeLocalization.string("BrassTune could not hear the microphone. Check your audio input and try again.")
         case .apiRequestFailed(_, let message): return message

@@ -13,7 +13,7 @@ struct APIClient {
         bearerToken: String? = nil
     ) async throws -> T {
         guard config.hasUsableAPIConfiguration else {
-            throw UserVisibleError.apiRequestFailed(statusCode: 0, message: "The class service address is not approved for this build.")
+            throw UserVisibleError.apiRequestFailed(statusCode: 0, message: NativeLocalization.string("The class service address is not approved for this build."))
         }
         guard path.hasPrefix("/"), !path.hasPrefix("//"),
               let url = URL(string: path, relativeTo: config.apiBaseURL)?.absoluteURL,
@@ -51,10 +51,9 @@ struct APIClient {
             throw UserVisibleError.malformedResponse
         }
         guard (200..<300).contains(http.statusCode) else {
-            let detail = (try? JSONDecoder().decode(APIErrorResponse.self, from: data))?.userSafeDetail
             throw UserVisibleError.apiRequestFailed(
                 statusCode: http.statusCode,
-                message: detail ?? Self.fallbackMessage(for: http.statusCode)
+                message: Self.fallbackMessage(for: http.statusCode)
             )
         }
         let decoder = JSONDecoder()
@@ -73,47 +72,6 @@ struct APIClient {
         case 404: return NativeLocalization.string("That class could not be found.")
         case 409: return NativeLocalization.string("That class action conflicts with your current membership.")
         default: return NativeLocalization.string("The class service could not complete this request.")
-        }
-    }
-}
-
-private struct APIErrorResponse: Decodable {
-    let detail: Detail?
-
-    var userSafeDetail: String? {
-        let raw: String?
-        switch detail {
-        case .message(let message): raw = message
-        case .validation(let issues): raw = issues.prefix(2).map(\.message).joined(separator: " ")
-        case nil: raw = nil
-        }
-        guard let raw else { return nil }
-        let normalized = raw
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return nil }
-        return String(normalized.prefix(240))
-    }
-
-    enum Detail: Decodable {
-        case message(String)
-        case validation([ValidationIssue])
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            if let message = try? container.decode(String.self) {
-                self = .message(message)
-                return
-            }
-            self = .validation(try container.decode([ValidationIssue].self))
-        }
-    }
-
-    struct ValidationIssue: Decodable {
-        let message: String
-
-        enum CodingKeys: String, CodingKey {
-            case message = "msg"
         }
     }
 }

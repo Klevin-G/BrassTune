@@ -47,7 +47,7 @@ final class AppModel: ObservableObject {
     @Published var lastError: UserVisibleError?
     @Published private(set) var persistenceErrorMessage: String?
 
-    let audioEngine = NativeAudioEngine()
+    let audioEngine: NativeAudioEngine
     let apiClient: APIClient
     let authService: AuthService
     private let guestPersistenceStore: NativePersistenceStore
@@ -55,8 +55,10 @@ final class AppModel: ObservableObject {
     private let guestScoreStorageDirectory: URL
     private var scoreImporter: NativeScoreImportService
     private let scoreFileRemover: (URL) throws -> Void
+    private let pendingAccountPurgeStore: PendingDigestStore
+    private let pendingCredentialRemovalStore: PendingDigestStore
     private var activeStorageNamespace: NativeStorageNamespace = .guest
-    private let metronomeOutput = NativeMetronomeOutput()
+    private let metronomeOutput: NativeMetronomeOutput
     private var isRestoringLocalState = false
     private var metronomeTimer: Timer?
     private var tapTempoEvents: [Date] = []
@@ -74,8 +76,11 @@ final class AppModel: ObservableObject {
         persistenceStore: NativePersistenceStore = .live(),
         scoreStorageDirectory: URL? = nil,
         scoreFileRemover: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
+        pendingAccountPurgeStore: PendingDigestStore = .live(key: "native.pending-account-purge-digests"),
+        pendingCredentialRemovalStore: PendingDigestStore = .live(key: "native.pending-credential-removal-digests"),
         apiClient: APIClient = APIClient(),
         authService: AuthService = AuthService(),
+        audioSessionCoordinator: NativeAudioSessionCoordinator = .shared,
         classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)? = nil
     ) {
         NativeLocalization.language = AppLanguage.launchOverride ?? .system
@@ -84,13 +89,18 @@ final class AppModel: ObservableObject {
         self.persistenceStore = persistenceStore
         self.guestScoreStorageDirectory = resolvedScoreStorageDirectory
         self.scoreFileRemover = scoreFileRemover
+        self.pendingAccountPurgeStore = pendingAccountPurgeStore
+        self.pendingCredentialRemovalStore = pendingCredentialRemovalStore
         self.scoreImporter = NativeScoreImportService(
             storageDirectory: resolvedScoreStorageDirectory,
             removeItem: scoreFileRemover
         )
         self.apiClient = apiClient
         self.authService = authService
+        self.audioEngine = NativeAudioEngine(audioSessionCoordinator: audioSessionCoordinator)
+        self.metronomeOutput = NativeMetronomeOutput(audioSessionCoordinator: audioSessionCoordinator)
         self.classAccessTokenProvider = classAccessTokenProvider
+        retryPendingAccountPurges()
         observeAudioFrames()
     }
 
@@ -166,7 +176,7 @@ final class AppModel: ObservableObject {
     }
 
     func resetForUITesting() {
-        authService.deleteStoredAuth()
+        try? authService.deleteStoredAuth()
         activateStorageNamespace(.guest)
         authState = .guest
         let exercisesEntryFlow = ProcessInfo.processInfo.arguments.contains("UITEST_ENTRY_FLOW")
@@ -224,15 +234,24 @@ final class AppModel: ObservableObject {
 
     func signOut() async {
         var signOutError: Error?
+        let accountDigest = activeStorageNamespace.accountDigest
+        if let accountDigest { pendingCredentialRemovalStore.enqueue(accountDigest) }
         do {
             try await authService.signOut(config: config)
         } catch {
             signOutError = error
         }
+        if authService.restoreSession() == nil, let accountDigest {
+            pendingCredentialRemovalStore.remove(accountDigest)
+        }
         transitionToUnauthenticated(.signedOut)
         if let signOutError {
-            setAuthFailure(signOutError)
-            authNotice = NativeLocalization.string("Signed out on this device. BrassTune couldn't confirm server logout, so try again online before using a shared device.")
+            if authService.restoreSession() != nil {
+                setAuthFailure(UserVisibleError.secureStorageDeletionFailed)
+            } else {
+                setAuthFailure(signOutError)
+                authNotice = NativeLocalization.string("Signed out on this device. BrassTune couldn't confirm server logout, so try again online before using a shared device.")
+            }
         } else {
             lastError = nil
             setAuthNotice(NativeLocalization.string("Signed out."))
@@ -245,16 +264,39 @@ final class AppModel: ObservableObject {
             authState = .guest
             return
         }
+        let storedNamespace = NativeStorageNamespace.account(userID: storedSession.userID)
+        if let digest = storedNamespace.accountDigest,
+           pendingCredentialRemovalStore.pendingDigests.contains(digest) {
+            do {
+                try authService.deleteStoredAuth()
+                pendingCredentialRemovalStore.remove(digest)
+                transitionToUnauthenticated(.signedOut)
+                lastError = nil
+                setAuthNotice(NativeLocalization.string("Signed out."))
+            } catch {
+                activateStorageNamespace(.guest)
+                authState = .signedOut
+                setAuthFailure(UserVisibleError.secureStorageDeletionFailed)
+            }
+            return
+        }
         prepareStorageNamespace(.account(userID: storedSession.userID))
         guard config.hasUsableAccountConfiguration else {
-            authService.signOut()
+            do {
+                try authService.signOut()
+            } catch {
+                transitionToUnauthenticated(.signedOut)
+                setAuthFailure(UserVisibleError.secureStorageDeletionFailed)
+                return
+            }
             transitionToUnauthenticated(.signedOut)
             setAuthFailure(UserVisibleError.missingAuthConfiguration)
             return
         }
         do {
             if let session = try await authService.refreshStoredSession(config: config) {
-                activateStorageNamespace(.account(userID: session.userID))
+                let namespace = NativeStorageNamespace.account(userID: session.userID)
+                activateStorageNamespace(namespace)
                 authState = .signedIn(email: session.email)
                 lastError = nil
             }
@@ -274,7 +316,7 @@ final class AppModel: ObservableObject {
                 setAuthFailure(error)
                 return
             }
-            authService.signOut()
+            try? authService.signOut()
             transitionToUnauthenticated(.signedOut)
             setAuthFailure(error)
         }
@@ -339,7 +381,7 @@ final class AppModel: ObservableObject {
             .uppercased()
             .replacingOccurrences(of: " ", with: "")
         guard (4...16).contains(normalizedCode.count) else {
-            lastError = .apiRequestFailed(statusCode: 422, message: "Enter the 4-16 character class code from your teacher.")
+            lastError = .apiRequestFailed(statusCode: 422, message: NativeLocalization.string("Enter the 4-16 character class code from your teacher."))
             return false
         }
         let token: String
@@ -449,7 +491,7 @@ final class AppModel: ObservableObject {
 
     private func validClassAccessToken() async throws -> String {
         guard classAccessTokenProvider != nil || authState.usesRemoteAccount else {
-            throw UserVisibleError.apiRequestFailed(statusCode: 400, message: "Sign in before using classes.")
+            throw UserVisibleError.apiRequestFailed(statusCode: 400, message: NativeLocalization.string("Sign in before using classes."))
         }
         let token: String?
         if let classAccessTokenProvider {
@@ -458,7 +500,7 @@ final class AppModel: ObservableObject {
             token = try await authService.validAccessToken(config: config)
         }
         guard let token, !token.isEmpty else {
-            throw UserVisibleError.apiRequestFailed(statusCode: 401, message: "Sign in before using classes.")
+            throw UserVisibleError.apiRequestFailed(statusCode: 401, message: NativeLocalization.string("Sign in before using classes."))
         }
         return token
     }
@@ -466,10 +508,10 @@ final class AppModel: ObservableObject {
     private func handleClassAuthOrNetworkError(_ error: Error) {
         let visible = (error as? UserVisibleError) ?? .networkUnavailable
         if case .apiRequestFailed(let statusCode, _) = visible, statusCode == 401 {
-            authService.signOut()
+            try? authService.signOut()
             transitionToUnauthenticated(.signedOut)
         } else if visible == .authenticationFailed {
-            authService.signOut()
+            try? authService.signOut()
             transitionToUnauthenticated(.signedOut)
         }
         lastError = visible
@@ -507,12 +549,12 @@ final class AppModel: ObservableObject {
             authState = .signedIn(email: session.email)
             gatewayCompleted = true
             lastError = nil
-            setAuthNotice("Account created. Here's a quick tour of BrassTune.")
+            setAuthNotice(NativeLocalization.string("Signed in."))
             requestTutorialPresentation()
         } catch UserVisibleError.emailConfirmationRequired {
             transitionToUnauthenticated(.emailConfirmationRequired(email: email))
             lastError = nil
-            setAuthNotice("Account created. Check your email to confirm it, then use this tour to get started.")
+            setAuthNotice(NativeLocalization.string("Check your email to confirm this BrassTune account before signing in."))
             requestTutorialPresentation()
         } catch {
             setAuthFailure(error)
@@ -542,7 +584,7 @@ final class AppModel: ObservableObject {
             lastError = nil
             switch result.isNewUser {
             case true:
-                setAuthNotice("Apple account created. Here's a quick tour of BrassTune.")
+                setAuthNotice(NativeLocalization.string("Signed in with Apple."))
                 requestTutorialPresentation()
             case false:
                 setAuthNotice(NativeLocalization.string("Signed in with Apple."))
@@ -550,7 +592,7 @@ final class AppModel: ObservableObject {
                 // Some providers omit account-age timestamps. Touring the
                 // unknown case guarantees a newly created identity is not left
                 // without help; known returning accounts are not interrupted.
-                setAuthNotice("Signed in with Apple. Here's a quick tour you can finish or dismiss.")
+                setAuthNotice(NativeLocalization.string("Signed in with Apple."))
                 requestTutorialPresentation()
             }
         } catch {
@@ -652,26 +694,37 @@ final class AppModel: ObservableObject {
         defer { authOperationInProgress = false }
         let deletedRemoteAccount = authState.usesRemoteAccount
         if deletedRemoteAccount {
+            let response: BackendDeletionResponse
             do {
                 guard let token = try await authService.validAccessToken(config: config), !token.isEmpty else {
                     throw UserVisibleError.apiRequestFailed(
                         statusCode: 401,
-                        message: "Your sign-in expired. Sign in again before deleting your account."
+                        message: NativeLocalization.string("Your sign-in expired. Sign in again before deleting your account.")
                     )
                 }
-                let body = try JSONSerialization.data(withJSONObject: ["confirmation": "delete my account"])
-                _ = try await apiClient.request(
-                    BackendDeletionResponse.self,
-                    path: "/api/users/me",
-                    method: "DELETE",
-                    body: body,
-                    config: config,
-                    bearerToken: token
-                )
+                response = try await requestRemoteAccountDeletion(bearerToken: token)
             } catch {
                 setAuthFailure(error)
                 return
             }
+
+            guard let accountDigest = activeStorageNamespace.accountDigest else {
+                setAuthFailure(UserVisibleError.malformedResponse)
+                return
+            }
+            guard response.deleted else {
+                if response.deletionStatus == "external_cleanup_queued" {
+                    finishRemoteAccountDeletion(accountDigest: accountDigest, providerCleanupQueued: true)
+                } else {
+                    setAuthFailure(UserVisibleError.apiRequestFailed(
+                        statusCode: 500,
+                        message: NativeLocalization.string("The class service could not complete this request.")
+                    ))
+                }
+                return
+            }
+            finishRemoteAccountDeletion(accountDigest: accountDigest, providerCleanupQueued: false)
+            return
         }
         resetPlayAlong()
         let clearedLocalArtifacts = clearLocalPracticeArtifacts()
@@ -679,11 +732,105 @@ final class AppModel: ObservableObject {
         ensembles.removeAll()
         selectedEnsembleID = nil
         ensembleStatusMessage = nil
-        authService.deleteStoredAuth()
+        var credentialRemovalFailed = false
+        if authService.restoreSession() != nil {
+            do {
+                try authService.deleteStoredAuth()
+            } catch {
+                credentialRemovalFailed = true
+                setAuthFailure(UserVisibleError.secureStorageDeletionFailed)
+            }
+        }
         transitionToUnauthenticated(.signedOut)
-        if clearedLocalArtifacts {
+        if clearedLocalArtifacts, !credentialRemovalFailed {
             lastError = nil
-            setAuthNotice(deletedRemoteAccount ? "Account and local practice data deleted." : "Local app data cleared.")
+            setAuthNotice(NativeLocalization.string("Done"))
+        }
+    }
+
+    private func requestRemoteAccountDeletion(bearerToken: String) async throws -> BackendDeletionResponse {
+        let body = try JSONSerialization.data(withJSONObject: ["confirmation": "delete my account"])
+        return try await apiClient.request(
+            BackendDeletionResponse.self,
+            path: "/api/users/me",
+            method: "DELETE",
+            body: body,
+            config: config,
+            bearerToken: bearerToken
+        )
+    }
+
+    private func finishRemoteAccountDeletion(accountDigest: String, providerCleanupQueued: Bool) {
+        pendingAccountPurgeStore.enqueue(accountDigest)
+        pendingCredentialRemovalStore.enqueue(accountDigest)
+        let purged = retryPendingAccountPurge(accountDigest)
+        let credentialsRemoved: Bool
+        do {
+            try authService.deleteStoredAuth()
+            pendingCredentialRemovalStore.remove(accountDigest)
+            credentialsRemoved = true
+        } catch {
+            credentialsRemoved = false
+        }
+        resetPlayAlong()
+        stopMetronome()
+        ensembles.removeAll()
+        selectedEnsembleID = nil
+        ensembleStatusMessage = nil
+        transitionToUnauthenticated(.signedOut)
+        if purged, credentialsRemoved {
+            lastError = nil
+            setAuthNotice(NativeLocalization.string(
+                providerCleanupQueued
+                    ? "Local data was removed. Account-provider cleanup is queued."
+                    : "Account and local practice data deleted."
+            ))
+        } else {
+            lastError = credentialsRemoved
+                ? .apiRequestFailed(
+                    statusCode: 500,
+                    message: NativeLocalization.string("Your account was deleted. BrassTune will retry removing its remaining local data the next time the app opens.")
+                )
+                : .secureStorageDeletionFailed
+            let outcome = providerCleanupQueued
+                ? NativeLocalization.string(
+                    purged
+                        ? "Local data was removed. Account-provider cleanup is queued."
+                        : "Account-provider cleanup is queued. BrassTune will retry removing its remaining local data the next time the app opens."
+                )
+                : NativeLocalization.string(
+                    purged
+                        ? "Account and local practice data deleted."
+                        : "Your account was deleted. BrassTune will retry removing its remaining local data the next time the app opens."
+                )
+            authNotice = credentialsRemoved
+                ? outcome
+                : "\(outcome) \(UserVisibleError.secureStorageDeletionFailed.localizedDescription)"
+            authNoticeIsError = true
+        }
+    }
+
+    @discardableResult
+    private func retryPendingAccountPurge(_ digest: String) -> Bool {
+        do {
+            try guestPersistenceStore.scoped(accountDigest: digest).clear()
+            let scoreDirectory = NativeStorageNamespace.scoreDirectory(
+                accountDigest: digest,
+                basedAt: guestScoreStorageDirectory
+            )
+            if FileManager.default.fileExists(atPath: scoreDirectory.path) {
+                try scoreFileRemover(scoreDirectory)
+            }
+            pendingAccountPurgeStore.remove(digest)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func retryPendingAccountPurges() {
+        for digest in pendingAccountPurgeStore.pendingDigests {
+            _ = retryPendingAccountPurge(digest)
         }
     }
 
@@ -980,7 +1127,7 @@ final class AppModel: ObservableObject {
         } catch {
             lastError = .apiRequestFailed(
                 statusCode: 500,
-                message: "BrassTune couldn't save the score deletion, so the score and file were kept. Try again."
+                message: NativeLocalization.string("BrassTune couldn't save the score deletion, so the score and file were kept. Try again.")
             )
             return
         }
@@ -993,13 +1140,13 @@ final class AppModel: ObservableObject {
             } catch {
                 lastError = .apiRequestFailed(
                     statusCode: 500,
-                    message: "BrassTune couldn't remove the local score file or restore its saved state. The score is still open; export your data before closing the app."
+                    message: NativeLocalization.string("BrassTune couldn't remove the local score file or restore its saved state. The score is still open; export your data before closing the app.")
                 )
                 return
             }
             lastError = .apiRequestFailed(
                 statusCode: 500,
-                message: "BrassTune couldn't remove the local score file, so the score was kept. Try again."
+                message: NativeLocalization.string("BrassTune couldn't remove the local score file, so the score was kept. Try again.")
             )
             return
         }
@@ -1120,6 +1267,10 @@ final class AppModel: ObservableObject {
 
     private func restartMetronomeIfNeeded() {
         guard metronomeRunning else { return }
+        let settings = effectiveMetronomeSettings
+        if settings.visualOnly || settings.muted || settings.volume <= 0 {
+            metronomeOutput.stop()
+        }
         scheduleMetronomeTimer()
     }
 
@@ -1264,7 +1415,7 @@ final class AppModel: ObservableObject {
         } catch {
             lastError = .apiRequestFailed(
                 statusCode: 500,
-                message: "BrassTune couldn't clear its saved local data, so your practice data was kept. Try again."
+                message: NativeLocalization.string("BrassTune couldn't clear its saved local data, so your practice data was kept. Try again.")
             )
             return false
         }
@@ -1277,13 +1428,13 @@ final class AppModel: ObservableObject {
             } catch {
                 lastError = .apiRequestFailed(
                     statusCode: 500,
-                    message: "BrassTune couldn't finish clearing local data or restore its saved copy. Your data is still open; export it before closing the app."
+                    message: NativeLocalization.string("BrassTune couldn't finish clearing local data or restore its saved copy. Your data is still open; export it before closing the app.")
                 )
                 return false
             }
             lastError = .apiRequestFailed(
                 statusCode: 500,
-                message: "BrassTune couldn't remove your imported score files, so your local practice data was kept. Try again."
+                message: NativeLocalization.string("BrassTune couldn't remove your imported score files, so your local practice data was kept. Try again.")
             )
             return false
         }
@@ -1368,6 +1519,7 @@ final class AppModel: ObservableObject {
     }
 
     private func activateStorageNamespace(_ namespace: NativeStorageNamespace) {
+        retryPendingAccountPurges()
         if activeStorageNamespace != namespace || !persistenceAccessState.matches(namespace) {
             prepareStorageNamespace(namespace)
         }
@@ -1398,6 +1550,12 @@ final class AppModel: ObservableObject {
 
 private struct BackendDeletionResponse: Decodable {
     let deleted: Bool
+    let deletionStatus: String?
+
+    enum CodingKeys: String, CodingKey {
+        case deleted
+        case deletionStatus = "deletion_status"
+    }
 }
 
 private struct EnsembleJoinResponse: Decodable {
@@ -1426,23 +1584,61 @@ enum NativeStorageNamespace: Equatable {
     case guest
     case account(userID: String)
 
-    private var accountComponent: String? {
+    var accountDigest: String? {
         guard case .account(let userID) = self else { return nil }
         let digest = SHA256.hash(data: Data(userID.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     func scoreDirectory(basedAt guestDirectory: URL) -> URL {
-        guard let accountComponent else { return guestDirectory }
-        return guestDirectory.appendingPathComponent("Account-\(accountComponent)", isDirectory: true)
+        guard let accountDigest else { return guestDirectory }
+        return Self.scoreDirectory(accountDigest: accountDigest, basedAt: guestDirectory)
     }
 
     func stateFile(basedAt guestFile: URL) -> URL {
-        guard let accountComponent else { return guestFile }
+        guard let accountDigest else { return guestFile }
+        return Self.stateFile(accountDigest: accountDigest, basedAt: guestFile)
+    }
+
+    static func scoreDirectory(accountDigest: String, basedAt guestDirectory: URL) -> URL {
+        guestDirectory.appendingPathComponent("Account-\(accountDigest)", isDirectory: true)
+    }
+
+    static func stateFile(accountDigest: String, basedAt guestFile: URL) -> URL {
         let base = guestFile.deletingPathExtension().lastPathComponent
         let ext = guestFile.pathExtension
-        let name = "\(base)-account-\(accountComponent)" + (ext.isEmpty ? "" : ".\(ext)")
+        let name = "\(base)-account-\(accountDigest)" + (ext.isEmpty ? "" : ".\(ext)")
         return guestFile.deletingLastPathComponent().appendingPathComponent(name)
+    }
+}
+
+struct PendingDigestStore {
+    private let load: () -> [String]
+    private let save: ([String]) -> Void
+
+    init(load: @escaping () -> [String], save: @escaping ([String]) -> Void) {
+        self.load = load
+        self.save = save
+    }
+
+    static func live(defaults: UserDefaults = .standard, key: String) -> PendingDigestStore {
+        PendingDigestStore(
+            load: { defaults.stringArray(forKey: key) ?? [] },
+            save: { defaults.set($0, forKey: key) }
+        )
+    }
+
+    var pendingDigests: [String] {
+        load().filter { $0.count == 64 && $0.allSatisfy(\.isHexDigit) }
+    }
+
+    func enqueue(_ digest: String) {
+        guard digest.count == 64, digest.allSatisfy(\.isHexDigit) else { return }
+        save(Array(Set(pendingDigests + [digest])).sorted())
+    }
+
+    func remove(_ digest: String) {
+        save(pendingDigests.filter { $0 != digest })
     }
 }
 
@@ -1513,6 +1709,14 @@ struct NativePersistenceStore {
     func scoped(to namespace: NativeStorageNamespace) -> NativePersistenceStore {
         NativePersistenceStore(
             fileURL: namespace.stateFile(basedAt: fileURL),
+            removeItem: removeItem,
+            writeData: writeData
+        )
+    }
+
+    func scoped(accountDigest: String) -> NativePersistenceStore {
+        NativePersistenceStore(
+            fileURL: NativeStorageNamespace.stateFile(accountDigest: accountDigest, basedAt: fileURL),
             removeItem: removeItem,
             writeData: writeData
         )

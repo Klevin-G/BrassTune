@@ -50,8 +50,8 @@ struct PracticeQuickStartCard: View {
     }
 
     @ViewBuilder
-    private func shortcutSection(title: String, shortcuts: [PracticeShortcut]) -> some View {
-        Text(title)
+    private func shortcutSection(title: BTCopy, shortcuts: [PracticeShortcut]) -> some View {
+        Text(verbatim: title.resolved)
             .font(.headline)
         ForEach(shortcuts) { shortcut in
             switch shortcut.kind {
@@ -98,11 +98,11 @@ private struct ShortcutLabel: View {
                 .foregroundStyle(BTTheme.accent)
                 .frame(width: 28, height: 44)
             VStack(alignment: .leading, spacing: BTSpacing.xs) {
-                Text(shortcut.title)
+                Text(verbatim: shortcut.displayTitle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(BTTheme.text)
                 if let date = shortcut.lastStartedAt {
-                    Text(date.formatted(date: .abbreviated, time: .shortened))
+                    Text(verbatim: date.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
                         .foregroundStyle(BTTheme.muted)
                 }
@@ -135,10 +135,11 @@ struct SelectedExerciseFavoriteButton: View {
         Button {
             model.toggleFavorite(shortcut)
         } label: {
-            Label(
-                model.isFavorite(shortcut) ? "Remove from favorites" : "Add to favorites",
-                systemImage: model.isFavorite(shortcut) ? "star.fill" : "star"
-            )
+            Label {
+                Text(verbatim: NativeLocalization.string(model.isFavorite(shortcut) ? "Remove from favorites" : "Add to favorites"))
+            } icon: {
+                Image(systemName: model.isFavorite(shortcut) ? "star.fill" : "star")
+            }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
@@ -176,8 +177,8 @@ struct CustomExerciseBuilderView: View {
 
             BTCard {
                 BTSectionHeader(
-                    title: "Notes",
-                    subtitle: NativeLocalization.format("%@ of 32", String(notes.count))
+                    title: "Exercise notes",
+                    subtitle: .verbatim(NativeLocalization.format("%@ of 32", String(notes.count)))
                 )
                 ForEach(notes.indices, id: \.self) { index in
                     HStack(spacing: BTSpacing.sm) {
@@ -236,7 +237,7 @@ struct CustomExerciseBuilderView: View {
             }
 
             if let errorMessage {
-                Text(errorMessage)
+                Text(verbatim: errorMessage)
                     .font(.footnote)
                     .foregroundStyle(BTTheme.danger)
                     .fixedSize(horizontal: false, vertical: true)
@@ -278,24 +279,24 @@ struct GuidedWarmupView: View {
             BTScreen {
                 BTPageHeader(
                     eyebrow: "Warm-up",
-                    title: plan.title,
+                    title: .verbatim(plan.displayTitle),
                     subtitle: "A relaxed, resumable routine. Pause whenever you need to.",
-                    trailing: timeLabel(remaining)
+                    trailing: .verbatim(timeLabel(remaining))
                 )
 
                 BTCard(tint: BTTheme.surfaceWarm) {
-                    Text(NativeLocalization.format(
+                    Text(verbatim: NativeLocalization.format(
                         "Step %@ of %@",
                         String(stepIndex + 1),
                         String(plan.steps.count)
                     ))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(BTTheme.muted)
-                    Text(step.title)
+                    Text(verbatim: step.displayTitle)
                         .font(.title2.weight(.bold))
                         .accessibilityFocused($stepFocused)
                         .accessibilityIdentifier("warmup.stepTitle")
-                    Text(step.instruction)
+                    Text(verbatim: step.displayInstruction)
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                     ProgressView(value: elapsed, total: plan.durationSeconds)
@@ -330,8 +331,12 @@ struct GuidedWarmupView: View {
                     Button {
                         model.startOrResumeWarmup(now: context.date)
                     } label: {
-                        Label(checkpoint == nil ? "Start warm-up" : "Resume warm-up", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
+                        Label {
+                            Text(verbatim: NativeLocalization.string(checkpoint == nil ? "Start warm-up" : "Resume warm-up"))
+                        } icon: {
+                            Image(systemName: "play.fill")
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
                     .accessibilityIdentifier("warmup.start")
@@ -382,10 +387,10 @@ struct MetronomePresetsCard: View {
                     .accessibilityIdentifier("metronome.presetName")
                 Button("Save") {
                     if model.saveMetronomePreset(name: presetName) {
-                        presetStatus = "Preset saved."
+                        presetStatus = NativeLocalization.string("Done")
                         presetName = ""
                     } else {
-                        presetStatus = "Use a unique preset name."
+                        presetStatus = NativeLocalization.string("Use a unique preset name.")
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -394,9 +399,9 @@ struct MetronomePresetsCard: View {
 
             ForEach(model.practiceFeatures.metronomePresets) { preset in
                 VStack(alignment: .leading, spacing: BTSpacing.sm) {
-                    Text(preset.name)
+                    Text(verbatim: preset.name)
                         .font(.headline)
-                    Text(NativeLocalization.format(
+                    Text(verbatim: NativeLocalization.format(
                         "%@ BPM · %@ · %@",
                         String(preset.settings.bpm),
                         preset.settings.meterLabel,
@@ -427,7 +432,7 @@ struct MetronomePresetsCard: View {
             }
 
             if let presetStatus {
-                Text(presetStatus)
+                Text(verbatim: presetStatus)
                     .font(.footnote)
                     .foregroundStyle(BTTheme.muted)
                     .accessibilityIdentifier("metronome.presetStatus")
@@ -487,7 +492,7 @@ struct WeeklyGoalCard: View {
                     String(progress.minutes),
                     String(goal.targetMinutes)
                 ))
-            Text(NativeLocalization.format(
+            Text(verbatim: NativeLocalization.format(
                 "%@ of %@ minutes · %@ of %@ sessions",
                 String(progress.minutes),
                 String(goal.targetMinutes),
@@ -496,15 +501,21 @@ struct WeeklyGoalCard: View {
             ))
                 .font(.headline.monospacedDigit())
                 .fixedSize(horizontal: false, vertical: true)
-            Stepper("Goal: \(goal.targetMinutes) minutes", value: Binding(
+            Stepper(value: Binding(
                 get: { model.practiceFeatures.weeklyGoal.targetMinutes },
                 set: { model.updateWeeklyGoal(minutes: $0, sessions: model.practiceFeatures.weeklyGoal.targetSessions) }
             ), in: 5...1_000, step: 5)
+            {
+                Text(verbatim: NativeLocalization.format("Goal: %@ minutes", String(goal.targetMinutes)))
+            }
             .accessibilityIdentifier("progress.goalMinutes")
-            Stepper("Goal: \(goal.targetSessions) sessions", value: Binding(
+            Stepper(value: Binding(
                 get: { model.practiceFeatures.weeklyGoal.targetSessions },
                 set: { model.updateWeeklyGoal(minutes: model.practiceFeatures.weeklyGoal.targetMinutes, sessions: $0) }
             ), in: 1...21)
+            {
+                Text(verbatim: NativeLocalization.format("Goal: %@ sessions", String(goal.targetSessions)))
+            }
             .accessibilityIdentifier("progress.goalSessions")
         }
         .accessibilityIdentifier("progress.weeklyGoal")
@@ -517,8 +528,8 @@ struct WeakTransitionCard: View {
     var body: some View {
         BTCard {
             if let insight = model.weakTransitionInsight {
-                BTSectionHeader(title: "Weak-transition drill", subtitle: insight.explanation)
-                Text(insight.exercise.writtenNotes.joined(separator: "  "))
+                BTSectionHeader(title: "Weak-transition drill", subtitle: .verbatim(insight.explanation))
+                Text(verbatim: NativeLocalization.preserve(insight.exercise.writtenNotes.joined(separator: "  ")))
                     .font(.title3.monospaced().weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
@@ -553,7 +564,7 @@ struct PracticeReflectionCard: View {
             BTSectionHeader(title: "Short reflection", subtitle: "Save one quick thought for your next practice.")
             Picker("How did it feel?", selection: $mood) {
                 ForEach(PracticeReflectionMood.allCases) { mood in
-                    Text(mood.title).tag(mood)
+                    Text(verbatim: mood.title).tag(mood)
                 }
             }
             .pickerStyle(.segmented)
@@ -565,9 +576,11 @@ struct PracticeReflectionCard: View {
             Text(verbatim: NativeLocalization.isolate("\(note.count)/280"))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(note.count > 280 ? BTTheme.danger : BTTheme.muted)
-            Button(saved ? "Saved" : "Save reflection") {
+            Button {
                 model.saveReflection(sessionID: sessionID, mood: mood, note: note)
                 saved = true
+            } label: {
+                Text(verbatim: NativeLocalization.string(saved ? "Saved" : "Save reflection"))
             }
             .buttonStyle(.bordered)
             .disabled(note.count > 280)
@@ -613,13 +626,19 @@ struct DroneIntervalView: View {
             )
 
             BTCard(tint: BTTheme.surfaceWarm) {
-                Text(settings.interval == .unison ? baseLabel : "\(baseLabel) + \(upperLabel)")
+                Text(verbatim: NativeLocalization.preserve(settings.interval == .unison ? baseLabel : "\(baseLabel) + \(upperLabel)"))
                     .font(.system(size: 58, weight: .bold, design: .rounded))
                     .frame(maxWidth: .infinity)
                     .minimumScaleFactor(0.55)
-                    .accessibilityLabel(settings.interval == .unison ? "Written note \(baseLabel)" : "Written notes \(baseLabel) and \(upperLabel)")
+                    .accessibilityLabel(Text(verbatim: settings.interval == .unison
+                        ? NativeLocalization.format("Written note: %@", baseLabel)
+                        : NativeLocalization.format("Written notes %@ and %@", baseLabel, upperLabel)))
                     .accessibilityIdentifier("drone.targetNote")
-                Text(settings.interval == .unison ? "Match the reference note" : "Hear both written notes together, correctly transposed to concert pitch")
+                Text(verbatim: NativeLocalization.string(
+                    settings.interval == .unison
+                        ? "Match the reference note"
+                        : "Hear both written notes together, correctly transposed to concert pitch"
+                ))
                     .font(.headline)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
@@ -627,7 +646,7 @@ struct DroneIntervalView: View {
 
             BTCard {
                 BTSectionHeader(title: "Reference")
-                Stepper("Written note: \(PracticePitchMath.noteLabel(writtenMIDI: settings.writtenMIDINote))", value: Binding(
+                Stepper(value: Binding(
                     get: { model.practiceFeatures.droneSettings.writtenMIDINote },
                     set: { value in
                         var updated = model.practiceFeatures.droneSettings
@@ -635,6 +654,12 @@ struct DroneIntervalView: View {
                         model.updateDroneSettings(updated)
                     }
                 ), in: 36...84)
+                {
+                    Text(verbatim: NativeLocalization.format(
+                        "Written note: %@",
+                        PracticePitchMath.noteLabel(writtenMIDI: settings.writtenMIDINote)
+                    ))
+                }
                 .accessibilityIdentifier("drone.noteStepper")
 
                 Picker("Interval", selection: Binding(
@@ -646,7 +671,7 @@ struct DroneIntervalView: View {
                     }
                 )) {
                     ForEach(TuningInterval.allCases) { interval in
-                        Text(interval.title).tag(interval)
+                        Text(verbatim: interval.title).tag(interval)
                     }
                 }
                 .accessibilityIdentifier("drone.interval")
@@ -671,14 +696,18 @@ struct DroneIntervalView: View {
             Button {
                 audioEngine.tonePlaying ? model.stopDrone() : model.startDrone()
             } label: {
-                Label(audioEngine.tonePlaying ? "Stop reference tone" : "Play reference tone", systemImage: audioEngine.tonePlaying ? "stop.fill" : "play.fill")
-                    .frame(maxWidth: .infinity)
+                Label {
+                    Text(verbatim: NativeLocalization.string(audioEngine.tonePlaying ? "Stop reference tone" : "Play reference tone"))
+                } icon: {
+                    Image(systemName: audioEngine.tonePlaying ? "stop.fill" : "play.fill")
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
             .accessibilityIdentifier("drone.toggle")
 
             if let notice = audioEngine.audioNotice {
-                Text(notice)
+                Text(verbatim: notice)
                     .font(.footnote)
                     .foregroundStyle(BTTheme.warning)
                     .fixedSize(horizontal: false, vertical: true)
@@ -703,8 +732,8 @@ struct PracticePacksView: View {
 
             ForEach(model.practicePacks) { pack in
                 BTCard {
-                    BTSectionHeader(title: pack.name, subtitle: pack.detail)
-                    Text(NativeLocalization.format(
+                    BTSectionHeader(title: .verbatim(pack.displayName), subtitle: .verbatim(pack.displayDetail))
+                    Text(verbatim: NativeLocalization.format(
                         "%@ blocks · %@ minutes",
                         String(pack.blocks.count),
                         String(Int(pack.blocks.reduce(0) { $0 + $1.durationSeconds } / 60))
@@ -745,32 +774,41 @@ struct FocusedPracticeWorkspaceView: View {
             let elapsed = checkpoint?.elapsedInBlock(at: context.date) ?? 0
             BTScreen {
                 BTPageHeader(
-                    eyebrow: pack.name,
-                    title: block?.title ?? "Focused workspace",
-                    subtitle: block?.instruction ?? "Start when you are ready. Only the current block is shown.",
-                    trailing: block.map { timeLabel(max(0, $0.durationSeconds - elapsed)) }
+                    eyebrow: .verbatim(pack.displayName),
+                    title: block.map { .verbatim(pack.displayTitle(for: $0)) } ?? "Focused workspace",
+                    subtitle: block.map { .verbatim(pack.displayInstruction(for: $0)) } ?? "Start when you are ready. Only the current block is shown.",
+                    trailing: block.map { .verbatim(timeLabel(max(0, $0.durationSeconds - elapsed))) }
                 )
                 .accessibilityFocused($blockFocused)
 
                 if checkpoint == nil || checkpoint?.completed == true {
                     BTCard {
-                        BTSectionHeader(title: checkpoint?.completed == true ? "Pack complete" : "Ready to focus", subtitle: pack.detail)
-                        Button(checkpoint?.completed == true ? "Start again" : "Start pack") {
+                        BTSectionHeader(
+                            title: checkpoint?.completed == true ? "Pack complete" : "Ready to focus",
+                            subtitle: .verbatim(pack.displayDetail)
+                        )
+                        Button {
                             model.startWorkspace(pack: pack, now: context.date)
+                        } label: {
+                            Text(verbatim: NativeLocalization.string(checkpoint?.completed == true ? "Start again" : "Start pack"))
                         }
                         .buttonStyle(BTPrimaryButtonStyle())
                         .accessibilityIdentifier("workspace.startPack")
                     }
                 } else if let block, let checkpoint {
                     BTCard(tint: BTTheme.surfaceWarm) {
-                        Text(NativeLocalization.format(
+                        Text(verbatim: NativeLocalization.format(
                             "Block %@ of %@",
                             String(checkpoint.blockIndex + 1),
                             String(pack.blocks.count)
                         ))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(BTTheme.muted)
-                        Label(block.kind.rawValue.capitalized, systemImage: icon(for: block.kind))
+                        Label {
+                            Text(verbatim: block.kind.title)
+                        } icon: {
+                            Image(systemName: icon(for: block.kind))
+                        }
                             .font(.title2.weight(.bold))
                         ProgressView(value: elapsed, total: block.durationSeconds)
                             .accessibilityLabel("Block progress")
@@ -781,7 +819,7 @@ struct FocusedPracticeWorkspaceView: View {
                             ))
 
                         if block.kind == .playAlong, let session = model.playAlongSession, model.playAlongPhase == .running {
-                            Text(NativeLocalization.format(
+                            Text(verbatim: NativeLocalization.format(
                                 "Play %@",
                                 session.currentNoteName ?? NativeLocalization.string("the next note")
                             ))
@@ -805,8 +843,12 @@ struct FocusedPracticeWorkspaceView: View {
                         Button {
                             Task { await model.beginWorkspaceCurrentBlock(now: context.date) }
                         } label: {
-                            Label(elapsed > 0 ? "Resume block" : "Start block", systemImage: "play.fill")
-                                .frame(maxWidth: .infinity)
+                            Label {
+                                Text(verbatim: NativeLocalization.string(elapsed > 0 ? "Resume block" : "Start block"))
+                            } icon: {
+                                Image(systemName: "play.fill")
+                            }
+                            .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
                         .accessibilityIdentifier("workspace.startBlock")
