@@ -12,7 +12,16 @@ struct APIClient {
         config: AppConfig,
         bearerToken: String? = nil
     ) async throws -> T {
-        guard let url = URL(string: path, relativeTo: config.apiBaseURL) else {
+        guard config.hasUsableAPIConfiguration else {
+            throw UserVisibleError.apiRequestFailed(statusCode: 0, message: "The class service address is not approved for this build.")
+        }
+        guard path.hasPrefix("/"), !path.hasPrefix("//"),
+              let url = URL(string: path, relativeTo: config.apiBaseURL)?.absoluteURL,
+              url.scheme?.lowercased() == config.apiBaseURL.scheme?.lowercased(),
+              url.host?.lowercased() == config.apiBaseURL.host?.lowercased(),
+              url.port == config.apiBaseURL.port,
+              url.user == nil,
+              url.password == nil else {
             throw UserVisibleError.malformedResponse
         }
         var request = URLRequest(url: url)

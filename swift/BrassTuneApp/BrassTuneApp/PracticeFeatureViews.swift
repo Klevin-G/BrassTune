@@ -165,7 +165,13 @@ struct CustomExerciseBuilderView: View {
                 BTSectionHeader(title: "Name")
                 TextField("Exercise name", text: $title)
                     .textFieldStyle(.roundedBorder)
+                    .onChange(of: title) { _, value in
+                        if value.count > 60 { title = String(value.prefix(60)) }
+                    }
                     .accessibilityIdentifier("exerciseBuilder.title")
+                Text("\(title.count)/60")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(BTTheme.muted)
             }
 
             BTCard {
@@ -535,6 +541,19 @@ struct PracticeReflectionCard: View {
             .buttonStyle(.bordered)
             .disabled(note.count > 280)
             .accessibilityIdentifier("reflection.save")
+            if model.reflection(for: sessionID) != nil {
+                Button(role: .destructive) {
+                    model.deleteReflection(sessionID: sessionID)
+                    mood = .focused
+                    note = ""
+                    saved = false
+                } label: {
+                    Label("Delete reflection", systemImage: "trash")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("reflection.delete")
+            }
         }
         .onAppear {
             if let reflection = model.reflection(for: sessionID) {
@@ -552,6 +571,8 @@ struct DroneIntervalView: View {
     var body: some View {
         let settings = model.practiceFeatures.droneSettings
         let targetMIDI = settings.writtenMIDINote + settings.interval.rawValue
+        let baseLabel = PracticePitchMath.noteLabel(writtenMIDI: settings.writtenMIDINote)
+        let upperLabel = PracticePitchMath.noteLabel(writtenMIDI: targetMIDI)
         BTScreen {
             BTPageHeader(
                 eyebrow: "Tuner",
@@ -561,12 +582,13 @@ struct DroneIntervalView: View {
             )
 
             BTCard(tint: BTTheme.surfaceWarm) {
-                Text(PracticePitchMath.noteLabel(writtenMIDI: targetMIDI))
+                Text(settings.interval == .unison ? baseLabel : "\(baseLabel) + \(upperLabel)")
                     .font(.system(size: 58, weight: .bold, design: .rounded))
                     .frame(maxWidth: .infinity)
-                    .accessibilityLabel("Target written note \(PracticePitchMath.noteLabel(writtenMIDI: targetMIDI))")
+                    .minimumScaleFactor(0.55)
+                    .accessibilityLabel(settings.interval == .unison ? "Written note \(baseLabel)" : "Written notes \(baseLabel) and \(upperLabel)")
                     .accessibilityIdentifier("drone.targetNote")
-                Text(settings.interval == .unison ? "Match the reference note" : "Hear and match the \(settings.interval.title.lowercased())")
+                Text(settings.interval == .unison ? "Match the reference note" : "Hear both written notes together, correctly transposed to concert pitch")
                     .font(.headline)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)

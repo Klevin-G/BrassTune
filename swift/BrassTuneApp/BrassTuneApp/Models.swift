@@ -28,10 +28,29 @@ enum AppEnvironment: String, CaseIterable, Identifiable {
 }
 
 struct AppConfig: Equatable {
+    static let approvedProductionAPIOrigin = URL(string: "https://brasstune-u8qj.onrender.com")!
     var environment: AppEnvironment
     var apiBaseURL: URL
     var supabaseURL: URL?
     var supabasePublishableKey: String?
+
+    var hasUsableAPIConfiguration: Bool {
+        guard apiBaseURL.user == nil,
+              apiBaseURL.password == nil,
+              apiBaseURL.query == nil,
+              apiBaseURL.fragment == nil,
+              let host = apiBaseURL.host?.lowercased(),
+              !host.isEmpty else { return false }
+        switch environment {
+        case .local:
+            return (apiBaseURL.scheme?.lowercased() == "http" && ["127.0.0.1", "localhost", "::1"].contains(host))
+                || apiBaseURL.scheme?.lowercased() == "https"
+        case .staging:
+            return apiBaseURL.scheme?.lowercased() == "https" && !["127.0.0.1", "localhost", "::1"].contains(host)
+        case .production:
+            return apiBaseURL == Self.approvedProductionAPIOrigin
+        }
+    }
 
     var hasUsableSupabaseAuthConfiguration: Bool {
         guard let supabaseURL,
@@ -40,11 +59,20 @@ struct AppConfig: Equatable {
               !host.isEmpty,
               supabaseURL.user == nil,
               supabaseURL.password == nil,
+              supabaseURL.query == nil,
+              supabaseURL.fragment == nil,
               let key = Self.runtimeValue(supabasePublishableKey),
               Self.isPublicClientKey(key) else {
             return false
         }
+        if environment == .production, !host.lowercased().hasSuffix(".supabase.co") {
+            return false
+        }
         return true
+    }
+
+    var hasUsableAccountConfiguration: Bool {
+        hasUsableAPIConfiguration && hasUsableSupabaseAuthConfiguration
     }
 
     static func fromProcessEnvironment(
@@ -52,13 +80,19 @@ struct AppConfig: Equatable {
         bundleInfo: [String: Any]? = nil
     ) -> AppConfig {
         let info = bundleInfo ?? Bundle.main.infoDictionary ?? [:]
-        let apiBaseURL = environment["BRASSTUNE_API_BASE_URL"].flatMap(URL.init(string:)) ?? local.apiBaseURL
+        let selectedEnvironment = environment["BRASSTUNE_ENV"].flatMap(AppEnvironment.init(rawValue:))
+            ?? (info["BRASSTUNE_ENV"] as? String).flatMap(AppEnvironment.init(rawValue:))
+            ?? .local
+        let apiBaseURLValue = runtimeValue(environment["BRASSTUNE_API_BASE_URL"])
+            ?? runtimeValue(info["BRASSTUNE_API_BASE_URL"] as? String)
+        let defaultAPIURL = selectedEnvironment == .production ? approvedProductionAPIOrigin : local.apiBaseURL
+        let apiBaseURL = apiBaseURLValue.flatMap(URL.init(string:)) ?? defaultAPIURL
         let supabaseURLValue = runtimeValue(environment["BRASSTUNE_SUPABASE_URL"])
             ?? runtimeValue(info["BRASSTUNE_SUPABASE_URL"] as? String)
         let publishableKey = runtimeValue(environment["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"])
             ?? runtimeValue(info["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"] as? String)
         return AppConfig(
-            environment: environment["BRASSTUNE_ENV"].flatMap(AppEnvironment.init(rawValue:)) ?? .local,
+            environment: selectedEnvironment,
             apiBaseURL: apiBaseURL,
             supabaseURL: supabaseURLValue.flatMap(URL.init(string:)),
             supabasePublishableKey: publishableKey
@@ -556,11 +590,13 @@ enum PlayAlongNoteRating: String, Codable, Equatable {
         }
         switch abs(cents) {
         case ...5: self = .excellent
-        case ...15: self = .good
-        case ...30: self = .close
+        case ...15: self = .close
         default: self = .off
         }
     }
+
+    var isCentered: Bool { self == .excellent }
+    var isAccepted: Bool { self == .excellent || self == .close }
 
     var title: String {
         switch self {
@@ -609,7 +645,7 @@ struct PlayAlongGrade: Codable, Equatable {
         self.noteGrades = noteGrades
         let played = noteGrades.filter { $0.medianCents != nil }
         notesPlayed = played.count
-        inTuneNotes = played.filter { [.excellent, .good].contains($0.rating) }.count
+        inTuneNotes = played.filter { $0.rating.isCentered }.count
         inTunePercentage = expectedNoteCount > 0
             ? Int((Double(inTuneNotes) / Double(expectedNoteCount) * 100).rounded())
             : 0
@@ -619,11 +655,16 @@ struct PlayAlongGrade: Codable, Equatable {
             let average = played.compactMap(\.medianCents).map(abs).reduce(0, +) / Double(played.count)
             averageAbsoluteCents = (average * 10).rounded() / 10
         }
+        stars = Self.starRating(inTunePercentage: Double(inTunePercentage))
+    }
+
+    static func starRating(inTunePercentage: Double?) -> Int {
+        guard let inTunePercentage, inTunePercentage.isFinite else { return 0 }
         switch inTunePercentage {
-        case 85...: stars = 3
-        case 60...: stars = 2
-        case 1...: stars = 1
-        default: stars = notesPlayed > 0 ? 1 : 0
+        case 95...: return 3
+        case 85...: return 2
+        case 70...: return 1
+        default: return 0
         }
     }
 }
@@ -1237,22 +1278,24 @@ enum UserVisibleError: LocalizedError, Equatable {
     case accountDeletionRequiresConfirmation
     case missingAuthConfiguration
     case authenticationFailed
+    case secureStorageUnavailable
     case emailConfirmationRequired
     case microphoneUnavailable
     case apiRequestFailed(statusCode: Int, message: String)
 
     var errorDescription: String? {
         switch self {
-        case .microphoneDenied: return "Microphone access is off. Allow it in Settings, then try again."
-        case .networkUnavailable: return "The account service is unavailable right now."
-        case .malformedResponse: return "The account service returned an unreadable response."
-        case .timeout: return "The request timed out."
-        case .appleSignInCancelled: return "Apple sign-in was cancelled."
-        case .accountDeletionRequiresConfirmation: return "Please confirm deletion and try again."
-        case .missingAuthConfiguration: return "Account sign-in isn't available right now. You can keep practicing as a guest."
-        case .authenticationFailed: return "BrassTune could not complete authentication."
-        case .emailConfirmationRequired: return "Check your email to confirm this BrassTune account before signing in."
-        case .microphoneUnavailable: return "BrassTune could not hear the microphone. Check your audio input and try again."
+        case .microphoneDenied: return String(localized: "Microphone access is off. Allow it in Settings, then try again.")
+        case .networkUnavailable: return String(localized: "The account service is unavailable right now.")
+        case .malformedResponse: return String(localized: "The account service returned an unreadable response.")
+        case .timeout: return String(localized: "The request timed out.")
+        case .appleSignInCancelled: return String(localized: "Apple sign-in was cancelled.")
+        case .accountDeletionRequiresConfirmation: return String(localized: "Please confirm deletion and try again.")
+        case .missingAuthConfiguration: return String(localized: "Account sign-in isn't available right now. You can keep practicing as a guest.")
+        case .authenticationFailed: return String(localized: "BrassTune could not complete authentication.")
+        case .secureStorageUnavailable: return String(localized: "BrassTune couldn't securely save your sign-in on this device. Check device storage and try again.")
+        case .emailConfirmationRequired: return String(localized: "Check your email to confirm this BrassTune account before signing in.")
+        case .microphoneUnavailable: return String(localized: "BrassTune could not hear the microphone. Check your audio input and try again.")
         case .apiRequestFailed(_, let message): return message
         }
     }

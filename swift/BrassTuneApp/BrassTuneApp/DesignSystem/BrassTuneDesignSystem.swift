@@ -202,27 +202,26 @@ struct BTPageHeader: View {
     var trailing: String?
 
     var body: some View {
-        BTCard(tint: BTTheme.surfaceWarm) {
-            HStack(alignment: .top, spacing: BTSpacing.lg) {
-                VStack(alignment: .leading, spacing: BTSpacing.sm) {
-                    Text(eyebrow.uppercased())
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(BTTheme.accentSoft)
-                    Text(title)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                        .foregroundStyle(BTTheme.text)
-                        .minimumScaleFactor(0.72)
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(BTTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: BTSpacing.md)
-                if let trailing {
-                    BTStatusPill(text: trailing, tint: BTTheme.secondaryAccent)
-                }
+        HStack(alignment: .top, spacing: BTSpacing.lg) {
+            VStack(alignment: .leading, spacing: BTSpacing.sm) {
+                Text(eyebrow.uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(BTTheme.accentSoft)
+                Text(title)
+                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                    .foregroundStyle(BTTheme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: BTSpacing.md)
+            if let trailing {
+                BTStatusPill(text: trailing, tint: BTTheme.secondaryAccent)
             }
         }
+        .padding(.horizontal, BTSpacing.xs)
     }
 }
 
@@ -355,6 +354,7 @@ struct BrassGlassButtonStyle: PrimitiveButtonStyle {
             configuration.label
                 .font(.headline)
                 .frame(maxWidth: .infinity)
+                .frame(minHeight: 44)
                 .padding(.vertical, BTSpacing.xs)
                 .contentShape(Rectangle())
         }
@@ -371,6 +371,7 @@ struct BTPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.headline)
             .frame(maxWidth: .infinity)
+            .frame(minHeight: 44)
             .padding(.vertical, BTSpacing.md)
             .foregroundStyle(isEnabled ? BTTheme.onAccent : BTTheme.muted)
             .background(shape.fill(isEnabled ? BTTheme.accent : BTTheme.surfaceAlt))
@@ -387,6 +388,7 @@ struct BTSecondaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.headline)
             .frame(maxWidth: .infinity)
+            .frame(minHeight: 44)
             .padding(.vertical, BTSpacing.md)
             .foregroundStyle(isEnabled ? BTTheme.text : BTTheme.muted)
             .background(shape.fill(BTTheme.surfaceAlt))

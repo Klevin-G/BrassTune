@@ -76,11 +76,21 @@ struct SettingsView: View {
                 Button {
                     onboardingPresented = true
                 } label: {
-                    Label("Replay welcome", systemImage: "arrow.counterclockwise")
+                    Label("Review instrument setup", systemImage: "arrow.counterclockwise")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("settings.reopenOnboarding")
+            }
+
+            BTCard {
+                BTSectionHeader(title: "Language", subtitle: "Follow the system language or choose a BrassTune language explicitly.")
+                Picker("Language", selection: $model.appLanguage) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+                .accessibilityIdentifier("settings.languagePicker")
             }
 
             BTCard {
@@ -135,14 +145,6 @@ struct SettingsView: View {
                     ScorePracticeView()
                 }
                 SettingsNavigationRow(
-                    title: "Classes",
-                    systemImage: "person.3",
-                    detail: model.ensembles.isEmpty ? nil : "\(model.ensembles.count)",
-                    identifier: "settings.classesLink"
-                ) {
-                    ClassesView()
-                }
-                SettingsNavigationRow(
                     title: "Offline practice packs",
                     systemImage: "shippingbox",
                     detail: "\(model.practicePacks.count)",
@@ -166,11 +168,12 @@ struct SettingsView: View {
                         .textContentType(.password)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("settings.password")
-                    HStack(spacing: BTSpacing.md) {
+                    VStack(spacing: BTSpacing.md) {
                         Button(model.authOperationInProgress ? "Working…" : "Sign in") {
                             Task { await model.signIn(email: email, password: password) }
                         }
                         .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .disabled(model.authOperationInProgress)
                         .accessibilityIdentifier("settings.signIn")
 
@@ -178,6 +181,7 @@ struct SettingsView: View {
                             Task { await model.signUp(email: email, password: password) }
                         }
                         .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .disabled(model.authOperationInProgress)
                         .accessibilityIdentifier("settings.createAccount")
                     }
@@ -225,7 +229,7 @@ struct SettingsView: View {
                 BTCard {
                     BTSectionHeader(title: "Sign out", subtitle: "Your practice history stays on this device.")
                     Button {
-                        model.signOut()
+                        Task { await model.signOut() }
                     } label: {
                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                             .frame(maxWidth: .infinity)

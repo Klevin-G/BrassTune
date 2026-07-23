@@ -2,6 +2,7 @@ import XCTest
 @testable import BrassTuneApp
 import BrassTuneCore
 import PDFKit
+import Security
 import UIKit
 
 private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
@@ -143,7 +144,7 @@ final class BrassTuneAppTests: XCTestCase {
     @MainActor
     func testRuntimeAccountConfigFailsClosedUnlessURLAndPublishableKeyAreBothPresent() {
         let model = makeModel()
-        let apiURL = URL(string: "https://api.example.test")!
+        let apiURL = AppConfig.approvedProductionAPIOrigin
         let supabaseURL = URL(string: "https://project.supabase.co")!
 
         model.config = AppConfig(environment: .production, apiBaseURL: apiURL, supabaseURL: supabaseURL, supabasePublishableKey: nil)
@@ -184,7 +185,7 @@ final class BrassTuneAppTests: XCTestCase {
 
         let secretLike = AppConfig(
             environment: .production,
-            apiBaseURL: URL(string: "https://api.example.test")!,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
             supabaseURL: URL(string: "https://project.supabase.co")!,
             supabasePublishableKey: "sb_secret_forbidden"
         )
@@ -202,6 +203,107 @@ final class BrassTuneAppTests: XCTestCase {
         )
         XCTAssertEqual(environmentOverride.supabaseURL, URL(string: "https://override.supabase.co"))
         XCTAssertEqual(environmentOverride.supabasePublishableKey, "sb_publishable_override")
+    }
+
+    func testProductionConfigurationRequiresExactImmutableOriginsAndJointAccountReadiness() {
+        let supabase = URL(string: "https://project.supabase.co")!
+        let key = "sb_publishable_test"
+        let approved = AppConfig(
+            environment: .production,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
+            supabaseURL: supabase,
+            supabasePublishableKey: key
+        )
+        XCTAssertTrue(approved.hasUsableAPIConfiguration)
+        XCTAssertTrue(approved.hasUsableAccountConfiguration)
+
+        for rejected in [
+            "http://brasstune-u8qj.onrender.com",
+            "https://localhost",
+            "https://user:password@brasstune-u8qj.onrender.com",
+            "https://api.example.test",
+            "https://brasstune-u8qj.onrender.com?redirect=evil",
+            "https://brasstune-u8qj.onrender.com.evil.test",
+        ] {
+            var config = approved
+            config.apiBaseURL = URL(string: rejected)!
+            XCTAssertFalse(config.hasUsableAPIConfiguration, rejected)
+            XCTAssertFalse(config.hasUsableAccountConfiguration, rejected)
+        }
+
+        var missingAPI = approved
+        missingAPI.apiBaseURL = URL(string: "https://api.example.test")!
+        XCTAssertTrue(missingAPI.hasUsableSupabaseAuthConfiguration)
+        XCTAssertFalse(missingAPI.hasUsableAccountConfiguration)
+
+        var missingSupabase = approved
+        missingSupabase.supabaseURL = nil
+        XCTAssertTrue(missingSupabase.hasUsableAPIConfiguration)
+        XCTAssertFalse(missingSupabase.hasUsableAccountConfiguration)
+    }
+
+    func testStringCatalogsCoverProductionLocalesPluralInterpolationMicCopyAndRTLHook() throws {
+        let expectedLocales = Set(["ar", "de", "en", "es", "fr", "ja", "ko", "pt-BR", "ru", "vi", "zh-Hans", "zh-Hant"])
+        XCTAssertEqual(Set(AppLanguage.allCases.dropFirst().map(\.rawValue)), expectedLocales)
+        XCTAssertTrue(AppLanguage.arabic.isRightToLeft)
+        XCTAssertFalse(AppLanguage.english.isRightToLeft)
+
+        let resourceDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("BrassTuneApp/Resources", isDirectory: true)
+        let localizableData = try Data(contentsOf: resourceDirectory.appendingPathComponent("Localizable.xcstrings"))
+        let localizable = try XCTUnwrap(JSONSerialization.jsonObject(with: localizableData) as? [String: Any])
+        let strings = try XCTUnwrap(localizable["strings"] as? [String: Any])
+        for (key, rawEntry) in strings {
+            let entry = try XCTUnwrap(rawEntry as? [String: Any], key)
+            let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any], key)
+            XCTAssertEqual(Set(localizations.keys), expectedLocales, "Missing production locale in \(key)")
+        }
+        let appSourceDirectory = resourceDirectory.deletingLastPathComponent()
+        let sourceEnumerator = FileManager.default.enumerator(at: appSourceDirectory, includingPropertiesForKeys: nil)
+        let expression = try NSRegularExpression(pattern: #"String\(localized: \"([^\"]+)\""#)
+        while let sourceURL = sourceEnumerator?.nextObject() as? URL {
+            guard sourceURL.pathExtension == "swift", let source = try? String(contentsOf: sourceURL, encoding: .utf8) else { continue }
+            let range = NSRange(source.startIndex..<source.endIndex, in: source)
+            for match in expression.matches(in: source, range: range) {
+                guard let keyRange = Range(match.range(at: 1), in: source) else { continue }
+                let rawKey = String(source[keyRange])
+                let key = rawKey.replacingOccurrences(of: #"\\\([^)]*\)"#, with: "%lld", options: .regularExpression)
+                XCTAssertNotNil(strings[key], "String(localized:) key missing from catalog: \(key)")
+            }
+        }
+        let systemDefault = try XCTUnwrap(strings["System Default"] as? [String: Any])
+        XCTAssertEqual(Set(try XCTUnwrap(systemDefault["localizations"] as? [String: Any]).keys), expectedLocales)
+        let plural = try XCTUnwrap(strings["%lld practice sessions"] as? [String: Any])
+        XCTAssertEqual(Set(try XCTUnwrap(plural["localizations"] as? [String: Any]).keys), expectedLocales)
+        XCTAssertEqual(AppLanguage.english.practiceSessionCountLabel(1), "1 practice session")
+        XCTAssertEqual(AppLanguage.english.practiceSessionCountLabel(2), "2 practice sessions")
+
+        let infoData = try Data(contentsOf: resourceDirectory.appendingPathComponent("InfoPlist.xcstrings"))
+        let info = try XCTUnwrap(JSONSerialization.jsonObject(with: infoData) as? [String: Any])
+        let infoStrings = try XCTUnwrap(info["strings"] as? [String: Any])
+        let mic = try XCTUnwrap(infoStrings["NSMicrophoneUsageDescription"] as? [String: Any])
+        XCTAssertEqual(Set(try XCTUnwrap(mic["localizations"] as? [String: Any]).keys), expectedLocales)
+    }
+
+    func testKeychainSessionUsesThisDeviceOnlyAccessibility() {
+        XCTAssertEqual(KeychainStore.sessionAccessibility, kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
+    }
+
+    @MainActor
+    func testLegacyAuthPayloadWithoutStableUserIDIsDeletedFailClosed() {
+        let store = InMemoryAuthSessionStore()
+        store.payload = #"{"accessToken":"legacy-token","refreshToken":"legacy-refresh","email":"legacy@example.com"}"#
+        let service = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { store.payload },
+            saveSessionPayload: { store.payload = $0 },
+            deleteSessionPayload: { store.payload = nil }
+        )
+
+        XCTAssertNil(service.restoreSession())
+        XCTAssertNil(store.payload)
     }
 
     @MainActor
@@ -231,7 +333,7 @@ final class BrassTuneAppTests: XCTestCase {
         let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
         model.config = AppConfig(
             environment: .production,
-            apiBaseURL: URL(string: "https://api.example.test")!,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
             supabaseURL: URL(string: "https://project.supabase.co")!,
             supabasePublishableKey: "sb_publishable_test"
         )
@@ -267,7 +369,7 @@ final class BrassTuneAppTests: XCTestCase {
         let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
         model.config = AppConfig(
             environment: .production,
-            apiBaseURL: URL(string: "https://api.example.test")!,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
             supabaseURL: URL(string: "https://project.supabase.co")!,
             supabasePublishableKey: "sb_publishable_test"
         )
@@ -324,6 +426,150 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testSignOutRevokesSupabaseSessionAndAlwaysClearsLocalCredential() async throws {
+        for shouldFailOffline in [false, true] {
+            let authService = makeIsolatedAuthService(session: makeStubSession())
+            let config = makeAuthConfig()
+            defer {
+                authService.signOut()
+                StubURLProtocol.handler = nil
+            }
+            nonisolated(unsafe) var logoutRequest: URLRequest?
+            StubURLProtocol.handler = { request in
+                if request.url?.path == "/auth/v1/logout" {
+                    logoutRequest = request
+                    if shouldFailOffline { throw URLError(.notConnectedToInternet) }
+                    return .init(
+                        response: HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!,
+                        data: Data()
+                    )
+                }
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: Data(#"{"access_token":"access-a","refresh_token":"refresh-a","expires_in":3600,"user":{"id":"user-a","email":"a@example.com"}}"#.utf8)
+                )
+            }
+            _ = try await authService.signIn(email: "a@example.com", password: "password", config: config)
+            XCTAssertNotNil(authService.restoreSession())
+
+            if shouldFailOffline {
+                do {
+                    try await authService.signOut(config: config)
+                    XCTFail("Expected offline logout to report a recoverable error")
+                } catch {
+                    XCTAssertEqual(error as? UserVisibleError, .networkUnavailable)
+                }
+            } else {
+                try await authService.signOut(config: config)
+            }
+
+            XCTAssertNil(authService.restoreSession(), "Local credentials must clear even when server revocation is offline.")
+            let request = try XCTUnwrap(logoutRequest)
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-a")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "apikey"), "sb_publishable_test")
+        }
+    }
+
+    @MainActor
+    func testAccountNamespacesPreventGuestOrCrossUserInheritanceAndDeletionSurvivesRelaunch() async throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-namespace-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-namespace-scores-\(UUID().uuidString)", isDirectory: true)
+        let authService = makeIsolatedAuthService(session: makeStubSession())
+        let config = makeAuthConfig()
+        defer {
+            authService.signOut()
+            StubURLProtocol.handler = nil
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: NativeStorageNamespace.account(userID: "user-a").stateFile(basedAt: stateURL))
+            try? FileManager.default.removeItem(at: NativeStorageNamespace.account(userID: "user-b").stateFile(basedAt: stateURL))
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.path == "/auth/v1/logout" {
+                return .init(response: response, data: Data())
+            }
+            if request.url?.host == AppConfig.approvedProductionAPIOrigin.host {
+                return .init(response: response, data: Data(#"{"deleted":true}"#.utf8))
+            }
+            let body = requestBodyData(request) ?? Data()
+            let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: String]
+            let email = payload?["email"] ?? "a@example.com"
+            let userID = email.hasPrefix("b") ? "user-b" : "user-a"
+            let data = try JSONSerialization.data(withJSONObject: [
+                "access_token": "access-\(userID)",
+                "refresh_token": "refresh-\(userID)",
+                "expires_in": 3_600,
+                "user": ["id": userID, "email": email],
+            ])
+            return .init(response: response, data: data)
+        }
+
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        model.config = config
+        let guestSession = makeSession(name: "Guest only", cents: [0])
+        model.sessions = [guestSession]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Guest score")
+
+        await model.signIn(email: "a@example.com", password: "password")
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertTrue(model.scores.isEmpty, "Account A must not inherit guest scores.")
+        let accountASession = makeSession(name: "Account A only", cents: [1])
+        model.sessions = [accountASession]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Account A score")
+
+        await model.signOut()
+        XCTAssertEqual(model.sessions.map(\.id), [guestSession.id])
+        XCTAssertEqual(model.scores.map(\.title), ["Guest score"])
+
+        await model.signIn(email: "b@example.com", password: "password")
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertTrue(model.scores.isEmpty, "Account B must not inherit account A or guest scores.")
+        model.sessions = [makeSession(name: "Account B only", cents: [2])]
+
+        await model.signOut()
+        await model.signIn(email: "a@example.com", password: "password")
+        XCTAssertEqual(model.sessions.map(\.id), [accountASession.id])
+        XCTAssertEqual(model.scores.map(\.title), ["Account A score"])
+
+        let relaunched = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        relaunched.config = config
+        await relaunched.restoreSession()
+        XCTAssertEqual(relaunched.sessions.map(\.id), [accountASession.id])
+        XCTAssertEqual(relaunched.scores.map(\.title), ["Account A score"])
+
+        let accountAFile = NativeStorageNamespace.account(userID: "user-a").stateFile(basedAt: stateURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: accountAFile.path))
+        await relaunched.deleteAccount()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: accountAFile.path))
+        XCTAssertEqual(relaunched.sessions.map(\.id), [guestSession.id])
+        XCTAssertEqual(relaunched.scores.map(\.title), ["Guest score"])
+
+        let afterDeletionRelaunch = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: authService
+        )
+        afterDeletionRelaunch.config = config
+        XCTAssertEqual(afterDeletionRelaunch.sessions.map(\.id), [guestSession.id])
+        await afterDeletionRelaunch.signIn(email: "a@example.com", password: "password")
+        XCTAssertTrue(afterDeletionRelaunch.sessions.isEmpty, "A deleted account namespace must stay deleted after relaunch.")
+        XCTAssertTrue(afterDeletionRelaunch.scores.isEmpty)
+    }
+
+    @MainActor
     func testTerminalRefreshFailureClearsExpiredStoredSessionAndSignsOut() async throws {
         let networkSession = makeStubSession()
         let authService = makeIsolatedAuthService(session: networkSession)
@@ -335,7 +581,7 @@ final class BrassTuneAppTests: XCTestCase {
         StubURLProtocol.handler = { request in
             .init(
                 response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-60,"user":{"email":"player@example.com"}}"#.utf8)
+                data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-60,"user":{"id":"player-a","email":"player@example.com"}}"#.utf8)
             )
         }
         _ = try await authService.signIn(email: "player@example.com", password: "password", config: config)
@@ -373,7 +619,7 @@ final class BrassTuneAppTests: XCTestCase {
         StubURLProtocol.handler = { request in
             .init(
                 response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                data: Data(#"{"access_token":"cached-token","refresh_token":"refresh-token","expires_in":3600,"user":{"email":"cached@example.com"}}"#.utf8)
+                data: Data(#"{"access_token":"cached-token","refresh_token":"refresh-token","expires_in":3600,"user":{"id":"cached-user","email":"cached@example.com"}}"#.utf8)
             )
         }
         _ = try await authService.signIn(email: "cached@example.com", password: "password", config: validConfig)
@@ -398,7 +644,7 @@ final class BrassTuneAppTests: XCTestCase {
             StubURLProtocol.handler = { request in
                 .init(
                     response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                    data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-60,"user":{"email":"retry@example.com"}}"#.utf8)
+                    data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-60,"user":{"id":"retry-user","email":"retry@example.com"}}"#.utf8)
                 )
             }
             _ = try await authService.signIn(email: "retry@example.com", password: "password", config: config)
@@ -441,7 +687,7 @@ final class BrassTuneAppTests: XCTestCase {
         StubURLProtocol.handler = { request in
             .init(
                 response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                data: Data(#"{"access_token":"still-live-token","refresh_token":"refresh-token","expires_in":30,"user":{"email":"offline@example.com"}}"#.utf8)
+                data: Data(#"{"access_token":"still-live-token","refresh_token":"refresh-token","expires_in":30,"user":{"id":"offline-user","email":"offline@example.com"}}"#.utf8)
             )
         }
         _ = try await authService.signIn(email: "offline@example.com", password: "password", config: config)
@@ -474,7 +720,7 @@ final class BrassTuneAppTests: XCTestCase {
         StubURLProtocol.handler = { request in
             .init(
                 response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-30,"user":{"email":"offline@example.com"}}"#.utf8)
+                data: Data(#"{"access_token":"expired-token","refresh_token":"refresh-token","expires_in":-30,"user":{"id":"offline-user","email":"offline@example.com"}}"#.utf8)
             )
         }
         _ = try await authService.signIn(email: "offline@example.com", password: "password", config: config)
@@ -520,7 +766,7 @@ final class BrassTuneAppTests: XCTestCase {
             let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
             let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
             model.config = makeAuthConfig()
-            var user: [String: String] = ["email": "apple@example.com"]
+            var user: [String: String] = ["id": "apple-user", "email": "apple@example.com"]
             user["created_at"] = expectation.created
             user["last_sign_in_at"] = expectation.last
             let payload: [String: Any] = [
@@ -1047,13 +1293,102 @@ final class BrassTuneAppTests: XCTestCase {
     func testPlayAlongRatingUsesWebCentsThresholds() {
         XCTAssertEqual(PlayAlongNoteRating(cents: 5), .excellent)
         XCTAssertEqual(PlayAlongNoteRating(cents: -5), .excellent)
-        XCTAssertEqual(PlayAlongNoteRating(cents: 15), .good)
-        XCTAssertEqual(PlayAlongNoteRating(cents: -15), .good)
-        XCTAssertEqual(PlayAlongNoteRating(cents: 30), .close)
-        XCTAssertEqual(PlayAlongNoteRating(cents: -30), .close)
-        XCTAssertEqual(PlayAlongNoteRating(cents: 30.1), .off)
+        XCTAssertEqual(PlayAlongNoteRating(cents: 15), .close)
+        XCTAssertEqual(PlayAlongNoteRating(cents: -15), .close)
+        XCTAssertEqual(PlayAlongNoteRating(cents: 15.1), .off)
+        XCTAssertEqual(PlayAlongNoteRating(cents: -30), .off)
         XCTAssertEqual(PlayAlongNoteRating(cents: nil), .missed)
         XCTAssertEqual(PlayAlongNoteRating(cents: .nan), .missed)
+    }
+
+    func testSharedPlayAlongContractFixtureMatchesNativeScorer() throws {
+        let data = try Data(contentsOf: try sharedFixtureURL(named: "play_along_contract.json"))
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let policy = try XCTUnwrap(root["policy"] as? [String: Any])
+        let grader = PlayAlongGrader(writtenNotes: ["C"])
+        XCTAssertEqual(grader.holdDurationMs, policy["hold_ms"] as? Int)
+        XCTAssertEqual(grader.minimumConfidence, policy["minimum_confidence"] as? Double)
+        XCTAssertEqual(grader.minimumSamples, policy["minimum_samples"] as? Int)
+        XCTAssertEqual(grader.attackTrimMs, policy["attack_trim_ms"] as? Int)
+        XCTAssertEqual(grader.maximumDropoutMs, policy["maximum_dropout_ms"] as? Int)
+
+        for item in try XCTUnwrap(root["rating_cases"] as? [[String: Any]]) {
+            let cents = item["cents"] is NSNull ? nil : item["cents"] as? Double
+            let rating = PlayAlongNoteRating(cents: cents)
+            XCTAssertEqual(rating.rawValue, item["expected_rating"] as? String, item["name"] as? String ?? "rating")
+            XCTAssertEqual(rating.isCentered, item["expected_centered"] as? Bool)
+            XCTAssertEqual(rating.isAccepted, item["expected_accepted"] as? Bool)
+        }
+
+        for item in try XCTUnwrap(root["star_cases"] as? [[String: Any]]) {
+            let percent = item["in_tune_percent"] is NSNull ? nil : item["in_tune_percent"] as? Double
+            XCTAssertEqual(PlayAlongGrade.starRating(inTunePercentage: percent), item["expected_stars"] as? Int)
+        }
+
+        for item in try XCTUnwrap(root["summary_cases"] as? [[String: Any]]) {
+            let ratings = try XCTUnwrap(item["ratings"] as? [[String: Any]])
+            let grades = ratings.enumerated().map { index, rating -> PlayAlongNoteGrade in
+                let cents = rating["cents"] is NSNull ? nil : rating["cents"] as? Double
+                let expectedRating = PlayAlongNoteRating(rawValue: rating["rating"] as? String ?? "")
+                return PlayAlongNoteGrade(
+                    writtenNoteName: "N\(index)",
+                    medianCents: cents,
+                    sampleCount: cents == nil ? 0 : 5,
+                    rating: expectedRating
+                )
+            }
+            let summary = PlayAlongGrade(expectedNoteCount: item["expected_total"] as? Int ?? 0, noteGrades: grades)
+            XCTAssertEqual(summary.totalNotes, item["expected_total"] as? Int)
+            XCTAssertEqual(summary.notesPlayed, item["expected_hit"] as? Int)
+            XCTAssertEqual(summary.inTuneNotes, item["expected_in_tune"] as? Int)
+            XCTAssertEqual(summary.inTunePercentage, item["expected_in_tune_percent"] as? Int)
+            XCTAssertEqual(summary.averageAbsoluteCents, item["expected_average_abs_cents"] as? Double)
+            XCTAssertEqual(summary.stars, item["expected_stars"] as? Int)
+        }
+    }
+
+    func testSharedReferenceToneDroneAndTranspositionFixturesMatchNativeMath() throws {
+        let referenceData = try Data(contentsOf: try sharedFixtureURL(named: "reference_tone_cases.json"))
+        let referenceCases = try XCTUnwrap(JSONSerialization.jsonObject(with: referenceData) as? [[String: Any]])
+        for item in referenceCases {
+            let midi = try writtenMIDI(from: try XCTUnwrap(item["written_note"] as? String))
+            let semitones = try XCTUnwrap(item["interval_semitones"] as? Int)
+            let interval = try XCTUnwrap(TuningInterval(rawValue: semitones))
+            let frequency = try XCTUnwrap(PracticePitchMath.frequency(
+                writtenMIDI: midi,
+                interval: interval,
+                instrumentID: try XCTUnwrap(item["instrument_id"] as? String),
+                referencePitchHz: try XCTUnwrap(item["reference_pitch_hz"] as? Double)
+            ))
+            XCTAssertEqual(frequency, try XCTUnwrap(item["expected_frequency_hz"] as? Double), accuracy: 0.000_1)
+        }
+
+        let droneData = try Data(contentsOf: try sharedFixtureURL(named: "drone_dyad_cases.json"))
+        let droneCases = try XCTUnwrap(JSONSerialization.jsonObject(with: droneData) as? [[String: Any]])
+        for item in droneCases {
+            let frequencies = try XCTUnwrap(PracticePitchMath.frequencies(
+                writtenMIDI: try writtenMIDI(from: try XCTUnwrap(item["written_note"] as? String)),
+                interval: try XCTUnwrap(TuningInterval(rawValue: try XCTUnwrap(item["interval_semitones"] as? Int))),
+                instrumentID: try XCTUnwrap(item["instrument_id"] as? String),
+                referencePitchHz: try XCTUnwrap(item["reference_pitch_hz"] as? Double)
+            ))
+            let expected = try XCTUnwrap(item["expected_frequencies_hz"] as? [Double])
+            XCTAssertEqual(frequencies.count, expected.count)
+            for (actual, target) in zip(frequencies, expected) {
+                XCTAssertEqual(actual, target, accuracy: 0.000_1)
+            }
+        }
+
+        let transpositionData = try Data(contentsOf: try sharedFixtureURL(named: "transposition_cases.json"))
+        let transpositionCases = try XCTUnwrap(JSONSerialization.jsonObject(with: transpositionData) as? [[String: Any]])
+        for item in transpositionCases {
+            let instrumentID = try XCTUnwrap(item["instrument_id"] as? String)
+            let expectedWritten = try XCTUnwrap(item["expected_written_midi"] as? Int)
+            XCTAssertEqual(
+                PracticePitchMath.concertMIDI(forWrittenMIDI: expectedWritten, instrumentID: instrumentID),
+                item["concert_midi"] as? Int
+            )
+        }
     }
 
     func testPlayAlongExerciseCatalogIncludesAllGroupedScalesAndPracticePatterns() {
@@ -1108,7 +1443,7 @@ final class BrassTuneAppTests: XCTestCase {
     func testAPIClientPreservesFastAPIValidationMessagesAndCancellation() async throws {
         let session = makeStubSession()
         let client = APIClient(session: session)
-        let baseURL = URL(string: "https://api.example.test")!
+        let baseURL = AppConfig.approvedProductionAPIOrigin
         let config = AppConfig(environment: .staging, apiBaseURL: baseURL, supabaseURL: nil, supabasePublishableKey: nil)
 
         StubURLProtocol.handler = { request in
@@ -1151,7 +1486,7 @@ final class BrassTuneAppTests: XCTestCase {
         )
         model.config = AppConfig(
             environment: .staging,
-            apiBaseURL: URL(string: "https://api.example.test")!,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
             supabaseURL: nil,
             supabasePublishableKey: nil
         )
@@ -1214,7 +1549,7 @@ final class BrassTuneAppTests: XCTestCase {
         )
         model.config = AppConfig(
             environment: .staging,
-            apiBaseURL: URL(string: "https://api.example.test")!,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
             supabaseURL: nil,
             supabasePublishableKey: nil
         )
@@ -1259,7 +1594,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(grader.noteGrades.count, 1)
         XCTAssertEqual(grader.noteGrades[0].writtenNoteName, "C")
         XCTAssertEqual(grader.noteGrades[0].medianCents ?? .nan, 10, accuracy: 0.001)
-        XCTAssertEqual(grader.noteGrades[0].rating, .good)
+        XCTAssertEqual(grader.noteGrades[0].rating, .close)
         XCTAssertEqual(grader.currentNoteName, "D")
     }
 
@@ -1298,7 +1633,7 @@ final class BrassTuneAppTests: XCTestCase {
         grader.feed(makePlayAlongFrame(note: "C", cents: 8, timestampMs: 640))
 
         XCTAssertTrue(grader.isComplete)
-        XCTAssertEqual(grader.noteGrades.first?.rating, .good)
+        XCTAssertEqual(grader.noteGrades.first?.rating, .close)
     }
 
     func testPlayAlongPausesVisibleProgressDuringBriefDropout() {
@@ -1337,27 +1672,11 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(playAlongAdvanceAnnouncement(for: session), "Exercise complete. Your results are ready.")
     }
 
-    func testEveryTutorialStepHasAStableVoiceOverFocusAnnouncement() {
-        let titles = [
-            "Choose your instrument",
-            "Play-Along",
-            "Tuner and recordings",
-            "Progress and practice history",
-            "Metronome",
-            "Sheet music",
-            "Classes and accounts",
-            "Settings, privacy, and data",
-        ]
-
-        for (index, title) in titles.enumerated() {
-            let announcement = nativeTutorialAccessibilityAnnouncement(stepIndex: index)
-            XCTAssertTrue(announcement.contains("Step \(index + 1) of 8"))
-            XCTAssertTrue(announcement.contains(title))
-        }
-        XCTAssertEqual(
-            Set(titles.indices.map { nativeTutorialAccessibilityAnnouncement(stepIndex: $0) }).count,
-            titles.count
-        )
+    func testInstrumentSetupHasAStableVoiceOverFocusAnnouncement() {
+        XCTAssertEqual(nativeTutorialSteps.count, 1)
+        let announcement = nativeTutorialAccessibilityAnnouncement(stepIndex: 0)
+        XCTAssertTrue(announcement.contains("Step 1 of 1"))
+        XCTAssertTrue(announcement.contains("Choose your instrument"))
     }
 
     func testPlayAlongLongSilenceResetsHoldAfterDropoutGrace() {
@@ -1469,10 +1788,10 @@ final class BrassTuneAppTests: XCTestCase {
         let summary = PlayAlongGrade(expectedNoteCount: 2, noteGrades: grader.noteGrades)
         XCTAssertEqual(summary.totalNotes, 2)
         XCTAssertEqual(summary.notesPlayed, 2)
-        XCTAssertEqual(summary.inTuneNotes, 2)
-        XCTAssertEqual(summary.inTunePercentage, 100)
+        XCTAssertEqual(summary.inTuneNotes, 1)
+        XCTAssertEqual(summary.inTunePercentage, 50)
         XCTAssertEqual(summary.averageAbsoluteCents ?? .nan, 8, accuracy: 0.001)
-        XCTAssertEqual(summary.stars, 3)
+        XCTAssertEqual(summary.stars, 0)
     }
 
     func testPlayAlongMatchesWrittenPitchClassAcrossEnharmonicSpellingAndOctave() {
@@ -1604,10 +1923,44 @@ final class BrassTuneAppTests: XCTestCase {
     private func makeAuthConfig() -> AppConfig {
         AppConfig(
             environment: .production,
-            apiBaseURL: URL(string: "https://api.example.test")!,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
             supabaseURL: URL(string: "https://project.supabase.co")!,
             supabasePublishableKey: "sb_publishable_test"
         )
+    }
+
+    private func sharedFixtureURL(named name: String) throws -> URL {
+        let fileManager = FileManager.default
+        if let override = ProcessInfo.processInfo.environment["BRASSTUNE_SHARED_FIXTURES_DIR"] {
+            let url = URL(fileURLWithPath: override, isDirectory: true).appendingPathComponent(name)
+            if fileManager.fileExists(atPath: url.path) { return url }
+        }
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = repositoryRoot.appendingPathComponent("fixtures", isDirectory: true).appendingPathComponent(name)
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw XCTSkip("Shared audio fixture \(name) is not present in this isolated worktree.")
+        }
+        return url
+    }
+
+    private func writtenMIDI(from label: String) throws -> Int {
+        let pattern = #"^([A-G])([#b]?)(-?\d+)$"#
+        let expression = try NSRegularExpression(pattern: pattern)
+        let range = NSRange(label.startIndex..<label.endIndex, in: label)
+        let match = try XCTUnwrap(expression.firstMatch(in: label, range: range))
+        let note = String(label[Range(match.range(at: 1), in: label)!])
+            + String(label[Range(match.range(at: 2), in: label)!])
+        let octave = try XCTUnwrap(Int(label[Range(match.range(at: 3), in: label)!]))
+        let pitchClass = try XCTUnwrap([
+            "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
+            "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
+            "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11,
+        ][note])
+        return (octave + 1) * 12 + pitchClass
     }
 
     private func makeSession(

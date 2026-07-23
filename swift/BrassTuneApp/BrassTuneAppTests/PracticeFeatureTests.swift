@@ -13,6 +13,9 @@ final class PracticeFeatureTests: XCTestCase {
         XCTAssertThrowsError(try SavedPlayAlongExercise(title: "Too short", writtenNotes: []))
         XCTAssertThrowsError(try SavedPlayAlongExercise(title: "Too long", writtenNotes: Array(repeating: "C", count: 33)))
         XCTAssertThrowsError(try SavedPlayAlongExercise(title: "Bad note", writtenNotes: ["H"]))
+
+        let longTitle = String(repeating: "A", count: 80)
+        XCTAssertEqual(try SavedPlayAlongExercise(title: longTitle, writtenNotes: ["C"]).title.count, 60)
     }
 
     func testFeatureStateDecodesWhenEveryNewFieldIsAbsent() throws {
@@ -56,6 +59,27 @@ final class PracticeFeatureTests: XCTestCase {
 
         model.advanceWarmup(now: start.addingTimeInterval(600))
         XCTAssertEqual(model.sessions.count, 1)
+    }
+
+    func testGuidedWarmupMatchesFiveStepFiveMinuteContract() {
+        XCTAssertEqual(GuidedWarmupPlan.fiveMinute.steps.map(\.id), ["breathe", "buzz", "long-tone", "slur", "scale"])
+        XCTAssertEqual(GuidedWarmupPlan.fiveMinute.steps.map(\.durationSeconds), [45, 45, 75, 75, 60])
+        XCTAssertEqual(GuidedWarmupPlan.fiveMinute.durationSeconds, 300)
+    }
+
+    @MainActor
+    func testReflectionCanBeCreatedUpdatedAndDeleted() {
+        let model = makeModel()
+        let session = makeSession(startedAt: Date(timeIntervalSince1970: 100), duration: 60)
+        model.sessions = [session]
+
+        model.saveReflection(sessionID: session.id, mood: .focused, note: "Centered", now: Date(timeIntervalSince1970: 200))
+        XCTAssertEqual(model.reflection(for: session.id)?.note, "Centered")
+        model.saveReflection(sessionID: session.id, mood: .challenging, note: "Needs air", now: Date(timeIntervalSince1970: 300))
+        XCTAssertEqual(model.practiceFeatures.reflections.count, 1)
+        XCTAssertEqual(model.reflection(for: session.id)?.mood, .challenging)
+        model.deleteReflection(sessionID: session.id)
+        XCTAssertNil(model.reflection(for: session.id))
     }
 
     @MainActor
@@ -138,6 +162,15 @@ final class PracticeFeatureTests: XCTestCase {
         XCTAssertEqual(trumpetA, 440, accuracy: 0.01)
         let hornFifth = try XCTUnwrap(PracticePitchMath.frequency(writtenMIDI: 60, interval: .perfectFifth, instrumentID: "horn", referencePitchHz: 440))
         XCTAssertEqual(hornFifth, 261.625, accuracy: 0.01)
+
+        XCTAssertEqual(TuningInterval.allCases, [.unison, .majorThird, .perfectFourth, .perfectFifth, .octave])
+        let unison = try XCTUnwrap(PracticePitchMath.frequencies(writtenMIDI: 71, interval: .unison, instrumentID: "trumpet", referencePitchHz: 440))
+        XCTAssertEqual(unison.count, 1)
+        XCTAssertEqual(unison[0], 440, accuracy: 0.01)
+        let fifth = try XCTUnwrap(PracticePitchMath.frequencies(writtenMIDI: 71, interval: .perfectFifth, instrumentID: "trumpet", referencePitchHz: 440))
+        XCTAssertEqual(fifth.count, 2)
+        XCTAssertEqual(fifth[0], 440, accuracy: 0.01)
+        XCTAssertEqual(fifth[1], 659.255, accuracy: 0.01)
     }
 
     func testBuiltInPackAndBlockIDsAreStableAndUnique() {

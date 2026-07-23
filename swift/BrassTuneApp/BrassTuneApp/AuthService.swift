@@ -34,7 +34,15 @@ final class AuthService: NSObject {
     func restoreSession() -> AuthSession? {
         guard let payload = readSessionPayload(),
               let data = payload.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(AuthSession.self, from: data)
+        do {
+            return try JSONDecoder().decode(AuthSession.self, from: data)
+        } catch {
+            // Legacy/corrupt payloads may not contain the stable user ID that
+            // now defines the local storage namespace. Fail closed and remove
+            // the unusable token instead of leaving it recoverable in Keychain.
+            deleteSessionPayload()
+            return nil
+        }
     }
 
     func signIn(email: String, password: String, config: AppConfig) async throws -> AuthSession {
@@ -128,6 +136,40 @@ final class AuthService: NSObject {
         deleteSessionPayload()
     }
 
+    /// Revokes the current Supabase access token before removing the local
+    /// Keychain payload. Local removal is guaranteed even when the device is
+    /// offline, so a failed network request never leaves a reusable token here.
+    func signOut(config: AppConfig) async throws {
+        let existing = restoreSession()
+        defer { deleteSessionPayload() }
+        guard let existing else { return }
+        guard config.hasUsableAccountConfiguration,
+              let supabaseURL = config.supabaseURL,
+              let publishableKey = config.supabasePublishableKey else {
+            throw UserVisibleError.missingAuthConfiguration
+        }
+        let url = supabaseURL.appending(path: "auth/v1/logout")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue(publishableKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(existing.accessToken)", forHTTPHeaderField: "Authorization")
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw UserVisibleError.authenticationFailed
+            }
+        } catch let visible as UserVisibleError {
+            throw visible
+        } catch let error as URLError where error.code == .timedOut {
+            throw UserVisibleError.timeout
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw UserVisibleError.networkUnavailable
+        }
+    }
+
     func deleteStoredAuth() {
         signOut()
     }
@@ -163,8 +205,11 @@ final class AuthService: NSObject {
     }
 
     private func store(response: SupabaseAuthResponse, fallbackEmail: String) throws -> AuthSession {
-        guard let accessToken = response.accessToken, !accessToken.isEmpty else { throw UserVisibleError.authenticationFailed }
+        guard let accessToken = response.accessToken, !accessToken.isEmpty,
+              let userID = response.user?.id?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !userID.isEmpty else { throw UserVisibleError.authenticationFailed }
         let session = AuthSession(
+            userID: userID,
             accessToken: accessToken,
             refreshToken: response.refreshToken,
             email: response.user?.email ?? fallbackEmail,
@@ -184,7 +229,7 @@ final class AuthService: NSObject {
         body: [String: String],
         expiredSessionFailure: Bool = false
     ) async throws -> SupabaseAuthResponse {
-        guard config.hasUsableSupabaseAuthConfiguration,
+        guard config.hasUsableAccountConfiguration,
               let supabaseURL = config.supabaseURL,
               let publishableKey = config.supabasePublishableKey else {
             throw UserVisibleError.missingAuthConfiguration
@@ -268,6 +313,8 @@ final class AuthService: NSObject {
 }
 
 enum KeychainStore {
+    static let sessionAccessibility = kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String
+
     static func save(_ value: String, service: String, account: String) throws {
         let data = Data(value.utf8)
         delete(service: service, account: account)
@@ -275,10 +322,11 @@ enum KeychainStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: sessionAccessibility
         ]
         let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else { throw UserVisibleError.networkUnavailable }
+        guard status == errSecSuccess else { throw UserVisibleError.secureStorageUnavailable }
     }
 
     static func read(service: String, account: String) -> String? {
@@ -306,6 +354,7 @@ enum KeychainStore {
 }
 
 struct AuthSession: Codable, Equatable {
+    let userID: String
     let accessToken: String
     let refreshToken: String?
     let email: String
@@ -334,11 +383,13 @@ struct SupabaseAuthResponse: Decodable {
 }
 
 struct SupabaseAuthUser: Decodable {
+    let id: String?
     let email: String?
     let createdAt: String?
     let lastSignInAt: String?
 
     enum CodingKeys: String, CodingKey {
+        case id
         case email
         case createdAt = "created_at"
         case lastSignInAt = "last_sign_in_at"

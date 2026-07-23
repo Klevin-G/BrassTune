@@ -6,27 +6,30 @@ import UniformTypeIdentifiers
 import UIKit
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case playAlong
     case tuner
+    case playAlong
     case progress
+    case classes
     case settings
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedStringKey {
         switch self {
-        case .playAlong: return "Play-Along"
         case .tuner: return "Tuner"
+        case .playAlong: return "Play-Along"
         case .progress: return "Progress"
+        case .classes: return "Class"
         case .settings: return "Settings"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .playAlong: return "music.note.list"
         case .tuner: return "tuningfork"
+        case .playAlong: return "music.note.list"
         case .progress: return "chart.line.uptrend.xyaxis"
+        case .classes: return "person.3"
         case .settings: return "gearshape"
         }
     }
@@ -35,7 +38,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 struct AppRootView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selectedTab: AppTab = .playAlong
+    @State private var selectedTab: AppTab = .tuner
     @State private var onboardingPresented: Bool
     private let resetUITestState: Bool
     private let settingsOnlyLaunch: Bool
@@ -57,16 +60,10 @@ struct AppRootView: View {
                 NavigationStack {
                     SettingsView(onboardingPresented: $onboardingPresented)
                 }
+            } else if !model.gatewayCompleted {
+                AuthGatewayView()
             } else {
                 TabView(selection: $selectedTab) {
-                    NavigationStack {
-                        PlayAlongView()
-                    }
-                    .tabItem {
-                        Label(AppTab.playAlong.title, systemImage: AppTab.playAlong.systemImage)
-                    }
-                    .tag(AppTab.playAlong)
-
                     NavigationStack {
                         TunerView()
                     }
@@ -74,6 +71,14 @@ struct AppRootView: View {
                         Label(AppTab.tuner.title, systemImage: AppTab.tuner.systemImage)
                     }
                     .tag(AppTab.tuner)
+
+                    NavigationStack {
+                        PlayAlongView()
+                    }
+                    .tabItem {
+                        Label(AppTab.playAlong.title, systemImage: AppTab.playAlong.systemImage)
+                    }
+                    .tag(AppTab.playAlong)
 
                     NavigationStack {
                         ProgressTabView(selectedTab: $selectedTab)
@@ -84,6 +89,14 @@ struct AppRootView: View {
                     .tag(AppTab.progress)
 
                     NavigationStack {
+                        ClassesView()
+                    }
+                    .tabItem {
+                        Label(AppTab.classes.title, systemImage: AppTab.classes.systemImage)
+                    }
+                    .tag(AppTab.classes)
+
+                    NavigationStack {
                         SettingsView(onboardingPresented: $onboardingPresented)
                     }
                     .tabItem {
@@ -92,6 +105,19 @@ struct AppRootView: View {
                     .tag(AppTab.settings)
                 }
                 .tint(BTTheme.accent)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let message = model.persistenceErrorMessage {
+                        Label(message, systemImage: "externaldrive.badge.exclamationmark")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(BTTheme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, BTSpacing.lg)
+                            .padding(.vertical, BTSpacing.sm)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(BTTheme.surfaceWarm)
+                            .accessibilityIdentifier("app.persistenceError")
+                    }
+                }
                 .onChange(of: selectedTab) { oldTab, newTab in
                     if oldTab == .playAlong,
                        newTab != .playAlong,
@@ -116,6 +142,11 @@ struct AppRootView: View {
         .onChange(of: model.tutorialPresentationRequest) { _, _ in
             onboardingPresented = true
         }
+        .onChange(of: model.gatewayCompleted) { _, completed in
+            if completed && !model.tutorialCompleted {
+                onboardingPresented = true
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 model.handlePracticeBackground()
@@ -127,14 +158,156 @@ struct AppRootView: View {
             }
             guard !uiTestMode else { return }
             await model.restoreSession()
-            if !model.tutorialCompleted {
+            if model.gatewayCompleted && !model.tutorialCompleted {
                 onboardingPresented = true
             }
         }
     }
 }
 
-private struct NativeTutorialStep: Identifiable {
+private enum GatewayAuthMode: String, Identifiable {
+    case signIn
+    case createAccount
+
+    var id: String { rawValue }
+    var title: String { self == .signIn ? "Sign in" : "Create account" }
+}
+
+struct AuthGatewayView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var authMode: GatewayAuthMode?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: BTSpacing.xl) {
+                    Spacer(minLength: BTSpacing.xl)
+                    VStack(alignment: .leading, spacing: BTSpacing.md) {
+                        Image(systemName: "tuningfork")
+                            .font(.system(size: 48, weight: .semibold))
+                            .foregroundStyle(BTTheme.accent)
+                            .accessibilityHidden(true)
+                        Text("Welcome to BrassTune")
+                            .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Tune right away, practice guided exercises, and keep progress on this device. An account is optional unless you use Classes.")
+                            .font(.body)
+                            .foregroundStyle(BTTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityElement(children: .contain)
+
+                    VStack(spacing: BTSpacing.md) {
+                        Button {
+                            model.enterGuestDemo()
+                        } label: {
+                            Label("Continue as guest", systemImage: "person.crop.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTPrimaryButtonStyle())
+                        .accessibilityHint("Starts local practice without an online account")
+                        .accessibilityIdentifier("gateway.continueAsGuest")
+
+                        Button {
+                            authMode = .signIn
+                        } label: {
+                            Label("Sign in", systemImage: "person.crop.circle.badge.checkmark")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("gateway.signIn")
+
+                        Button {
+                            authMode = .createAccount
+                        } label: {
+                            Label("Create account", systemImage: "person.crop.circle.badge.plus")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("gateway.createAccount")
+                    }
+
+                    Text("Guest practice remains on this device. You can sign in later from Settings.")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(BTSpacing.xl)
+                .frame(maxWidth: 620, alignment: .leading)
+                .frame(maxWidth: .infinity)
+            }
+            .background(BTTheme.background.ignoresSafeArea())
+            .navigationBarHidden(true)
+        }
+        .accessibilityIdentifier("screen.gateway")
+        .sheet(item: $authMode) { mode in
+            GatewayAuthForm(mode: mode)
+        }
+    }
+}
+
+private struct GatewayAuthForm: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let mode: GatewayAuthMode
+    @State private var email = ""
+    @State private var password = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("gateway.email")
+                    SecureField("Password", text: $password)
+                        .textContentType(mode == .signIn ? .password : .newPassword)
+                        .accessibilityIdentifier("gateway.password")
+                } footer: {
+                    Text(model.accountUnavailableMessage ?? "Your sign-in is stored securely in Keychain on this device.")
+                }
+
+                if let notice = model.authNotice {
+                    Section {
+                        Label(notice, systemImage: model.authNoticeIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(model.authNoticeIsError ? BTTheme.danger : BTTheme.success)
+                            .accessibilityIdentifier("gateway.authNotice")
+                    }
+                }
+            }
+            .navigationTitle(mode.title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(model.authOperationInProgress ? "Working…" : mode.title) {
+                        Task {
+                            switch mode {
+                            case .signIn: await model.signIn(email: email, password: password)
+                            case .createAccount: await model.signUp(email: email, password: password)
+                            }
+                            if model.gatewayCompleted { dismiss() }
+                        }
+                    }
+                    .disabled(
+                        model.authOperationInProgress
+                            || !model.accountFeaturesEnabled
+                            || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || password.isEmpty
+                    )
+                    .accessibilityIdentifier("gateway.submitAuth")
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+}
+
+struct NativeTutorialStep: Identifiable {
     let id: String
     let title: String
     let subtitle: String
@@ -143,7 +316,7 @@ private struct NativeTutorialStep: Identifiable {
     var showsInstrumentPicker = false
 }
 
-private let nativeTutorialSteps = [
+let nativeTutorialSteps = [
     NativeTutorialStep(
         id: "instrument",
         title: "Choose your instrument",
@@ -154,83 +327,6 @@ private let nativeTutorialSteps = [
             "You can change it later in Settings.",
         ],
         showsInstrumentPicker: true
-    ),
-    NativeTutorialStep(
-        id: "playAlong",
-        title: "Play-Along",
-        subtitle: "Practice a scale or exercise one note at a time.",
-        systemImage: "music.note.list",
-        bullets: [
-            "Choose an exercise, tap Start listening, and play the highlighted note.",
-            "Hold the correct note steadily for two seconds. The ring pauses during a short sound dropout and resets for a different note.",
-            "Build custom exercises, favorite useful drills, revisit recent practice, or start the guided five-minute warm-up.",
-            "Offline packs open one focused block at a time, and completed results can generate weak-transition drills.",
-        ]
-    ),
-    NativeTutorialStep(
-        id: "tuner",
-        title: "Tuner and recordings",
-        subtitle: "Use the Tuner for live flat, centered, and sharp feedback.",
-        systemImage: "tuningfork",
-        bullets: [
-            "Tap Start listening and play a comfortable note into the microphone.",
-            "Use the meter and plain-language cue to move toward the center.",
-            "Tap Stop and save to keep the tuning result in your local practice history.",
-            "Open Drone and intervals to hear a written-note reference or practice the sound of an interval. Start quietly and use headphones when possible.",
-        ]
-    ),
-    NativeTutorialStep(
-        id: "progress",
-        title: "Progress and practice history",
-        subtitle: "See what is improving across the practice results saved on this device.",
-        systemImage: "chart.line.uptrend.xyaxis",
-        bullets: [
-            "Progress shows in-tune percentage, average distance, practice time, and a simple next step.",
-            "Open Practice history to review, share a text summary, or delete an individual result.",
-            "Set weekly minutes and session goals, then save a short reflection on any result.",
-        ]
-    ),
-    NativeTutorialStep(
-        id: "metronome",
-        title: "Metronome",
-        subtitle: "Open the metronome from Settings whenever you need a steady beat.",
-        systemImage: "metronome",
-        bullets: [
-            "Set the tempo, meter, subdivision, sound, volume, and optional haptic pulse.",
-            "Tap the beat to estimate a tempo, or use visual-only mode for silent practice.",
-            "Save the full setup as a named preset, then apply, rename, or delete it later.",
-        ]
-    ),
-    NativeTutorialStep(
-        id: "scores",
-        title: "Sheet music",
-        subtitle: "Keep local practice copies of music from Files or Photos.",
-        systemImage: "doc.text.image",
-        bullets: [
-            "Import a PDF or photo, choose a page, zoom in, rotate, crop, or improve contrast.",
-            "Add practice notes, set a target tempo, attach a score to your latest result, share it, or delete it locally.",
-        ]
-    ),
-    NativeTutorialStep(
-        id: "classes",
-        title: "Classes and accounts",
-        subtitle: "Accounts are optional for practice, but a signed-in account is required for Classes.",
-        systemImage: "person.3",
-        bullets: [
-            "Sign in with email or Apple when online accounts are configured, or keep practicing as a guest on this device.",
-            "In Classes, enter a teacher's code, switch between your classes, refresh the list, or leave when your role allows it.",
-        ]
-    ),
-    NativeTutorialStep(
-        id: "settings",
-        title: "Settings, privacy, and data",
-        subtitle: "Settings keeps your account, instrument, tools, local data, and help in one place.",
-        systemImage: "gearshape",
-        bullets: [
-            "Change your instrument, advanced A4 reference pitch, and metronome defaults.",
-            "Export local data, clear practice history, sign out, or delete your account and local files.",
-            "Open Privacy, Terms, or Support, and replay this tutorial at any time.",
-        ]
     ),
 ]
 
@@ -301,40 +397,26 @@ struct OnboardingView: View {
                     .accessibilityValue("Step \(stepIndex + 1) of \(nativeTutorialSteps.count)")
                     .accessibilityIdentifier("onboarding.progress")
 
-                HStack(spacing: BTSpacing.md) {
-                    if stepIndex > 0 {
-                        Button {
-                            stepIndex -= 1
-                        } label: {
-                            Label("Back", systemImage: "chevron.left")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(BTSecondaryButtonStyle())
-                        .accessibilityIdentifier("onboarding.back")
-                    }
-
-                    Button {
-                        if isLastStep {
-                            model.completeTutorial()
-                            selectedTab = .playAlong
-                            isPresented = false
-                        } else {
-                            stepIndex += 1
-                        }
-                    } label: {
-                        Label(isLastStep ? "Finish tutorial" : "Next", systemImage: isLastStep ? "checkmark" : "chevron.right")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
-                    .accessibilityIdentifier(isLastStep ? "onboarding.startPractice" : "onboarding.next")
-                }
             }
             .navigationTitle("Welcome")
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    model.completeTutorial()
+                    selectedTab = .tuner
+                    isPresented = false
+                } label: {
+                    Label("Continue to Tuner", systemImage: "tuningfork")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                .padding(.horizontal, BTSpacing.lg)
+                .padding(.vertical, BTSpacing.sm)
+                .background(.bar)
+                .accessibilityIdentifier("onboarding.startPractice")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Not now") {
-                        // Dismissing is intentionally not completion. A first-time
-                        // user will see the tutorial again on the next launch.
+                    Button("Skip for now") {
                         isPresented = false
                     }
                     .accessibilityIdentifier("onboarding.notNow")
@@ -696,12 +778,16 @@ struct TunerView: View {
         return audioEngine.currentFrame
     }
 
+    private var language: AppLanguage {
+        AppLanguage.launchOverride ?? model.appLanguage
+    }
+
     var body: some View {
         BTScreen {
             BTPageHeader(
-                eyebrow: "Tuner",
-                title: "Find the center",
-                subtitle: "Play a note and BrassTune will show whether it is flat, in tune, or sharp."
+                eyebrow: language.localized("Tuner"),
+                title: language.localized("Find the center"),
+                subtitle: language.localized("Play a note and BrassTune will show whether it is flat, in tune, or sharp.")
             )
 
             TunerReadout(frame: activeFrame)
@@ -753,19 +839,24 @@ struct TunerView: View {
 
 private struct TunerReadout: View {
     let frame: PitchFrame?
+    @EnvironmentObject private var model: AppModel
+
+    private var language: AppLanguage {
+        AppLanguage.launchOverride ?? model.appLanguage
+    }
 
     private var noteLabel: String {
-        guard let note = frame?.writtenNoteName else { return "Play a note" }
+        guard let note = frame?.writtenNoteName else { return language.localized("Play a note") }
         return "\(note)\(frame?.writtenOctave.map(String.init) ?? "")"
     }
 
     private var verdict: String {
-        guard let frame else { return "Listening…" }
+        guard let frame else { return language.localized("Listening…") }
         switch frame.tuningStatus {
-        case .inTune: return "In tune — hold it steady"
-        case .sharp: return "A little sharp — ease down"
-        case .flat: return "A little flat — lift up"
-        case .silence, .noLock, .unstable: return "Listening…"
+        case .inTune: return language.localized("In tune — hold it steady")
+        case .sharp: return language.localized("A little sharp — ease down")
+        case .flat: return language.localized("A little flat — lift up")
+        case .silence, .noLock, .unstable: return language.localized("Listening…")
         }
     }
 
@@ -808,9 +899,9 @@ private struct TuningMeter: View {
     }
 
     private var accessibilityVerdict: String {
-        guard let cents else { return "Waiting for a note" }
-        if abs(cents) <= 5 { return "In tune" }
-        return cents > 0 ? "Sharp" : "Flat"
+        guard let cents else { return String(localized: "Waiting for a note") }
+        if abs(cents) <= 5 { return String(localized: "In tune") }
+        return cents > 0 ? String(localized: "Sharp") : String(localized: "Flat")
     }
 
     var body: some View {
@@ -850,6 +941,8 @@ private struct TuningMeter: View {
         .accessibilityLabel("Tuning meter")
         .accessibilityValue(accessibilityVerdict)
         .accessibilityIdentifier("tuner.meter")
+        // Musical flat-to-sharp position is semantic data, not reading order.
+        .environment(\.layoutDirection, .leftToRight)
     }
 }
 

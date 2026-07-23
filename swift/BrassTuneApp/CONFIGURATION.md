@@ -1,6 +1,9 @@
 # Native public runtime configuration
 
-BrassTune's native account client needs exactly two public Supabase values:
+BrassTune's native account client needs an immutable production API origin and two public Supabase values:
+
+- `BRASSTUNE_ENV=production`.
+- `BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com`; archives reject every other origin.
 
 - `BRASSTUNE_SUPABASE_URL`: the project's public HTTPS URL.
 - `BRASSTUNE_SUPABASE_PUBLISHABLE_KEY`: an `sb_publishable_...` client key.
@@ -21,6 +24,8 @@ xcodebuild \
   -project BrassTuneApp.xcodeproj \
   -scheme BrassTuneApp \
   -configuration Release \
+  BRASSTUNE_ENV=production \
+  BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
   BRASSTUNE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
   BRASSTUNE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_REPLACE_ME \
   build

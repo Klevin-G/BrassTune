@@ -14,6 +14,7 @@ final class NativeAudioEngine: ObservableObject {
     @Published private(set) var routeChanged = false
     @Published private(set) var tonePlaying = false
     @Published private(set) var toneFrequencyHz: Double?
+    @Published private(set) var toneFrequenciesHz: [Double] = []
 
     private let engine = AVAudioEngine()
     private let tonePlayer = AVAudioPlayerNode()
@@ -164,9 +165,15 @@ final class NativeAudioEngine: ObservableObject {
     }
 
     func startTone(frequencyHz: Double, volume: Double) throws {
-        guard frequencyHz.isFinite, (20...5_000).contains(frequencyHz) else {
+        try startTone(frequenciesHz: [frequencyHz], volume: volume)
+    }
+
+    func startTone(frequenciesHz: [Double], volume: Double) throws {
+        guard (1...4).contains(frequenciesHz.count),
+              frequenciesHz.allSatisfy({ $0.isFinite && (20...5_000).contains($0) }) else {
             throw NativeAudioEngineError.invalidToneFrequency
         }
+        let frequencyHz = frequenciesHz[0]
         stopAndResetAudioEngine()
         activeSource = .live
         audioNotice = nil
@@ -176,6 +183,7 @@ final class NativeAudioEngine: ObservableObject {
         if Self.testFixturesEnabled {
             tonePlaying = true
             toneFrequencyHz = frequencyHz
+            toneFrequenciesHz = frequenciesHz
             return
         }
 
@@ -194,11 +202,15 @@ final class NativeAudioEngine: ObservableObject {
         }
         buffer.frameLength = 44_100
         let fadeFrames = 441
+        let perToneVolume = safeVolume / Float(frequenciesHz.count)
         for frame in 0..<Int(buffer.frameLength) {
-            let phase = 2 * Double.pi * frequencyHz * Double(frame) / format.sampleRate
+            let sample = frequenciesHz.reduce(0.0) { partial, frequency in
+                let phase = 2 * Double.pi * frequency * Double(frame) / format.sampleRate
+                return partial + sin(phase)
+            }
             let fadeIn = min(1, Double(frame) / Double(fadeFrames))
             let fadeOut = min(1, Double(Int(buffer.frameLength) - frame) / Double(fadeFrames))
-            samples[frame] = Float(sin(phase)) * safeVolume * Float(min(fadeIn, fadeOut))
+            samples[frame] = Float(sample) * perToneVolume * Float(min(fadeIn, fadeOut))
         }
         engine.connect(tonePlayer, to: engine.mainMixerNode, format: format)
         tonePlayer.scheduleBuffer(buffer, at: nil, options: .loops)
@@ -207,6 +219,7 @@ final class NativeAudioEngine: ObservableObject {
         tonePlayer.play()
         tonePlaying = true
         toneFrequencyHz = frequencyHz
+        toneFrequenciesHz = frequenciesHz
     }
 
     func stopTone() {
@@ -215,6 +228,7 @@ final class NativeAudioEngine: ObservableObject {
         engine.stop()
         tonePlaying = false
         toneFrequencyHz = nil
+        toneFrequenciesHz = []
         if !recording {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
@@ -231,6 +245,7 @@ final class NativeAudioEngine: ObservableObject {
         recording = false
         tonePlaying = false
         toneFrequencyHz = nil
+        toneFrequenciesHz = []
         fixtureStartedAt = nil
         liveStartedAt = nil
         liveCaptureID = nil

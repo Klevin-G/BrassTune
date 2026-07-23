@@ -6,73 +6,37 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
-    func testFirstRunTutorialCoversEveryNativeFeatureAndCompletionPersists() throws {
+    func testFirstRunGatewayAndInstrumentSetupLeadToTunerAndPersist() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["UITEST_RESET_STATE"]
+        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW"]
         app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["gateway.continueAsGuest"].exists)
+        XCTAssertTrue(app.buttons["gateway.signIn"].exists)
+        XCTAssertTrue(app.buttons["gateway.createAccount"].exists)
+        app.buttons["gateway.continueAsGuest"].tap()
 
         XCTAssertTrue(
             app.descendants(matching: .any)["onboarding.hero"].waitForExistence(timeout: 8),
-            "Onboarding should open for a normal first launch"
+            "The one-screen instrument setup should follow guest entry"
         )
         XCTAssertTrue(app.descendants(matching: .any)["onboarding.hero"].label.contains("Choose your instrument"))
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.hero"].label.contains("Step 1 of 1"))
         XCTAssertTrue(app.descendants(matching: .any)["onboarding.instrumentPicker"].exists)
-        XCTAssertTrue(app.buttons["onboarding.next"].exists)
+        XCTAssertTrue(app.buttons["onboarding.startPractice"].exists)
         XCTAssertTrue(app.buttons["onboarding.notNow"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["settings.referencePitchStepper"].exists)
-
-        app.buttons["onboarding.notNow"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["screen.playAlong"].waitForExistence(timeout: 5))
-
-        app.terminate()
-        app.launchArguments = []
-        app.launch()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["onboarding.hero"].waitForExistence(timeout: 8),
-            "Not now must not mark the tutorial complete"
-        )
-
-        let tutorialSteps = [
-            (title: "Choose your instrument", copy: "Pick the horn you play now"),
-            (title: "Play-Along", copy: "Hold the correct note steadily for two seconds"),
-            (title: "Tuner and recordings", copy: "Tap Stop and save"),
-            (title: "Progress and practice history", copy: "Open Practice history to review"),
-            (title: "Metronome", copy: "Set the tempo, meter, subdivision"),
-            (title: "Sheet music", copy: "Import a PDF or photo"),
-            (title: "Classes and accounts", copy: "enter a teacher's code"),
-            (title: "Settings, privacy, and data", copy: "replay this tutorial at any time"),
-        ]
-        for (index, step) in tutorialSteps.enumerated() {
-            let hero = app.descendants(matching: .any)["onboarding.hero"]
-            XCTAssertTrue(hero.waitForExistence(timeout: 5), "Missing tutorial step: \(step.title)")
-            XCTAssertTrue(hero.label.contains("Step \(index + 1) of 8"), "VoiceOver focus label must include tutorial progress.")
-            XCTAssertTrue(hero.label.contains(step.title), "VoiceOver focus label must name the current tutorial step.")
-            assertTutorialCopy(step.copy, in: app)
-            XCTAssertTrue(app.descendants(matching: .any)["onboarding.progress"].exists)
-            if index == 0 {
-                XCTAssertTrue(app.descendants(matching: .any)["onboarding.instrumentPicker"].exists)
-            } else {
-                XCTAssertTrue(app.buttons["onboarding.back"].exists)
-            }
-            if index < tutorialSteps.count - 1 {
-                XCTAssertTrue(app.buttons["onboarding.next"].exists)
-                tapWhenHittable(app.buttons["onboarding.next"], in: app)
-            } else {
-                XCTAssertTrue(app.buttons["onboarding.startPractice"].exists)
-            }
-        }
-
         tapWhenHittable(app.buttons["onboarding.startPractice"], in: app)
 
         XCTAssertTrue(
-            app.descendants(matching: .any)["screen.playAlong"].waitForExistence(timeout: 5),
-            "Finishing should lead to the flagship Play-Along tab"
+            app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 5),
+            "Finishing setup should lead directly to Tuner"
         )
 
         app.terminate()
         app.launchArguments = []
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["screen.playAlong"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.descendants(matching: .any)["onboarding.hero"].exists, "Completion must persist across relaunch")
     }
 
@@ -82,12 +46,13 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
         app.launch()
 
-        assertFourTabInformationArchitecture(in: app)
+        assertFiveTabInformationArchitecture(in: app)
 
         XCTAssertTrue(
-            app.descendants(matching: .any)["screen.playAlong"].waitForExistence(timeout: 8),
-            "Play-Along should be the first tab"
+            app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8),
+            "Tuner should be the first tab"
         )
+        openTab("Play-Along", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["playAlong.exercisePicker"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["playAlong.exerciseNotes"].exists)
 
@@ -159,15 +124,13 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertNotEqual(soundToggle.value as? String, "0", "Metronome sound should be enabled by default")
         XCTAssertTrue(app.descendants(matching: .any)["settings.metronomeLink"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings.scoresLink"].waitForExistence(timeout: 5))
-        let classesLink = app.descendants(matching: .any)["settings.classesLink"]
-        XCTAssertTrue(classesLink.waitForExistence(timeout: 5))
-        classesLink.tap()
+        openTab("Class", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.classes"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["classes.activePicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Demo brass studio"].exists)
         XCTAssertTrue(app.staticTexts["Second demo class"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["classes.leave.1"].exists)
-        app.navigationBars.buttons["Settings"].tap()
+        openTab("Settings", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings.privacyLink"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings.termsLink"].waitForExistence(timeout: 5))
@@ -219,11 +182,12 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
-    func testLocalPracticeToolboxIsReachableFromFourTabs() throws {
+    func testLocalPracticeToolboxIsReachableFromFiveTabs() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
         app.launch()
 
+        openTab("Play-Along", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["practice.quickStart.warmup"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["Guided five-minute warm-up"].exists)
         XCTAssertTrue(app.buttons["Create a Play-Along exercise"].exists)
@@ -273,14 +237,15 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
-    private func assertFourTabInformationArchitecture(in app: XCUIApplication) {
+    private func assertFiveTabInformationArchitecture(in app: XCUIApplication) {
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(tabBar.waitForExistence(timeout: 8))
         XCTAssertTrue(tabBar.buttons["Play-Along"].exists)
         XCTAssertTrue(tabBar.buttons["Tuner"].exists)
         XCTAssertTrue(tabBar.buttons["Progress"].exists)
+        XCTAssertTrue(tabBar.buttons["Class"].exists)
         XCTAssertTrue(tabBar.buttons["Settings"].exists)
-        XCTAssertEqual(tabBar.buttons.count, 4)
+        XCTAssertEqual(tabBar.buttons.count, 5)
 
         for removedTab in ["Home", "Practice", "Analytics", "Coach", "More"] {
             XCTAssertFalse(tabBar.buttons[removedTab].exists, "\(removedTab) should not remain in the focused tab bar")

@@ -31,7 +31,7 @@ struct SavedPlayAlongExercise: Codable, Equatable, Identifiable {
         guard !cleanTitle.isEmpty else { throw CustomExerciseValidationError.missingTitle }
         guard (1...32).contains(writtenNotes.count) else { throw CustomExerciseValidationError.invalidNoteCount }
         self.id = id
-        self.title = String(cleanTitle.prefix(48))
+        self.title = String(cleanTitle.prefix(60))
         self.writtenNotes = try writtenNotes.map(Self.normalize(note:))
         self.createdAt = createdAt
     }
@@ -118,12 +118,11 @@ struct GuidedWarmupPlan: Codable, Equatable, Identifiable {
         id: "guided-five-minute",
         title: "Guided five-minute warm-up",
         steps: [
-            GuidedWarmupStep(id: "breathe", title: "Easy breaths", instruction: "Relax your shoulders. Breathe in for four counts and out for four.", durationSeconds: 30, exerciseID: nil),
-            GuidedWarmupStep(id: "buzz", title: "Gentle buzz", instruction: "Buzz softly in the middle of your range. Keep the air even.", durationSeconds: 45, exerciseID: nil),
-            GuidedWarmupStep(id: "long-tone", title: "Long tones", instruction: "Hold each note with a centered sound. Rest whenever you need to.", durationSeconds: 75, exerciseID: "longtones"),
-            GuidedWarmupStep(id: "intervals", title: "Easy intervals", instruction: "Move between C and G without forcing the change.", durationSeconds: 60, exerciseID: "intervals"),
-            GuidedWarmupStep(id: "scale", title: "Comfortable scale", instruction: "Play the C major scale slowly and listen between notes.", durationSeconds: 60, exerciseID: "cmaj"),
-            GuidedWarmupStep(id: "reset", title: "Reset and listen", instruction: "Finish with a relaxed breath and one comfortable note.", durationSeconds: 30, exerciseID: nil),
+            GuidedWarmupStep(id: "breathe", title: "Easy breaths", instruction: "Breathe in quietly for 4 counts and release for 8. Keep shoulders loose.", durationSeconds: 45, exerciseID: nil),
+            GuidedWarmupStep(id: "buzz", title: "Gentle buzz", instruction: "Buzz a comfortable pitch softly. Rest whenever the sound feels forced.", durationSeconds: 45, exerciseID: nil),
+            GuidedWarmupStep(id: "long-tone", title: "Centered long tones", instruction: "Play an easy note with a smooth start and steady air.", durationSeconds: 75, exerciseID: "longtones"),
+            GuidedWarmupStep(id: "slur", title: "Relaxed slurs", instruction: "Move between two comfortable notes without pressing the mouthpiece.", durationSeconds: 75, exerciseID: "intervals"),
+            GuidedWarmupStep(id: "scale", title: "Easy scale", instruction: "Finish with one slow scale at an even volume.", durationSeconds: 60, exerciseID: "cmaj"),
         ]
     )
 }
@@ -307,11 +306,15 @@ enum WeakTransitionAnalyzer {
 
 enum TuningInterval: Int, Codable, CaseIterable, Identifiable {
     case unison = 0
+    // Retained for backward decoding only. The parity picker intentionally
+    // exposes the same five intervals as the web app.
     case majorSecond = 2
     case majorThird = 4
     case perfectFourth = 5
     case perfectFifth = 7
     case octave = 12
+
+    static let allCases: [TuningInterval] = [.unison, .majorThird, .perfectFourth, .perfectFifth, .octave]
 
     var id: Int { rawValue }
     var title: String {
@@ -361,6 +364,28 @@ enum PracticePitchMath {
         let targetWrittenMIDI = writtenMIDI + interval.rawValue
         guard let concertMIDI = concertMIDI(forWrittenMIDI: targetWrittenMIDI, instrumentID: instrumentID) else { return nil }
         return BrassTuneCore.midiToFrequency(Double(concertMIDI), referencePitchHz: referencePitchHz)
+    }
+
+    static func frequencies(
+        writtenMIDI: Int,
+        interval: TuningInterval,
+        instrumentID: String,
+        referencePitchHz: Double
+    ) -> [Double]? {
+        guard let base = frequency(
+            writtenMIDI: writtenMIDI,
+            interval: .unison,
+            instrumentID: instrumentID,
+            referencePitchHz: referencePitchHz
+        ) else { return nil }
+        guard interval != .unison else { return [base] }
+        guard let upper = frequency(
+            writtenMIDI: writtenMIDI,
+            interval: interval,
+            instrumentID: instrumentID,
+            referencePitchHz: referencePitchHz
+        ) else { return nil }
+        return [base, upper]
     }
 
     static func noteLabel(writtenMIDI: Int) -> String {
@@ -657,6 +682,10 @@ extension AppModel {
         }
     }
 
+    func deleteReflection(sessionID: PracticeSession.ID) {
+        practiceFeatures.reflections.removeAll { $0.sessionID == sessionID }
+    }
+
     func startOrResumeWarmup(now: Date = Date()) {
         stopFeatureAudio()
         var checkpoint = practiceFeatures.warmupCheckpoint
@@ -732,7 +761,7 @@ extension AppModel {
     func startDrone() {
         stopFeatureAudio(exceptTone: true)
         let settings = practiceFeatures.droneSettings
-        guard let frequency = PracticePitchMath.frequency(
+        guard let frequencies = PracticePitchMath.frequencies(
             writtenMIDI: settings.writtenMIDINote,
             interval: settings.interval,
             instrumentID: selectedInstrumentId,
@@ -742,7 +771,7 @@ extension AppModel {
             return
         }
         do {
-            try audioEngine.startTone(frequencyHz: frequency, volume: settings.volume)
+            try audioEngine.startTone(frequenciesHz: frequencies, volume: settings.volume)
             recordPracticeStart(PracticeShortcut(kind: .drone, referenceID: "drone", title: "Drone and interval tuning"))
         } catch {
             audioEngine.setExternalAudioNotice("BrassTune couldn't start the reference tone. Check your audio output and try again.")

@@ -18,11 +18,21 @@ fail() {
 
 supabase_url=${BRASSTUNE_SUPABASE_URL:-}
 publishable_key=${BRASSTUNE_SUPABASE_PUBLISHABLE_KEY:-}
+api_base_url=${BRASSTUNE_API_BASE_URL:-}
+app_environment=${BRASSTUNE_ENV:-}
+
+[ "$app_environment" = "production" ] || fail "BRASSTUNE_ENV must be production for an archive."
+[ "$api_base_url" = "https://brasstune-u8qj.onrender.com" ] || fail "BRASSTUNE_API_BASE_URL must be the approved immutable production origin."
 
 case "$supabase_url" in
     ""|*'$('*) fail "set BRASSTUNE_SUPABASE_URL to the public HTTPS project URL." ;;
     https://?*) ;;
     *) fail "BRASSTUNE_SUPABASE_URL must be an HTTPS URL." ;;
+esac
+
+case "$supabase_url" in
+    https://*.supabase.co) ;;
+    *) fail "BRASSTUNE_SUPABASE_URL must use an approved supabase.co project host." ;;
 esac
 
 case "$supabase_url" in

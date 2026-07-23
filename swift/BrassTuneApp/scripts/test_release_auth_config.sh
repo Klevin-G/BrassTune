@@ -13,6 +13,8 @@ if CONFIGURATION=Release ACTION=install /bin/sh "$preflight" >/dev/null 2>&1; th
 fi
 
 if CONFIGURATION=Release ACTION=install \
+    BRASSTUNE_ENV=production \
+    BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
     BRASSTUNE_SUPABASE_URL=https://example.supabase.co \
     BRASSTUNE_SUPABASE_PUBLISHABLE_KEY=sb_secret_test_only \
     /bin/sh "$preflight" >/dev/null 2>&1; then
@@ -20,7 +22,29 @@ if CONFIGURATION=Release ACTION=install \
     exit 1
 fi
 
+if CONFIGURATION=Release ACTION=install \
+    BRASSTUNE_ENV=production \
+    BRASSTUNE_API_BASE_URL=https://evil.example \
+    BRASSTUNE_SUPABASE_URL=https://example.supabase.co \
+    BRASSTUNE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_test_only \
+    /bin/sh "$preflight" >/dev/null 2>&1; then
+    echo "Expected an unexpected API origin to fail." >&2
+    exit 1
+fi
+
+if CONFIGURATION=Release ACTION=install \
+    BRASSTUNE_ENV=production \
+    BRASSTUNE_API_BASE_URL=http://127.0.0.1:8000 \
+    BRASSTUNE_SUPABASE_URL=https://example.supabase.co \
+    BRASSTUNE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_test_only \
+    /bin/sh "$preflight" >/dev/null 2>&1; then
+    echo "Expected a loopback API origin to fail." >&2
+    exit 1
+fi
+
 CONFIGURATION=Release ACTION=install \
+    BRASSTUNE_ENV=production \
+    BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
     BRASSTUNE_SUPABASE_URL=https://example.supabase.co \
     BRASSTUNE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_test_only \
     /bin/sh "$preflight"

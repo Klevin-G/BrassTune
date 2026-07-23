@@ -6,6 +6,10 @@
 	<string>$(BRASSTUNE_SUPABASE_PUBLISHABLE_KEY)</string>
 	<key>BRASSTUNE_SUPABASE_URL</key>
 	<string>$(BRASSTUNE_SUPABASE_URL)</string>
+	<key>BRASSTUNE_API_BASE_URL</key>
+	<string>$(BRASSTUNE_API_BASE_URL)</string>
+	<key>BRASSTUNE_ENV</key>
+	<string>$(BRASSTUNE_ENV)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -26,6 +30,23 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIRequiresFullScreen</key>
+	<true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>BrassTune uses the microphone to analyze brass pitch while you are actively tuning or recording.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
