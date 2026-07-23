@@ -373,10 +373,7 @@ test('locale selection updates language, direction, manifest, Intl output, and p
   await expect(page.locator('.tuning-meter-track')).toHaveCSS('direction', 'ltr');
 
   await page.goto('/settings');
-  await page.locator('.locale-selector select').selectOption('en-XA');
-  await expect(page.locator('html')).toHaveAttribute('lang', 'en-XA');
-  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
-  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifests/en-XA.webmanifest');
+  await expect(page.locator('.locale-selector option[value="en-XA"]')).toHaveCount(0);
   await page.goto('/practice/play-along');
   await page.locator('.practice-builder summary').click();
   await page.locator('.practice-builder input').fill('A-G Warmup');
