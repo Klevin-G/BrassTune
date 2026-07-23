@@ -2,7 +2,7 @@
 
 Use this only after the current integration pull request is merged into `main`. Do not tag or promote production from this checklist without owner approval.
 
-Precondition: the final integration head must have reviewed Backend, Frontend, Security, Swift, and exact-SHA preview results, or any external CI/service blocker must be recorded explicitly before merge. The release intentionally spans two pull requests because `supabase db push` applies every pending migration. PR1 contains the database expand and compatible backend but no contract migration. PR2 adds the contract and promotes the final exact-SHA backend and frontend. Do not combine both migrations in one push.
+Precondition: the final integration head must have reviewed, green Backend, Frontend, Security, Swift, and exact-SHA preview results. Any external CI or service blocker prevents merge until it is resolved and those exact-head gates execute successfully; recording a blocker is not a substitute for a passing gate. The release intentionally spans two pull requests because `supabase db push` applies every pending migration. PR1 contains the database expand and compatible backend but no contract migration. PR2 adds the contract and promotes the final exact-SHA backend and frontend. Do not combine both migrations in one push.
 
 ## Ordered Production Rollout
 
