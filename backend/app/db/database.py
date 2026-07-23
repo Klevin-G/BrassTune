@@ -99,11 +99,67 @@ def _sqlite_columns(table_name: str):
     return {row[1] for row in rows}
 
 
+def _sqlite_column_rows(table_name: str):
+    with engine.connect() as connection:
+        return connection.execute(text("PRAGMA table_info(%s)" % table_name)).fetchall()
+
+
 def _add_sqlite_column(table_name: str, column_name: str, definition: str) -> None:
     if column_name in _sqlite_columns(table_name):
         return
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE %s ADD COLUMN %s %s" % (table_name, column_name, definition)))
+
+
+def _ensure_sqlite_account_deletion_user_id_nullable() -> None:
+    """Converge older local databases without discarding retry state.
+
+    SQLite cannot drop a NOT NULL constraint in place. This table has no
+    foreign keys, so an atomic table rebuild is the narrow compatibility path.
+    """
+    columns = {row[1]: row for row in _sqlite_column_rows("account_deletion_jobs")}
+    if not columns or int(columns.get("user_id", (None, None, None, 0))[3] or 0) == 0:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("alter table account_deletion_jobs rename to account_deletion_jobs_pre_privacy"))
+        for index_name in (
+            "ix_account_deletion_jobs_id",
+            "ix_account_deletion_jobs_user_id",
+            "ix_account_deletion_jobs_supabase_user_id",
+            "ix_account_deletion_jobs_idempotency_key",
+        ):
+            connection.execute(text("drop index if exists %s" % index_name))
+        connection.execute(
+            text(
+                "create table account_deletion_jobs ("
+                "id integer not null primary key, "
+                "user_id integer, "
+                "supabase_user_id varchar, "
+                "idempotency_key varchar not null, "
+                "stage varchar not null, "
+                "status varchar not null, "
+                "retry_count integer not null, "
+                "next_retry_at datetime, "
+                "safe_error_category varchar, "
+                "counts_json json not null, "
+                "completed_at datetime, "
+                "created_at datetime not null, "
+                "updated_at datetime not null)"
+            )
+        )
+        connection.execute(
+            text(
+                "insert into account_deletion_jobs "
+                "select id, user_id, supabase_user_id, idempotency_key, stage, status, retry_count, "
+                "next_retry_at, safe_error_category, counts_json, completed_at, created_at, updated_at "
+                "from account_deletion_jobs_pre_privacy"
+            )
+        )
+        connection.execute(text("drop table account_deletion_jobs_pre_privacy"))
+        connection.execute(text("create index ix_account_deletion_jobs_id on account_deletion_jobs (id)"))
+        connection.execute(text("create index ix_account_deletion_jobs_user_id on account_deletion_jobs (user_id)"))
+        connection.execute(text("create index ix_account_deletion_jobs_supabase_user_id on account_deletion_jobs (supabase_user_id)"))
+        connection.execute(text("create unique index ix_account_deletion_jobs_idempotency_key on account_deletion_jobs (idempotency_key)"))
 
 
 def ensure_additive_columns() -> None:
@@ -146,3 +202,4 @@ def ensure_additive_columns() -> None:
         for column_name, definition in columns.items():
             if column_name not in existing:
                 _add_sqlite_column(table_name, column_name, definition)
+    _ensure_sqlite_account_deletion_user_id_nullable()

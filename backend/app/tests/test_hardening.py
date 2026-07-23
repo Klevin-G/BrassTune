@@ -22,7 +22,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
+import app.db.database as database_module
 import app.services.audio_storage as audio_storage_module
+import app.services.account_deletion as account_deletion_module
 from app.api.auth import AuthContext, _sync_supabase_user, delete_supabase_identity
 from app.api.routes import (
     _filtered_events,
@@ -49,7 +51,8 @@ from app.db.database import Base, DATABASE_URL, SessionLocal, database_backend, 
 from app.db.maintenance import clear_practice_data, repair_demo_data
 from app.db.seed import _sync_explicit_identity_sequences, seed_demo_data
 from app.main import app
-from app.models.db import AccountDeletionJob, AudioStorageJob, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, UsageEvent, User
+from app.models.db import AccountDeletionJob, AudioStorageJob, DeletedIdentityTombstone, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, UsageEvent, User
+from app.services.account_deletion import ensure_deletion_tombstone_key_state
 from app.schemas.schemas import (
     MAX_BATCH_PITCH_FRAMES,
     AcceptInvitationRequest,
@@ -69,7 +72,10 @@ WEBM_AUDIO_BYTES = b"\x1a\x45\xdf\xa3webm-audio-bytes"
 def _test_db():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine)()
+    db = sessionmaker(bind=engine)()
+    ensure_deletion_tombstone_key_state(db, allow_initialization=True)
+    db.commit()
+    return db
 
 
 def test_sqlite_engine_uses_busy_timeout_for_browser_ci_contention():
@@ -80,6 +86,36 @@ def test_sqlite_engine_uses_busy_timeout_for_browser_ci_contention():
         journal_mode = str(connection.exec_driver_sql("PRAGMA journal_mode").scalar()).lower()
     assert busy_timeout_ms >= 30000
     assert journal_mode in {"wal", "memory"}
+
+
+def test_legacy_sqlite_account_deletion_jobs_are_rebuilt_nullable_without_data_loss(monkeypatch, tmp_path):
+    legacy_engine = create_engine("sqlite:///%s" % (tmp_path / "legacy.db"))
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                "create table account_deletion_jobs ("
+                "id integer not null primary key, user_id integer not null, supabase_user_id varchar, "
+                "idempotency_key varchar not null unique, stage varchar not null, status varchar not null, "
+                "retry_count integer not null, next_retry_at datetime, safe_error_category varchar, "
+                "counts_json json not null, completed_at datetime, created_at datetime not null, updated_at datetime not null)"
+            )
+        )
+        connection.execute(
+            text(
+                "insert into account_deletion_jobs values "
+                "(1, 42, 'subject-42', 'delete-user-42', 'external_cleanup_failed', 'retryable_failure', "
+                "1, null, 'external_identity_cleanup_failed', '{}', null, current_timestamp, current_timestamp)"
+            )
+        )
+    monkeypatch.setattr(database_module, "engine", legacy_engine)
+
+    database_module._ensure_sqlite_account_deletion_user_id_nullable()
+
+    with legacy_engine.connect() as connection:
+        columns = {row[1]: row for row in connection.execute(text("pragma table_info(account_deletion_jobs)"))}
+        row = connection.execute(text("select user_id, supabase_user_id, status from account_deletion_jobs")).one()
+    assert columns["user_id"][3] == 0
+    assert row == (42, "subject-42", "retryable_failure")
 
 
 def test_default_pytest_database_is_process_isolated():
@@ -147,6 +183,33 @@ def test_backend_requirements_use_sqlalchemy_two_floor():
     constraints = (Path(__file__).resolve().parents[2] / "constraints.txt").read_text()
     assert "sqlalchemy>=2.0,<3" in requirements.lower()
     assert "sqlalchemy>=2.0" in constraints.lower()
+
+
+def test_backend_deploy_and_ci_use_hash_pinned_lockfiles():
+    root = Path(__file__).resolve().parents[3]
+    prod_lock = (root / "backend" / "requirements-prod.lock").read_text()
+    dev_lock = (root / "backend" / "requirements-dev.lock").read_text()
+    assert "--hash=sha256:" in prod_lock
+    assert "--hash=sha256:" in dev_lock
+    assert "fastapi==" in prod_lock
+    assert "pytest==" in dev_lock
+    assert "pip-audit==" in dev_lock
+    assert "pip install --require-hashes -r requirements-prod.lock" in (root / "render.yaml").read_text()
+    for workflow in ("backend.yml", "frontend.yml", "device-simulation.yml", "security.yml"):
+        contents = (root / ".github" / "workflows" / workflow).read_text()
+        assert "pip install --require-hashes -r requirements" in contents
+
+
+def test_render_cors_regex_is_not_enabled_by_default_and_tombstone_key_is_durable():
+    root = Path(__file__).resolve().parents[3]
+    render = (root / "render.yaml").read_text()
+    deploy = (root / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "BRASSTUNE_ALLOW_CORS_REGEX" not in render
+    assert "CORS_ALLOWED_ORIGIN_REGEX" in render
+    assert "BRASSTUNE_DELETION_TOMBSTONE_SECRET" in render
+    assert "generateValue: true" in render
+    assert "/env-vars/BRASSTUNE_DELETION_TOMBSTONE_SECRET" in deploy
+    assert "secrets.BRASSTUNE_DELETION_TOMBSTONE_SECRET" in deploy
 
 
 def _session(db, user_id: int, instrument_id: str, started_at: dt.datetime):
@@ -469,6 +532,24 @@ def test_postgres_readiness_requires_terminal_job_identifier_nullability():
         "audio_storage_jobs",
         [{"name": "user_id", "nullable": True}, {"name": "session_id", "nullable": True}],
     ) == []
+
+    assert _postgres_column_nullability_issues(
+        "account_deletion_jobs",
+        [{"name": "user_id", "nullable": False}],
+    ) == ["Column account_deletion_jobs.user_id must be nullable."]
+
+
+def test_deployed_readiness_requires_dedicated_stable_deletion_tombstone_key(monkeypatch):
+    from app.db.readiness import maintenance_readiness_issues
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", "configured")
+    monkeypatch.delenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", raising=False)
+    assert "BRASSTUNE_DELETION_TOMBSTONE_SECRET" in " ".join(maintenance_readiness_issues())
+    monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "too-short")
+    assert "at least 32 bytes" in " ".join(maintenance_readiness_issues())
+    monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "production-deletion-tombstone-key-32-bytes")
+    assert maintenance_readiness_issues() == []
 
 
 def test_deployed_release_readiness_requires_one_matching_full_revision(monkeypatch):
@@ -1550,6 +1631,8 @@ def test_account_export_contains_profile_and_lifecycle_data():
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         names = set(archive.namelist())
         assert {"account.json", "sessions.json", "memberships.json", "owned_groups.json", "invitations.json", "recommendations.json", "usage_events.json"}.issubset(names)
+        assert "account_deletion_jobs.json" not in names
+        assert "deleted_identity_tombstones.json" not in names
         account = json.loads(archive.read("account.json"))
         sessions = json.loads(archive.read("sessions.json"))
         usage_events = json.loads(archive.read("usage_events.json"))
@@ -2217,11 +2300,25 @@ def test_account_deletion_records_completed_job_and_external_cleanup_last(monkey
         assert payload["deletion_status"] == "completed"
         assert db.query(User).filter(User.id == user.id).first() is None
         assert external_calls == [("signout", "access-token", True), ("delete", "supabase-151", True)]
-        job = db.query(AccountDeletionJob).filter(AccountDeletionJob.user_id == user.id).one()
+        job = db.query(AccountDeletionJob).one()
         assert job.status == "completed"
         assert job.stage == "completed"
-        assert isinstance(job.counts_json, dict)
-        assert job.counts_json["practice_sessions"] == 1
+        assert job.user_id is None
+        assert job.supabase_user_id is None
+        assert job.idempotency_key == "terminal:%s" % job.id
+        assert job.counts_json == {}
+        tombstone = db.query(DeletedIdentityTombstone).one()
+        assert len(tombstone.subject_digest) == 64
+        assert "supabase-151" not in tombstone.subject_digest
+        assert payload["counts"]["practice_sessions"] == 1
+        assert "supabase-151" not in json.dumps(payload)
+
+        with pytest.raises(HTTPException) as exc:
+            _sync_supabase_user(
+                db,
+                {"id": "supabase-151", "email": "recreate@example.com", "user_metadata": {}, "app_metadata": {}},
+            )
+        assert exc.value.status_code == 410
     finally:
         db.close()
 
@@ -2344,6 +2441,10 @@ def test_account_deletion_retry_executor_completes_external_cleanup(monkeypatch)
         assert job.status == "completed"
         assert job.stage == "completed"
         assert job.next_retry_at is None
+        assert job.user_id is None
+        assert job.supabase_user_id is None
+        assert job.counts_json == {}
+        assert db.query(DeletedIdentityTombstone).count() == 1
     finally:
         db.close()
 
@@ -2472,6 +2573,127 @@ def test_account_deletion_retry_executor_recovers_local_cleanup_failure(monkeypa
         db.refresh(job)
         assert job.status == "completed"
         assert job.stage == "completed"
+    finally:
+        db.close()
+
+
+def test_deleted_identity_key_rotation_fails_closed(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(id=259, username="delete259", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-259")
+        db.add(user)
+        db.commit()
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda _token: True)
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda _user_id: True)
+        delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=False, access_token="access-token"),
+        )
+        monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "different-production-tombstone-key-32-bytes")
+        with pytest.raises(HTTPException) as exc:
+            _sync_supabase_user(
+                db,
+                {"id": "supabase-259", "email": "recreate@example.com", "user_metadata": {}, "app_metadata": {}},
+            )
+        assert exc.value.status_code == 503
+        assert db.query(User).filter(User.supabase_user_id == "supabase-259").first() is None
+    finally:
+        db.close()
+
+
+def test_deletion_key_mismatch_is_rejected_before_local_or_external_cleanup(monkeypatch):
+    db = _test_db()
+    external_calls = []
+    try:
+        user = User(id=262, username="delete262", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-262")
+        db.add(user)
+        db.commit()
+        monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "different-production-tombstone-key-32-bytes")
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda token: external_calls.append(("signout", token)))
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda subject: external_calls.append(("delete", subject)))
+
+        with pytest.raises(HTTPException) as exc:
+            delete_my_account(
+                AccountDeletionRequest(confirmation="delete my account"),
+                db,
+                AuthContext(user=user, is_guest=False, access_token="access-token"),
+            )
+
+        assert exc.value.status_code == 503
+        assert external_calls == []
+        assert db.query(User).filter(User.id == user.id).one()
+        assert db.query(AccountDeletionJob).count() == 0
+    finally:
+        db.close()
+
+
+def test_terminal_account_deletion_jobs_are_purged_but_hmac_tombstones_remain(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(id=260, username="delete260", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-260")
+        db.add(user)
+        db.commit()
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda _token: True)
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda _user_id: True)
+        delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=False, access_token="access-token"),
+        )
+        job = db.query(AccountDeletionJob).one()
+        job.completed_at = dt.datetime.utcnow() - dt.timedelta(days=8)
+        db.commit()
+
+        monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_JOB_RETENTION_DAYS", "7")
+        result = account_deletion_module.purge_terminal_account_deletion_jobs(db)
+        assert result == {"retention_days": 7, "purged": 1, "failed": False}
+        assert db.query(AccountDeletionJob).count() == 0
+        assert db.query(DeletedIdentityTombstone).count() == 1
+        with pytest.raises(HTTPException) as exc:
+            _sync_supabase_user(
+                db,
+                {"id": "supabase-260", "email": "recreate@example.com", "user_metadata": {}, "app_metadata": {}},
+            )
+        assert exc.value.status_code == 410
+
+        monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_JOB_RETENTION_DAYS", "999")
+        assert account_deletion_module._terminal_job_retention_days() == 30
+        monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_JOB_RETENTION_DAYS", "0")
+        assert account_deletion_module._terminal_job_retention_days() == 7
+    finally:
+        db.close()
+
+
+def test_legacy_completed_deletion_job_is_hmac_backfilled_and_scrubbed_by_maintenance():
+    db = _test_db()
+    try:
+        job = AccountDeletionJob(
+            user_id=261,
+            supabase_user_id="legacy-supabase-261",
+            idempotency_key="delete-user-261",
+            stage="completed",
+            status="completed",
+            retry_count=2,
+            safe_error_category="legacy-detail",
+            counts_json={"practice_sessions": 4, "usage_events": 9},
+            completed_at=dt.datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+
+        result = account_deletion_module.maintain_terminal_account_deletion_jobs(db)
+
+        assert result["scrubbed"] == 1
+        assert result["failed"] == 0
+        db.refresh(job)
+        assert job.user_id is None
+        assert job.supabase_user_id is None
+        assert job.idempotency_key == "terminal:%s" % job.id
+        assert job.counts_json == {}
+        assert job.safe_error_category is None
+        tombstone = db.query(DeletedIdentityTombstone).one()
+        assert "legacy-supabase-261" not in tombstone.subject_digest
     finally:
         db.close()
 
@@ -3228,6 +3450,27 @@ def test_audio_storage_jobs_migration_is_private_idempotent_and_indexed():
     assert "where status in ('reserved', 'pending', 'in_progress', 'retryable_failure')" in migration
     assert "default 7-day ttl" in migration
     assert "rollback notes" in migration
+
+
+def test_account_deletion_privacy_migration_is_additive_private_and_forward_compatible():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260723021828_account_deletion_privacy_tombstones.sql"
+    ).read_text().lower()
+    assert "create table if not exists public.deleted_identity_tombstones" in migration
+    assert "create table if not exists public.deleted_identity_tombstone_config" in migration
+    assert "subject_digest text not null unique" in migration
+    assert "account_deletion_jobs alter column user_id drop not null" in migration
+    assert "account_deletion_jobs_terminal_privacy_check" in migration
+    assert ") not valid" in migration
+    assert "enable row level security" in migration
+    assert "('anon', 'authenticated', 'service_role')" in migration
+    assert "revoke all privileges on table public.deleted_identity_tombstones" in migration
+    assert "idx_account_deletion_jobs_retry_queue" in migration
+    assert "idx_account_deletion_jobs_terminal_purge" in migration
+    assert "default 7-day ttl bounded to 30 days" in migration
 
 
 def test_env_granted_admin_is_revoked_when_email_removed(monkeypatch):

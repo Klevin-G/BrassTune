@@ -152,6 +152,7 @@ jobs:
       BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.sha }}
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+      BRASSTUNE_DELETION_TOMBSTONE_SECRET: ${{ secrets.BRASSTUNE_DELETION_TOMBSTONE_SECRET }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Disable Render auto-deploy
@@ -163,6 +164,32 @@ jobs:
             --header "Content-Type: application/json" \
             --data '{"autoDeploy":"no"}' \
             --output /dev/null
+      - name: Synchronize deletion tombstone key to Render
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import sys
+
+          value = os.environ.get("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "")
+          if len(value.encode("utf-8")) < 32:
+              print("::error::BRASSTUNE_DELETION_TOMBSTONE_SECRET must be a stable secret of at least 32 bytes.")
+              sys.exit(1)
+          PY
+          python - <<'PY' | curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
+            --request PUT \
+            --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/env-vars/BRASSTUNE_DELETION_TOMBSTONE_SECRET" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data-binary @- \
+            --output /dev/null
+          import json
+          import os
+
+          print(json.dumps({"value": os.environ["BRASSTUNE_DELETION_TOMBSTONE_SECRET"]}))
+          PY
+          echo "Synchronized the dedicated deletion tombstone key without exposing its value."
       - name: Trigger exact Render deploy
         run: |
           curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \

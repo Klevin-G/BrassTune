@@ -24,6 +24,12 @@ from app.db.maintenance import clear_practice_data, export_all_data, repair_demo
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
 from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
+from app.services.account_deletion import (
+    DeletionTombstoneSecretError,
+    complete_and_scrub_account_deletion_job,
+    ensure_deletion_tombstone_key_state,
+    maintain_terminal_account_deletion_jobs,
+)
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 from app.services.usage import record_event
@@ -903,8 +909,10 @@ def _mark_deletion_job(job: AccountDeletionJob, stage: str, status: str, error_c
         job.next_retry_at = dt.datetime.utcnow() + dt.timedelta(minutes=min(60, 2 ** min(job.retry_count, 6)))
 
 
-def _deletion_job_payload(job: AccountDeletionJob):
-    if isinstance(job.counts_json, dict):
+def _deletion_job_payload(job: AccountDeletionJob, counts_override: Optional[dict] = None):
+    if counts_override is not None:
+        counts = counts_override
+    elif isinstance(job.counts_json, dict):
         counts = job.counts_json
     elif isinstance(job.counts_json, str):
         try:
@@ -977,7 +985,7 @@ def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
                     continue
 
         if not job.supabase_user_id:
-            _mark_deletion_job(job, "completed", "completed")
+            complete_and_scrub_account_deletion_job(db, job)
             db.add(job)
             db.commit()
             results.append({"job_id": job.id, "status": job.status, "stage": job.stage})
@@ -991,17 +999,22 @@ def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
         except Exception:
             external_deleted = False
         if external_deleted:
-            _mark_deletion_job(job, "completed", "completed")
+            try:
+                complete_and_scrub_account_deletion_job(db, job)
+            except DeletionTombstoneSecretError:
+                _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "identity_protection_unavailable")
         else:
             _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "external_identity_cleanup_failed")
         db.add(job)
         db.commit()
         results.append({"job_id": job.id, "status": job.status, "stage": job.stage})
+    privacy_maintenance = maintain_terminal_account_deletion_jobs(db, limit=max(50, limit))
     return {
         "processed": len(results),
         "completed": sum(1 for row in results if row["status"] == "completed"),
         "still_retryable": sum(1 for row in results if row["status"] == "retryable_failure"),
         "results": results,
+        "privacy_maintenance": privacy_maintenance,
     }
 
 
@@ -1043,6 +1056,13 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
     user = auth.user
     user_id = user.id
     supabase_user_id = user.supabase_user_id
+    if not auth.is_guest and supabase_user_id:
+        try:
+            # Validate the stable HMAC key before deleting any local data. A
+            # missing key must never weaken the deleted-identity deny list.
+            ensure_deletion_tombstone_key_state(db)
+        except DeletionTombstoneSecretError as exc:
+            raise HTTPException(status_code=503, detail="Account deletion protection is temporarily unavailable.") from exc
     job_key = "delete-user-%s" % user_id
     job = db.query(AccountDeletionJob).filter(AccountDeletionJob.idempotency_key == job_key).first()
     if job and job.status == "completed" and db.query(User).filter(User.id == user_id).first() is None:
@@ -1113,10 +1133,16 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
             db.add(job)
             db.commit()
             return _deletion_job_payload(job)
-    _mark_deletion_job(job, "completed", "completed")
-    db.add(job)
+    response_counts = dict(deleted_counts)
+    try:
+        complete_and_scrub_account_deletion_job(db, job)
+    except DeletionTombstoneSecretError:
+        _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "identity_protection_unavailable")
+        db.add(job)
+        db.commit()
+        return _deletion_job_payload(job)
     db.commit()
-    return _deletion_job_payload(job)
+    return _deletion_job_payload(job, counts_override=response_counts)
 
 
 def _group_member_ids(db: Session, group_id: int):

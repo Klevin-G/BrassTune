@@ -1,3 +1,4 @@
+import hmac
 import os
 import re
 from typing import Iterable
@@ -9,6 +10,11 @@ from app.api.auth import assert_auth_configured
 from app.core.security import DEPLOYED_ENVIRONMENTS, app_environment
 from app.db.database import DATABASE_URL, assert_database_configured, build_engine, configured_database_url, database_backend, engine
 from app.services.audio_storage import _supabase_bucket, _supabase_url, storage_backend
+from app.services.account_deletion import (
+    DeletionTombstoneSecretError,
+    deletion_tombstone_key_verifier,
+    deletion_tombstone_secret_issue,
+)
 
 
 REQUIRED_TABLE_COLUMNS = {
@@ -38,6 +44,8 @@ REQUIRED_TABLE_COLUMNS = {
         "counts_json",
         "completed_at",
     },
+    "deleted_identity_tombstones": {"id", "subject_digest", "created_at"},
+    "deleted_identity_tombstone_config": {"id", "key_verifier", "created_at"},
     "audio_storage_jobs": {
         "id",
         "user_id",
@@ -59,6 +67,10 @@ REQUIRED_TABLE_COLUMNS = {
 
 REQUIRED_INDEX_COLUMN_SETS = {
     "invitations": {("invited_user_id",), ("invited_by_user_id",)},
+    "account_deletion_jobs": {
+        ("status", "next_retry_at", "updated_at", "id"),
+        ("completed_at", "id"),
+    },
     "audio_storage_jobs": {
         ("user_id", "action", "status"),
         ("status", "next_retry_at", "updated_at", "id"),
@@ -68,6 +80,7 @@ REQUIRED_INDEX_COLUMN_SETS = {
 
 REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS = {
     "group_members": {("group_id", "user_id")},
+    "deleted_identity_tombstones": {("subject_digest",)},
 }
 
 REQUIRED_POSTGRES_COLUMN_TYPES = {
@@ -81,6 +94,7 @@ REQUIRED_POSTGRES_COLUMN_TYPES = {
 
 REQUIRED_POSTGRES_COLUMN_NULLABILITY = {
     # Terminal rows are immediately stripped of account/session identifiers.
+    "account_deletion_jobs": {"user_id": True},
     "audio_storage_jobs": {"user_id": True, "session_id": True},
 }
 
@@ -195,6 +209,77 @@ def _postgres_audio_job_security_issues(connection) -> list[str]:
     return issues
 
 
+def _postgres_account_deletion_security_issues(connection) -> list[str]:
+    issues = []
+    for table_name in (
+        "account_deletion_jobs",
+        "deleted_identity_tombstones",
+        "deleted_identity_tombstone_config",
+    ):
+        rls_enabled = connection.execute(
+            text(
+                "select c.relrowsecurity "
+                "from pg_class c join pg_namespace n on n.oid = c.relnamespace "
+                "where n.nspname = 'public' and c.relname = :table_name"
+            ),
+            {"table_name": table_name},
+        ).scalar()
+        if rls_enabled is not True:
+            issues.append("Row level security must be enabled on %s." % table_name)
+
+        policy_count = int(
+            connection.execute(
+                text(
+                    "select count(*) from pg_policies "
+                    "where schemaname = 'public' and tablename = :table_name"
+                ),
+                {"table_name": table_name},
+            ).scalar()
+            or 0
+        )
+        if policy_count:
+            issues.append("Backend-only %s must not have Data API RLS policies." % table_name)
+
+        rows = connection.execute(
+            text(
+                "select rolname, "
+                "has_table_privilege(rolname, 'public.' || :table_name, 'select') as can_select, "
+                "has_table_privilege(rolname, 'public.' || :table_name, 'insert') as can_insert, "
+                "has_table_privilege(rolname, 'public.' || :table_name, 'update') as can_update, "
+                "has_table_privilege(rolname, 'public.' || :table_name, 'delete') as can_delete "
+                "from pg_roles where rolname in ('anon', 'authenticated', 'service_role')"
+            ),
+            {"table_name": table_name},
+        ).mappings()
+        for row in rows:
+            if any(row[name] for name in ("can_select", "can_insert", "can_update", "can_delete")):
+                issues.append("Data API role %s must not access %s." % (row["rolname"], table_name))
+
+    privacy_constraint_count = int(
+        connection.execute(
+            text(
+                "select count(*) from pg_constraint "
+                "where conrelid = to_regclass('public.account_deletion_jobs') "
+                "and conname = 'account_deletion_jobs_terminal_privacy_check' "
+                "and convalidated"
+            )
+        ).scalar()
+        or 0
+    )
+    if privacy_constraint_count != 1:
+        issues.append("Validated terminal privacy constraint is required on account_deletion_jobs.")
+    try:
+        expected_verifier = deletion_tombstone_key_verifier()
+        stored_verifier = connection.execute(
+            text("select key_verifier from public.deleted_identity_tombstone_config where id = 1")
+        ).scalar()
+        if not stored_verifier or not hmac.compare_digest(stored_verifier, expected_verifier):
+            issues.append("Deleted identity tombstone key does not match durable key state.")
+    except DeletionTombstoneSecretError:
+        issues.append("Deleted identity tombstone key state cannot be verified.")
+    return issues
+
+
 def _postgres_unique_key_issues(table_name: str, unique_constraints: list[dict], indexes: list[dict]) -> list[str]:
     """Require an unconditional unique key over the exact ordered columns.
 
@@ -288,6 +373,12 @@ def database_readiness_issues() -> list[str]:
                         issues.append("Could not verify unique constraint or index on %s." % table_name)
             if database_backend(url) == "postgresql" and "audio_storage_jobs" in table_names:
                 issues.extend(_postgres_audio_job_security_issues(connection))
+            if database_backend(url) == "postgresql" and {
+                "account_deletion_jobs",
+                "deleted_identity_tombstones",
+                "deleted_identity_tombstone_config",
+            }.issubset(table_names):
+                issues.extend(_postgres_account_deletion_security_issues(connection))
     except (SQLAlchemyError, OSError, RuntimeError) as exc:
         # Driver messages can embed connection hosts, usernames, query text, or
         # provider details. Preserve the failure class without exposing it in
@@ -330,9 +421,13 @@ def storage_readiness_issues() -> list[str]:
 def maintenance_readiness_issues() -> list[str]:
     if app_environment() not in DEPLOYED_ENVIRONMENTS:
         return []
+    issues = []
     if not os.getenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET"):
-        return ["Missing BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET for maintenance retry executors."]
-    return []
+        issues.append("Missing BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET for maintenance retry executors.")
+    tombstone_issue = deletion_tombstone_secret_issue()
+    if tombstone_issue:
+        issues.append(tombstone_issue)
+    return issues
 
 
 def revision_candidates() -> list[tuple[str, str]]:

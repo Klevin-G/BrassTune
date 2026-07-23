@@ -68,6 +68,7 @@ Required Render env vars:
 - Leave `CORS_ALLOWED_ORIGIN_REGEX` empty in production unless the owner approves a tightly anchored temporary preview pattern.
 - `BRASSTUNE_DATABASE_URL` or `DATABASE_URL` pointing to PostgreSQL. Render is IPv4-only, so use the Supabase pooler endpoint unless a compatible direct connection is explicitly available.
 - `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET` for the scheduled account deletion retry executor.
+- `BRASSTUNE_DELETION_TOMBSTONE_SECRET`, a dedicated stable secret of at least 32 bytes used only to HMAC deleted Supabase subjects. Never reuse a JWT, Supabase, storage, or maintenance credential. Back up this value in the production secret store: losing or rotating it without a deliberate tombstone migration makes readiness fail closed.
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_PUBLISHABLE_KEY`
@@ -170,6 +171,7 @@ Use secret stores only. Do not commit values.
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_PUBLISHABLE_KEY`
 - `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET`
+- `BRASSTUNE_DELETION_TOMBSTONE_SECRET`
 - `VERCEL_TOKEN`
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
@@ -182,6 +184,12 @@ Use `workflow_dispatch` with `target=frontend`, `backend`, or `all`. The backend
 job disables Render auto-deploy, then calls Render's authenticated deploy API
 with the workflow commit SHA. This prevents a push-triggered build from racing
 the exact-SHA release. Do not replace it with an unpinned deploy hook.
+
+Before requesting that exact deploy, the backend job requires the GitHub
+Production secret `BRASSTUNE_DELETION_TOMBSTONE_SECRET` and upserts only that
+single variable through Render's per-key environment-variable API. The value is
+never printed. `render.yaml` also uses `generateValue: true` as a safe bootstrap
+for newly created Blueprint services; Render preserves an existing value.
 
 The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It runs after a successful `Deploy` workflow and can also be manually dispatched. For `workflow_run`, both smoke jobs explicitly check out the deploy run's `head_sha`; a manual dispatch checks out its own `github.sha`. It wraps:
 

@@ -41,6 +41,7 @@
 ## Known Risks
 
 - Account deletion now blocks re-login/re-creation while external cleanup is queued. The scheduled retry workflow exists, but production durability still requires `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET` in Render and the GitHub production environment plus live disposable-account verification.
+- Completed deletion jobs retain no raw local ID, Supabase subject, idempotency material, or detailed counts. A separate backend-only HMAC tombstone permanently enforces the deleted-identity recreation block, while scrubbed operational rows are purged after a bounded short TTL. Production requires the dedicated stable `BRASSTUNE_DELETION_TOMBSTONE_SECRET`; losing or changing it fails readiness/auth closed rather than silently weakening the deny list.
 - WebSocket origin checks mirror the exact HTTP CORS policy. Production regex use remains disabled unless `BRASSTUNE_ALLOW_CORS_REGEX=1`; exact owner-controlled origins are preferred.
 - Score image/PDF validation includes magic-byte/active-content checks and decoded-pixel caps, but still needs EXIF orientation/private metadata handling and stronger visual quality checks.
 - Metronome click bleed, long-run drift, and physical-device audio behavior are not verified.

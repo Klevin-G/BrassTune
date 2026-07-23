@@ -15,6 +15,7 @@ from app.core.security import DEPLOYED_ENVIRONMENTS, LOCAL_ENVIRONMENTS, app_env
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.db.database import get_db
 from app.models.db import AccountDeletionJob, Group, User
+from app.services.account_deletion import DeletionTombstoneSecretError, deleted_identity_is_blocked
 from app.services.session_service import get_or_create_default_user
 from app.services.usage import record_event
 
@@ -113,6 +114,13 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
         if deletion_job.status == "completed":
             raise HTTPException(status_code=410, detail="This account has been deleted.")
         raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
+    try:
+        if deleted_identity_is_blocked(db, supabase_id):
+            raise HTTPException(status_code=410, detail="This account has been deleted.")
+    except DeletionTombstoneSecretError as exc:
+        # Fail closed: without the keyed digest, a deleted remote identity could
+        # otherwise be recreated as a new local account.
+        raise HTTPException(status_code=503, detail="Account identity protection is temporarily unavailable.") from exc
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
     is_new = user is None
     if user is None:

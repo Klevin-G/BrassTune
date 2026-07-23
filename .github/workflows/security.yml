@@ -51,8 +51,8 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt -c constraints.txt
-          pip-audit -r requirements.txt -r requirements-dev.txt
+          python -m pip install --require-hashes -r requirements-dev.lock
+          pip-audit -r requirements-dev.lock
       - name: Bandit backend scan
         working-directory: backend
         run: |
