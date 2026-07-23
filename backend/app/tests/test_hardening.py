@@ -741,6 +741,163 @@ def test_deployed_readiness_requires_dedicated_stable_deletion_tombstone_key(mon
     assert maintenance_readiness_issues() == []
 
 
+class _ReadinessResult:
+    def __init__(self, rows=None, scalar_value=None):
+        self.rows = rows or []
+        self.scalar_value = scalar_value
+
+    def mappings(self):
+        return self
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def first(self):
+        return self.rows[0] if self.rows else None
+
+    def scalar(self):
+        return self.scalar_value
+
+
+def test_postgres_application_readiness_detects_rls_policy_and_grant_drift():
+    from app.db.readiness import BACKEND_APPLICATION_TABLES, _postgres_application_security_issues
+
+    class FakeConnection:
+        def execute(self, statement, _params=None):
+            sql = str(statement)
+            if "c.relrowsecurity as rls_enabled" in sql:
+                return _ReadinessResult(
+                    [
+                        {"table_name": table, "rls_enabled": table != "users"}
+                        for table in BACKEND_APPLICATION_TABLES
+                    ]
+                )
+            if "count(*) as policy_count" in sql:
+                return _ReadinessResult([{"tablename": "usage_events", "policy_count": 1}])
+            if "has_table_privilege" in sql:
+                rows = []
+                for role in ("anon", "authenticated"):
+                    for table in BACKEND_APPLICATION_TABLES:
+                        rows.append(
+                            {
+                                "rolname": role,
+                                "table_name": table,
+                                "can_select": role == "authenticated" and table == "users",
+                                "can_insert": False,
+                                "can_update": False,
+                                "can_delete": False,
+                                "can_truncate": False,
+                                "can_reference": False,
+                                "can_trigger": False,
+                            }
+                        )
+                return _ReadinessResult(rows)
+            if "has_sequence_privilege" in sql:
+                return _ReadinessResult(
+                    [
+                        {
+                            "rolname": "anon",
+                            "sequence_name": "users_id_seq",
+                            "can_use": True,
+                            "can_select": False,
+                            "can_update": False,
+                        }
+                    ]
+                )
+            raise AssertionError(sql)
+
+    issues = _postgres_application_security_issues(
+        FakeConnection(),
+        set(BACKEND_APPLICATION_TABLES),
+    )
+    assert "Row level security must be enabled on public.users." in issues
+    assert "Backend-only public.usage_events must not have Data API RLS policies." in issues
+    assert "Data API role authenticated must not access public.users." in issues
+    assert "Data API role anon must not access application sequence users_id_seq." in issues
+
+
+def test_storage_readiness_enforces_private_bucket_settings_and_policy_scope():
+    from app.db.readiness import _postgres_storage_security_issues
+
+    class FakeConnection:
+        def __init__(self, *, public=False, file_size_limit=50 * 1024 * 1024, policy_qual=None):
+            self.public = public
+            self.file_size_limit = file_size_limit
+            self.policy_qual = policy_qual
+
+        def execute(self, statement, _params=None):
+            sql = str(statement)
+            if "information_schema.columns" in sql:
+                return _ReadinessResult(
+                    [{"column_name": name} for name in ("id", "public", "file_size_limit", "allowed_mime_types")]
+                )
+            if "from storage.buckets where id" in sql:
+                return _ReadinessResult(
+                    [
+                        {
+                            "public": self.public,
+                            "file_size_limit": self.file_size_limit,
+                            "allowed_mime_types": ["audio/webm", "audio/mp4", "audio/mpeg", "audio/wav", "audio/ogg"],
+                        }
+                    ]
+                )
+            if "c.relrowsecurity as rls_enabled" in sql:
+                return _ReadinessResult(
+                    [
+                        {"table_name": "buckets", "rls_enabled": True},
+                        {"table_name": "objects", "rls_enabled": True},
+                    ]
+                )
+            if "from pg_policies" in sql:
+                if self.policy_qual is None:
+                    return _ReadinessResult([])
+                return _ReadinessResult(
+                    [
+                        {
+                            "tablename": "objects",
+                            "policyname": "browser policy",
+                            "roles": ["authenticated"],
+                            "qual": self.policy_qual,
+                            "with_check": None,
+                        }
+                    ]
+                )
+            raise AssertionError(sql)
+
+    assert _postgres_storage_security_issues(
+        FakeConnection(policy_qual="bucket_id = 'avatars'::text"),
+        "session-audio",
+    ) == []
+    issues = _postgres_storage_security_issues(
+        FakeConnection(public=True, file_size_limit=1, policy_qual="true"),
+        "session-audio",
+    )
+    assert "Configured audio bucket must be private." in issues
+    assert "Configured audio bucket must enforce the backend upload-size limit." in issues
+    assert "Browser-facing Storage policies may expose the configured audio bucket." in issues
+
+
+def test_storage_policy_checks_using_and_with_check_independently():
+    from app.db.readiness import _storage_policy_may_reach_bucket
+
+    assert _storage_policy_may_reach_bucket(
+        {
+            "roles": ["authenticated"],
+            "qual": "true",
+            "with_check": "bucket_id = 'avatars'::text",
+        },
+        "session-audio",
+    )
+    assert not _storage_policy_may_reach_bucket(
+        {
+            "roles": ["authenticated"],
+            "qual": "bucket_id = 'avatars'::text",
+            "with_check": "bucket_id = 'avatars'::text",
+        },
+        "session-audio",
+    )
+
+
 def test_deployed_release_readiness_requires_one_matching_full_revision(monkeypatch):
     from app.db.readiness import release_readiness_issues, version_payload
 
@@ -4071,6 +4228,24 @@ def test_account_deletion_privacy_expand_migration_is_private_and_old_writer_com
     assert "idx_account_deletion_jobs_terminal_purge" in expand_migration
     assert "default 7-day ttl bounded to 30 days" in expand_migration
     assert "b84dacc" in expand_migration
+
+
+def test_backend_data_and_audio_privacy_reassertion_is_separately_sequenced():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260723120000_reassert_backend_data_and_audio_privacy.sql"
+    ).read_text().lower()
+    assert "'instrument_profiles'" in migration
+    assert "'audio_storage_jobs'" in migration
+    assert "enable row level security" in migration
+    assert "revoke all privileges on table" in migration
+    assert "revoke all privileges on all sequences in schema public" in migration
+    assert "set public = false" in migration
+    assert "set file_size_limit = 52428800" in migration
+    assert "allowed_mime_types" in migration
+    assert "does not drop unknown policies" in migration
 
 
 def test_env_granted_admin_is_revoked_when_email_removed(monkeypatch):

@@ -9,11 +9,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api.auth import assert_auth_configured
 from app.core.security import DEPLOYED_ENVIRONMENTS, app_environment
 from app.db.database import DATABASE_URL, assert_database_configured, build_engine, configured_database_url, database_backend, engine
-from app.services.audio_storage import _supabase_bucket, _supabase_url, storage_backend
 from app.services.account_deletion import (
     DeletionTombstoneSecretError,
     deletion_tombstone_key_verifier,
     deletion_tombstone_secret_issue,
+)
+from app.services.audio_storage import (
+    ALLOWED_AUDIO_MIME_TYPES,
+    MAX_AUDIO_UPLOAD_BYTES,
+    _supabase_bucket,
+    _supabase_bucket_name,
+    _supabase_url,
+    storage_backend,
 )
 
 
@@ -98,6 +105,22 @@ REQUIRED_POSTGRES_COLUMN_NULLABILITY = {
     "audio_storage_jobs": {"user_id": True, "session_id": True},
 }
 
+BACKEND_APPLICATION_TABLES = {
+    "users",
+    "instrument_profiles",
+    "practice_sessions",
+    "pitch_samples",
+    "note_events",
+    "groups",
+    "group_members",
+    "invitations",
+    "recommendations",
+    "account_deletion_jobs",
+    "usage_events",
+    "audio_storage_jobs",
+}
+DATA_API_ROLES = {"anon", "authenticated"}
+
 _REVISION_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$", re.IGNORECASE)
 
 
@@ -141,30 +164,110 @@ def _postgres_column_nullability_issues(table_name: str, columns: list[dict]) ->
     return issues
 
 
+def _postgres_application_security_issues(connection, table_names: set[str]) -> list[str]:
+    issues = []
+    missing_tables = sorted(BACKEND_APPLICATION_TABLES - table_names)
+    for table_name in missing_tables:
+        issues.append("Missing backend application table: %s." % table_name)
+
+    present_tables = sorted(BACKEND_APPLICATION_TABLES & table_names)
+    if not present_tables:
+        return issues
+
+    rls_rows = connection.execute(
+        text(
+            "select c.relname as table_name, c.relrowsecurity as rls_enabled "
+            "from pg_class c join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = 'public' and c.relkind in ('r', 'p') "
+            "and c.relname = any(:table_names)"
+        ),
+        {"table_names": present_tables},
+    ).mappings()
+    rls_by_table = {row["table_name"]: row["rls_enabled"] for row in rls_rows}
+    for table_name in present_tables:
+        if rls_by_table.get(table_name) is not True:
+            issues.append("Row level security must be enabled on public.%s." % table_name)
+
+    policy_rows = connection.execute(
+        text(
+            "select tablename, count(*) as policy_count from pg_policies "
+            "where schemaname = 'public' and tablename = any(:table_names) "
+            "group by tablename"
+        ),
+        {"table_names": present_tables},
+    ).mappings()
+    for row in policy_rows:
+        if int(row["policy_count"] or 0) > 0:
+            issues.append(
+                "Backend-only public.%s must not have Data API RLS policies."
+                % row["tablename"]
+            )
+
+    grant_rows = connection.execute(
+        text(
+            "select r.rolname, c.relname as table_name, "
+            "has_table_privilege(r.oid, c.oid, 'select') as can_select, "
+            "has_table_privilege(r.oid, c.oid, 'insert') as can_insert, "
+            "has_table_privilege(r.oid, c.oid, 'update') as can_update, "
+            "has_table_privilege(r.oid, c.oid, 'delete') as can_delete, "
+            "has_table_privilege(r.oid, c.oid, 'truncate') as can_truncate, "
+            "has_table_privilege(r.oid, c.oid, 'references') as can_reference, "
+            "has_table_privilege(r.oid, c.oid, 'trigger') as can_trigger "
+            "from pg_roles r cross join pg_class c "
+            "join pg_namespace n on n.oid = c.relnamespace "
+            "where r.rolname = any(:role_names) and n.nspname = 'public' "
+            "and c.relname = any(:table_names)"
+        ),
+        {"role_names": sorted(DATA_API_ROLES), "table_names": present_tables},
+    ).mappings()
+    found_roles = set()
+    for row in grant_rows:
+        found_roles.add(row["rolname"])
+        if any(
+            row[name]
+            for name in (
+                "can_select",
+                "can_insert",
+                "can_update",
+                "can_delete",
+                "can_truncate",
+                "can_reference",
+                "can_trigger",
+            )
+        ):
+            issues.append(
+                "Data API role %s must not access public.%s."
+                % (row["rolname"], row["table_name"])
+            )
+    for role_name in sorted(DATA_API_ROLES - found_roles):
+        issues.append("Could not verify application grants for Data API role %s." % role_name)
+
+    sequence_rows = connection.execute(
+        text(
+            "select distinct r.rolname, s.relname as sequence_name, "
+            "has_sequence_privilege(r.oid, s.oid, 'usage') as can_use, "
+            "has_sequence_privilege(r.oid, s.oid, 'select') as can_select, "
+            "has_sequence_privilege(r.oid, s.oid, 'update') as can_update "
+            "from pg_roles r cross join pg_class s "
+            "join pg_namespace n on n.oid = s.relnamespace "
+            "join pg_depend d on d.objid = s.oid and d.deptype in ('a', 'i') "
+            "join pg_class t on t.oid = d.refobjid "
+            "where r.rolname = any(:role_names) and n.nspname = 'public' "
+            "and s.relkind = 'S' and t.relname = any(:table_names)"
+        ),
+        {"role_names": sorted(DATA_API_ROLES), "table_names": present_tables},
+    ).mappings()
+    for row in sequence_rows:
+        if row["can_use"] or row["can_select"] or row["can_update"]:
+            issues.append(
+                "Data API role %s must not access application sequence %s."
+                % (row["rolname"], row["sequence_name"])
+            )
+    return issues
+
+
 def _postgres_audio_job_security_issues(connection) -> list[str]:
     issues = []
-    rls_enabled = connection.execute(
-        text(
-            "select c.relrowsecurity "
-            "from pg_class c join pg_namespace n on n.oid = c.relnamespace "
-            "where n.nspname = 'public' and c.relname = 'audio_storage_jobs'"
-        )
-    ).scalar()
-    if rls_enabled is not True:
-        issues.append("Row level security must be enabled on audio_storage_jobs.")
-
-    policy_count = int(
-        connection.execute(
-            text(
-                "select count(*) from pg_policies "
-                "where schemaname = 'public' and tablename = 'audio_storage_jobs'"
-            )
-        ).scalar()
-        or 0
-    )
-    if policy_count:
-        issues.append("Backend-only audio_storage_jobs must not have Data API RLS policies.")
-
     privacy_constraint_count = int(
         connection.execute(
             text(
@@ -189,7 +292,7 @@ def _postgres_audio_job_security_issues(connection) -> list[str]:
             "has_sequence_privilege(rolname, 'public.audio_storage_jobs_id_seq', 'usage') as can_use_sequence, "
             "has_sequence_privilege(rolname, 'public.audio_storage_jobs_id_seq', 'select') as can_select_sequence, "
             "has_sequence_privilege(rolname, 'public.audio_storage_jobs_id_seq', 'update') as can_update_sequence "
-            "from pg_roles where rolname in ('anon', 'authenticated', 'service_role')"
+            "from pg_roles where rolname = 'service_role'"
         )
     ).mappings()
     for row in rows:
@@ -205,7 +308,108 @@ def _postgres_audio_job_security_issues(connection) -> list[str]:
                 "can_update_sequence",
             )
         ):
-            issues.append("Data API role %s must not access audio_storage_jobs." % row["rolname"])
+            issues.append("Service role must not access backend-only audio_storage_jobs.")
+    return issues
+
+
+def _policy_roles(value) -> set[str]:
+    if isinstance(value, (list, tuple, set)):
+        return {str(item) for item in value}
+    if not value:
+        return set()
+    return {
+        item.strip().strip('"')
+        for item in str(value).strip("{}").split(",")
+        if item.strip()
+    }
+
+
+def _storage_policy_expression_may_reach_bucket(expression: str, bucket_name: str) -> bool:
+    expression = expression.lower()
+    if not expression or "bucket_id" not in expression:
+        return True
+    if re.search(r"\bor\b|<>|!=", expression):
+        return True
+    literals = [
+        value.replace("''", "'")
+        for value in re.findall(r"'((?:''|[^'])*)'", expression)
+    ]
+    if bucket_name.lower() in {value.lower() for value in literals}:
+        return True
+    # Prove exclusion only for the conventional equality restriction to one or
+    # more explicitly different bucket literals. Complex expressions fail shut.
+    return re.search(r"bucket_id\s*=\s*'((?:''|[^'])*)'(?:::[a-z_ ]+)?", expression) is None
+
+
+def _storage_policy_may_reach_bucket(policy: dict, bucket_name: str) -> bool:
+    if not (_policy_roles(policy.get("roles")) & {"public", "anon", "authenticated"}):
+        return False
+    expressions = [
+        str(policy.get(name) or "")
+        for name in ("qual", "with_check")
+        if policy.get(name) is not None
+    ]
+    return not expressions or any(
+        _storage_policy_expression_may_reach_bucket(expression, bucket_name)
+        for expression in expressions
+    )
+
+
+def _postgres_storage_security_issues(connection, bucket_name: str) -> list[str]:
+    issues = []
+    columns = {
+        row["column_name"]
+        for row in connection.execute(
+            text(
+                "select column_name from information_schema.columns "
+                "where table_schema = 'storage' and table_name = 'buckets'"
+            )
+        ).mappings()
+    }
+    required_columns = {"id", "public", "file_size_limit", "allowed_mime_types"}
+    missing_columns = sorted(required_columns - columns)
+    if missing_columns:
+        issues.append("Supabase audio bucket settings could not be fully verified.")
+    else:
+        bucket = connection.execute(
+            text(
+                "select public, file_size_limit, allowed_mime_types "
+                "from storage.buckets where id = :bucket_name"
+            ),
+            {"bucket_name": bucket_name},
+        ).mappings().first()
+        if bucket is None:
+            issues.append("Configured private audio bucket is missing.")
+        else:
+            if bucket["public"] is not False:
+                issues.append("Configured audio bucket must be private.")
+            if int(bucket["file_size_limit"] or 0) != MAX_AUDIO_UPLOAD_BYTES:
+                issues.append("Configured audio bucket must enforce the backend upload-size limit.")
+            allowed_mime_types = set(bucket["allowed_mime_types"] or [])
+            if allowed_mime_types != set(ALLOWED_AUDIO_MIME_TYPES):
+                issues.append("Configured audio bucket MIME allowlist does not match the backend.")
+
+    table_rows = connection.execute(
+        text(
+            "select c.relname as table_name, c.relrowsecurity as rls_enabled "
+            "from pg_class c join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = 'storage' and c.relname in ('buckets', 'objects')"
+        )
+    ).mappings()
+    security_by_table = {row["table_name"]: row["rls_enabled"] for row in table_rows}
+    for table_name in ("buckets", "objects"):
+        if security_by_table.get(table_name) is not True:
+            issues.append("Row level security must be enabled on storage.%s." % table_name)
+
+    policy_rows = connection.execute(
+        text(
+            "select tablename, policyname, roles, qual, with_check "
+            "from pg_policies where schemaname = 'storage' "
+            "and tablename in ('buckets', 'objects')"
+        )
+    ).mappings()
+    if any(_storage_policy_may_reach_bucket(dict(row), bucket_name) for row in policy_rows):
+        issues.append("Browser-facing Storage policies may expose the configured audio bucket.")
     return issues
 
 
@@ -390,14 +594,32 @@ def database_readiness_issues() -> list[str]:
                             issues.extend(unique_issues)
                     else:
                         issues.append("Could not verify unique constraint or index on %s." % table_name)
-            if database_backend(url) == "postgresql" and "audio_storage_jobs" in table_names:
-                issues.extend(_postgres_audio_job_security_issues(connection))
-            if database_backend(url) == "postgresql" and {
-                "account_deletion_jobs",
-                "deleted_identity_tombstones",
-                "deleted_identity_tombstone_config",
-            }.issubset(table_names):
-                issues.extend(_postgres_account_deletion_security_issues(connection))
+            if database_backend(url) == "postgresql":
+                issues.extend(_postgres_application_security_issues(connection, table_names))
+                if "audio_storage_jobs" in table_names:
+                    issues.extend(_postgres_audio_job_security_issues(connection))
+                if {
+                    "account_deletion_jobs",
+                    "deleted_identity_tombstones",
+                    "deleted_identity_tombstone_config",
+                }.issubset(table_names):
+                    issues.extend(_postgres_account_deletion_security_issues(connection))
+                if (
+                    app_environment() in DEPLOYED_ENVIRONMENTS
+                    and storage_backend() == "supabase"
+                    and os.getenv("SUPABASE_STORAGE_BUCKET")
+                ):
+                    try:
+                        bucket_name = _supabase_bucket_name()
+                    except Exception:
+                        issues.append("Configured audio bucket name is invalid.")
+                    else:
+                        issues.extend(
+                            _postgres_storage_security_issues(
+                                connection,
+                                bucket_name,
+                            )
+                        )
     except (SQLAlchemyError, OSError, RuntimeError) as exc:
         # Driver messages can embed connection hosts, usernames, query text, or
         # provider details. Preserve the failure class without exposing it in

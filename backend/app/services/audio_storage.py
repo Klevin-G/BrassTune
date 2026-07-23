@@ -243,11 +243,15 @@ def _supabase_url(path: str) -> str:
     return "%s/%s" % (base.rstrip("/"), path.lstrip("/"))
 
 
-def _supabase_bucket() -> str:
+def _supabase_bucket_name() -> str:
     bucket = (os.getenv("SUPABASE_STORAGE_BUCKET") or "session-audio").strip()
     if not bucket or len(bucket) > 100 or any(char in bucket for char in "/\\?#\x00\r\n"):
         raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
-    return urllib.parse.quote(bucket, safe="")
+    return bucket
+
+
+def _supabase_bucket() -> str:
+    return urllib.parse.quote(_supabase_bucket_name(), safe="")
 
 
 def _upload_to_supabase(object_key: str, data: bytes, mime_type: str) -> None:
