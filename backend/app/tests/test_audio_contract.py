@@ -265,7 +265,7 @@ def test_synthetic_steady_pitch_quality_gate_is_executable_not_physical_mic_evid
         signed_errors.append(signed_error)
         assert signed_error == pytest.approx(case["expected_python_signed_cents_error"], abs=0.001), case["note"]
         correct += round_midi_half_up(midi) == case["midi"]
-        gross_octave_errors += abs(midi - case["midi"]) >= 11.5
+        gross_octave_errors += abs(signed_error) >= contract["benchmark_policy"]["gross_octave_error_cents_inclusive"]
 
     thresholds = contract["thresholds"]
     absolute_errors = [abs(value) for value in signed_errors]
@@ -273,6 +273,19 @@ def test_synthetic_steady_pitch_quality_gate_is_executable_not_physical_mic_evid
     assert gross_octave_errors / len(signed_errors) * 100 <= thresholds["gross_octave_error_max_percent"]
     assert np.median(absolute_errors) <= thresholds["median_abs_cents_error_max"]
     assert _p95(absolute_errors) <= thresholds["p95_abs_cents_error_max"]
+
+
+def test_pitch_quality_benchmark_semantics_cover_gross_error_boundary_and_nearest_note_tie():
+    contract = fixture("pitch_quality_contract.json")
+    policy = contract["benchmark_policy"]
+    assert policy["accuracy_definition"] == "nearest_midi_half_up_equals_expected_midi"
+
+    for case in contract["benchmark_semantics_cases"]:
+        signed_error_cents = (case["detected_midi"] - case["expected_midi"]) * 100
+        assert (round_midi_half_up(case["detected_midi"]) == case["expected_midi"]) is case["expected_accurate"], case["name"]
+        assert (
+            abs(signed_error_cents) >= policy["gross_octave_error_cents_inclusive"]
+        ) is case["expected_gross_octave_error"], case["name"]
 
 
 def test_synthetic_onset_p95_measures_time_to_first_detector_lock():

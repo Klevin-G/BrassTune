@@ -1174,6 +1174,7 @@ struct NativePracticeRecommendation: Equatable {
 enum NativePitchAnalytics {
     static let maximumMergeGapMs = 340
     static let minimumEventDurationMs = 120
+    static let centeredCentsLimit = 5.0
 
     static func segmentNoteEvents(
         frames: [PitchFrame],
@@ -1268,10 +1269,10 @@ enum NativePitchAnalytics {
             .values
             .compactMap { items in
                 guard let first = items.first else { return nil }
-                let totalDuration = items.reduce(0.0) { $0 + Double($1.durationMs) }
+                let totalDuration = items.reduce(0.0) { $0 + max(0, Double($1.durationMs)) }
                 let denominator = totalDuration > 0 ? totalDuration : Double(items.count)
                 func weight(_ event: NativeNoteEvent) -> Double {
-                    totalDuration > 0 ? Double(event.durationMs) : 1
+                    totalDuration > 0 ? max(0, Double(event.durationMs)) : 1
                 }
                 let centers = items.map(\.averageSignedCents)
                 let averageSigned = items.reduce(0.0) { $0 + $1.averageSignedCents * weight($1) } / denominator
@@ -1291,7 +1292,7 @@ enum NativePitchAnalytics {
                     medianCents: median(centers),
                     standardDeviationCents: deviation,
                     inTunePercentage: inTune,
-                    durationMs: denominator,
+                    durationMs: totalDuration,
                     sampleCount: items.reduce(0) { $0 + $1.sampleCount },
                     eventCount: items.count,
                     stabilityScore: stability,
@@ -1313,9 +1314,9 @@ enum NativePitchAnalytics {
             category = "Insufficient data"
         } else if stats.trend == "Unstable" {
             category = "Inconsistent pitch"
-        } else if stats.averageSignedCents >= 10 {
+        } else if stats.trend == "Mostly sharp" {
             category = "Sharp tendency"
-        } else if stats.averageSignedCents <= -10 {
+        } else if stats.trend == "Mostly flat" {
             category = "Flat tendency"
         } else if stats.severity == "severe issue" {
             category = "Severe problem note"
@@ -1331,8 +1332,8 @@ enum NativePitchAnalytics {
         stabilityScore: Double
     ) -> String {
         if standardDeviationCents >= 12 || stabilityScore < 50 { return "Unstable" }
-        if averageSignedCents >= 6 { return "Mostly sharp" }
-        if averageSignedCents <= -6 { return "Mostly flat" }
+        if averageSignedCents > centeredCentsLimit { return "Mostly sharp" }
+        if averageSignedCents < -centeredCentsLimit { return "Mostly flat" }
         return "Centered"
     }
 
@@ -1363,6 +1364,8 @@ enum NativePitchAnalytics {
     }
 
     private static func roundedHundredth(_ value: Double) -> Double {
+        // Problem severity is nonnegative; Swift's default rule is half away
+        // from zero, which is the shared two-decimal half-up contract here.
         (value * 100).rounded() / 100
     }
 }

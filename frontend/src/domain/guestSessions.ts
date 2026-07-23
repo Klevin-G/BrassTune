@@ -261,8 +261,8 @@ export function classifyGuestNoteTrend(noteStats: Partial<NoteStats>): string {
   const stddev = Number(noteStats.stddev_cents ?? 0);
   const stability = Number(noteStats.stability_score ?? 100);
   if (stddev >= 12 || stability < 50) return 'Unstable';
-  if (signed >= 6) return 'Mostly sharp';
-  if (signed <= -6) return 'Mostly flat';
+  if (signed > 5) return 'Mostly sharp';
+  if (signed < -5) return 'Mostly flat';
   return 'Centered';
 }
 
@@ -270,6 +270,8 @@ export function guestProblemScore(noteStats: Partial<NoteStats>): number {
   const avgAbs = Number(noteStats.avg_abs_cents ?? 0);
   const stddev = Number(noteStats.stddev_cents ?? 0);
   const inTune = Number(noteStats.in_tune_percentage ?? 0);
+  // Problem severity is nonnegative; Math.round implements the shared
+  // two-decimal half-up contract for this domain.
   return Math.round((avgAbs * 2 + stddev + Math.max(0, 80 - inTune) * 0.25) * 100) / 100;
 }
 
@@ -301,9 +303,9 @@ export function calculateGuestNoteStats(events: NoteEvent[]): NoteStats[] {
   return [...groups.values()]
     .map((items) => {
       const first = items[0];
-      const durationMs = items.reduce((sum, item) => sum + item.duration_ms, 0);
+      const durationMs = items.reduce((sum, item) => sum + Math.max(0, item.duration_ms), 0);
       const denominator = durationMs > 0 ? durationMs : items.length;
-      const weight = (item: NoteEvent) => (durationMs > 0 ? item.duration_ms : 1);
+      const weight = (item: NoteEvent) => (durationMs > 0 ? Math.max(0, item.duration_ms) : 1);
       const sampleCount = items.reduce((sum, item) => sum + item.sample_count, 0);
       const eventCenters = items.map((item) => item.avg_signed_cents);
       const row: NoteStats = {
@@ -315,8 +317,8 @@ export function calculateGuestNoteStats(events: NoteEvent[]): NoteStats[] {
         median_cents: median(eventCenters),
         stddev_cents: items.length > 1 ? populationStdDev(eventCenters) : first.stddev_cents,
         in_tune_percentage: items.reduce((sum, item) => sum + item.in_tune_percentage * weight(item), 0) / denominator,
-        duration_ms: denominator,
-        duration_seconds: denominator / 1000,
+        duration_ms: durationMs,
+        duration_seconds: durationMs / 1000,
         sample_count: sampleCount,
         event_count: items.length,
         stability_score: items.reduce((sum, item) => sum + item.stability_score * weight(item), 0) / denominator,
@@ -357,12 +359,12 @@ export function generateGuestNoteRecommendation(row: NoteStats): Recommendation 
     message = `In this guest workspace, written ${label} changes too much for BrassTune to call it centered yet.`;
     category = 'Inconsistent pitch';
     suggestions = ['Hold the note for 8-12 seconds and aim for a steady needle.', 'Use a drone and focus on minimizing motion.', 'Record several repetitions with full breaths.'];
-  } else if (signed >= 10) {
+  } else if (trend === 'Mostly sharp') {
     title = `${label} tends sharp`;
     message = `In this guest workspace, written ${label} averages ${Math.abs(signed).toFixed(0)} cents sharp.`;
     category = 'Sharp tendency';
     suggestions = ['Practice slow long tones on this note with a drone.', 'Start slightly below the pitch and gently center upward.', 'Check whether you are over-tightening your embouchure.'];
-  } else if (signed <= -10) {
+  } else if (trend === 'Mostly flat') {
     title = `${label} tends flat`;
     message = `In this guest workspace, written ${label} averages ${Math.abs(signed).toFixed(0)} cents flat.`;
     category = 'Flat tendency';
@@ -401,9 +403,13 @@ function computeGuestSessionSummary(events: NoteEvent[]) {
   if (!events.length) {
     return { duration_seconds: 0, notes_count: 0, average_signed_cents: 0, average_abs_cents: 0, in_tune_percentage: 0 };
   }
-  const durationMs = events.reduce((sum, event) => sum + event.duration_ms, 0) || events.length;
+  const durationMs = events.reduce((sum, event) => sum + Math.max(0, event.duration_ms), 0);
+  const denominator = durationMs > 0 ? durationMs : events.length;
   const weighted = (key: 'avg_signed_cents' | 'avg_abs_cents' | 'in_tune_percentage') =>
-    events.reduce((sum, event) => sum + event[key] * (event.duration_ms || 1), 0) / durationMs;
+    events.reduce(
+      (sum, event) => sum + event[key] * (durationMs > 0 ? Math.max(0, event.duration_ms) : 1),
+      0,
+    ) / denominator;
   return {
     duration_seconds: Math.round((durationMs / 1000) * 100) / 100,
     notes_count: events.length,

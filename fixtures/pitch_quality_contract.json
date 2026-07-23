@@ -3,6 +3,33 @@
   "sample_rate_hz": 48000,
   "frame_size": 4096,
   "harmonic_amplitudes": [0.75, 0.2, 0.05],
+  "benchmark_policy": {
+    "gross_octave_error_cents_inclusive": 600,
+    "accuracy_definition": "nearest_midi_half_up_equals_expected_midi"
+  },
+  "benchmark_semantics_cases": [
+    {
+      "name": "Just below the gross octave threshold",
+      "expected_midi": 60,
+      "detected_midi": 65.99999,
+      "expected_accurate": false,
+      "expected_gross_octave_error": false
+    },
+    {
+      "name": "Exact gross octave threshold is included",
+      "expected_midi": 60,
+      "detected_midi": 66,
+      "expected_accurate": false,
+      "expected_gross_octave_error": true
+    },
+    {
+      "name": "Nearest-note midpoint rounds upward",
+      "expected_midi": 61,
+      "detected_midi": 60.5,
+      "expected_accurate": true,
+      "expected_gross_octave_error": false
+    }
+  ],
   "thresholds": {
     "steady_note_octave_accuracy_min_percent": 99,
     "gross_octave_error_max_percent": 0.5,

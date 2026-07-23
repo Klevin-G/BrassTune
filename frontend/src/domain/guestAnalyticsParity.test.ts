@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import segmentationCases from '../../../fixtures/note_segmentation_cases.json';
 import recommendationCases from '../../../fixtures/recommendation_cases.json';
+import problemScoreRoundingCases from '../../../fixtures/problem_score_rounding_cases.json';
 import {
   buildGuestNoteEvents,
   calculateGuestNoteStats,
+  classifyGuestNoteTrend,
   generateGuestNoteRecommendation,
+  guestProblemScore,
 } from './guestSessions';
-import type { NoteStats, PitchFrame } from './types';
+import type { NoteEvent, NoteStats, PitchFrame } from './types';
 
 function fixtureFrame(item: (typeof segmentationCases)[number]['frames'][number]): PitchFrame {
   const valid = 'is_valid_for_recording' in item ? item.is_valid_for_recording !== false : true;
@@ -51,6 +54,38 @@ function recommendationStats(input: Record<string, number | string | undefined>)
   };
 }
 
+function analyticsEvent(
+  id: number,
+  durationMs: number,
+  averageSignedCents: number,
+  averageAbsoluteCents = Math.abs(averageSignedCents),
+): NoteEvent {
+  return {
+    id,
+    session_id: -7,
+    instrument_id: 'trumpet',
+    written_note: 'D',
+    written_octave: 4,
+    note_label: 'D4',
+    concert_note: 'C',
+    concert_octave: 4,
+    started_at_ms: 0,
+    ended_at_ms: Math.max(0, durationMs),
+    duration_ms: durationMs,
+    duration_seconds: durationMs / 1_000,
+    sample_count: 10,
+    avg_signed_cents: averageSignedCents,
+    avg_abs_cents: averageAbsoluteCents,
+    median_cents: averageSignedCents,
+    stddev_cents: 2,
+    min_cents: averageSignedCents,
+    max_cents: averageSignedCents,
+    in_tune_percentage: 70,
+    stability_score: 90,
+    created_at: '2026-07-23T00:00:00.000Z',
+  };
+}
+
 describe('guest/backend fixture parity', () => {
   it('matches backend segmentation duration, median, dropout, and stability values', () => {
     for (const testCase of segmentationCases) {
@@ -82,6 +117,25 @@ describe('guest/backend fixture parity', () => {
     }
   });
 
+  it.each([
+    { cents: -5.01, trend: 'Mostly flat', category: 'Flat tendency' },
+    { cents: -5, trend: 'Centered', category: 'Good progress' },
+    { cents: 5, trend: 'Centered', category: 'Good progress' },
+    { cents: 5.01, trend: 'Mostly sharp', category: 'Sharp tendency' },
+  ])('uses the backend inclusive ±5 centered boundary at $cents cents', ({ cents, trend, category }) => {
+    const stats = recommendationStats({
+      note_label: 'D4',
+      avg_signed_cents: cents,
+      avg_abs_cents: Math.abs(cents),
+      stddev_cents: 2,
+      in_tune_percentage: 70,
+      stability_score: 90,
+      duration_seconds: 10,
+    });
+    expect(classifyGuestNoteTrend(stats)).toBe(trend);
+    expect(generateGuestNoteRecommendation(stats).category).toBe(category);
+  });
+
   it('duration-weights aggregate centers and preserves event medians', () => {
     const events = buildGuestNoteEvents(-7, [
       ...Array.from({ length: 11 }, (_, index) => fixtureFrame({
@@ -100,5 +154,37 @@ describe('guest/backend fixture parity', () => {
     expect(stats.avg_signed_cents).toBeCloseTo(22 / 7, 9);
     expect(stats.median_cents).toBe(6);
     expect(stats.duration_ms).toBe(4_200);
+  });
+
+  it('excludes nonpositive legacy durations from mixed weighted aggregates', () => {
+    const stats = calculateGuestNoteStats([
+      analyticsEvent(1, 4_000, 5.01),
+      analyticsEvent(2, 0, 100),
+      analyticsEvent(3, -1_000, -100),
+    ])[0];
+
+    expect(stats.avg_signed_cents).toBeCloseTo(5.01, 9);
+    expect(stats.avg_abs_cents).toBeCloseTo(5.01, 9);
+    expect(stats.in_tune_percentage).toBe(70);
+    expect(stats.stability_score).toBe(90);
+    expect(stats.duration_ms).toBe(4_000);
+  });
+
+  it('preserves the backend even-mean fallback when every duration is legacy', () => {
+    const stats = calculateGuestNoteStats([
+      analyticsEvent(1, 0, 4),
+      analyticsEvent(2, -1_000, 10),
+    ])[0];
+
+    expect(stats.avg_signed_cents).toBe(7);
+    expect(stats.avg_abs_cents).toBe(7);
+    expect(stats.duration_ms).toBe(0);
+  });
+
+  it('rounds nonnegative problem severity half up at two decimals', () => {
+    for (const testCase of problemScoreRoundingCases) {
+      expect(guestProblemScore(testCase.note_stats), testCase.name)
+        .toBe(testCase.expected_problem_severity);
+    }
   });
 });

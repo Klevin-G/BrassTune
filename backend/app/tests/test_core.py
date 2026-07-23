@@ -181,10 +181,10 @@ def test_centered_and_tendency_recommendation_thresholds_are_aligned():
     profile = get_instrument_profile("trumpet")
     cases = [
         (-8, "Mostly flat", "Flat tendency"),
-        (-6, "Mostly flat", "Flat tendency"),
+        (-5.01, "Mostly flat", "Flat tendency"),
         (-5, "Centered", "Good progress"),
         (5, "Centered", "Good progress"),
-        (6, "Mostly sharp", "Sharp tendency"),
+        (5.01, "Mostly sharp", "Sharp tendency"),
         (8, "Mostly sharp", "Sharp tendency"),
     ]
     for cents, expected_trend, expected_category in cases:
@@ -199,6 +199,23 @@ def test_centered_and_tendency_recommendation_thresholds_are_aligned():
         }
         assert classify_note_trend(stats) == expected_trend
         assert generate_note_recommendation(stats, profile)["category"] == expected_category
+
+
+def test_problem_score_rounds_nonnegative_half_values_up():
+    for case in _fixture("problem_score_rounding_cases.json"):
+        assert calculate_note_stats(
+            [
+                {
+                    "written_note": "D",
+                    "written_octave": 4,
+                    "duration_ms": 1_000,
+                    "sample_count": 10,
+                    "avg_signed_cents": 0,
+                    **case["note_stats"],
+                    "stability_score": 90,
+                }
+            ]
+        )[0]["problem_severity"] == case["expected_problem_severity"], case["name"]
 
 
 def test_shared_pitch_math_fixtures():

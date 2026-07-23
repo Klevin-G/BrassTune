@@ -1,6 +1,7 @@
 import datetime as dt
 import statistics
 from collections import defaultdict
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from app.core.instruments.profiles import InstrumentProfile
@@ -115,10 +116,12 @@ def classify_note_trend(note_stats: Dict[str, object]) -> str:
 
 
 def problem_score(note_stats: Dict[str, object]) -> float:
+    """Return nonnegative severity rounded to cents-style hundredths, half up."""
     avg_abs = float(note_stats.get("avg_abs_cents", 0))
     stddev = float(note_stats.get("stddev_cents", 0))
     in_tune = float(note_stats.get("in_tune_percentage", 0))
-    return round(avg_abs * 2 + stddev + max(0.0, 80 - in_tune) * 0.25, 2)
+    value = avg_abs * 2 + stddev + max(0.0, 80 - in_tune) * 0.25
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def heatmap_severity(note_stats: Optional[Dict[str, object]]) -> str:

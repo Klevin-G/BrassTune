@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import qualityContract from '../../../fixtures/pitch_quality_contract.json';
 import { estimatePitchFromPcm, nearestMidiForFrequency } from './localPitchDetection';
-import { frequencyToMidi } from './music';
+import { frequencyToMidi, midiToFrequency } from './music';
 
 function percentile95(values: number[]) {
   const sorted = [...values].sort((left, right) => left - right);
@@ -20,6 +20,24 @@ function harmonicTone(frequencyHz: number, amplitudeMultiplier = 1) {
 }
 
 describe('synthetic pitch quality gate', () => {
+  it('uses shared nearest-note accuracy and inclusive 600-cent gross-error semantics', () => {
+    expect(qualityContract.benchmark_policy.accuracy_definition)
+      .toBe('nearest_midi_half_up_equals_expected_midi');
+
+    for (const testCase of qualityContract.benchmark_semantics_cases) {
+      const frequency = midiToFrequency(testCase.detected_midi, 440);
+      const signedErrorCents = (testCase.detected_midi - testCase.expected_midi) * 100;
+      expect(
+        nearestMidiForFrequency(frequency, 440) === testCase.expected_midi,
+        `${testCase.name}: accuracy`,
+      ).toBe(testCase.expected_accurate);
+      expect(
+        Math.abs(signedErrorCents) >= qualityContract.benchmark_policy.gross_octave_error_cents_inclusive,
+        `${testCase.name}: gross octave error`,
+      ).toBe(testCase.expected_gross_octave_error);
+    }
+  });
+
   it('meets steady note/octave, gross-octave, cents, and cross-platform thresholds', () => {
     const signedErrors: number[] = [];
     const crossPlatformDeltas: number[] = [];
@@ -38,7 +56,9 @@ describe('synthetic pitch quality gate', () => {
       signedErrors.push(signedError);
       crossPlatformDeltas.push(Math.abs(signedError - testCase.expected_python_signed_cents_error));
       if (nearestMidiForFrequency(frequency, 440) === testCase.midi) correctNoteAndOctave += 1;
-      if (Math.abs(estimatedMidi - testCase.midi) >= 11.5) grossOctaveErrors += 1;
+      if (Math.abs(signedError) >= qualityContract.benchmark_policy.gross_octave_error_cents_inclusive) {
+        grossOctaveErrors += 1;
+      }
     }
 
     const accuracy = (correctNoteAndOctave / qualityContract.cases.length) * 100;
