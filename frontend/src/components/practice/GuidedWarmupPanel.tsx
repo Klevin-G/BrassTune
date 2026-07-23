@@ -4,7 +4,7 @@ import { GUIDED_WARMUP_SECONDS, GUIDED_WARMUP_STEPS, warmupStepAt } from '../../
 import { usePracticeLibrary } from '../../state/PracticeLibraryContext';
 import { SectionCard } from '../ui/AppPrimitives';
 import { useI18n } from '../../i18n/LocaleContext';
-import type { MessageId } from '../../i18n/messages';
+import type { MessageId } from '../../i18n/messages.base';
 
 export function GuidedWarmupPanel() {
   const { library, setWarmupProgress, recordRecent, recordActivity } = usePracticeLibrary();

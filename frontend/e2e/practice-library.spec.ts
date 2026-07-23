@@ -119,7 +119,7 @@ test('saved reflections are fully listed, editable, deletable, and persist user 
   await expect(page.getByText('Keep A-G smooth.')).toBeVisible();
   await expect(page.getByText('Breathe before Bb.')).toBeVisible();
   await page.getByRole('button', { name: 'Edit reflection' }).first().click();
-  await page.getByLabel('Edit reflection').fill('Keep A-G smooth — softer next time.');
+  await page.getByRole('textbox', { name: 'Edit reflection' }).fill('Keep A-G smooth — softer next time.');
   await page.getByRole('button', { name: 'Save reflection changes' }).click();
   await expect(page.getByText('Keep A-G smooth — softer next time.')).toBeVisible();
   await page.getByRole('button', { name: 'Delete reflection' }).last().click();

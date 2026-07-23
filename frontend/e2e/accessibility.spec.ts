@@ -117,3 +117,34 @@ test('tablet shell navigation remains accessible when labels are visually compac
   const serious = results.violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical');
   expect(serious, JSON.stringify(serious, null, 2)).toEqual([]);
 });
+
+test('skip navigation, radio arrows, and throttled tuner announcements work from the keyboard', async ({ page }) => {
+  await page.goto('/practice');
+  await page.keyboard.press('Tab');
+  const skipLink = page.getByRole('link', { name: 'Skip to main content' });
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('main')).toBeFocused();
+
+  const source = page.getByRole('radiogroup', { name: 'Sound source' });
+  const demo = source.getByRole('radio', { name: 'Demo' });
+  await demo.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(source.getByRole('radio', { name: 'Live mic' })).toBeChecked();
+  await page.keyboard.press('ArrowRight');
+  await expect(demo).toBeChecked();
+
+  const noteDisplay = page.locator('.note-display');
+  await expect(noteDisplay).not.toHaveAttribute('aria-live');
+  const liveStatus = noteDisplay.getByRole('status');
+  const announcementChanges = await liveStatus.evaluate((status) => new Promise<number>((resolve) => {
+    let changes = 0;
+    const observer = new MutationObserver(() => { changes += 1; });
+    observer.observe(status, { characterData: true, childList: true, subtree: true });
+    window.setTimeout(() => {
+      observer.disconnect();
+      resolve(changes);
+    }, 1_100);
+  }));
+  expect(announcementChanges).toBeLessThanOrEqual(1);
+});

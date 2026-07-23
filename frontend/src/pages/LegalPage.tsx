@@ -6,7 +6,7 @@ import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPr
 import { SUPPORT_EMAIL, supportGmailComposeUrl } from '../domain/supportContact';
 import './LegalPage.css';
 import { useI18n } from '../i18n/LocaleContext';
-import type { MessageId } from '../i18n/messages';
+import type { MessageId } from '../i18n/messages.base';
 
 function BackButton() {
   const navigate = useNavigate();

@@ -5,7 +5,7 @@ import { clearLocalSessions, downloadExport, friendlyUserFacingError, repairDemo
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { ThemeSelector } from '../components/ThemeSelector';
 import { PageHeader, ScreenContainer, SectionCard, SegmentedControl } from '../components/ui/AppPrimitives';
-import { guestSessionsExport } from '../domain/guestSessions';
+import { GUEST_WORKSPACE_ACCESS, guestSessionsExport } from '../domain/guestSessions';
 import { PRACTICE_LIBRARY_PREFIX } from '../domain/practiceLibrary';
 import { clearLocalScoreDocuments } from '../domain/scoreDocuments';
 import { MAX_REFERENCE_PITCH, MIN_REFERENCE_PITCH, useAppSettings } from '../state/AppSettingsContext';
@@ -35,6 +35,7 @@ type MicCheck = 'idle' | 'listening' | 'pass' | 'fail' | 'blocked';
 export function SettingsPage() {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
   const auth = useAuth();
+  const guestAccess = !auth.loading && !auth.isSignedIn && auth.guestMode ? GUEST_WORKSPACE_ACCESS : undefined;
   const location = useLocation();
   const practiceLibrary = usePracticeLibrary();
   const { setTheme } = useTheme();
@@ -92,7 +93,7 @@ export function SettingsPage() {
         .catch(() => setMaintenanceStatus('Export is unavailable right now. Please try again later.'));
       return;
     }
-    downloadTextFile(guestSessionsExport(), 'brasstune-guest-practice-export.json');
+    downloadTextFile(guestSessionsExport(guestAccess), 'brasstune-guest-practice-export.json');
     setMaintenanceStatus('Your practice history was downloaded to this device.');
   };
 

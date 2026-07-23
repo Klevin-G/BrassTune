@@ -13,7 +13,7 @@ import { WeakTransitionCard } from '../components/practice/WeakTransitionCard';
 import { LoadingSkeleton, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { instrumentDisplayName } from '../domain/instrumentNames';
 import { describeCents, describeInTunePercent } from '../domain/tuningLanguage';
-import { getGuestSession, isGuestSessionId, type GuestSessionDetail } from '../domain/guestSessions';
+import { getGuestSession, GUEST_WORKSPACE_ACCESS, isGuestSessionId, type GuestSessionDetail } from '../domain/guestSessions';
 import type { NoteEvent, NoteStats, PracticeSession, Recommendation } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
 import { authPathWithReturn } from '../domain/authNavigation';
@@ -32,6 +32,7 @@ export function classifySessionReviewError(error: unknown): Exclude<ReviewLoadEr
 export function SessionReviewPage() {
   const { id } = useParams();
   const auth = useAuth();
+  const guestAccess = !auth.loading && !auth.isSignedIn && auth.guestMode ? GUEST_WORKSPACE_ACCESS : undefined;
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [stats, setStats] = useState<NoteStats[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
@@ -56,7 +57,7 @@ export function SessionReviewPage() {
       };
     }
     if (isGuestSessionId(id)) {
-      const guestSession = getGuestSession(id);
+      const guestSession = getGuestSession(id, guestAccess);
       if (guestSession) {
         setSession(guestSession);
         setStats(guestSession.note_stats);
@@ -100,7 +101,7 @@ export function SessionReviewPage() {
     return () => {
       active = false;
     };
-  }, [auth.isSignedIn, auth.loading, auth.profile?.id, id, retryKey]);
+  }, [auth.guestMode, auth.isSignedIn, auth.loading, auth.profile?.id, guestAccess, id, retryKey]);
 
   if (loading) {
     return (

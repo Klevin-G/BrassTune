@@ -7,7 +7,7 @@ import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { EmptyActionState, LoadingSkeleton, PageHeader, ScreenContainer, SectionCard, SelectionChip, StatusBadge } from '../components/ui/AppPrimitives';
 import { instrumentDisplayName } from '../domain/instrumentNames';
 import { describeInTunePercent } from '../domain/tuningLanguage';
-import { deleteGuestSession, listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
+import { deleteGuestSession, GUEST_WORKSPACE_ACCESS, listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
 import type { PracticeSession } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
 import './SessionsPage.css';
@@ -42,6 +42,7 @@ export function resolvePostDeleteFocusTarget(savedTarget: HTMLElement | null, ro
 
 export function SessionsPage() {
   const auth = useAuth();
+  const guestAccess = !auth.loading && !auth.isSignedIn && auth.guestMode ? GUEST_WORKSPACE_ACCESS : undefined;
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   const [filter, setFilter] = useState<SessionFilter>('all');
   const [status, setStatus] = useState('');
@@ -56,7 +57,7 @@ export function SessionsPage() {
 
   useEffect(() => {
     let active = true;
-    const guestSessions = listGuestSessions();
+    const guestSessions = listGuestSessions(guestAccess);
     setLoadState('loading');
     if (!auth.isSignedIn) {
       setSessions(guestSessions);
@@ -80,7 +81,7 @@ export function SessionsPage() {
     return () => {
       active = false;
     };
-  }, [auth.isSignedIn, auth.profile?.id, retryKey]);
+  }, [auth.isSignedIn, auth.guestMode, auth.profile?.id, guestAccess, retryKey]);
 
   useEffect(() => {
     if (!pendingDelete) return;
@@ -112,7 +113,8 @@ export function SessionsPage() {
     }
     setDeleteBusy(true);
     try {
-      await Promise.resolve(deleteGuestSession(session.id));
+      const deleted = deleteGuestSession(session.id, guestAccess);
+      if (!deleted) throw new Error('Guest workspace access is unavailable.');
       setSessions((current) => current.filter((item) => item.id !== session.id));
       setStatus('Recording deleted.');
       setPendingDelete(null);

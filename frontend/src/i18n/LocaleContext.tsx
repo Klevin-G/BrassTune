@@ -1,35 +1,62 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { IntlProvider, useIntl, type PrimitiveType } from 'react-intl';
-import { englishMessages, messagesForLocale, type MessageId } from './messages';
+import {
+  bootstrapMessagesForLocale,
+  englishMessages,
+  type MessageCatalog,
+  type MessageId,
+} from './messages.base';
 
 export const LOCALE_STORAGE_KEY = 'brasstune.locale';
+
+export const productionLocales = [
+  'en', 'es', 'zh-Hans', 'zh-Hant', 'ar', 'fr', 'de', 'ru', 'pt-BR', 'ja', 'ko', 'vi',
+] as const;
 
 export const localeOptions = [
   { value: 'en', label: 'English' },
   { value: 'es', label: 'Español' },
+  { value: 'zh-Hans', label: '简体中文' },
+  { value: 'zh-Hant', label: '繁體中文' },
+  { value: 'ar', label: 'العربية' },
   { value: 'fr', label: 'Français' },
   { value: 'de', label: 'Deutsch' },
-  { value: 'it', label: 'Italiano' },
+  { value: 'ru', label: 'Русский' },
   { value: 'pt-BR', label: 'Português (Brasil)' },
-  { value: 'ar', label: 'العربية' },
-  { value: 'hi', label: 'हिन्दी' },
   { value: 'ja', label: '日本語' },
   { value: 'ko', label: '한국어' },
-  { value: 'zh-CN', label: '简体中文' },
+  { value: 'vi', label: 'Tiếng Việt' },
   { value: 'en-XA', label: 'Pseudo (QA)' },
 ] as const;
 
+export type ProductionLocale = (typeof productionLocales)[number];
 export type AppLocale = (typeof localeOptions)[number]['value'];
 
 const localeValues = new Set<string>(localeOptions.map((option) => option.value));
+const catalogLoaders = {
+  es: () => import('./catalogs/locale-es'),
+  'zh-Hans': () => import('./catalogs/locale-zh-Hans'),
+  'zh-Hant': () => import('./catalogs/locale-zh-Hant'),
+  ar: () => import('./catalogs/locale-ar'),
+  fr: () => import('./catalogs/locale-fr'),
+  de: () => import('./catalogs/locale-de'),
+  ru: () => import('./catalogs/locale-ru'),
+  'pt-BR': () => import('./catalogs/locale-pt-BR'),
+  ja: () => import('./catalogs/locale-ja'),
+  ko: () => import('./catalogs/locale-ko'),
+  vi: () => import('./catalogs/locale-vi'),
+} satisfies Record<Exclude<ProductionLocale, 'en'>, () => Promise<{ default: MessageCatalog }>>;
 
 export function normalizeLocale(value: string | null | undefined): AppLocale | null {
   if (!value) return null;
-  const normalized = value.replace('_', '-');
+  const normalized = value.replace(/_/g, '-');
   if (localeValues.has(normalized)) return normalized as AppLocale;
   const lower = normalized.toLowerCase();
+  if (lower.startsWith('zh')) {
+    if (/^zh-(?:hant|tw|hk|mo)(?:-|$)/.test(lower)) return 'zh-Hant';
+    return 'zh-Hans';
+  }
   if (lower.startsWith('pt')) return 'pt-BR';
-  if (lower.startsWith('zh')) return 'zh-CN';
   const language = lower.split('-')[0];
   return localeOptions.find((option) => option.value.toLowerCase() === language)?.value ?? null;
 }
@@ -45,10 +72,20 @@ function initialLocale(): AppLocale {
   return 'en';
 }
 
+export async function loadMessagesForLocale(locale: AppLocale): Promise<MessageCatalog> {
+  if (locale === 'en' || locale === 'en-XA') return bootstrapMessagesForLocale(locale);
+  return (await catalogLoaders[locale]()).default;
+}
+
 interface LocaleState {
   locale: AppLocale;
   dir: 'ltr' | 'rtl';
   setLocale: (locale: AppLocale) => void;
+}
+
+interface LoadedCatalog {
+  locale: AppLocale;
+  messages: MessageCatalog;
 }
 
 const LocaleStateContext = createContext<LocaleState | null>(null);
@@ -59,26 +96,56 @@ function manifestPath(locale: AppLocale): string {
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<AppLocale>(initialLocale);
-  const dir: LocaleState['dir'] = locale === 'ar' ? 'rtl' : 'ltr';
-  const messages = useMemo(() => messagesForLocale(locale), [locale]);
+  const immediatelyAvailable = locale === 'en' || locale === 'en-XA';
+  const [catalog, setCatalog] = useState<LoadedCatalog>(() => ({
+    locale: immediatelyAvailable ? locale : 'en',
+    messages: bootstrapMessagesForLocale(immediatelyAvailable ? locale : 'en'),
+  }));
+  const [loading, setLoading] = useState(!immediatelyAvailable);
+  const dir: LocaleState['dir'] = catalog.locale === 'ar' ? 'rtl' : 'ltr';
 
   useEffect(() => {
-    document.documentElement.lang = locale;
+    let active = true;
+    setLoading(true);
+    loadMessagesForLocale(locale)
+      .then((messages) => {
+        if (!active) return;
+        setCatalog({ locale, messages });
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCatalog({ locale: 'en', messages: englishMessages });
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [locale]);
+
+  useEffect(() => {
+    document.documentElement.lang = catalog.locale;
     document.documentElement.dir = dir;
-    document.title = messages['meta.title'];
-    document.querySelector('meta[name="description"]')?.setAttribute('content', messages['meta.description']);
-    document.querySelector<HTMLLinkElement>('link[rel="manifest"]')?.setAttribute('href', manifestPath(locale));
+    document.title = catalog.messages['meta.title'];
+    document.querySelector('meta[name="description"]')?.setAttribute('content', catalog.messages['meta.description']);
+    document.querySelector<HTMLLinkElement>('link[rel="manifest"]')?.setAttribute('href', manifestPath(catalog.locale));
+  }, [catalog, dir]);
+
+  useEffect(() => {
     window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
-  }, [dir, locale, messages]);
+  }, [locale]);
 
   const setLocale = (value: AppLocale) => {
     if (localeValues.has(value)) setLocaleState(value);
   };
   const state = useMemo(() => ({ locale, dir, setLocale }), [dir, locale]);
+  const intlLocale = catalog.locale === 'en-XA' ? 'en' : catalog.locale;
 
   return (
-    <IntlProvider locale={locale === 'en-XA' ? 'en' : locale} defaultLocale="en" messages={messages}>
-      <LocaleStateContext.Provider value={state}>{children}</LocaleStateContext.Provider>
+    <IntlProvider locale={intlLocale} defaultLocale="en" messages={catalog.messages}>
+      <LocaleStateContext.Provider value={state}>
+        {loading ? <div className="app-loading" role="status">{englishMessages['loading.locale']}</div> : children}
+      </LocaleStateContext.Provider>
     </IntlProvider>
   );
 }

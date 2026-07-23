@@ -40,7 +40,7 @@ export function CustomExerciseBuilder({ onSaved }: { onSaved: (id: string) => vo
         {library.customExercises.length > 0 && (
           <div className="practice-saved-list" aria-label={t('exercise.saved')}>
             {library.customExercises.map((item) => (
-              <div key={item.id}><button className="link-button" type="button" onClick={() => onSaved(item.id)}>{item.name} · {formatNumber(item.notes.length)} notes</button><button className="icon-button" type="button" onClick={() => deleteExercise(item.id)} aria-label={t('exercise.delete', { name: item.name })}><Trash2 size={16} /></button></div>
+              <div key={item.id}><button className="link-button" type="button" onClick={() => onSaved(item.id)}>{item.name} · {t('exercise.noteCount', { count: formatNumber(item.notes.length) })}</button><button className="icon-button" type="button" onClick={() => deleteExercise(item.id)} aria-label={t('exercise.delete', { name: item.name })}><Trash2 size={16} /></button></div>
             ))}
           </div>
         )}
