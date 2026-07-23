@@ -60,12 +60,13 @@ Do not add `SUPABASE_SECRET_KEY`, Render deploy hooks, GitHub tokens, Apple keys
 Required Render env vars:
 
 - `APP_ENV=production`
+- `PYTHON_VERSION=3.11.15`, pinned through Render's supported environment-variable mechanism and synchronized by the exact-deploy workflow.
 - `BRASSTUNE_SEED_DEMO_DATA` should be unset or `0` in production. Set `1` only for a deliberate disposable demo environment.
 - `BRASSTUNE_AUTH_MODE=supabase`
 - `BRASSTUNE_TRUST_PROXY=1`. Render must keep Uvicorn proxy rewriting disabled so the application receives the raw forwarding chain. Render's current guidance reads the true client from `X-Forwarded-For`, and its rate-limit example selects the first list entry; malformed first entries fall back to the socket peer instead of scanning later values.
 - `FRONTEND_ORIGIN=https://brasstune.vercel.app`
 - `CORS_ALLOWED_ORIGINS` as an exact comma-separated allowlist for production and approved preview origins.
-- Leave `CORS_ALLOWED_ORIGIN_REGEX` empty in production unless the owner approves a tightly anchored temporary preview pattern.
+- `CORS_ALLOWED_ORIGIN_REGEX` and `BRASSTUNE_ALLOW_CORS_REGEX` must be absent in production. The exact-deploy workflow deletes both service-level variables before every backend deploy so the backend uses only the exact origin allowlist.
 - `BRASSTUNE_DATABASE_URL` or `DATABASE_URL` pointing to PostgreSQL. Render is IPv4-only, so use the Supabase pooler endpoint unless a compatible direct connection is explicitly available.
 - `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET` for the scheduled account deletion retry executor.
 - `BRASSTUNE_DELETION_TOMBSTONE_SECRET`, a dedicated stable secret of at least 32 bytes used only to HMAC deleted Supabase subjects. Never reuse a JWT, Supabase, storage, or maintenance credential. Back up this value in the production secret store: losing or rotating it without a deliberate tombstone migration makes readiness fail closed.
@@ -140,7 +141,10 @@ WebSocket Origin checks mirror the HTTP CORS policy. Include
 `https://brasstune.vercel.app` and any owner-approved preview/share origins;
 prefer exact `CORS_ALLOWED_ORIGINS`/`FRONTEND_ORIGIN` entries.
 
-`CORS_ALLOWED_ORIGIN_REGEX` is disabled in deployed environments unless `BRASSTUNE_ALLOW_CORS_REGEX=1` is also set. Prefer exact origins for production and previews.
+Production deployment actively deletes `CORS_ALLOWED_ORIGIN_REGEX` and
+`BRASSTUNE_ALLOW_CORS_REGEX` through Render's per-key environment-variable API.
+Prefer exact origins for production and previews. Reintroducing a regex requires
+an explicit, reviewed workflow change in addition to backend configuration.
 
 ### Account Deletion Retry
 
@@ -186,10 +190,14 @@ with the workflow commit SHA. This prevents a push-triggered build from racing
 the exact-SHA release. Do not replace it with an unpinned deploy hook.
 
 Before requesting that exact deploy, the backend job requires the GitHub
-Production secret `BRASSTUNE_DELETION_TOMBSTONE_SECRET` and upserts only that
-single variable through Render's per-key environment-variable API. The value is
-never printed. `render.yaml` also uses `generateValue: true` as a safe bootstrap
-for newly created Blueprint services; Render preserves an existing value.
+Production secret `BRASSTUNE_DELETION_TOMBSTONE_SECRET` and upserts it through
+Render's per-key environment-variable API. The value is never printed, and the
+corresponding `render.yaml` entry uses `sync: false` so GitHub remains the sole
+authority instead of creating a divergent Blueprint-generated key. The job also
+pins `PYTHON_VERSION=3.11.15`, then deletes the legacy
+`BRASSTUNE_ALLOW_CORS_REGEX` and `CORS_ALLOWED_ORIGIN_REGEX` variables. Render
+`204` and already-absent `404` responses are accepted; every other response
+blocks deployment.
 
 The hosted production smoke workflow lives at `.github/workflows/production-smoke.yml`. It runs after a successful `Deploy` workflow and can also be manually dispatched. For `workflow_run`, both smoke jobs explicitly check out the deploy run's `head_sha`; a manual dispatch checks out its own `github.sha`. It wraps:
 

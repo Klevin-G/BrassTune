@@ -48,7 +48,7 @@ jobs:
         run: npm ci
       - name: Install backend dependencies for browser journeys
         working-directory: backend
-        run: python -m pip install --upgrade pip && python -m pip install --require-hashes -r requirements-prod.lock
+        run: python -m pip install --require-hashes -r requirements-prod.lock
       - name: Unit tests
         run: npm test
       - name: Production build

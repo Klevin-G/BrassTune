@@ -153,6 +153,7 @@ jobs:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
       BRASSTUNE_DELETION_TOMBSTONE_SECRET: ${{ secrets.BRASSTUNE_DELETION_TOMBSTONE_SECRET }}
+      BRASSTUNE_RENDER_PYTHON_VERSION: "3.11.15"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Disable Render auto-deploy
@@ -190,6 +191,58 @@ jobs:
           print(json.dumps({"value": os.environ["BRASSTUNE_DELETION_TOMBSTONE_SECRET"]}))
           PY
           echo "Synchronized the dedicated deletion tombstone key without exposing its value."
+      - name: Pin Render Python version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' | curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
+            --request PUT \
+            --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/env-vars/PYTHON_VERSION" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data-binary @- \
+            --output /dev/null
+          import json
+          import os
+
+          print(json.dumps({"value": os.environ["BRASSTUNE_RENDER_PYTHON_VERSION"]}))
+          PY
+          echo "Pinned the Render Python runtime to ${BRASSTUNE_RENDER_PYTHON_VERSION}."
+      - name: Remove legacy Render CORS regex variables
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          delete_render_env_var() {
+            local key="$1"
+            local status
+
+            if ! status="$(curl --max-time 30 --retry 2 --retry-all-errors --silent --show-error \
+              --request DELETE \
+              --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/env-vars/${key}" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --output /dev/null \
+              --write-out '%{http_code}')"; then
+              echo "::error::Render request failed while deleting ${key}."
+              return 1
+            fi
+
+            case "$status" in
+              204)
+                echo "Deleted legacy Render environment variable ${key}."
+                ;;
+              404)
+                echo "Legacy Render environment variable ${key} was already absent."
+                ;;
+              *)
+                echo "::error::Render refused to delete ${key} (HTTP ${status})."
+                return 1
+                ;;
+            esac
+          }
+
+          delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX
+          delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX
       - name: Trigger exact Render deploy
         run: |
           curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \

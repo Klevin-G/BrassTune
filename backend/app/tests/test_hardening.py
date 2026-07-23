@@ -198,18 +198,31 @@ def test_backend_deploy_and_ci_use_hash_pinned_lockfiles():
     for workflow in ("backend.yml", "frontend.yml", "device-simulation.yml", "security.yml"):
         contents = (root / ".github" / "workflows" / workflow).read_text()
         assert "pip install --require-hashes -r requirements" in contents
+        assert "--upgrade pip" not in contents
 
 
-def test_render_cors_regex_is_not_enabled_by_default_and_tombstone_key_is_durable():
+def test_render_deploy_removes_legacy_cors_regex_and_uses_authoritative_runtime_values():
     root = Path(__file__).resolve().parents[3]
     render = (root / "render.yaml").read_text()
     deploy = (root / ".github" / "workflows" / "deploy.yml").read_text()
     assert "BRASSTUNE_ALLOW_CORS_REGEX" not in render
-    assert "CORS_ALLOWED_ORIGIN_REGEX" in render
+    assert "CORS_ALLOWED_ORIGIN_REGEX" not in render
     assert "BRASSTUNE_DELETION_TOMBSTONE_SECRET" in render
-    assert "generateValue: true" in render
+    assert "BRASSTUNE_DELETION_TOMBSTONE_SECRET\n        sync: false" in render
+    assert "generateValue: true" not in render
+    assert 'PYTHON_VERSION\n        value: "3.11.15"' in render
     assert "/env-vars/BRASSTUNE_DELETION_TOMBSTONE_SECRET" in deploy
     assert "secrets.BRASSTUNE_DELETION_TOMBSTONE_SECRET" in deploy
+    assert "--request DELETE" in deploy
+    assert "/env-vars/${key}" in deploy
+    assert "delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX" in deploy
+    assert "delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX" in deploy
+    assert "204)" in deploy
+    assert "404)" in deploy
+    assert deploy.index("Disable Render auto-deploy") < deploy.index("Remove legacy Render CORS regex variables")
+    assert deploy.index("Remove legacy Render CORS regex variables") < deploy.index("Trigger exact Render deploy")
+    assert "/env-vars/PYTHON_VERSION" in deploy
+    assert 'BRASSTUNE_RENDER_PYTHON_VERSION: "3.11.15"' in deploy
 
 
 def _session(db, user_id: int, instrument_id: str, started_at: dt.datetime):
