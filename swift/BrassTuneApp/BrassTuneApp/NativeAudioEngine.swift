@@ -95,6 +95,8 @@ final class NativeAudioEngine: ObservableObject {
     private var routeChangeObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private let audioSessionCoordinator: NativeAudioSessionCoordinator
+    private let microphonePermissionRequester: @MainActor () async -> Bool
+    private let simulateTonePlayback: Bool
     private var prepareForTonePlayback: (() -> Void)?
 
     static var defaultRecordingSource: PracticeSessionSource {
@@ -103,8 +105,23 @@ final class NativeAudioEngine: ObservableObject {
 
     static var testFixturesEnabled: Bool { NativeTestFixtures.areEnabled }
 
-    init(audioSessionCoordinator: NativeAudioSessionCoordinator = .shared) {
+    init(
+        audioSessionCoordinator: NativeAudioSessionCoordinator = .shared,
+        microphonePermissionRequester: (@MainActor () async -> Bool)? = nil,
+        simulateTonePlayback: Bool = false
+    ) {
         self.audioSessionCoordinator = audioSessionCoordinator
+        self.microphonePermissionRequester = microphonePermissionRequester ?? {
+            if #available(iOS 17.0, *) {
+                return await AVAudioApplication.requestRecordPermission()
+            }
+            return await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                    continuation.resume(returning: allowed)
+                }
+            }
+        }
+        self.simulateTonePlayback = simulateTonePlayback
         routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: nil,
@@ -141,16 +158,7 @@ final class NativeAudioEngine: ObservableObject {
     }
 
     func requestMicrophonePermission() async -> Bool {
-        let granted: Bool
-        if #available(iOS 17.0, *) {
-            granted = await AVAudioApplication.requestRecordPermission()
-        } else {
-            granted = await withCheckedContinuation { continuation in
-                AVAudioSession.sharedInstance().requestRecordPermission { allowed in
-                    continuation.resume(returning: allowed)
-                }
-            }
-        }
+        let granted = await microphonePermissionRequester()
         permissionDenied = !granted
         audioNotice = granted ? nil : NativeLocalization.string("Microphone access is off. Allow it in Settings, then try again.")
         return granted
@@ -249,8 +257,8 @@ final class NativeAudioEngine: ObservableObject {
               frequenciesHz.allSatisfy({ $0.isFinite && (20...5_000).contains($0) }) else {
             throw NativeAudioEngineError.invalidToneFrequency
         }
+        prepareForTonePlayback?()
         if recording {
-            prepareForTonePlayback?()
             guard !recording else {
                 throw NativeAudioEngineError.captureActive
             }
@@ -262,7 +270,7 @@ final class NativeAudioEngine: ObservableObject {
         routeChanged = false
         let safeVolume = Float(min(0.5, max(0.05, volume)))
 
-        if Self.testFixturesEnabled {
+        if Self.testFixturesEnabled || simulateTonePlayback {
             tonePlaying = true
             toneFrequencyHz = frequencyHz
             toneFrequenciesHz = frequenciesHz

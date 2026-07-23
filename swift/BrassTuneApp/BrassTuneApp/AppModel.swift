@@ -7,6 +7,20 @@ import UIKit
 import UniformTypeIdentifiers
 
 @MainActor
+enum AppAudioOwnershipHandoff {
+    static func prepareForTonePlayback(
+        cancelPendingRecordingStart: () -> Void,
+        isRecording: () -> Bool,
+        stopRecording: () -> Void
+    ) {
+        cancelPendingRecordingStart()
+        if isRecording() {
+            stopRecording()
+        }
+    }
+}
+
+@MainActor
 final class AppModel: ObservableObject {
     @Published var config: AppConfig = .fromProcessEnvironment()
     @Published var authState: AuthState = .signedOut
@@ -81,6 +95,7 @@ final class AppModel: ObservableObject {
         apiClient: APIClient = APIClient(),
         authService: AuthService = AuthService(),
         audioSessionCoordinator: NativeAudioSessionCoordinator = .shared,
+        audioEngine: NativeAudioEngine? = nil,
         classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)? = nil
     ) {
         NativeLocalization.language = AppLanguage.launchOverride ?? .system
@@ -97,13 +112,18 @@ final class AppModel: ObservableObject {
         )
         self.apiClient = apiClient
         self.authService = authService
-        self.audioEngine = NativeAudioEngine(audioSessionCoordinator: audioSessionCoordinator)
+        self.audioEngine = audioEngine ?? NativeAudioEngine(audioSessionCoordinator: audioSessionCoordinator)
         self.metronomeOutput = NativeMetronomeOutput(audioSessionCoordinator: audioSessionCoordinator)
         self.classAccessTokenProvider = classAccessTokenProvider
         retryPendingAccountPurges()
         observeAudioFrames()
         self.audioEngine.setTonePlaybackPreparation { [weak self] in
-            self?.stopRecording()
+            guard let self else { return }
+            AppAudioOwnershipHandoff.prepareForTonePlayback(
+                cancelPendingRecordingStart: self.cancelRecordingStart,
+                isRecording: { self.audioEngine.recording },
+                stopRecording: self.stopRecording
+            )
         }
     }
 

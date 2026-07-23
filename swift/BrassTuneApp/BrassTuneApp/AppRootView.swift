@@ -244,7 +244,11 @@ struct AuthGatewayView: View {
                         }
 
                         if let persistenceError = model.persistenceErrorMessage {
-                            Label(persistenceError, systemImage: "externaldrive.badge.exclamationmark")
+                            Label {
+                                Text(verbatim: persistenceError)
+                            } icon: {
+                                Image(systemName: "externaldrive.badge.exclamationmark")
+                            }
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(BTTheme.danger)
                                 .fixedSize(horizontal: false, vertical: true)

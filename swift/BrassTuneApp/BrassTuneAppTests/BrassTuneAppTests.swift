@@ -42,8 +42,109 @@ private final class InMemoryAuthSessionStore: @unchecked Sendable {
     var payload: String?
 }
 
+@MainActor
+private final class DeferredMicrophonePermission {
+    private var requestObservedContinuation: CheckedContinuation<Void, Never>?
+    private var permissionContinuation: CheckedContinuation<Bool, Never>?
+    private(set) var requested = false
+
+    func request() async -> Bool {
+        requested = true
+        requestObservedContinuation?.resume()
+        requestObservedContinuation = nil
+        return await withCheckedContinuation { continuation in
+            permissionContinuation = continuation
+        }
+    }
+
+    func waitUntilRequested() async {
+        guard !requested else { return }
+        await withCheckedContinuation { continuation in
+            requestObservedContinuation = continuation
+        }
+    }
+
+    func resolve(granted: Bool) {
+        permissionContinuation?.resume(returning: granted)
+        permissionContinuation = nil
+    }
+}
+
 final class BrassTuneAppTests: XCTestCase {
     // MARK: - Shipping defaults and local model behavior
+
+    @MainActor
+    func testToneOwnershipCancelsPendingTunerStartBeforeStoppingActiveRecording() {
+        var events: [String] = []
+        var isRecording = true
+
+        AppAudioOwnershipHandoff.prepareForTonePlayback(
+            cancelPendingRecordingStart: { events.append("cancel pending tuner start") },
+            isRecording: { isRecording },
+            stopRecording: {
+                events.append("stop and save tuner recording")
+                isRecording = false
+            }
+        )
+
+        XCTAssertFalse(isRecording)
+        XCTAssertEqual(events, ["cancel pending tuner start", "stop and save tuner recording"])
+    }
+
+    @MainActor
+    func testToneOwnershipCancelsPendingTunerStartWithoutInventingARecording() {
+        var events: [String] = []
+
+        AppAudioOwnershipHandoff.prepareForTonePlayback(
+            cancelPendingRecordingStart: { events.append("cancel pending tuner start") },
+            isRecording: { false },
+            stopRecording: { events.append("stop tuner recording") }
+        )
+
+        XCTAssertEqual(events, ["cancel pending tuner start"])
+    }
+
+    @MainActor
+    func testLateMicrophoneGrantCannotReplaceDroneToneOrSaveHiddenRecording() async {
+        let permission = DeferredMicrophonePermission()
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { XCTFail("A canceled microphone start must not acquire the audio session.") },
+            deactivateSession: { }
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            microphonePermissionRequester: permission.request,
+            simulateTonePlayback: true
+        )
+        let model = makeModel(audioEngine: engine, audioSessionCoordinator: coordinator)
+
+        let pendingRecording = Task { @MainActor in
+            await model.startRecording()
+        }
+        await permission.waitUntilRequested()
+        XCTAssertTrue(model.recordingStartInProgress)
+        XCTAssertFalse(engine.recording)
+
+        model.startDrone()
+        let droneFrequencies = engine.toneFrequenciesHz
+        XCTAssertTrue(engine.tonePlaying)
+        XCTAssertFalse(droneFrequencies.isEmpty)
+        XCTAssertFalse(
+            model.recordingStartInProgress,
+            "Drone ownership must synchronously invalidate the pending tuner start."
+        )
+
+        permission.resolve(granted: true)
+        await pendingRecording.value
+
+        XCTAssertTrue(engine.tonePlaying, "A late microphone grant must not stop the tone that owns the audio engine.")
+        XCTAssertEqual(engine.toneFrequenciesHz, droneFrequencies)
+        XCTAssertFalse(engine.recording, "The canceled tuner request must not become a hidden capture.")
+        XCTAssertFalse(model.recordingStartInProgress)
+        XCTAssertTrue(model.sessions.isEmpty, "A canceled pending start has no take to save.")
+        XCTAssertNil(model.lastError)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+    }
 
     @MainActor
     func testLeavingActiveSceneCancelsPendingTunerStartBeforeReleasingPracticeAudio() {
@@ -2886,13 +2987,18 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    private func makeModel() -> AppModel {
+    private func makeModel(
+        audioEngine: NativeAudioEngine? = nil,
+        audioSessionCoordinator: NativeAudioSessionCoordinator = .shared
+    ) -> AppModel {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
         let model = AppModel(
             persistenceStore: .ephemeral(fileURL: stateURL),
             scoreStorageDirectory: scoreDirectory,
-            authService: AuthService(session: makeStubSession(), readSessionPayload: { nil })
+            authService: AuthService(session: makeStubSession(), readSessionPayload: { nil }),
+            audioSessionCoordinator: audioSessionCoordinator,
+            audioEngine: audioEngine
         )
         model.enterGuestDemo(presentTutorial: false)
         return model
