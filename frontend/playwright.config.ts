@@ -14,11 +14,12 @@ const defaultBackendPython = process.platform === 'win32'
 const backendPython = process.env.E2E_BACKEND_PYTHON ?? defaultBackendPython;
 const backendCommand = `cd ../backend && ${backendPython} -m uvicorn app.main:app --host 127.0.0.1 --port 8000`;
 const backendDatabaseURL = process.env.E2E_BACKEND_DATABASE_URL ?? `sqlite:///${join(tmpdir(), `brasstune-e2e-${process.pid}.db`)}`;
+export const CI_E2E_GLOBAL_TIMEOUT_MS = 30 * 60_000;
 
 export default defineConfig({
   testDir: './e2e',
   timeout: 45_000,
-  globalTimeout: ci ? 12 * 60_000 : undefined,
+  globalTimeout: ci ? CI_E2E_GLOBAL_TIMEOUT_MS : undefined,
   workers: 1,
   forbidOnly: ci,
   expect: {

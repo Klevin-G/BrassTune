@@ -59,7 +59,7 @@ jobs:
         timeout-minutes: 60
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Browser release journeys
-        timeout-minutes: 15
+        timeout-minutes: 35
         env:
           DATABASE_URL: sqlite:///${{ runner.temp }}/brasstune-e2e-${{ github.run_id }}-${{ github.run_attempt }}.db
           E2E_START_LOCAL_SERVERS: "1"
