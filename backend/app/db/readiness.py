@@ -37,10 +37,28 @@ REQUIRED_TABLE_COLUMNS = {
         "counts_json",
         "completed_at",
     },
+    "audio_storage_jobs": {
+        "id",
+        "user_id",
+        "session_id",
+        "idempotency_key",
+        "action",
+        "provider",
+        "object_key",
+        "size_bytes",
+        "reason",
+        "status",
+        "retry_count",
+        "next_retry_at",
+        "safe_error_category",
+        "details_json",
+        "completed_at",
+    },
 }
 
 REQUIRED_INDEX_COLUMN_SETS = {
     "invitations": {("invited_user_id",), ("invited_by_user_id",)},
+    "audio_storage_jobs": {("user_id", "action", "status"), ("status", "next_retry_at", "updated_at")},
 }
 
 REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS = {
@@ -50,6 +68,9 @@ REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS = {
 REQUIRED_POSTGRES_COLUMN_TYPES = {
     "account_deletion_jobs": {
         "counts_json": "jsonb",
+    },
+    "audio_storage_jobs": {
+        "details_json": "jsonb",
     },
 }
 
@@ -208,7 +229,7 @@ def maintenance_readiness_issues() -> list[str]:
     if app_environment() not in DEPLOYED_ENVIRONMENTS:
         return []
     if not os.getenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET"):
-        return ["Missing BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET for account deletion retry executor."]
+        return ["Missing BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET for maintenance retry executors."]
     return []
 
 

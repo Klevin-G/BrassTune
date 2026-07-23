@@ -209,3 +209,31 @@ class AccountDeletionJob(Base):
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+
+class AudioStorageJob(Base):
+    """Durable upload reservations, cleanup tombstones, and reconciliations.
+
+    User/session identifiers intentionally are not foreign keys: cleanup work
+    must survive account or session deletion until the storage object is gone.
+    """
+
+    __tablename__ = "audio_storage_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    session_id = Column(Integer, nullable=True, index=True)
+    idempotency_key = Column(String, nullable=False, unique=True, index=True)
+    action = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
+    object_key = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False, default=0)
+    reason = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    retry_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime, nullable=True)
+    safe_error_category = Column(String, nullable=True)
+    details_json = Column(JSON().with_variant(JSONB(), "postgresql"), nullable=False, default=dict)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)

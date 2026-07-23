@@ -312,6 +312,73 @@ def test_websocket_non_object_json_is_rejected_without_crashing(monkeypatch):
             assert websocket.receive_json()["type"] == "pong"
 
 
+def test_websocket_start_session_uses_bounded_shared_schema(monkeypatch):
+    starts = []
+
+    def fake_start(_db, instrument_id, name, reference_pitch_hz, user_id):
+        starts.append((instrument_id, name, reference_pitch_hz, user_id))
+        return SimpleNamespace(id=len(starts), name=name or "Trumpet practice")
+
+    monkeypatch.setattr(websocket_module, "start_session", fake_start)
+    monkeypatch.setenv("BRASSTUNE_WS_SESSION_STARTS_PER_ACCOUNT_PER_MINUTE", "1")
+    monkeypatch.setenv("BRASSTUNE_WS_SESSION_STARTS_PER_IP_PER_MINUTE", "1")
+    app = _websocket_limit_app(monkeypatch)
+    invalid_messages = [
+        {"type": "start_session", "instrument_id": "trumpet", "name": "x" * 121},
+        {"type": "start_session", "instrument_id": "trumpet", "reference_pitch_hz": "nan"},
+        {"type": "start_session", "instrument_id": "trumpet", "reference_pitch_hz": 399},
+        {"type": "start_session", "instrument_id": "trumpet", "reference_pitch_hz": 481},
+        {"type": "start_session", "instrument_id": "not-a-real-instrument"},
+    ]
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            for message in invalid_messages:
+                websocket.send_json(message)
+                assert websocket.receive_json()["type"] == "error"
+            websocket.send_json(
+                {
+                    "type": "start_session",
+                    "instrument_id": "trumpet",
+                    "name": "Warmup",
+                    "reference_pitch_hz": 442,
+                }
+            )
+            assert websocket.receive_json()["type"] == "session_started"
+            websocket.send_json({"type": "start_session", "instrument_id": "trumpet"})
+            assert "too many session starts" in websocket.receive_json()["message"].lower()
+    assert starts == [("trumpet", "Warmup", 442.0, 42)]
+
+
+def test_websocket_session_start_budget_is_account_scoped(monkeypatch):
+    starts = []
+
+    def fake_start(_db, instrument_id, name, reference_pitch_hz, user_id):
+        starts.append(user_id)
+        return SimpleNamespace(id=len(starts), name=name or "Trumpet practice")
+
+    monkeypatch.setattr(websocket_module, "start_session", fake_start)
+    monkeypatch.setenv("BRASSTUNE_WS_SESSION_STARTS_PER_ACCOUNT_PER_MINUTE", "1")
+    monkeypatch.setenv("BRASSTUNE_WS_SESSION_STARTS_PER_IP_PER_MINUTE", "10")
+    app = _websocket_limit_app(monkeypatch)
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_json({"type": "start_session", "instrument_id": "trumpet"})
+            assert websocket.receive_json()["type"] == "session_started"
+            websocket.send_json({"type": "start_session", "instrument_id": "trumpet"})
+            assert "too many session starts" in websocket.receive_json()["message"].lower()
+            websocket.send_json({"type": "ping"})
+            assert websocket.receive_json()["type"] == "pong"
+    assert starts == [42]
+
+
+def test_websocket_session_start_budget_is_also_ip_scoped(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_WS_SESSION_STARTS_PER_ACCOUNT_PER_MINUTE", "10")
+    monkeypatch.setenv("BRASSTUNE_WS_SESSION_STARTS_PER_IP_PER_MINUTE", "1")
+    assert websocket_module._try_consume_session_start("account-a", "198.51.100.10", now=10.0) is True
+    assert websocket_module._try_consume_session_start("account-b", "198.51.100.10", now=10.1) is False
+    assert websocket_module._try_consume_session_start("account-b", "198.51.100.11", now=10.1) is True
+
+
 def test_session_quota_is_enforced_at_shared_creation_boundary(monkeypatch, quota_db):
     monkeypatch.setenv("BRASSTUNE_MAX_SESSIONS_PER_USER", "1")
     quota_db.add(User(id=701, username="quota701", name="Quota User", primary_instrument_id="trumpet"))
@@ -342,7 +409,7 @@ def test_websocket_reports_shared_session_quota_without_disconnect(monkeypatch):
             assert websocket.receive_json()["type"] == "pong"
 
 
-def test_audio_quota_subtracts_current_recording_on_replacement(monkeypatch, quota_db):
+def test_audio_quota_counts_current_recording_until_replacement_cleanup(monkeypatch, quota_db):
     monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "350")
     quota_db.add(User(id=702, username="audio702", name="Audio User", primary_instrument_id="trumpet"))
     current = PracticeSession(
@@ -361,9 +428,9 @@ def test_audio_quota_subtracts_current_recording_on_replacement(monkeypatch, quo
     quota_db.commit()
     quota_db.refresh(current)
 
-    enforce_audio_storage_quota(quota_db, current, 150)
+    enforce_audio_storage_quota(quota_db, current, 50)
     with pytest.raises(HTTPException) as blocked:
-        enforce_audio_storage_quota(quota_db, current, 151)
+        enforce_audio_storage_quota(quota_db, current, 51)
     assert blocked.value.status_code == 413
 
 

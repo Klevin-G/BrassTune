@@ -4,6 +4,10 @@ import io
 import json
 import math
 import asyncio
+import os
+import subprocess
+import sys
+import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
+import app.services.audio_storage as audio_storage_module
 from app.api.auth import AuthContext, _sync_supabase_user, delete_supabase_identity
 from app.api.routes import (
     _filtered_events,
@@ -44,7 +49,7 @@ from app.db.database import Base, DATABASE_URL, SessionLocal, database_backend, 
 from app.db.maintenance import clear_practice_data, repair_demo_data
 from app.db.seed import _sync_explicit_identity_sequences, seed_demo_data
 from app.main import app
-from app.models.db import AccountDeletionJob, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, UsageEvent, User
+from app.models.db import AccountDeletionJob, AudioStorageJob, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, UsageEvent, User
 from app.schemas.schemas import (
     MAX_BATCH_PITCH_FRAMES,
     AcceptInvitationRequest,
@@ -54,7 +59,8 @@ from app.schemas.schemas import (
     JoinByCodeRequest,
     UpdateGroupMemberRequest,
 )
-from app.services.audio_storage import delete_audio_for_session
+from app.services.audio_storage import AudioReplaceResult, delete_audio_for_session, prepare_audio_upload, replace_audio_for_session, reserve_audio_upload, retry_audio_storage_jobs
+from app.services.serializers import session_to_dict
 from app.services.session_service import save_pitch_frames
 
 WEBM_AUDIO_BYTES = b"\x1a\x45\xdf\xa3webm-audio-bytes"
@@ -74,6 +80,60 @@ def test_sqlite_engine_uses_busy_timeout_for_browser_ci_contention():
         journal_mode = str(connection.exec_driver_sql("PRAGMA journal_mode").scalar()).lower()
     assert busy_timeout_ms >= 30000
     assert journal_mode in {"wal", "memory"}
+
+
+def test_default_pytest_database_is_process_isolated():
+    if os.getenv("BRASSTUNE_PYTEST_DATABASE_ISOLATED") != "1":
+        pytest.skip("Caller explicitly selected the test database.")
+    assert DATABASE_URL.startswith("sqlite:///")
+    assert not DATABASE_URL.endswith("/backend/data/brasstune.db")
+    assert "brasstune-pytest-" in DATABASE_URL
+
+
+def _probe_pytest_database_environment(env):
+    code = """
+import json
+import os
+import runpy
+import sys
+
+state = runpy.run_path(sys.argv[1])
+from app.db.database import DATABASE_URL
+print(json.dumps({
+    "database_url": DATABASE_URL,
+    "isolated": os.getenv("BRASSTUNE_PYTEST_DATABASE_ISOLATED"),
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(Path(__file__).with_name("conftest.py"))],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_pytest_ignores_ambient_application_database_urls(tmp_path):
+    env = os.environ.copy()
+    env.pop("BRASSTUNE_TEST_DATABASE_URL", None)
+    env["BRASSTUNE_DATABASE_URL"] = "sqlite:///%s" % (tmp_path / "ambient-brasstune.db")
+    env["DATABASE_URL"] = "sqlite:///%s" % (tmp_path / "ambient-generic.db")
+    result = _probe_pytest_database_environment(env)
+    assert result["isolated"] == "1"
+    assert "brasstune-pytest-" in result["database_url"]
+    assert "ambient" not in result["database_url"]
+
+
+def test_pytest_requires_test_only_database_url_for_explicit_database(tmp_path):
+    explicit_url = "sqlite:///%s" % (tmp_path / "explicit-test.db")
+    env = os.environ.copy()
+    env["BRASSTUNE_TEST_DATABASE_URL"] = explicit_url
+    env["BRASSTUNE_DATABASE_URL"] = "sqlite:///%s" % (tmp_path / "ambient-brasstune.db")
+    env["DATABASE_URL"] = "sqlite:///%s" % (tmp_path / "ambient-generic.db")
+    result = _probe_pytest_database_environment(env)
+    assert result == {"database_url": explicit_url, "isolated": None}
 
 
 def test_backend_requirements_install_uvicorn_websocket_protocol():
@@ -318,6 +378,10 @@ def test_postgres_readiness_requires_account_deletion_counts_jsonb():
         "account_deletion_jobs",
         [{"name": "counts_json", "type": "JSONB"}],
     ) == []
+    assert _postgres_column_type_issues(
+        "audio_storage_jobs",
+        [{"name": "details_json", "type": "TEXT"}],
+    ) == ["Column audio_storage_jobs.details_json must be jsonb, not text."]
 
 
 def test_postgres_readiness_accepts_exact_membership_unique_constraint_or_index():
@@ -825,6 +889,19 @@ def test_audio_upload_rejects_spoofed_audio_mime():
             assert "format" in response.json()["detail"].lower()
 
 
+@pytest.mark.parametrize("duration", ["nan", "inf", "-1", "86401"])
+def test_audio_upload_rejects_invalid_duration_metadata(duration):
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        response = client.post(
+            f"/api/sessions/{session['id']}/audio",
+            content=WEBM_AUDIO_BYTES,
+            headers={"Content-Type": "audio/webm", "X-Audio-Duration-Seconds": duration},
+        )
+    assert response.status_code == 400
+    assert "duration" in response.json()["detail"].lower()
+
+
 def test_session_zip_contains_expected_files():
     with TestClient(app) as client:
         session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
@@ -1324,6 +1401,475 @@ def test_supabase_audio_delete_is_called_before_metadata_is_cleared(monkeypatch)
         db.close()
 
 
+def test_cross_mime_audio_replacement_commits_metadata_before_old_cleanup(monkeypatch):
+    db = _test_db()
+    calls = []
+    try:
+        session = _session(db, 52, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "52/%s/recording.webm" % session.id
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "replacement")
+        monkeypatch.setattr(
+            "app.services.audio_storage._upload_to_supabase",
+            lambda key, data, mime: calls.append(("upload", key, mime, len(data))),
+        )
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_supabase_object",
+            lambda key: calls.append(("delete", key)),
+        )
+        real_commit = db.commit
+        commit_count = 0
+
+        def tracked_commit():
+            nonlocal commit_count
+            commit_count += 1
+            calls.append(("commit", commit_count))
+            real_commit()
+
+        monkeypatch.setattr(db, "commit", tracked_commit)
+
+        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 2.5)
+        replacement_key = "52/%s/versions/replacement/recording.wav" % session.id
+        assert result.cleanup_pending is False
+        assert result.reconciliation_pending is False
+        assert session.audio_object_key == replacement_key
+        assert session.audio_mime_type == "audio/wav"
+        assert calls == [
+            ("commit", 1),
+            ("upload", replacement_key, "audio/wav", 12),
+            ("commit", 2),
+            ("commit", 3),
+            ("delete", "52/%s/recording.webm" % session.id),
+            ("commit", 4),
+        ]
+        jobs = db.query(AudioStorageJob).order_by(AudioStorageJob.id.asc()).all()
+        assert [(job.action, job.status, job.size_bytes) for job in jobs] == [
+            ("reconcile_metadata", "completed", 12),
+            ("delete_object", "completed", 100),
+        ]
+
+        delete_audio_for_session(session)
+        assert calls[-1] == ("delete", replacement_key)
+        assert session.audio_object_key is None
+    finally:
+        db.close()
+
+
+def test_cross_mime_audio_commit_failure_discards_only_new_object(monkeypatch):
+    db = _test_db()
+    calls = []
+    try:
+        session = _session(db, 53, "trumpet", dt.datetime(2026, 6, 15))
+        previous_key = "53/%s/recording.webm" % session.id
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = previous_key
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "replacement")
+        monkeypatch.setattr(
+            "app.services.audio_storage._upload_to_supabase",
+            lambda key, data, mime: calls.append(("upload", key)),
+        )
+        real_commit = db.commit
+        commit_count = 0
+
+        def fail_metadata_commit_only():
+            nonlocal commit_count
+            commit_count += 1
+            calls.append(("commit", commit_count))
+            if commit_count == 2:
+                raise RuntimeError("commit failed")
+            real_commit()
+
+        monkeypatch.setattr(db, "commit", fail_metadata_commit_only)
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_supabase_object",
+            lambda key: calls.append(("delete", key)),
+        )
+
+        with pytest.raises(HTTPException) as blocked:
+            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 3.0)
+        assert blocked.value.status_code == 503
+        replacement_key = "53/%s/versions/replacement/recording.wav" % session.id
+        assert "staged upload was removed" in blocked.value.detail.lower()
+        assert calls == [
+            ("commit", 1),
+            ("upload", replacement_key),
+            ("commit", 2),
+            ("delete", replacement_key),
+            ("commit", 3),
+        ]
+        db.refresh(session)
+        assert session.audio_object_key == previous_key
+        assert session.audio_mime_type == "audio/webm"
+        assert session.audio_size_bytes == 100
+        job = db.query(AudioStorageJob).one()
+        assert job.action == "upload_reservation"
+        assert job.status == "cancelled"
+    finally:
+        db.close()
+
+
+def test_cross_mime_post_commit_cleanup_failure_keeps_new_recording_active(monkeypatch):
+    db = _test_db()
+    calls = []
+    try:
+        session = _session(db, 54, "trumpet", dt.datetime(2026, 6, 15))
+        previous_key = "54/%s/recording.webm" % session.id
+        replacement_key = "54/%s/versions/replacement/recording.wav" % session.id
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = previous_key
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "replacement")
+        monkeypatch.setattr(
+            "app.services.audio_storage._upload_to_supabase",
+            lambda key, data, mime: calls.append(("upload", key)),
+        )
+
+        def fail_old_cleanup(key):
+            calls.append(("delete", key))
+            raise HTTPException(status_code=502, detail="old cleanup failed")
+
+        monkeypatch.setattr("app.services.audio_storage._delete_supabase_object", fail_old_cleanup)
+
+        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 3.0)
+        assert result.cleanup_pending is True
+        assert result.reconciliation_pending is False
+        assert calls == [("upload", replacement_key), ("delete", previous_key)]
+        db.refresh(session)
+        assert session.audio_object_key == replacement_key
+        assert session.audio_mime_type == "audio/wav"
+        assert session.audio_size_bytes == 12
+        jobs = db.query(AudioStorageJob).order_by(AudioStorageJob.id.asc()).all()
+        assert [(job.action, job.status) for job in jobs] == [
+            ("reconcile_metadata", "completed"),
+            ("delete_object", "retryable_failure"),
+        ]
+    finally:
+        db.close()
+
+
+def test_audio_upload_truthfully_reports_post_commit_cleanup_pending(monkeypatch):
+    def fake_replace(db, session, _data, mime_type, duration_seconds):
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "%s/%s/versions/new/recording.wav" % (session.user_id, session.id)
+        session.audio_mime_type = mime_type
+        session.audio_duration_seconds = duration_seconds
+        session.audio_size_bytes = 12
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return AudioReplaceResult(audio_snapshot=session_to_dict(session), cleanup_pending=True)
+
+    monkeypatch.setattr("app.api.routes.replace_audio_for_session", fake_replace)
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        response = client.post(
+            f"/api/sessions/{session['id']}/audio",
+            content=b"RIFF....WAVE",
+            headers={"Content-Type": "audio/wav", "X-Audio-Duration-Seconds": "3"},
+        )
+    assert response.status_code == 202
+    assert response.json()["uploaded"] is True
+    assert response.json()["cleanup_pending"] is True
+    assert "new recording is active" in response.json()["message"].lower()
+
+
+def test_audio_refresh_failure_returns_snapshot_and_leaves_durable_reconciliation(monkeypatch):
+    db = _test_db()
+    try:
+        session = _session(db, 55, "trumpet", dt.datetime(2026, 6, 15))
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "refresh-failure")
+        monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: None)
+        monkeypatch.setattr(db, "refresh", lambda _row: (_ for _ in ()).throw(RuntimeError("refresh failed")))
+
+        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        assert result.activation_pending is False
+        assert result.reconciliation_pending is True
+        assert result.audio_snapshot["audio_mime_type"] == "audio/wav"
+        assert result.audio_snapshot["audio_size_bytes"] == 12
+        job = db.query(AudioStorageJob).one()
+        assert job.action == "reconcile_metadata"
+        assert job.status == "pending"
+        assert job.details_json["audio_snapshot"] == result.audio_snapshot
+    finally:
+        db.close()
+
+
+def test_failed_staged_cleanup_is_durable_and_operator_retry_is_idempotent(monkeypatch):
+    db = _test_db()
+    try:
+        session = _session(db, 56, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "56/%s/recording.webm" % session.id
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "cleanup-retry")
+        monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: None)
+        real_commit = db.commit
+        commit_count = 0
+
+        def fail_metadata_commit_only():
+            nonlocal commit_count
+            commit_count += 1
+            if commit_count == 2:
+                raise RuntimeError("commit failed")
+            real_commit()
+
+        monkeypatch.setattr(db, "commit", fail_metadata_commit_only)
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_supabase_object",
+            lambda _key: (_ for _ in ()).throw(HTTPException(status_code=502, detail="cleanup failed")),
+        )
+
+        with pytest.raises(HTTPException, match="queued for retry"):
+            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        job = db.query(AudioStorageJob).one()
+        assert job.action == "delete_object"
+        assert job.status == "retryable_failure"
+        assert job.user_id == session.user_id
+        assert job.session_id == session.id
+        assert job.provider == "supabase"
+        assert job.size_bytes == 12
+        assert job.reason == "metadata_commit_failed_cleanup"
+        job.next_retry_at = dt.datetime.utcnow() - dt.timedelta(seconds=1)
+        db.add(job)
+        db.commit()
+        deleted = []
+        monkeypatch.setattr("app.services.audio_storage._delete_supabase_object", lambda key: deleted.append(key))
+
+        first = retry_audio_storage_jobs(db)
+        second = retry_audio_storage_jobs(db)
+
+        assert first["completed"] == 1
+        assert second["processed"] == 0
+        assert deleted == [job.object_key]
+        db.refresh(job)
+        assert job.status == "completed"
+    finally:
+        db.close()
+
+
+def test_known_over_quota_upload_never_writes_storage(monkeypatch):
+    db = _test_db()
+    writes = []
+    try:
+        session = _session(db, 57, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "57/%s/recording.webm" % session.id
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "105")
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: writes.append("upload"))
+
+        with pytest.raises(HTTPException) as blocked:
+            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        assert blocked.value.status_code == 413
+        assert writes == []
+        assert db.query(AudioStorageJob).count() == 0
+    finally:
+        db.close()
+
+
+def test_pending_cleanup_bytes_remain_in_quota_until_retry_completes(monkeypatch):
+    db = _test_db()
+    writes = []
+    try:
+        session = _session(db, 58, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_size_bytes = 50
+        db.add(
+            AudioStorageJob(
+                user_id=58,
+                session_id=session.id,
+                idempotency_key="pending-cleanup-58",
+                action="delete_object",
+                provider="supabase",
+                object_key="58/old/recording.webm",
+                size_bytes=40,
+                reason="test_pending_cleanup",
+                status="pending",
+                details_json={},
+            )
+        )
+        db.commit()
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "100")
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: writes.append("upload"))
+
+        with pytest.raises(HTTPException) as blocked:
+            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        assert blocked.value.status_code == 413
+        assert writes == []
+    finally:
+        db.close()
+
+
+def test_account_scoped_upload_budget_blocks_second_outstanding_reservation(monkeypatch):
+    db = _test_db()
+    try:
+        first = _session(db, 59, "trumpet", dt.datetime(2026, 6, 15))
+        second = _session(db, 59, "trumpet", dt.datetime(2026, 6, 16))
+        monkeypatch.setenv("BRASSTUNE_MAX_PENDING_AUDIO_UPLOADS_PER_USER", "1")
+        first_stage = prepare_audio_upload(first, b"RIFF....WAVE", "audio/wav", 4.0)
+        reserve_audio_upload(db, first, first_stage)
+        second_stage = prepare_audio_upload(second, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        with pytest.raises(HTTPException) as blocked:
+            reserve_audio_upload(db, second, second_stage)
+
+        assert blocked.value.status_code == 429
+        assert db.query(AudioStorageJob).filter(AudioStorageJob.status == "reserved").count() == 1
+    finally:
+        db.close()
+
+
+def test_concurrent_reservations_cannot_overcommit_account_bytes(monkeypatch):
+    db = _test_db()
+    try:
+        first = _session(db, 60, "trumpet", dt.datetime(2026, 6, 15))
+        second = _session(db, 60, "trumpet", dt.datetime(2026, 6, 16))
+        monkeypatch.setenv("BRASSTUNE_MAX_PENDING_AUDIO_UPLOADS_PER_USER", "10")
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "20")
+        first_stage = prepare_audio_upload(first, b"RIFF....WAVE", "audio/wav", 4.0)
+        reserve_audio_upload(db, first, first_stage)
+        second_stage = prepare_audio_upload(second, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        with pytest.raises(HTTPException) as blocked:
+            reserve_audio_upload(db, second, second_stage)
+
+        assert blocked.value.status_code == 413
+        assert db.query(AudioStorageJob).filter(AudioStorageJob.status == "reserved").count() == 1
+    finally:
+        db.close()
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL row-lock regression")
+def test_postgres_concurrent_reservations_serialize_account_quota(monkeypatch):
+    """Two real transactions cannot both reserve the same account headroom."""
+    user_id = 900060
+    setup_db = SessionLocal()
+    first_holds_account_lock = threading.Event()
+    release_first_reservation = threading.Event()
+    second_started = threading.Event()
+    results = {}
+    failures = []
+    threads = []
+    try:
+        setup_db.query(AudioStorageJob).filter(AudioStorageJob.user_id == user_id).delete(synchronize_session=False)
+        setup_db.query(PracticeSession).filter(PracticeSession.user_id == user_id).delete(synchronize_session=False)
+        setup_db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
+        setup_db.add(User(id=user_id, name="Concurrent Audio User", role="student", primary_instrument_id="trumpet"))
+        setup_db.flush()
+        rows = [
+            PracticeSession(
+                user_id=user_id,
+                instrument_id="trumpet",
+                name="Concurrent reservation %s" % index,
+                started_at=dt.datetime(2026, 7, 16, 12, index),
+                created_at=dt.datetime(2026, 7, 16, 12, index),
+                duration_seconds=8,
+            )
+            for index in (1, 2)
+        ]
+        setup_db.add_all(rows)
+        setup_db.commit()
+        session_ids = [row.id for row in rows]
+
+        monkeypatch.setenv("BRASSTUNE_MAX_PENDING_AUDIO_UPLOADS_PER_USER", "10")
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "20")
+        real_pending_bytes = audio_storage_module._pending_audio_storage_bytes
+
+        def pause_first_while_account_is_locked(db, locked_user_id):
+            pending_bytes = real_pending_bytes(db, locked_user_id)
+            if threading.current_thread().name == "first-audio-reservation":
+                first_holds_account_lock.set()
+                if not release_first_reservation.wait(timeout=10):
+                    raise RuntimeError("Timed out waiting to release first reservation")
+            return pending_bytes
+
+        monkeypatch.setattr(audio_storage_module, "_pending_audio_storage_bytes", pause_first_while_account_is_locked)
+
+        def reserve(name, session_id):
+            db = SessionLocal()
+            try:
+                if name == "second":
+                    second_started.set()
+                row = db.query(PracticeSession).filter(PracticeSession.id == session_id).one()
+                stage = prepare_audio_upload(row, b"RIFF....WAVE", "audio/wav", 4.0)
+                reserve_audio_upload(db, row, stage)
+                results[name] = "reserved"
+            except HTTPException as exc:
+                results[name] = exc.status_code
+            except Exception as exc:  # pragma: no cover - surfaced by the assertion below
+                failures.append(exc)
+            finally:
+                db.close()
+
+        first = threading.Thread(
+            target=reserve,
+            args=("first", session_ids[0]),
+            name="first-audio-reservation",
+        )
+        second = threading.Thread(
+            target=reserve,
+            args=("second", session_ids[1]),
+            name="second-audio-reservation",
+        )
+        threads = [first, second]
+        first.start()
+        assert first_holds_account_lock.wait(timeout=10)
+        second.start()
+        assert second_started.wait(timeout=10)
+        second.join(timeout=0.25)
+        assert second.is_alive(), "The second transaction should wait on the account row lock."
+        release_first_reservation.set()
+        for thread in threads:
+            thread.join(timeout=10)
+            assert not thread.is_alive()
+
+        assert failures == []
+        assert results == {"first": "reserved", "second": 413}
+        assert setup_db.query(AudioStorageJob).filter(
+            AudioStorageJob.user_id == user_id,
+            AudioStorageJob.status == "reserved",
+        ).count() == 1
+    finally:
+        release_first_reservation.set()
+        for thread in threads:
+            thread.join(timeout=1)
+        setup_db.rollback()
+        setup_db.query(AudioStorageJob).filter(AudioStorageJob.user_id == user_id).delete(synchronize_session=False)
+        setup_db.query(PracticeSession).filter(PracticeSession.user_id == user_id).delete(synchronize_session=False)
+        setup_db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
+        setup_db.commit()
+        setup_db.close()
+
+
 def test_account_deletion_local_cleanup_failure_does_not_delete_external_identity(monkeypatch):
     db = _test_db()
     external_calls = []
@@ -1470,6 +2016,20 @@ def test_account_deletion_retry_endpoint_requires_secret(monkeypatch):
         assert response.status_code == 403
         response = client.post("/api/maintenance/account-deletions/retry", headers={"X-BrassTune-Maintenance-Secret": "retry-secret"})
         assert response.status_code == 200
+        assert "audio_storage" in response.json()
+
+
+def test_audio_storage_retry_endpoint_reuses_secure_maintenance_secret(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", "retry-secret")
+    with TestClient(app) as client:
+        response = client.post("/api/maintenance/audio-storage/retry")
+        assert response.status_code == 403
+        response = client.post(
+            "/api/maintenance/audio-storage/retry",
+            headers={"X-BrassTune-Maintenance-Secret": "retry-secret"},
+        )
+        assert response.status_code == 200
+        assert {"processed", "completed", "still_retryable", "results"}.issubset(response.json())
 
 
 def test_account_deletion_retry_executor_completes_external_cleanup(monkeypatch):
@@ -2306,6 +2866,23 @@ def test_join_code_rotation_migration_targets_only_legacy_or_missing_codes():
     assert "generate_series(1, 8)" in migration
     assert "floor(random() * length(alphabet))" in migration
     assert "create unique index if not exists groups_join_code_key" in migration
+
+
+def test_audio_storage_jobs_migration_is_private_idempotent_and_indexed():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260716201825_audio_storage_jobs_and_upload_reservations.sql"
+    ).read_text().lower()
+    assert "create table if not exists public.audio_storage_jobs" in migration
+    assert "idempotency_key text not null unique" in migration
+    assert "details_json jsonb" in migration
+    assert "enable row level security" in migration
+    assert "revoke all privileges on table public.audio_storage_jobs" in migration
+    assert "idx_audio_storage_jobs_account_state" in migration
+    assert "idx_audio_storage_jobs_retry_queue" in migration
+    assert "where status in ('reserved', 'pending', 'in_progress', 'retryable_failure')" in migration
 
 
 def test_env_granted_admin_is_revoked_when_email_removed(monkeypatch):

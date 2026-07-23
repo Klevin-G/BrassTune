@@ -61,8 +61,7 @@ jobs:
     env:
       APP_ENV: local
       BRASSTUNE_AUTH_MODE: disabled
-      BRASSTUNE_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
+      BRASSTUNE_TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
       BRASSTUNE_SEED_DEMO_DATA: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -90,6 +89,8 @@ jobs:
                       cur.execute(path.read_text())
           PY
       - name: Validate PostgreSQL readiness
+        env:
+          BRASSTUNE_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
         run: python -m app.db.check_ready
       - name: Run pytest against PostgreSQL
         run: python -m pytest

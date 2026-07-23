@@ -8,6 +8,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from app.api.auth import AuthContext, auth_context_from_token, local_auth_enabled
 from app.core.security import LOCAL_ENVIRONMENTS, app_environment, origin_is_allowed
@@ -15,7 +16,7 @@ from app.core.instruments.profiles import is_valid_instrument_id
 from app.core.pitch.detector import PitchDetector
 from app.db.database import SessionLocal
 from app.models.db import PracticeSession
-from app.schemas.schemas import AudioFrameIn
+from app.schemas.schemas import AudioFrameIn, StartSessionRequest
 from app.services.session_service import save_pitch_frames, start_session, stop_session
 
 router = APIRouter()
@@ -28,7 +29,10 @@ IDLE_TIMEOUT_SECONDS = 120
 _WS_STATE_LOCK = threading.Lock()
 _WS_CONNECTIONS_BY_IP = defaultdict(int)
 _WS_CONNECTIONS_BY_ACCOUNT = defaultdict(int)
+_WS_SESSION_STARTS_BY_IP = defaultdict(deque)
+_WS_SESSION_STARTS_BY_ACCOUNT = defaultdict(deque)
 _WS_ACTIVE_PITCH_COMPUTATIONS = 0
+_WS_SESSION_START_WINDOW_SECONDS = 60
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -90,11 +94,42 @@ def _release_pitch_compute_slot() -> None:
         _WS_ACTIVE_PITCH_COMPUTATIONS = max(0, _WS_ACTIVE_PITCH_COMPUTATIONS - 1)
 
 
+def _prune_start_buckets(store, now: float) -> None:
+    for key in list(store.keys()):
+        bucket = store[key]
+        while bucket and now - bucket[0] >= _WS_SESSION_START_WINDOW_SECONDS:
+            bucket.popleft()
+        if not bucket:
+            del store[key]
+
+
+def _try_consume_session_start(account_key: str, client_host: str, now: float | None = None) -> bool:
+    timestamp = time.monotonic() if now is None else now
+    account_limit = _positive_int_env("BRASSTUNE_WS_SESSION_STARTS_PER_ACCOUNT_PER_MINUTE", 30)
+    ip_limit = _positive_int_env("BRASSTUNE_WS_SESSION_STARTS_PER_IP_PER_MINUTE", 60)
+    with _WS_STATE_LOCK:
+        _prune_start_buckets(_WS_SESSION_STARTS_BY_ACCOUNT, timestamp)
+        _prune_start_buckets(_WS_SESSION_STARTS_BY_IP, timestamp)
+        account_bucket = _WS_SESSION_STARTS_BY_ACCOUNT.get(account_key)
+        ip_bucket = _WS_SESSION_STARTS_BY_IP.get(client_host)
+        if account_limit and account_bucket is not None and len(account_bucket) >= account_limit:
+            return False
+        if ip_limit and ip_bucket is not None and len(ip_bucket) >= ip_limit:
+            return False
+        if account_limit:
+            _WS_SESSION_STARTS_BY_ACCOUNT[account_key].append(timestamp)
+        if ip_limit:
+            _WS_SESSION_STARTS_BY_IP[client_host].append(timestamp)
+        return True
+
+
 def _reset_abuse_state_for_tests() -> None:
     global _WS_ACTIVE_PITCH_COMPUTATIONS
     with _WS_STATE_LOCK:
         _WS_CONNECTIONS_BY_IP.clear()
         _WS_CONNECTIONS_BY_ACCOUNT.clear()
+        _WS_SESSION_STARTS_BY_IP.clear()
+        _WS_SESSION_STARTS_BY_ACCOUNT.clear()
         _WS_ACTIVE_PITCH_COMPUTATIONS = 0
 
 
@@ -267,16 +302,29 @@ async def pitch_socket(websocket: WebSocket):
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
             elif msg_type == "start_session":
-                instrument_id = str(message.get("instrument_id", "trumpet"))
-                if not is_valid_instrument_id(instrument_id):
-                    await websocket.send_json({"type": "error", "message": "Unknown instrument_id: %s" % instrument_id})
+                try:
+                    request = StartSessionRequest.model_validate(
+                        {
+                            "instrument_id": message.get("instrument_id", "trumpet"),
+                            "name": message.get("name"),
+                            "reference_pitch_hz": message.get("reference_pitch_hz", 440.0),
+                        }
+                    )
+                except ValidationError:
+                    await websocket.send_json({"type": "error", "message": "Session details are invalid."})
+                    continue
+                if not is_valid_instrument_id(request.instrument_id):
+                    await websocket.send_json({"type": "error", "message": "Unknown instrument_id: %s" % request.instrument_id})
+                    continue
+                if not _try_consume_session_start(str(auth.user.id), client_host):
+                    await websocket.send_json({"type": "error", "message": "Too many session starts. Wait a moment before trying again."})
                     continue
                 try:
                     session = start_session(
                         db,
-                        instrument_id,
-                        message.get("name"),
-                        float(message.get("reference_pitch_hz", 440.0)),
+                        request.instrument_id,
+                        request.name,
+                        request.reference_pitch_hz,
                         auth.user.id,
                     )
                 except HTTPException as exc:

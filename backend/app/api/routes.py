@@ -8,7 +8,7 @@ import zipfile
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -23,7 +23,7 @@ from app.db.readiness import public_readiness_report, readiness_report, version_
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, enforce_audio_storage_quota, local_audio_path, read_audio_bytes
+from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 from app.services.usage import record_event
@@ -485,12 +485,34 @@ async def upload_session_audio(
 ):
     session = _require_session_access(db, session_id, auth)
     data, mime_type = read_audio_bytes(await _read_limited_body(request), content_type or "")
-    enforce_audio_storage_quota(db, session, len(data))
-    attach_audio_to_session(session, data, mime_type, x_audio_duration_seconds)
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    return {"uploaded": True, "audio": session_to_dict(session)}
+    result = replace_audio_for_session(
+        db,
+        session,
+        data,
+        mime_type,
+        x_audio_duration_seconds,
+    )
+    if result.cleanup_pending or result.reconciliation_pending or result.activation_pending:
+        if result.activation_pending:
+            message = "The recording was uploaded, but activation confirmation is pending durable reconciliation."
+        elif result.cleanup_pending and result.reconciliation_pending:
+            message = "The new recording is active. Metadata confirmation and previous-recording cleanup are queued."
+        elif result.reconciliation_pending:
+            message = "The new recording is active. Metadata confirmation is queued for retry."
+        else:
+            message = "The new recording is active. Cleanup of the previous recording is queued for retry."
+        return JSONResponse(
+            status_code=202,
+            content={
+                "uploaded": True,
+                "cleanup_pending": result.cleanup_pending,
+                "reconciliation_pending": result.reconciliation_pending,
+                "activation_pending": result.activation_pending,
+                "message": message,
+                "audio": result.audio_snapshot,
+            },
+        )
+    return {"uploaded": True, "audio": result.audio_snapshot}
 
 
 @router.get("/sessions/{session_id}/audio")
@@ -961,7 +983,19 @@ def retry_account_deletions(
     db: Session = Depends(get_db),
 ):
     _require_account_deletion_retry_secret(x_brasstune_maintenance_secret)
-    return retry_account_deletion_jobs(db, limit=limit)
+    account_result = retry_account_deletion_jobs(db, limit=limit)
+    account_result["audio_storage"] = retry_audio_storage_jobs(db, limit=limit)
+    return account_result
+
+
+@router.post("/maintenance/audio-storage/retry")
+def retry_audio_storage(
+    limit: int = Query(default=10, ge=1, le=50),
+    x_brasstune_maintenance_secret: Optional[str] = Header(default=None, alias="X-BrassTune-Maintenance-Secret"),
+    db: Session = Depends(get_db),
+):
+    _require_account_deletion_retry_secret(x_brasstune_maintenance_secret)
+    return retry_audio_storage_jobs(db, limit=limit)
 
 
 @router.delete("/users/me")
