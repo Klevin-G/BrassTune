@@ -1,6 +1,8 @@
 import statistics
 from typing import Dict, Iterable, List, Optional
 
+from app.core.analytics.stats import duration_weighted_mean
+
 
 def _value(frame, key, default=None):
     if isinstance(frame, dict):
@@ -108,18 +110,13 @@ def compute_session_summary(note_events: List[Dict[str, object]]) -> Dict[str, o
             "average_abs_cents": 0.0,
             "in_tune_percentage": 0.0,
         }
-    total_duration = sum(float(event.get("duration_ms", 0)) for event in note_events)
-    if total_duration <= 0:
-        total_duration = float(len(note_events))
-    signed = sum(float(event["avg_signed_cents"]) * float(event.get("duration_ms", 1)) for event in note_events)
-    absolute = sum(float(event["avg_abs_cents"]) * float(event.get("duration_ms", 1)) for event in note_events)
-    in_tune = sum(float(event["in_tune_percentage"]) * float(event.get("duration_ms", 1)) for event in note_events)
+    total_duration = sum(max(0.0, float(event.get("duration_ms", 0) or 0)) for event in note_events)
     return {
         "duration_seconds": round(total_duration / 1000.0, 2),
         "notes_count": len(note_events),
-        "average_signed_cents": signed / total_duration,
-        "average_abs_cents": absolute / total_duration,
-        "in_tune_percentage": in_tune / total_duration,
+        "average_signed_cents": duration_weighted_mean(note_events, "avg_signed_cents", "duration_ms") or 0.0,
+        "average_abs_cents": duration_weighted_mean(note_events, "avg_abs_cents", "duration_ms") or 0.0,
+        "in_tune_percentage": duration_weighted_mean(note_events, "in_tune_percentage", "duration_ms") or 0.0,
     }
 
 
@@ -129,4 +126,3 @@ def reject_outliers(frames: List[object], max_abs_cents: float = 50.0) -> List[o
         for frame in frames
         if _value(frame, "cents_deviation") is None or abs(float(_value(frame, "cents_deviation"))) <= max_abs_cents
     ]
-

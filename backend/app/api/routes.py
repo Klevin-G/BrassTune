@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
-from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics
+from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics, duration_weighted_mean
 from app.core.ensemble.analytics import calculate_ensemble_summary, generate_rehearsal_report
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
@@ -1617,13 +1617,6 @@ def ensemble_report(group_id: int = 1, db: Session = Depends(get_db), auth: Auth
     return ensemble_group_report(group_id, db, auth)
 
 
-def _weighted_mean(pairs):
-    total_weight = sum(weight for _, weight in pairs)
-    if total_weight <= 0:
-        return None
-    return sum(value * weight for value, weight in pairs) / total_weight
-
-
 @router.get("/ensemble/groups/{group_id}/roster")
 def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     """Per-student practice stats for the ensemble director/admin."""
@@ -1645,10 +1638,17 @@ def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: Au
                 .filter(PracticeSession.user_id == member.user_id, PracticeSession.started_at >= since)
                 .all()
             )
-        weighted = [(s.average_abs_cents, s.notes_count or 0) for s in sessions if (s.notes_count or 0) > 0]
-        intune = [(s.in_tune_percentage, s.notes_count or 0) for s in sessions if (s.notes_count or 0) > 0]
-        avg_abs_cents = _weighted_mean(weighted)
-        in_tune_pct = _weighted_mean(intune)
+        tuning_sessions = [session for session in sessions if (session.notes_count or 0) > 0]
+        avg_abs_cents = duration_weighted_mean(
+            tuning_sessions,
+            "average_abs_cents",
+            "duration_seconds",
+        )
+        in_tune_pct = duration_weighted_mean(
+            tuning_sessions,
+            "in_tune_percentage",
+            "duration_seconds",
+        )
         last_practice_at = max((s.started_at for s in sessions), default=None)
         user = member.user
         students.append({

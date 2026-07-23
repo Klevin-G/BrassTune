@@ -23,16 +23,7 @@ def generate_note_recommendation(note_stats: Dict[str, object], instrument_profi
         message = "You need more recorded attempts on written %s before BrassTune can identify a reliable pattern." % label
         category = "Insufficient data"
         suggestions = ["Record at least three steady long-tone attempts on this note."]
-    elif trend == "Unstable":
-        title = "%s is inconsistent" % label
-        message = "Your pitch on written %s changes too much for BrassTune to call it centered yet." % label
-        category = "Inconsistent pitch"
-        suggestions = [
-            "Hold the note for 8-12 seconds and aim for a steady needle.",
-            "Use a drone and focus on minimizing motion.",
-            "Record several repetitions with full breaths.",
-        ] + _instrument_suggestions(instrument_profile, "unstable")
-    elif signed >= 10:
+    elif trend == "Mostly sharp":
         title = "%s tends sharp" % label
         message = "You consistently play written %s %.0f cents sharp." % (label, abs(signed))
         category = "Sharp tendency"
@@ -41,7 +32,7 @@ def generate_note_recommendation(note_stats: Dict[str, object], instrument_profi
             "Start slightly below the pitch and gently center upward.",
             "Check whether you are over-tightening your embouchure.",
         ] + _instrument_suggestions(instrument_profile, "sharp")
-    elif signed <= -10:
+    elif trend == "Mostly flat":
         title = "%s tends flat" % label
         message = "You consistently play written %s %.0f cents flat." % (label, abs(signed))
         category = "Flat tendency"
@@ -50,6 +41,15 @@ def generate_note_recommendation(note_stats: Dict[str, object], instrument_profi
             "Support the air stream and avoid letting the pitch sag.",
             "Check posture and breath support.",
         ] + _instrument_suggestions(instrument_profile, "flat")
+    elif trend == "Unstable":
+        title = "%s is inconsistent" % label
+        message = "Your pitch on written %s changes a lot from attempt to attempt." % label
+        category = "Inconsistent pitch"
+        suggestions = [
+            "Hold the note for 8-12 seconds and aim for a steady needle.",
+            "Use a drone and focus on minimizing motion.",
+            "Record several repetitions with full breaths.",
+        ] + _instrument_suggestions(instrument_profile, "unstable")
     elif severity == "severe issue":
         title = "%s needs focused intonation work" % label
         message = "Written %s averages %.0f cents away from center." % (label, avg_abs)

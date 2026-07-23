@@ -34,6 +34,7 @@ from app.api.routes import (
     add_member_by_username,
     create_ensemble_group,
     delete_my_account,
+    ensemble_group_roster,
     get_ensemble_group,
     join_ensemble_by_code,
     leave_ensemble_group,
@@ -1841,6 +1842,62 @@ def test_student_roster_view_is_self_only_and_redacted():
     assert member["is_current_user"] is True
     assert "user_id" not in member
     assert "username" not in member
+
+
+def test_ensemble_roster_uses_session_duration_for_tuning_averages():
+    db = _test_db()
+    try:
+        director = User(id=780, username="director780", name="Director", role="director", primary_instrument_id="trumpet")
+        student = User(id=781, username="student781", name="Student", role="student", primary_instrument_id="horn")
+        group = Group(id=782, name="Duration Contract", director_user_id=director.id)
+        membership = GroupMember(
+            group_id=group.id,
+            user_id=student.id,
+            instrument_id="horn",
+            role_in_group="student",
+            status="active",
+            active_since=dt.datetime(2026, 7, 1),
+        )
+        db.add_all([director, student, group, membership])
+        db.commit()
+        db.add_all(
+            [
+                PracticeSession(
+                    user_id=student.id,
+                    instrument_id="horn",
+                    name="Short",
+                    started_at=dt.datetime(2026, 7, 2, 10),
+                    duration_seconds=60,
+                    notes_count=1,
+                    average_abs_cents=20,
+                    in_tune_percentage=20,
+                ),
+                PracticeSession(
+                    user_id=student.id,
+                    instrument_id="horn",
+                    name="Long",
+                    started_at=dt.datetime(2026, 7, 2, 11),
+                    duration_seconds=180,
+                    notes_count=2,
+                    average_abs_cents=4,
+                    in_tune_percentage=80,
+                ),
+            ]
+        )
+        db.commit()
+
+        payload = ensemble_group_roster(
+            group.id,
+            db,
+            AuthContext(user=director, is_guest=True, access_token=None),
+        )
+
+        row = payload["students"][0]
+        assert row["average_abs_cents"] == 8
+        assert row["in_tune_percentage"] == 65
+        assert row["practice_minutes"] == 4
+    finally:
+        db.close()
 
 
 def test_student_group_list_redacts_director_identity():
