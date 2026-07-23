@@ -36,6 +36,11 @@ describe('guided warm-up timer', () => {
     expect(state.running).toBe(false);
   });
 
+  it('returns the current state for semantic timer no-ops', () => {
+    const state = stopped(20_000);
+    expect(updateWarmupTimer(state, { type: 'tick' }, 5_000)).toBe(state);
+  });
+
   it('clamps completion, stops, and restarts a completed warm-up from zero', () => {
     let state = updateWarmupTimer(stopped(299_000), { type: 'start', visible: true }, 1_000);
     state = updateWarmupTimer(state, { type: 'tick' }, 5_000);

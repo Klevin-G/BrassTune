@@ -1,5 +1,5 @@
 import { Pause, Play, RotateCcw } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GUIDED_WARMUP_SECONDS, GUIDED_WARMUP_STEPS, warmupStepAt } from '../../domain/warmup';
 import { usePracticeLibrary } from '../../state/PracticeLibraryContext';
 import { SectionCard } from '../ui/AppPrimitives';
@@ -51,12 +51,18 @@ export function updateWarmupTimer(
   }
 
   if (elapsedMilliseconds >= GUIDED_WARMUP_MILLISECONDS) running = false;
-  return {
+  const next = {
     elapsedMilliseconds,
     running,
     visible,
     activeSinceMilliseconds: running && visible ? nowMilliseconds : null,
   };
+  return next.elapsedMilliseconds === state.elapsedMilliseconds
+    && next.running === state.running
+    && next.visible === state.visible
+    && next.activeSinceMilliseconds === state.activeSinceMilliseconds
+    ? state
+    : next;
 }
 
 const systemWarmupClock = () => Date.now();
@@ -64,54 +70,44 @@ const systemWarmupClock = () => Date.now();
 export function GuidedWarmupPanel({ nowMilliseconds = systemWarmupClock }: { nowMilliseconds?: () => number } = {}) {
   const { library, setWarmupProgress, recordRecent, recordActivity } = usePracticeLibrary();
   const { t, formatNumber } = useI18n();
-  const [timer, setTimer] = useState<WarmupTimerState>(() => ({
-    elapsedMilliseconds: library.warmup.elapsedSeconds * 1000,
+  const initialElapsedSeconds = Math.max(0, Math.min(GUIDED_WARMUP_SECONDS, Math.floor(library.warmup.elapsedSeconds)));
+  const initialStepIndex = warmupStepAt(initialElapsedSeconds).index;
+  const timerRef = useRef<WarmupTimerState>({
+    elapsedMilliseconds: initialElapsedSeconds * 1000,
     running: false,
     visible: typeof document === 'undefined' || !document.hidden,
     activeSinceMilliseconds: null,
-  }));
+  });
+  const [timer, setTimer] = useState<WarmupTimerState>(timerRef.current);
   const elapsed = Math.floor(timer.elapsedMilliseconds / 1000);
   const running = timer.running;
   const completionRecordedRef = useRef(elapsed >= GUIDED_WARMUP_SECONDS);
-  const persistedElapsedRef = useRef(library.warmup.elapsedSeconds);
+  const persistedProgressRef = useRef({ elapsedSeconds: initialElapsedSeconds, stepIndex: initialStepIndex });
   const position = warmupStepAt(elapsed);
   const step = GUIDED_WARMUP_STEPS[position.index];
   const complete = elapsed >= GUIDED_WARMUP_SECONDS;
 
-  useEffect(() => {
-    if (running) return;
-    if (library.warmup.elapsedSeconds === persistedElapsedRef.current) return;
-    persistedElapsedRef.current = library.warmup.elapsedSeconds;
-    completionRecordedRef.current = library.warmup.elapsedSeconds >= GUIDED_WARMUP_SECONDS;
-    setTimer((current) => {
-      const elapsedMilliseconds = library.warmup.elapsedSeconds * 1000;
-      return current.elapsedMilliseconds === elapsedMilliseconds
-        ? current
-        : { ...current, elapsedMilliseconds, activeSinceMilliseconds: null };
-    });
-  }, [library.warmup.elapsedSeconds, running]);
+  const transitionTimer = useCallback((event: WarmupTimerEvent) => {
+    const current = timerRef.current;
+    if (!current.running && event.type === 'visibility') return;
+    const next = updateWarmupTimer(current, event, nowMilliseconds());
+    if (next === current) return;
+    timerRef.current = next;
+    setTimer(next);
+  }, [nowMilliseconds]);
 
   useEffect(() => {
     if (!running || !timer.visible) return undefined;
     const intervalId = window.setInterval(() => {
-      const tickAt = nowMilliseconds();
-      setTimer((current) => updateWarmupTimer(current, { type: 'tick' }, tickAt));
+      transitionTimer({ type: 'tick' });
     }, 1000);
     return () => window.clearInterval(intervalId);
-  }, [nowMilliseconds, running, timer.visible]);
+  }, [running, timer.visible, transitionTimer]);
 
   useEffect(() => {
-    const updateVisibility = (visible: boolean) => {
-      const changedAt = nowMilliseconds();
-      setTimer((current) => updateWarmupTimer(
-        current,
-        { type: 'visibility', visible },
-        changedAt,
-      ));
-    };
-    const handleVisibility = () => updateVisibility(!document.hidden);
-    const handlePageHide = () => updateVisibility(false);
-    const handlePageShow = () => updateVisibility(!document.hidden);
+    const handleVisibility = () => transitionTimer({ type: 'visibility', visible: !document.hidden });
+    const handlePageHide = () => transitionTimer({ type: 'visibility', visible: false });
+    const handlePageShow = () => transitionTimer({ type: 'visibility', visible: !document.hidden });
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('pageshow', handlePageShow);
@@ -120,11 +116,16 @@ export function GuidedWarmupPanel({ nowMilliseconds = systemWarmupClock }: { now
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [nowMilliseconds]);
+  }, [transitionTimer]);
 
   useEffect(() => {
-    persistedElapsedRef.current = elapsed;
-    setWarmupProgress({ elapsedSeconds: elapsed, stepIndex: position.index });
+    if (
+      persistedProgressRef.current.elapsedSeconds !== elapsed
+      || persistedProgressRef.current.stepIndex !== position.index
+    ) {
+      persistedProgressRef.current = { elapsedSeconds: elapsed, stepIndex: position.index };
+      setWarmupProgress({ elapsedSeconds: elapsed, stepIndex: position.index });
+    }
     if (elapsed >= GUIDED_WARMUP_SECONDS) {
       if (!completionRecordedRef.current) {
         completionRecordedRef.current = true;
@@ -138,18 +139,12 @@ export function GuidedWarmupPanel({ nowMilliseconds = systemWarmupClock }: { now
       completionRecordedRef.current = false;
     }
     recordRecent({ kind: 'warmup', id: 'guided-5', label: '5-minute warm-up', href: '/practice#warmup' });
-    const startedAt = nowMilliseconds();
-    setTimer((current) => updateWarmupTimer(
-      current,
-      { type: 'start', visible: !document.hidden },
-      startedAt,
-    ));
+    transitionTimer({ type: 'start', visible: !document.hidden });
   };
 
   const reset = () => {
     completionRecordedRef.current = false;
-    const resetAt = nowMilliseconds();
-    setTimer((current) => updateWarmupTimer(current, { type: 'reset' }, resetAt));
+    transitionTimer({ type: 'reset' });
   };
 
   const remaining = Math.max(0, GUIDED_WARMUP_SECONDS - elapsed);
@@ -165,8 +160,7 @@ export function GuidedWarmupPanel({ nowMilliseconds = systemWarmupClock }: { now
             type="button"
             onClick={running
               ? () => {
-                const pausedAt = nowMilliseconds();
-                setTimer((current) => updateWarmupTimer(current, { type: 'pause' }, pausedAt));
+                transitionTimer({ type: 'pause' });
               }
               : start}
           >

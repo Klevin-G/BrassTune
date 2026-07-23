@@ -219,6 +219,7 @@ export function PracticeLibraryProvider({
     setLoadedState((current) => {
       if (!ownerId || current.ownerId !== ownerId) return current;
       const next = update(current.library);
+      if (next === current.library) return current;
       const saved = writePracticeLibrary(localStorage, ownerId, next);
       return saved
         ? { ...current, library: next, storageError: null }
@@ -369,14 +370,19 @@ export function PracticeLibraryProvider({
   }, [updateLibrary]);
 
   const setWarmupProgress = useCallback((progress: Pick<WarmupProgress, 'elapsedSeconds' | 'stepIndex'>) => {
-    updateLibrary((current) => ({
-      ...current,
-      warmup: {
-        elapsedSeconds: Math.max(0, Math.min(300, Math.round(progress.elapsedSeconds))),
-        stepIndex: Math.max(0, Math.min(4, Math.round(progress.stepIndex))),
-        updatedAt: new Date().toISOString(),
-      },
-    }));
+    const elapsedSeconds = Math.max(0, Math.min(300, Math.round(progress.elapsedSeconds)));
+    const stepIndex = Math.max(0, Math.min(4, Math.round(progress.stepIndex)));
+    updateLibrary((current) => {
+      if (current.warmup.elapsedSeconds === elapsedSeconds && current.warmup.stepIndex === stepIndex) return current;
+      return {
+        ...current,
+        warmup: {
+          elapsedSeconds,
+          stepIndex,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    });
   }, [updateLibrary]);
 
   const persistWorkspace = useCallback((next: PracticeWorkspace | null) => {

@@ -103,6 +103,41 @@ test('guided warm-up excludes hidden time, tolerates repeated visibility events,
   await expect(page.getByText(/5 of 60 minutes.*1 of 3 sessions/)).toBeVisible();
 });
 
+test('idle warm-up lifecycle events leave resumed progress untouched', async ({ page }) => {
+  const consoleWarningsAndErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'warning' || message.type() === 'error') consoleWarningsAndErrors.push(message.text());
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
+      version: 1,
+      customExercises: [],
+      metronomePresets: [],
+      favorites: [],
+      recents: [],
+      reflections: [],
+      warmup: { elapsedSeconds: 37, stepIndex: 0, updatedAt: '2026-07-23T12:00:00.000Z' },
+      weeklyGoal: { week: '2026-07-20', targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
+    }));
+  });
+
+  await page.goto('/practice');
+  await expect(page.locator('.practice-time')).toHaveText('4:23');
+  const before = await page.evaluate(() => localStorage.getItem('brasstune.practiceLibrary.v1.guest'));
+  const updatedAt = await page.evaluate(() => JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}').warmup.updatedAt);
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('pageshow'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('pageshow'));
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(50);
+  const after = await page.evaluate(() => localStorage.getItem('brasstune.practiceLibrary.v1.guest'));
+  expect(after).toBe(before);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}').warmup.updatedAt)).toBe(updatedAt);
+  expect(consoleWarningsAndErrors.join('\n')).not.toContain('Cannot update a component');
+});
+
 test('Arabic tiny-phone tuner fits the viewport while keeping the pitch axis left-to-right', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('brasstune.locale', 'ar'));
   await page.setViewportSize({ width: 320, height: 568 });
