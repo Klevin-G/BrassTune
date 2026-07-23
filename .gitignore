@@ -23,14 +23,14 @@ swift/**/*.xcodeproj/xcuserdata/
 .env.*
 *.env
 *.env.*
-!.env.example
-!**/.env.example
 .agents/
 skills-lock.json
 .vercel/
 **/.vercel/
 .vercel
 .env*
+!.env.example
+!**/.env.example
 
 # Supabase CLI local link state
 supabase/.temp/
