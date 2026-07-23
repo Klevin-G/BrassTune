@@ -37,6 +37,10 @@ export function shouldGradePitchFrame(phase: Phase, referenceToneActive: boolean
   return phase === 'running' && !referenceToneActive;
 }
 
+export function shouldShowPitchRecovery(micActive: boolean, audioContextState: string): boolean {
+  return !micActive && audioContextState !== 'starting' && audioContextState !== 'demo';
+}
+
 const GRADE_TONE: Record<string, string> = {
   excellent: 'tone-green',
   good: 'tone-teal',
@@ -429,6 +433,18 @@ export function PlayAlongPage() {
 
       {phase === 'running' && snapshot && (
         <SectionCard title={t('playAlong.play')} eyebrow={t('playAlong.noteProgress', { current: formatNumber(Math.min(snapshot.index + 1, exercise.notes.length)), total: formatNumber(exercise.notes.length) })}>
+          {!stream.micActive && (
+            <div className="pa-error" role="status" aria-live="polite">
+              <AlertCircle size={16} />
+              <span>{stream.statusMessage}</span>
+              {shouldShowPitchRecovery(stream.micActive, stream.streamInfo.audioContextState) && (
+                <button className="ghost-button" type="button" onClick={() => void stream.startMicrophone()}>
+                  <Mic size={15} />
+                  {t('session.turnOnMic')}
+                </button>
+              )}
+            </div>
+          )}
           <div className="playalong-live">
             <div className="playalong-target">
               <HoldRing fraction={snapshot.heldFraction} />

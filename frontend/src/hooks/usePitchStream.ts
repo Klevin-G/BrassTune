@@ -92,6 +92,35 @@ export interface PitchFrameFlushResult {
   failed: number;
 }
 
+export const MICROPHONE_DISCONNECTED_MESSAGE = 'Microphone disconnected. Reconnect it, then turn the microphone on again.';
+export const MICROPHONE_PAUSED_MESSAGE = 'Microphone audio paused. Select Turn on microphone to resume listening.';
+
+export function hasLiveMicrophoneTrack(stream: Pick<MediaStream, 'getTracks'> | null): boolean {
+  if (!stream) return false;
+  return stream.getTracks().some((track) => track.readyState !== 'ended');
+}
+
+export function installMicrophoneEndedHandler(
+  stream: Pick<MediaStream, 'getTracks'>,
+  onEnded: (event: Event) => void,
+): void {
+  stream.getTracks().forEach((track) => {
+    track.onended = onEnded;
+  });
+}
+
+export function audioContextRecoveryStatus(state: AudioContextState): { micActive: boolean; statusMessage: string } {
+  if (state === 'running') {
+    return { micActive: true, statusMessage: 'Listening. Play a steady note.' };
+  }
+  return {
+    micActive: false,
+    statusMessage: state === 'closed'
+      ? 'Microphone audio closed. Select Turn on microphone to reconnect.'
+      : MICROPHONE_PAUSED_MESSAGE,
+  };
+}
+
 interface UsePitchStreamOptions {
   enabled: boolean;
   demoMode: boolean;
@@ -310,7 +339,10 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     processorRef.current?.disconnect();
     sourceRef.current?.disconnect();
     monitorGainRef.current?.disconnect();
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current?.getTracks().forEach((track) => {
+      track.onended = null;
+      track.stop();
+    });
     if (audioContextRef.current) audioContextRef.current.onstatechange = null;
     audioContextRef.current?.close().catch(() => undefined);
     processorRef.current = null;
@@ -345,7 +377,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
 
     const existingStream = mediaStreamRef.current;
     const existingContext = audioContextRef.current;
-    if (existingStream && existingContext && existingContext.state !== 'closed') {
+    if (existingStream && existingContext && existingContext.state !== 'closed' && hasLiveMicrophoneTrack(existingStream)) {
       if (existingContext.state !== 'running') {
         await existingContext.resume().catch(() => undefined);
       }
@@ -383,7 +415,11 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         audioContext = new AudioContextClass();
         audioContext.onstatechange = () => {
           if (mountedRef.current && generation === microphoneGenerationRef.current) {
-            setStreamInfo((old) => ({ ...old, audioContextState: audioContext?.state ?? 'closed' }));
+            const contextState = audioContext?.state ?? 'closed';
+            const recovery = audioContextRecoveryStatus(contextState);
+            setStreamInfo((old) => ({ ...old, audioContextState: contextState }));
+            setMicActive(recovery.micActive && hasLiveMicrophoneTrack(stream));
+            setStatusMessage(recovery.statusMessage);
           }
         };
         const source = audioContext.createMediaStreamSource(stream);
@@ -408,6 +444,15 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         sourceRef.current = source;
         processorRef.current = processor;
         monitorGainRef.current = monitorGain;
+        installMicrophoneEndedHandler(stream, () => {
+          if (
+            mountedRef.current
+            && generation === microphoneGenerationRef.current
+            && mediaStreamRef.current === stream
+          ) {
+            cleanupMicrophone(MICROPHONE_DISCONNECTED_MESSAGE, 'unavailable');
+          }
+        });
         setMediaStream(stream);
         audioFrameTimingRef.current = EMPTY_AUDIO_FRAME_TIMING;
         setStreamInfo((old) => ({

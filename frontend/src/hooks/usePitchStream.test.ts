@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_AUDIO_FRAME_TIMING,
+  MICROPHONE_PAUSED_MESSAGE,
+  audioContextRecoveryStatus,
   enqueuePendingPersistFrame,
+  hasLiveMicrophoneTrack,
+  installMicrophoneEndedHandler,
   observeAudioFrameTiming,
   requeueFailedPersistFrames,
   shouldPersistFrameFromFrontend,
@@ -89,5 +93,48 @@ describe('browser audio observability', () => {
     const observed = observeAudioFrameTiming(EMPTY_AUDIO_FRAME_TIMING, 100, Number.NaN, 0);
     expect(observed.averageProcessingLatencyMs).toBe(0);
     expect(observed.droppedFrames).toBe(0);
+  });
+});
+
+describe('browser audio recovery', () => {
+  it('marks suspended and closed contexts inactive with a recoverable message', () => {
+    expect(audioContextRecoveryStatus('suspended')).toEqual({
+      micActive: false,
+      statusMessage: MICROPHONE_PAUSED_MESSAGE,
+    });
+    expect(audioContextRecoveryStatus('closed')).toEqual({
+      micActive: false,
+      statusMessage: 'Microphone audio closed. Select Turn on microphone to reconnect.',
+    });
+    expect(audioContextRecoveryStatus('running').micActive).toBe(true);
+  });
+
+  it('does not reuse a media stream after every track has ended', () => {
+    const stream = {
+      getTracks: () => [{ readyState: 'ended' }, { readyState: 'ended' }],
+    } as unknown as MediaStream;
+    const liveStream = {
+      getTracks: () => [{ readyState: 'ended' }, { readyState: 'live' }],
+    } as unknown as MediaStream;
+
+    expect(hasLiveMicrophoneTrack(stream)).toBe(false);
+    expect(hasLiveMicrophoneTrack(liveStream)).toBe(true);
+  });
+
+  it('binds ended-track recovery to every captured microphone track', () => {
+    const tracks = [
+      { readyState: 'live', onended: null },
+      { readyState: 'live', onended: null },
+    ] as unknown as MediaStreamTrack[];
+    const stream = { getTracks: () => tracks } as unknown as MediaStream;
+    let endedCount = 0;
+
+    installMicrophoneEndedHandler(stream, () => {
+      endedCount += 1;
+    });
+    tracks[0].onended?.({} as Event);
+    tracks[1].onended?.({} as Event);
+
+    expect(endedCount).toBe(2);
   });
 });

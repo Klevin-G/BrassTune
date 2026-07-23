@@ -33,7 +33,7 @@ def test_portable_play_along_contract_is_complete_for_python_and_swift_loaders()
         "centered_cents_inclusive": 5,
         "accepted_cents_inclusive": 15,
         "hold_ms": 2000,
-        "minimum_confidence": 0.65,
+        "minimum_confidence": 0.95,
         "minimum_samples": 5,
         "attack_trim_ms": 120,
         "maximum_dropout_ms": 250,

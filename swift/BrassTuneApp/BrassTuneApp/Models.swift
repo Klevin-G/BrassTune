@@ -737,7 +737,7 @@ struct PlayAlongGrader: Equatable {
     init(
         writtenNotes: [String],
         holdDurationMs: Int = 2_000,
-        minimumConfidence: Double = 0.65,
+        minimumConfidence: Double = 0.95,
         minimumSamples: Int = 5,
         attackTrimMs: Int = 120,
         maximumDropoutMs: Int = 250
@@ -767,7 +767,10 @@ struct PlayAlongGrader: Equatable {
     mutating func feed(_ frame: PitchFrame) {
         guard !isComplete else { return }
         guard let target = currentNoteName else { return }
-        let confident = frame.confidence >= minimumConfidence && frame.frequencyHz != nil
+        let confident = frame.confidence >= minimumConfidence
+            && frame.frequencyHz != nil
+            && frame.isValidForRecording
+            && [.flat, .inTune, .sharp].contains(frame.tuningStatus)
         detectedNoteName = confident ? frame.writtenNoteName : nil
         detectedCents = confident ? frame.centsDeviation : nil
         let matchesTarget = confident
@@ -901,7 +904,7 @@ struct PlayAlongSession: Equatable {
         exercise: PlayAlongExercise,
         startedAt: Date = Date(),
         holdDurationMs: Int = 2_000,
-        minimumConfidence: Double = 0.65,
+        minimumConfidence: Double = 0.95,
         minimumSamples: Int = 5,
         attackTrimMs: Int = 120
     ) {

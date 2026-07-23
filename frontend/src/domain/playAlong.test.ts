@@ -22,7 +22,7 @@ import {
 import type { PitchFrame } from './types';
 import { starsForPercent } from './tuningLanguage';
 
-function frame(note: string | null, cents: number | null, confidence = 0.9): PitchFrame {
+function frame(note: string | null, cents: number | null, confidence = 0.99): PitchFrame {
   return {
     timestamp_ms: 0,
     frequency_hz: note ? 440 : null,
@@ -345,8 +345,34 @@ describe('PlayAlongGrader', () => {
   it('ignores low-confidence frames entirely', () => {
     const grader = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
     let snapshot = grader.snapshot();
-    for (let t = 0; t <= 600; t += 100) snapshot = grader.feed(frame('C', 0, 0.4), t); // centered, but below 0.65 gate
+    for (let t = 0; t <= 600; t += 100) snapshot = grader.feed(frame('C', 0, 0.9), t); // centered, but below the 95% scoring gate
     expect(grader.results.length).toBe(0);
+    expect(snapshot.heldFraction).toBe(0);
+    expect(snapshot.detectedName).toBeNull();
+    expect(snapshot.detectedCents).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'explicitly invalid',
+      patch: { is_valid_for_recording: false, save_eligibility_reason: 'unstable/no pitch lock' },
+    },
+    {
+      name: 'unstable',
+      patch: { tuning_status: 'unstable' as const },
+    },
+    {
+      name: 'silence',
+      patch: { tuning_status: 'silence' as const },
+    },
+  ])('does not award an excellent grade to $name pitch frames', ({ patch }) => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    let snapshot = grader.snapshot();
+    for (let timestamp = 0; timestamp <= 600; timestamp += 100) {
+      snapshot = grader.feed({ ...frame('C', 0), ...patch }, timestamp);
+    }
+
+    expect(grader.results).toEqual([]);
     expect(snapshot.heldFraction).toBe(0);
     expect(snapshot.detectedName).toBeNull();
     expect(snapshot.detectedCents).toBeNull();

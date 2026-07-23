@@ -1,3 +1,5 @@
+import { MIN_RECORDING_CONFIDENCE } from './music';
+import { isReliableTunerFrame } from './pitchFrameStatus';
 import type { PitchFrame } from './types';
 
 // A play-along exercise is a sequence of *written* pitch-class names (what the
@@ -76,7 +78,7 @@ export type CentsGrade = 'excellent' | 'good' | 'close' | 'off' | 'missed';
 export const PLAY_ALONG_CENTERED_CENTS = 5;
 export const PLAY_ALONG_ACCEPTED_CENTS = 15;
 export const DEFAULT_PLAY_ALONG_HOLD_MS = 2_000;
-export const DEFAULT_PLAY_ALONG_MIN_CONFIDENCE = 0.65;
+export const DEFAULT_PLAY_ALONG_MIN_CONFIDENCE = MIN_RECORDING_CONFIDENCE;
 export const DEFAULT_PLAY_ALONG_MIN_SAMPLES = 5;
 export const DEFAULT_PLAY_ALONG_ATTACK_TRIM_MS = 120;
 export const DEFAULT_PLAY_ALONG_MAX_DROPOUT_MS = 250;
@@ -224,7 +226,11 @@ export class PlayAlongGrader {
   feed(frame: PitchFrame, nowMs: number): GraderSnapshot {
     if (!this.done) {
       const target = this.notes[this.idx];
-      const confident = frame.confidence >= this.minConfidence && frame.frequency_hz != null;
+      // Play-Along is a scoring surface, so it must use the same recording-
+      // quality lock as saved analytics. Provisional unstable/silence frames
+      // may carry plausible note/cents values but are detector dropouts, not
+      // evidence that a target was held.
+      const confident = isReliableTunerFrame(frame) && frame.confidence >= this.minConfidence;
       const matchesPitchClass = samePitchClass(frame.written_note_name, target);
       const matches = confident && matchesPitchClass && frame.cents_deviation != null && Number.isFinite(frame.cents_deviation);
       if (matches) {
@@ -265,7 +271,12 @@ export class PlayAlongGrader {
 
   snapshot(frame?: PitchFrame): GraderSnapshot {
     const heldFraction = this.firstMatchTs == null ? 0 : Math.min(1, this.heldMs / this.holdMs);
-    const confidentDetection = Boolean(frame && frame.confidence >= this.minConfidence && frame.frequency_hz != null);
+    const confidentDetection = Boolean(
+      frame
+      && isReliableTunerFrame(frame)
+      && frame.confidence >= this.minConfidence
+      && Number.isFinite(frame.cents_deviation),
+    );
     return {
       index: this.idx,
       currentName: this.currentName,
