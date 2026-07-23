@@ -45,7 +45,7 @@ REQUIRED_TABLE_COLUMNS = {
         "completed_at",
     },
     "deleted_identity_tombstones": {"id", "subject_digest", "created_at"},
-    "deleted_identity_tombstone_config": {"id", "key_verifier", "created_at"},
+    "deleted_identity_tombstone_config": {"id", "key_verifier", "enforcement_phase", "created_at"},
     "audio_storage_jobs": {
         "id",
         "user_id",
@@ -255,19 +255,22 @@ def _postgres_account_deletion_security_issues(connection) -> list[str]:
             if any(row[name] for name in ("can_select", "can_insert", "can_update", "can_delete")):
                 issues.append("Data API role %s must not access %s." % (row["rolname"], table_name))
 
-    privacy_constraint_count = int(
+    constraint_states = list(
         connection.execute(
             text(
-                "select count(*) from pg_constraint "
+                "select convalidated from pg_constraint "
                 "where conrelid = to_regclass('public.account_deletion_jobs') "
-                "and conname = 'account_deletion_jobs_terminal_privacy_check' "
-                "and convalidated"
+                "and conname = 'account_deletion_jobs_terminal_privacy_check'"
             )
-        ).scalar()
-        or 0
+        ).scalars()
     )
-    if privacy_constraint_count != 1:
-        issues.append("Validated terminal privacy constraint is required on account_deletion_jobs.")
+    enforcement_phase = connection.execute(
+        text(
+            "select enforcement_phase from public.deleted_identity_tombstone_config "
+            "where id = 1"
+        )
+    ).scalar()
+    issues.extend(_account_deletion_constraint_phase_issues(enforcement_phase, constraint_states))
     try:
         expected_verifier = deletion_tombstone_key_verifier()
         stored_verifier = connection.execute(
@@ -278,6 +281,22 @@ def _postgres_account_deletion_security_issues(connection) -> list[str]:
     except DeletionTombstoneSecretError:
         issues.append("Deleted identity tombstone key state cannot be verified.")
     return issues
+
+
+def _account_deletion_constraint_phase_issues(
+    enforcement_phase: str | None,
+    constraint_states: Iterable[bool],
+) -> list[str]:
+    states = list(constraint_states)
+    if enforcement_phase == "expand":
+        if states:
+            return ["Expand-phase account deletion privacy must not install the terminal constraint."]
+        return []
+    if enforcement_phase == "contract":
+        if states == [True]:
+            return []
+        return ["Contract-phase account deletion privacy requires one validated terminal constraint."]
+    return ["Account deletion privacy rollout phase is missing or invalid."]
 
 
 def _postgres_unique_key_issues(table_name: str, unique_constraints: list[dict], indexes: list[dict]) -> list[str]:

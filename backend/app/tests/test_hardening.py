@@ -618,6 +618,25 @@ def test_postgres_readiness_requires_terminal_job_identifier_nullability():
     ) == ["Column account_deletion_jobs.user_id must be nullable."]
 
 
+def test_postgres_readiness_tracks_account_deletion_expand_and_contract_phases():
+    from app.db.readiness import _account_deletion_constraint_phase_issues
+
+    assert _account_deletion_constraint_phase_issues("expand", []) == []
+    assert _account_deletion_constraint_phase_issues("expand", [False]) == [
+        "Expand-phase account deletion privacy must not install the terminal constraint."
+    ]
+    assert _account_deletion_constraint_phase_issues("contract", [True]) == []
+    assert _account_deletion_constraint_phase_issues("contract", []) == [
+        "Contract-phase account deletion privacy requires one validated terminal constraint."
+    ]
+    assert _account_deletion_constraint_phase_issues("contract", [False]) == [
+        "Contract-phase account deletion privacy requires one validated terminal constraint."
+    ]
+    assert _account_deletion_constraint_phase_issues(None, []) == [
+        "Account deletion privacy rollout phase is missing or invalid."
+    ]
+
+
 def test_deployed_readiness_requires_dedicated_stable_deletion_tombstone_key(monkeypatch):
     from app.db.readiness import maintenance_readiness_issues
 
@@ -2814,6 +2833,110 @@ def test_legacy_completed_deletion_job_is_hmac_backfilled_and_scrubbed_by_mainte
         db.close()
 
 
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL migration compatibility regression")
+def test_postgres_expand_new_writer_scrubs_and_tombstones_terminal_job():
+    """The privacy-aware writer finishes safely while the database is in expand."""
+    db = SessionLocal()
+    job_id = None
+    subject = "expand-new-writer-subject-%s" % os.getpid()
+    digest = account_deletion_module.deleted_identity_digest(subject)
+    try:
+        db.query(DeletedIdentityTombstone).filter(DeletedIdentityTombstone.subject_digest == digest).delete(
+            synchronize_session=False
+        )
+        job = AccountDeletionJob(
+            user_id=990261,
+            supabase_user_id=subject,
+            idempotency_key="expand-new-writer-job-%s" % os.getpid(),
+            stage="external_cleanup_started",
+            status="in_progress",
+            counts_json={"practice_sessions": 2},
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+        account_deletion_module.complete_and_scrub_account_deletion_job(db, job)
+        db.commit()
+        db.refresh(job)
+
+        assert account_deletion_module.terminal_job_is_scrubbed(job)
+        assert db.query(DeletedIdentityTombstone).filter(
+            DeletedIdentityTombstone.subject_digest == digest
+        ).one()
+    finally:
+        db.rollback()
+        if job_id is not None:
+            db.query(AccountDeletionJob).filter(AccountDeletionJob.id == job_id).delete(synchronize_session=False)
+        db.query(DeletedIdentityTombstone).filter(DeletedIdentityTombstone.subject_digest == digest).delete(
+            synchronize_session=False
+        )
+        db.commit()
+        db.close()
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL migration compatibility regression")
+def test_postgres_expand_allows_old_writer_before_strict_contract():
+    """Replay the expand migration and the b84dacc completion shape."""
+    schema = "account_deletion_expand_%s" % os.getpid()
+    migrations_dir = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
+    expand_sql = (migrations_dir / "20260723021828_account_deletion_privacy_tombstones.sql").read_text()
+    expand_sql = expand_sql.replace("public.", "%s." % schema)
+
+    raw_connection = engine.raw_connection()
+    driver_connection = raw_connection.driver_connection
+    original_autocommit = driver_connection.autocommit
+    driver_connection.autocommit = True
+    try:
+        with driver_connection.cursor() as cursor:
+            cursor.execute("drop schema if exists %s cascade" % schema)
+            cursor.execute("create schema %s" % schema)
+            cursor.execute(
+                "create table %s.account_deletion_jobs ("
+                "id bigserial primary key, user_id bigint not null, supabase_user_id text, "
+                "idempotency_key text not null unique, stage text not null, status text not null, "
+                "retry_count integer not null default 0, next_retry_at timestamptz, "
+                "safe_error_category text, counts_json jsonb not null default '{}'::jsonb, "
+                "completed_at timestamptz, created_at timestamptz not null default now(), "
+                "updated_at timestamptz not null default now())" % schema
+            )
+
+            cursor.execute(expand_sql)
+            cursor.execute(
+                "insert into %s.account_deletion_jobs "
+                "(user_id, supabase_user_id, idempotency_key, stage, status, counts_json) "
+                "values (42, 'legacy-subject-42', 'delete-user-42', 'external_cleanup_started', "
+                "'in_progress', '{\"practice_sessions\": 2}'::jsonb) returning id" % schema
+            )
+            legacy_job_id = cursor.fetchone()[0]
+
+            # This is the b84dacc completion shape. It must succeed after expand.
+            cursor.execute(
+                "update %s.account_deletion_jobs set stage = 'completed', status = 'completed', "
+                "completed_at = now(), next_retry_at = null where id = %%s" % schema,
+                (legacy_job_id,),
+            )
+            cursor.execute(
+                "select user_id, supabase_user_id, idempotency_key, counts_json "
+                "from %s.account_deletion_jobs where id = %%s" % schema,
+                (legacy_job_id,),
+            )
+            assert cursor.fetchone() == (42, "legacy-subject-42", "delete-user-42", {"practice_sessions": 2})
+            cursor.execute(
+                "select count(*) from pg_constraint where "
+                "conrelid = %%s::regclass and conname = 'account_deletion_jobs_terminal_privacy_check'",
+                ("%s.account_deletion_jobs" % schema,),
+            )
+            assert cursor.fetchone()[0] == 0
+    finally:
+        try:
+            with driver_connection.cursor() as cursor:
+                cursor.execute("drop schema if exists %s cascade" % schema)
+        finally:
+            driver_connection.autocommit = original_autocommit
+            raw_connection.close()
+
+
 def test_account_deletion_removes_sessions_audio_and_teacher_owned_group():
     with TestClient(app) as client:
         session = client.post(
@@ -3568,25 +3691,27 @@ def test_audio_storage_jobs_migration_is_private_idempotent_and_indexed():
     assert "rollback notes" in migration
 
 
-def test_account_deletion_privacy_migration_is_additive_private_and_forward_compatible():
-    migration = (
+def test_account_deletion_privacy_expand_migration_is_private_and_old_writer_compatible():
+    expand_migration = (
         Path(__file__).resolve().parents[3]
         / "supabase"
         / "migrations"
         / "20260723021828_account_deletion_privacy_tombstones.sql"
     ).read_text().lower()
-    assert "create table if not exists public.deleted_identity_tombstones" in migration
-    assert "create table if not exists public.deleted_identity_tombstone_config" in migration
-    assert "subject_digest text not null unique" in migration
-    assert "account_deletion_jobs alter column user_id drop not null" in migration
-    assert "account_deletion_jobs_terminal_privacy_check" in migration
-    assert ") not valid" in migration
-    assert "enable row level security" in migration
-    assert "('anon', 'authenticated', 'service_role')" in migration
-    assert "revoke all privileges on table public.deleted_identity_tombstones" in migration
-    assert "idx_account_deletion_jobs_retry_queue" in migration
-    assert "idx_account_deletion_jobs_terminal_purge" in migration
-    assert "default 7-day ttl bounded to 30 days" in migration
+    assert "create table if not exists public.deleted_identity_tombstones" in expand_migration
+    assert "create table if not exists public.deleted_identity_tombstone_config" in expand_migration
+    assert "subject_digest text not null unique" in expand_migration
+    assert "account_deletion_jobs alter column user_id drop not null" in expand_migration
+    assert "enforcement_phase text not null default 'expand'" in expand_migration
+    assert "do not add the terminal privacy check here" in expand_migration
+    assert "add constraint account_deletion_jobs_terminal_privacy_check" not in expand_migration
+    assert "enable row level security" in expand_migration
+    assert "('anon', 'authenticated', 'service_role')" in expand_migration
+    assert "revoke all privileges on table public.deleted_identity_tombstones" in expand_migration
+    assert "idx_account_deletion_jobs_retry_queue" in expand_migration
+    assert "idx_account_deletion_jobs_terminal_purge" in expand_migration
+    assert "default 7-day ttl bounded to 30 days" in expand_migration
+    assert "b84dacc" in expand_migration
 
 
 def test_env_granted_admin_is_revoked_when_email_removed(monkeypatch):

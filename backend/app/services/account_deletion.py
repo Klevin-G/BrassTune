@@ -221,6 +221,13 @@ def validate_account_deletion_privacy_constraint(db: Session) -> bool | None:
                 "and conname = 'account_deletion_jobs_terminal_privacy_check'"
             )
         ).scalar()
+        # The expand migration intentionally has no terminal privacy constraint
+        # so the previously deployed writer remains safe during database-first
+        # rollout and rollback. The separately applied contract migration adds
+        # and validates it after this backend has scrubbed legacy terminal rows.
+        if already_validated is None:
+            db.rollback()
+            return None
         if already_validated is True:
             db.rollback()
             return True
