@@ -564,7 +564,7 @@ test('Play-Along serializes repeated Start activation while permission is pendin
     (window as unknown as { __playAlongMicTest: unknown }).__playAlongMicTest = state;
   });
 
-  await page.goto('/practice/play-along');
+  await page.goto('/practice/scorer');
   const start = page.getByRole('button', { name: 'Start', exact: true });
   await start.evaluate((button) => {
     (button as HTMLButtonElement).click();
@@ -627,6 +627,47 @@ test('Play-Along serializes Hear it and disables speaker output while grading', 
   await page.getByRole('button', { name: 'Start', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Hear it', exact: true })).toBeDisabled();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __referenceToneTest: { oscillators: Array<{ stopCalls: number }> } }).__referenceToneTest.oscillators[0].stopCalls)).toBeGreaterThanOrEqual(2);
+});
+
+test('an ended audio track from a minimal MediaStream fixture returns the tuner to microphone recovery', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state: { requests: number; ended?: () => void; stops: number } = { requests: 0, stops: 0 };
+    class FakeAudioContext {
+      state: AudioContextState = 'running';
+      sampleRate = 48_000;
+      destination = {};
+      resume() { return Promise.resolve(); }
+      close() { this.state = 'closed'; return Promise.resolve(); }
+      createMediaStreamSource() { return { connect: () => undefined, disconnect: () => undefined }; }
+      createScriptProcessor() { return { connect: () => undefined, disconnect: () => undefined, onaudioprocess: null }; }
+      createGain() { return { gain: { value: 1 }, connect: () => undefined, disconnect: () => undefined }; }
+    }
+    Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: async () => {
+          state.requests += 1;
+          const track: { kind: 'audio'; readyState: 'live'; onended?: () => void; stop: () => void } = {
+            kind: 'audio',
+            readyState: 'live',
+            stop: () => { state.stops += 1; },
+          };
+          state.ended = () => track.onended?.();
+          // Deliberately omit getAudioTracks: this matches simple test and
+          // embedded-browser MediaStream fixtures that only implement getTracks.
+          return { getTracks: () => [track] };
+        },
+      },
+    });
+    (window as unknown as { __trackEndedTest: unknown }).__trackEndedTest = state;
+  });
+
+  await page.goto('/practice');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __trackEndedTest: { requests: number } }).__trackEndedTest.requests)).toBe(1);
+  await page.evaluate(() => (window as unknown as { __trackEndedTest: { ended?: () => void } }).__trackEndedTest.ended?.());
+  await expect(page.getByRole('button', { name: 'Turn on microphone' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __trackEndedTest: { stops: number } }).__trackEndedTest.stops)).toBe(1);
 });
 
 test('Stop cancels scheduled count-in clicks and unmount closes the metronome context', async ({ page }) => {

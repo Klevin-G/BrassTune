@@ -5,6 +5,7 @@ const routes = [
   '/',
   '/practice',
   '/practice/play-along',
+  '/practice/scorer',
   '/progress',
   '/metronome',
   '/practice/sheet-music',

@@ -71,6 +71,16 @@ export function selectBrowserPitchPipeline(workerAvailable: boolean, workerStart
   return workerAvailable && workerStarted ? 'worker' : 'script-processor';
 }
 
+export function browserPitchPipelineLabel(pipeline: BrowserPitchPipeline): string {
+  return pipeline === 'worker' ? 'browser worker pitch' : 'browser local pitch (fallback)';
+}
+
+/** Browser and test MediaStream implementations do not all expose getAudioTracks. */
+export function audioTracksForStream(stream: Pick<MediaStream, 'getTracks'> & Partial<Pick<MediaStream, 'getAudioTracks'>>): MediaStreamTrack[] {
+  const tracks = typeof stream.getAudioTracks === 'function' ? stream.getAudioTracks() : stream.getTracks().filter((track) => track.kind === 'audio');
+  return tracks.filter((track) => track.kind === 'audio');
+}
+
 export const EMPTY_AUDIO_FRAME_TIMING: AudioFrameTimingObservation = {
   lastCallbackAtMs: null,
   processedFrames: 0,
@@ -100,6 +110,23 @@ export function observeAudioFrameTiming(
   };
 }
 
+/** A Worker backlog drop is intentionally not a completed pitch frame. */
+export function recordDroppedAudioFrame(previous: AudioFrameTimingObservation): AudioFrameTimingObservation {
+  return { ...previous, droppedFrames: previous.droppedFrames + 1 };
+}
+
+/** Worker results, unlike callbacks, are the only frames that completed analysis. */
+export function recordProcessedWorkerFrame(previous: AudioFrameTimingObservation, processingLatencyMs: number): AudioFrameTimingObservation {
+  const safeLatency = Math.max(0, Number.isFinite(processingLatencyMs) ? processingLatencyMs : 0);
+  const processedFrames = previous.processedFrames + 1;
+  return {
+    ...previous,
+    processedFrames,
+    averageProcessingLatencyMs: previous.averageProcessingLatencyMs + (safeLatency - previous.averageProcessingLatencyMs) / processedFrames,
+    maxProcessingLatencyMs: Math.max(previous.maxProcessingLatencyMs, safeLatency),
+  };
+}
+
 export interface PitchFrameFlushResult {
   flushed: number;
   failed: number;
@@ -110,14 +137,14 @@ export const MICROPHONE_PAUSED_MESSAGE = 'Microphone audio paused. Select Turn o
 
 export function hasLiveMicrophoneTrack(stream: Pick<MediaStream, 'getTracks'> | null): boolean {
   if (!stream) return false;
-  return stream.getTracks().some((track) => track.readyState !== 'ended');
+  return audioTracksForStream(stream as MediaStream).some((track) => track.readyState !== 'ended');
 }
 
 export function installMicrophoneEndedHandler(
   stream: Pick<MediaStream, 'getTracks'>,
   onEnded: (event: Event) => void,
 ): void {
-  stream.getTracks().forEach((track) => {
+  audioTracksForStream(stream as MediaStream).forEach((track) => {
     track.onended = onEnded;
   });
 }
@@ -176,6 +203,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const workerPendingRef = useRef(0);
+  const workerRequestTimesRef = useRef(new Map<number, number>());
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const monitorGainRef = useRef<GainNode | null>(null);
   const microphoneStartingRef = useRef(false);
@@ -305,9 +333,12 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     return flushPendingFrames();
   }, [flushPendingFrames]);
 
-  const handleFrame = useCallback((frame: PitchFrame) => {
+  const handleFrame = useCallback((frame: PitchFrame, pipeline?: BrowserPitchPipeline) => {
     setCurrentFrame(frame);
-    setStreamInfo((old) => ({ ...old, detectorSource: frame.detector_source ?? (demoModeRef.current ? 'guest demo' : old.detectorSource) }));
+    setStreamInfo((old) => ({
+      ...old,
+      detectorSource: pipeline ? browserPitchPipelineLabel(pipeline) : (demoModeRef.current ? 'guest demo' : (frame.detector_source ?? old.detectorSource)),
+    }));
     setHistory((old) => [frame, ...old.filter((item) => item.is_valid_for_recording)].slice(0, 8));
     onFrameRef.current?.(frame);
     // Demo frames are generated in the browser, so signed-in demo recordings
@@ -368,6 +399,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     processorRef.current = null;
     workerRef.current = null;
     workerPendingRef.current = 0;
+    workerRequestTimesRef.current.clear();
     sourceRef.current = null;
     monitorGainRef.current = null;
     mediaStreamRef.current = null;
@@ -384,6 +416,11 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         ...old,
         sampleRate: null,
         detectorSource: demoModeRef.current ? 'guest demo' : 'browser local pitch',
+        sentFrames: 0,
+        droppedFrames: 0,
+        processingLatencyMs: 0,
+        averageProcessingLatencyMs: 0,
+        maxProcessingLatencyMs: 0,
         audioContextState: finalState ?? (demoModeRef.current ? 'demo' : 'closed'),
       }));
     }
@@ -455,10 +492,24 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         let worker: Worker | null = null;
         try {
           worker = new Worker(new URL('../workers/pitchDetection.worker.ts', import.meta.url), { type: 'module' });
-          worker.onmessage = (workerEvent: MessageEvent<{ type: 'frame'; frame: PitchFrame }>) => {
+          worker.onmessage = (workerEvent: MessageEvent<{ type: 'frame'; timestampMs: number; frame: PitchFrame }>) => {
             if (!mountedRef.current || generation !== microphoneGenerationRef.current) return;
             workerPendingRef.current = Math.max(0, workerPendingRef.current - 1);
-            handleFrame(workerEvent.data.frame);
+            const requestedAt = workerRequestTimesRef.current.get(workerEvent.data.timestampMs);
+            workerRequestTimesRef.current.delete(workerEvent.data.timestampMs);
+            const latencyMs = requestedAt == null ? 0 : Math.max(0, performance.now() - requestedAt);
+            const timing = recordProcessedWorkerFrame(audioFrameTimingRef.current, latencyMs);
+            audioFrameTimingRef.current = timing;
+            setStreamInfo((old) => ({
+              ...old,
+              sentFrames: timing.processedFrames,
+              droppedFrames: timing.droppedFrames,
+              processingLatencyMs: latencyMs,
+              averageProcessingLatencyMs: timing.averageProcessingLatencyMs,
+              maxProcessingLatencyMs: timing.maxProcessingLatencyMs,
+              detectorSource: browserPitchPipelineLabel('worker'),
+            }));
+            handleFrame(workerEvent.data.frame, 'worker');
             if (workerEvent.data.frame.is_valid_for_recording) {
               setStatusMessage('Sound detected. Tracking pitch now.');
             } else if (workerEvent.data.frame.tuning_status === 'silence') {
@@ -472,13 +523,20 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
             // browser creates a Worker but later blocks its module execution.
             worker?.terminate();
             if (workerRef.current === worker) workerRef.current = null;
+            const abandonedFrames = workerPendingRef.current;
             workerPendingRef.current = 0;
-            setStreamInfo((old) => ({ ...old, detectorSource: 'browser local pitch (fallback)' }));
+            workerRequestTimesRef.current.clear();
+            audioFrameTimingRef.current = Array.from({ length: abandonedFrames }).reduce(recordDroppedAudioFrame, audioFrameTimingRef.current);
+            setStreamInfo((old) => ({
+              ...old,
+              detectorSource: browserPitchPipelineLabel('script-processor'),
+              droppedFrames: audioFrameTimingRef.current.droppedFrames,
+            }));
           };
           workerRef.current = worker;
         } catch {
           worker = null;
-          setStreamInfo((old) => ({ ...old, detectorSource: 'browser local pitch (fallback)' }));
+          setStreamInfo((old) => ({ ...old, detectorSource: browserPitchPipelineLabel('script-processor') }));
         }
 
         if (!mountedRef.current || demoModeRef.current || generation !== microphoneGenerationRef.current) {
@@ -509,7 +567,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         setStreamInfo((old) => ({
           ...old,
           sampleRate: audioContext?.sampleRate ?? null,
-          detectorSource: worker ? 'browser worker pitch' : 'browser local pitch (fallback)',
+          detectorSource: browserPitchPipelineLabel(selectBrowserPitchPipeline(Boolean(worker), Boolean(workerRef.current))),
           sentFrames: 0,
           droppedFrames: 0,
           processingLatencyMs: 0,
@@ -527,25 +585,47 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
           const timestampMs = Math.round(analyzedMsRef.current);
           const activeWorker = workerRef.current;
           if (activeWorker && !shouldDropWorkerFrame(workerPendingRef.current)) {
-            workerPendingRef.current += 1;
-            activeWorker.postMessage({
-              type: 'detect',
-              pcm: pcm.buffer,
-              sampleRate: audioContext!.sampleRate,
-              instrumentId: instrumentIdRef.current,
-              referencePitch: referencePitchRef.current,
-              timestampMs,
-            }, [pcm.buffer]);
+            try {
+              workerPendingRef.current += 1;
+              workerRequestTimesRef.current.set(timestampMs, callbackAtMs);
+              activeWorker.postMessage({
+                type: 'detect',
+                pcm: pcm.buffer,
+                sampleRate: audioContext!.sampleRate,
+                instrumentId: instrumentIdRef.current,
+                referencePitch: referencePitchRef.current,
+                timestampMs,
+              }, [pcm.buffer]);
+            } catch {
+              workerPendingRef.current = Math.max(0, workerPendingRef.current - 1);
+              workerRequestTimesRef.current.delete(timestampMs);
+              audioFrameTimingRef.current = recordDroppedAudioFrame(audioFrameTimingRef.current);
+              setStreamInfo((old) => ({ ...old, droppedFrames: audioFrameTimingRef.current.droppedFrames, detectorSource: browserPitchPipelineLabel('script-processor') }));
+              if (workerRef.current === activeWorker) {
+                activeWorker.terminate();
+                workerRef.current = null;
+              }
+            }
           } else if (activeWorker) {
             // Drop stale PCM rather than queuing it: an old pitch estimate is
             // less useful than a current one and can corrupt note timing.
-            audioFrameTimingRef.current = {
-              ...audioFrameTimingRef.current,
-              droppedFrames: audioFrameTimingRef.current.droppedFrames + 1,
-            };
+            audioFrameTimingRef.current = recordDroppedAudioFrame(audioFrameTimingRef.current);
+            setStreamInfo((old) => ({ ...old, droppedFrames: audioFrameTimingRef.current.droppedFrames }));
           } else {
             const frame = pitchFrameFromPcm(pcm, audioContext!.sampleRate, instrumentIdRef.current, referencePitchRef.current, timestampMs);
-            handleFrame(frame);
+            const processingLatencyMs = Math.max(0, performance.now() - callbackAtMs);
+            const timing = observeAudioFrameTiming(audioFrameTimingRef.current, callbackAtMs, processingLatencyMs, (AUDIO_FRAME_SIZE / audioContext!.sampleRate) * 1000);
+            audioFrameTimingRef.current = timing;
+            setStreamInfo((old) => ({
+              ...old,
+              sentFrames: timing.processedFrames,
+              droppedFrames: timing.droppedFrames,
+              processingLatencyMs,
+              averageProcessingLatencyMs: timing.averageProcessingLatencyMs,
+              maxProcessingLatencyMs: timing.maxProcessingLatencyMs,
+              detectorSource: browserPitchPipelineLabel('script-processor'),
+            }));
+            handleFrame(frame, 'script-processor');
             if (frame.is_valid_for_recording) {
               setStatusMessage('Sound detected. Tracking pitch now.');
             } else if (frame.tuning_status === 'silence') {
@@ -554,22 +634,6 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
               setStatusMessage('Sound detected. No stable pitch yet.');
             }
           }
-          const processingLatencyMs = Math.max(0, performance.now() - callbackAtMs);
-          const timing = observeAudioFrameTiming(
-            audioFrameTimingRef.current,
-            callbackAtMs,
-            processingLatencyMs,
-            (AUDIO_FRAME_SIZE / audioContext!.sampleRate) * 1000,
-          );
-          audioFrameTimingRef.current = timing;
-          setStreamInfo((old) => ({
-            ...old,
-            sentFrames: timing.processedFrames,
-            droppedFrames: timing.droppedFrames,
-            processingLatencyMs,
-            averageProcessingLatencyMs: timing.averageProcessingLatencyMs,
-            maxProcessingLatencyMs: timing.maxProcessingLatencyMs,
-          }));
         };
 
         if (audioContext.state !== 'running') {

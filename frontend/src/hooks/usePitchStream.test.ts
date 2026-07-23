@@ -4,9 +4,13 @@ import {
   MICROPHONE_PAUSED_MESSAGE,
   audioContextRecoveryStatus,
   enqueuePendingPersistFrame,
+  audioTracksForStream,
+  browserPitchPipelineLabel,
   hasLiveMicrophoneTrack,
   installMicrophoneEndedHandler,
   observeAudioFrameTiming,
+  recordDroppedAudioFrame,
+  recordProcessedWorkerFrame,
   requeueFailedPersistFrames,
   selectBrowserPitchPipeline,
   shouldDropWorkerFrame,
@@ -86,6 +90,11 @@ describe('worker pitch pipeline fallback and backlog policy', () => {
     expect(selectBrowserPitchPipeline(true, false)).toBe('script-processor');
   });
 
+  it('labels the actual browser pipeline without allowing frame metadata to hide it', () => {
+    expect(browserPitchPipelineLabel('worker')).toBe('browser worker pitch');
+    expect(browserPitchPipelineLabel('script-processor')).toBe('browser local pitch (fallback)');
+  });
+
   it('bounds the Worker queue and drops stale audio rather than delaying live feedback', () => {
     expect(shouldDropWorkerFrame(2, 3)).toBe(false);
     expect(shouldDropWorkerFrame(3, 3)).toBe(true);
@@ -99,6 +108,13 @@ describe('worker pitch pipeline fallback and backlog policy', () => {
       averageProcessingLatencyMs: 0,
       maxProcessingLatencyMs: 0,
     });
+  });
+
+  it('finds audio tracks in standards-compliant streams and minimal test fixtures', () => {
+    const audio = { kind: 'audio' } as MediaStreamTrack;
+    const video = { kind: 'video' } as MediaStreamTrack;
+    expect(audioTracksForStream({ getTracks: () => [audio, video], getAudioTracks: () => [audio] } as MediaStream)).toEqual([audio]);
+    expect(audioTracksForStream({ getTracks: () => [audio, video] } as MediaStream)).toEqual([audio]);
   });
 });
 
@@ -119,6 +135,17 @@ describe('browser audio observability', () => {
     expect(observed.averageProcessingLatencyMs).toBe(0);
     expect(observed.droppedFrames).toBe(0);
   });
+
+  it('counts a dropped Worker callback without falsely recording a processed pitch frame', () => {
+    const dropped = recordDroppedAudioFrame(EMPTY_AUDIO_FRAME_TIMING);
+    expect(dropped.processedFrames).toBe(0);
+    expect(dropped.droppedFrames).toBe(1);
+  });
+
+  it('records Worker latency only when a Worker result arrives', () => {
+    const completed = recordProcessedWorkerFrame(recordDroppedAudioFrame(EMPTY_AUDIO_FRAME_TIMING), 18);
+    expect(completed).toMatchObject({ processedFrames: 1, droppedFrames: 1, averageProcessingLatencyMs: 18, maxProcessingLatencyMs: 18 });
+  });
 });
 
 describe('browser audio recovery', () => {
@@ -136,10 +163,10 @@ describe('browser audio recovery', () => {
 
   it('does not reuse a media stream after every track has ended', () => {
     const stream = {
-      getTracks: () => [{ readyState: 'ended' }, { readyState: 'ended' }],
+      getTracks: () => [{ kind: 'audio', readyState: 'ended' }, { kind: 'audio', readyState: 'ended' }],
     } as unknown as MediaStream;
     const liveStream = {
-      getTracks: () => [{ readyState: 'ended' }, { readyState: 'live' }],
+      getTracks: () => [{ kind: 'audio', readyState: 'ended' }, { kind: 'audio', readyState: 'live' }],
     } as unknown as MediaStream;
 
     expect(hasLiveMicrophoneTrack(stream)).toBe(false);
@@ -148,8 +175,8 @@ describe('browser audio recovery', () => {
 
   it('binds ended-track recovery to every captured microphone track', () => {
     const tracks = [
-      { readyState: 'live', onended: null },
-      { readyState: 'live', onended: null },
+      { kind: 'audio', readyState: 'live', onended: null },
+      { kind: 'audio', readyState: 'live', onended: null },
     ] as unknown as MediaStreamTrack[];
     const stream = { getTracks: () => tracks } as unknown as MediaStream;
     let endedCount = 0;
