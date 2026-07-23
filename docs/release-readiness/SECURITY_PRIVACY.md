@@ -1,5 +1,11 @@
 # Security And Privacy Data Map
 
+## Current Predeployment Boundary (2026-07-23)
+
+- Local candidate evidence records a clean Bandit scan and clean `pip-audit` result. These are local checks, not hosted/provider verification.
+- The linked-provider dry run reports pending `20260716201825_audio_storage_jobs_and_upload_reservations.sql` and `20260723021828_account_deletion_privacy_tombstones.sql`. Neither migration was applied for this candidate.
+- Disposable live account, storage, export, deletion, and retry-lifecycle checks remain unverified. Do not infer them from unit tests, fixtures, migration files, or simulator evidence.
+
 ## Data Categories
 
 | Data | Purpose | Storage | Third Parties | Retention | Export | Deletion | Required |

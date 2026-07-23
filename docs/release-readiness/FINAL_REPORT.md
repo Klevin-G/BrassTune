@@ -2,38 +2,37 @@
 
 Updated: 2026-07-23
 
-## Current Decision
+## Decision
 
-This is a **predeployment** audit, not a final-release or production-deployment claim. No P0 or P1 issues remain after the recorded remediation work, but required provider, hosted, and Apple evidence is still incomplete.
+This branch is a **predeployment candidate**. It is not a deployment, release, TestFlight, or App Store readiness decision. The quiescent local matrix passed, but the candidate has not yet been committed or independently reviewed. No clean-worktree claim, defect-free claim, provider mutation, or hosted result is recorded here.
 
-## Current Local Evidence
+## Evidence Recorded For This Candidate
 
 | Surface | Evidence | Boundary |
 |---|---|---|
-| Backend | `215 passed`, `2 skipped` | Local suite result; not hosted evidence. |
-| Web | `139` unit tests and production build passed; focused and offline coverage passed | The full five-browser matrix is still finishing. |
-| Native | `3` BrassTuneCore tests, `91` native unit tests, `5` UI-smoke tests, plus unsigned Debug and Release simulator builds | Local simulator evidence only. |
-| Supabase | Linked-project dry run found two pending migrations | Dry run made no provider mutation. |
+| Backend | Local suite: `219 passed`, `2 skipped`; Bandit clean; `pip-audit` clean. | Local evidence only; it does not validate a deployed backend or provider configuration. |
+| Web | `156/156` unit tests; production build; `11` lazy locale chunks; `npm audit --omit=dev` with `0` vulnerabilities; full local Playwright matrix `303 passed`, `7` intentional skips; offline production smoke `2/2`; WebKit redirect repeat `20/20`; Chromium and WebKit journey repeat `30/30`; device simulation `12/12` Pass/None. | Local browser and synthetic viewport evidence only; supporting reruns overlap the full matrix and are not added to its count. |
+| Native | BrassTuneCore `3/3`; native units `99/99`; UI smoke `8/8`; Debug and Release iPhone/iPad simulator builds and launch-frame checks passed. Localization validation covered `556` source keys, `562` catalog entries, `159` sentinels, and `1,511` locale assertions with zero violations. | Local unsigned simulator and static localization evidence only; not physical-device, live-provider, signing, or Apple distribution evidence. |
+| Supabase | Two repository migrations are pending on the linked provider. | No provider mutation was made for this candidate. |
 
-## Product Scope Recorded By This Audit
+## Candidate Scope And Evidence Boundaries
 
-- Native navigation has five tabs: Tuner (default), Play-Along, Progress, Class, and Settings.
-- Twelve production locales are supported: `en`, `es`, `zh-Hans`, `zh-Hant`, `ar`, `fr`, `de`, `ru`, `pt-BR`, `ja`, `ko`, and `vi`.
-- The eight local-first practice features are custom exercises, guided warm-up, metronome presets, weekly goals, weak-transition drills, short reflections, drone/interval practice, and offline practice packs.
-- The shared scorer contract uses ±5 cents for centered notes, ±15 cents for accepted progression, a 2-second hold, and centered-only percentage/star credit. Confidence, sample-count, attack-trim, and dropout limits are part of the fixture contract.
+- The candidate includes backend, web, fixture, localization, native SwiftUI, and release-workflow changes visible in the working-tree diff.
+- Test fixtures, simulator execution, browser automation, launch-frame checks, and static localization assertions are synthetic or local evidence unless an individual result states otherwise. They do not validate real brass audio, microphone routing, accessibility assistive technology, human translation quality, Apple signing, or deployed-provider behavior.
+- The two pending migrations are `20260716201825_audio_storage_jobs_and_upload_reservations.sql` and `20260723021828_account_deletion_privacy_tombstones.sql`. Their repository presence is not evidence of an applied migration.
 
-## Provider And Rollback State
+## Required Gates Before A Release Decision
 
-- The linked Supabase dry run found pending `20260716201825_audio_storage_jobs_and_upload_reservations.sql` and `20260723021828_account_deletion_privacy_tombstones.sql`; neither was applied in this audit.
-- Historical Vercel deployment `dpl_6pScePaqbs8fYYD44wanhdgZkAPN` and historical rollback reference `dpl_2T68p4MQo8VbbAst4f7gnbHKitnP` are retained for traceability only. They are not validated rollback targets for this candidate.
-- A current Render deployment ID and an exact hosted SHA are unknown for this candidate.
+1. Commit the quiescent candidate, record its exact revision, and complete independent diff/security/release review.
+2. Apply the two Supabase migrations only through an authorized provider change; then verify linked migration history and relevant security/account-lifecycle invariants.
+3. Establish exact revision identity for Vercel and Render, then run hosted smoke and authorized disposable-account lifecycle checks.
+4. Run physical iPhone/iPad validation for microphone/brass quality, audio routes and interruptions, Files/Photos, accessibility, and localization/RTL review.
+5. Complete in-context linguistic and RTL review with human speakers/reviewers.
+6. Produce a signed archive and complete the separate TestFlight/App Store gates before making an Apple distribution claim.
 
-## Remaining Gates And Next Steps
+## Exclusions And Known Unknowns
 
-1. Finish the web five-browser matrix and retain its exact command/result with the candidate SHA.
-2. Apply the two Supabase migrations only through an authorized provider change, then re-run linked migration and security-invariant checks.
-3. Establish exact-SHA Vercel/Render deployment identity, then run hosted smoke and disposable-provider lifecycle tests.
-4. Run physical-device microphone, route/interruption, Files/Photos, accessibility, and localization review.
-5. Create and validate a signed archive before any TestFlight or App Store submission.
+- No final exact commit, independent review approval, Vercel or Render deployment, hosted smoke, exact hosted SHA, or rollback target is claimed.
+- No App Store Connect, TestFlight upload, signed archive, physical-device microphone, or physical brass-room result is claimed.
 
-No provider mutation, hosted exact-SHA verification, physical microphone validation, signed archive, TestFlight upload, or production deployment is claimed here.
+**Precommit documentation status: local evidence recorded; commit, review, provider, physical-device, and distribution gates remain pending.**

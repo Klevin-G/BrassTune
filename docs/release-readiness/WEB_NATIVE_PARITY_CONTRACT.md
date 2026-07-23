@@ -1,6 +1,10 @@
 # Web Native Parity Contract
 
-Updated: 2026-06-20 UTC.
+Updated: 2026-07-23 UTC.
+
+## Current Candidate Boundary
+
+The active branch has a passing quiescent local backend, frontend, browser, device-simulation, native, and localization matrix. The final commit, independent reviews, provider migrations/deployments, live authentication, physical-device checks, signing, and Apple distribution remain pending. This contract is not a deployment or Apple-release decision; the detailed current gate state is in `FINAL_REPORT.md` and `TEST_MATRIX.md`.
 
 | Feature | Web Status | Native Status | Current Release Claim |
 |---|---|---|---|

@@ -59,7 +59,7 @@ Home-as-launcher, the More bento grid, standalone Analytics and Coach tabs, Audi
 
 The current local candidate has coverage for the five-tab information architecture, onboarding, fixture isolation, audible metronome defaults, the `27`-exercise grouped Play-Along catalog, the shared scorer contract, eight practice features, 12 production locales, class capability/API/race handling, destructive alerts, persistence, and audio behavior.
 
-Current local macOS evidence is `3` BrassTuneCore tests, `91` native unit tests, `5` UI-smoke tests, and unsigned Debug and Release simulator builds. This records local execution only; preserve the exact revision with the evidence run before treating it as a release candidate.
+Current local evidence is BrassTuneCore `3/3`, native app units `99/99`, UI smoke `8/8`, and passing Debug and Release iPhone/iPad simulator builds plus launch-frame checks. Localization validation covered `556` source keys, `562` String Catalog entries, `159` sentinels, and `1,511` locale assertions with zero violations. Preserve the exact revision with this evidence after the final commit before treating it as a release candidate.
 
 When an unrestricted macOS/Xcode environment is available, run:
 
@@ -76,6 +76,7 @@ Always discover an available simulator dynamically instead of hard-coding a devi
 ## Explicit Non-Claims
 
 - Native evidence is local and unsigned; it does not validate the final pushed/deployed SHA.
+- Static localization coverage does not validate translation quality, typography, truncation, or RTL behavior; in-context human review remains required.
 - No physical-device microphone, brass-room acoustic, interruption/route, haptic, metronome timing, speaker/headphone bleed, Files, or Photos validation is claimed.
 - No signed archive, Apple Developer signing, App Store Connect upload, TestFlight run, App Review, or App Store readiness is claimed.
 - Camera score capture remains absent; no camera capability or validation is implied.
