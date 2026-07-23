@@ -270,6 +270,7 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
 
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.instrument', 'horn');
     localStorage.setItem('brasstune.referencePitch', '442');
     localStorage.setItem('brasstune.guestSessions.v1', JSON.stringify([{ id: -901, name: 'Local warmup' }]));
@@ -390,6 +391,7 @@ async function installAccountSwitchFixture(
 
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.instrument', 'trumpet');
   });
 
@@ -529,7 +531,7 @@ test('a delayed join from account A cannot reload or label account B', async ({ 
   expect(counters.groupLoads['token-b']).toBe(accountBLoadsBeforeRelease);
 });
 
-test('a new signed-in account receives the tour and can retry completion persistence', async ({ page }) => {
+test('a new signed-in account completes one-step instrument setup and retries persistence', async ({ page }) => {
   const counters = await installSignedInClassFixture(page, {
     onboardingCompletedAt: null,
     onboardingUpdateFailures: 1,
@@ -538,11 +540,10 @@ test('a new signed-in account receives the tour and can retry completion persist
   await page.goto('/practice');
 
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('heading', { name: 'Welcome to BrassTune' })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Show me around' }).click();
-  for (let step = 0; step < 7; step += 1) {
-    await dialog.getByRole('button', { name: 'Next' }).click();
-  }
+  await expect(dialog.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
+  await expect(dialog.getByText('Using an account')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /next|back|show me around/i })).toHaveCount(0);
+  await dialog.getByRole('combobox').selectOption('horn');
   await dialog.getByRole('button', { name: 'Open the tuner' }).click();
   await expect(dialog.getByRole('button', { name: 'Saving tour…' })).toBeDisabled();
   await page.keyboard.press('Escape');

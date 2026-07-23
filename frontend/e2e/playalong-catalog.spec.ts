@@ -7,6 +7,7 @@ test.beforeEach(async ({ page }) => {
       .filter((key) => key !== 'brasstune.theme')
       .forEach((key) => localStorage.removeItem(key));
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.guestAccess', 'true');
   });
 });

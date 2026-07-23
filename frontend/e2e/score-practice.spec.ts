@@ -51,6 +51,7 @@ async function savedDocumentCount(page: Page) {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.demoMode', 'true');
     localStorage.setItem('brasstune.guestAccess', 'true');
   });

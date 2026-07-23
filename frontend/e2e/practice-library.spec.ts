@@ -5,6 +5,7 @@ test.beforeEach(async ({ page }) => {
     if (sessionStorage.getItem('e2e.practiceLibrary.initialized') !== 'true') {
       Object.keys(localStorage).filter((key) => key.startsWith('brasstune.')).forEach((key) => localStorage.removeItem(key));
       localStorage.setItem('brasstune.onboardingComplete', 'true');
+      localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
       localStorage.setItem('brasstune.guestAccess', 'true');
       localStorage.setItem('brasstune.demoMode', 'true');
       sessionStorage.setItem('e2e.practiceLibrary.initialized', 'true');
@@ -157,7 +158,7 @@ test('Arabic tiny-phone tuner fits the viewport while keeping the pitch axis lef
 test('Arabic Play-Along keeps musical note order left-to-right', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('brasstune.locale', 'ar'));
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/practice/play-along');
+  await page.goto('/practice/scorer');
   await page.locator('.pa-start').click();
   const notes = page.locator('.playalong-sequence .playalong-note');
   await expect(notes).toHaveCount(8);
@@ -311,7 +312,7 @@ test('an open practice tab reconciles its displayed goal when focus returns afte
 });
 
 test('custom play-along exercises validate, edit in place, reload, and delete coherently', async ({ page }) => {
-  await page.goto('/practice/play-along');
+  await page.goto('/practice/scorer');
   await page.getByText('Build a custom exercise').click();
   await expect(page.getByLabel('Exercise name')).toHaveAttribute('maxlength', '60');
   await page.getByLabel('Exercise name').fill('Lip slur check');
@@ -388,7 +389,7 @@ test('locale selection updates language, direction, manifest, Intl output, and p
 
   await page.goto('/settings');
   await expect(page.locator('.locale-selector option[value="en-XA"]')).toHaveCount(0);
-  await page.goto('/practice/play-along');
+  await page.goto('/practice/scorer');
   await page.locator('.practice-builder summary').click();
   await page.locator('.practice-builder input').fill('A-G Warmup');
   await page.locator('.practice-builder textarea').fill('A B C D E F G');
@@ -402,6 +403,7 @@ test('built-in shortcut labels follow the selected locale while custom titles an
     const seedKey = 'e2e.practiceLibrary.localeShortcutsSeeded';
     if (sessionStorage.getItem(seedKey) !== 'true') {
       localStorage.setItem('brasstune.onboardingComplete', 'true');
+      localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
       localStorage.setItem('brasstune.guestAccess', 'true');
       localStorage.setItem('brasstune.demoMode', 'true');
       sessionStorage.setItem('e2e.practiceLibrary.initialized', 'true');
@@ -411,9 +413,9 @@ test('built-in shortcut labels follow the selected locale while custom titles an
         metronomePresets: [],
         favorites: [
           { kind: 'warmup', id: 'guided-5', label: 'stale warm-up label', href: '/practice#warmup' },
-          { kind: 'play-along', id: 'custom-a-g', label: 'A-G Warmup', href: '/practice/play-along?exercise=custom-a-g' },
+          { kind: 'play-along', id: 'custom-a-g', label: 'A-G Warmup', href: '/practice/scorer?exercise=custom-a-g' },
         ],
-        recents: [{ kind: 'play-along', id: 'cmaj', label: 'stale scale label', href: '/practice/play-along?exercise=cmaj' }],
+        recents: [{ kind: 'play-along', id: 'cmaj', label: 'stale scale label', href: '/practice/scorer?exercise=cmaj' }],
         reflections: [],
         warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-23T12:00:00.000Z' },
         weeklyGoal: { week: '2026-07-20', targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },

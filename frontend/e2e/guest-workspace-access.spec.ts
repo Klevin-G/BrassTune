@@ -184,13 +184,13 @@ test('configured auth preserves the current route and always offers a guest esca
 
   await page.goto('/practice/play-along?exercise=cmaj');
   const signIn = page.getByRole('link', { name: 'Sign in' }).first();
-  await expect(signIn).toHaveAttribute('href', '/?next=%2Fpractice%2Fplay-along%3Fexercise%3Dcmaj');
+  await expect(signIn).toHaveAttribute('href', '/?next=%2Fpractice%2Fscorer%3Fexercise%3Dcmaj');
 
-  await page.goto('/auth/sign-in?next=%2Fpractice%2Fplay-along%3Fexercise%3Dcmaj');
+  await page.goto('/auth/sign-in?next=%2Fpractice%2Fscorer%3Fexercise%3Dcmaj');
   const guestEscape = page.getByRole('button', { name: 'Keep practicing as a guest' });
   await expect(guestEscape).toBeEnabled();
   await guestEscape.click();
-  await expect(page).toHaveURL(/\/practice\/play-along\?exercise=cmaj$/);
+  await expect(page).toHaveURL(/\/practice\/scorer\?exercise=cmaj$/);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBe('true');
 });
 
