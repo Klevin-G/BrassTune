@@ -1,37 +1,26 @@
 # Predeployment Test Matrix
 
-Updated: 2026-07-23
+Updated: 2026-07-23. Heavy-gate base: `8ee07d63ddf201efc59f4b8c0b8d661cfd491082`; candidate successor: `8035d6c6b69a814a419439e0aeee820464f34d36`.
 
-This matrix applies to implementation tree `3ec585ec8b604b9a04cb7708872c66bef963fe3f`. Historical counts elsewhere do not validate this candidate. Device-evidence commit `9003cf4282f8aef5d1e4d5900454d57862e1519e` records the clean responsive simulation; the containing documentation commit changes reports only.
-
-| Gate | Current evidence | Status | Release boundary |
+| Gate | Evidence | Status | Boundary |
 |---|---|---|---|
-| Backend suite | Local `pytest`: `223 passed`, `4` PostgreSQL-only skips. | Passed locally | The isolated PostgreSQL expand/legacy-writer harness remains for CI because Docker/PostgreSQL was unavailable locally. |
-| Backend SAST and dependencies | Production-code Bandit passed; current-environment `pip-audit --local` found no known vulnerabilities. | Passed locally | The direct requirements-file resolver still hits the documented local `ensurepip` crash; exact lockfile auditing remains a remote security-workflow gate. |
-| Frontend units | `npm test`: `35` test files / `188` unit tests passed. | Passed locally | Local unit evidence only. |
-| Frontend build, typecheck, PWA, and locale chunks | Production build/typecheck and PWA checks passed; lazy-load assertion found `11` locale chunks. | Passed locally | Does not validate a Vercel deployment or translation quality. |
-| Frontend production dependency audit | `npm audit --omit=dev`: `0` vulnerabilities. | Passed locally | Re-run if production dependency inputs change. |
-| Full browser matrix | `365` total: `358 passed`, `7` intentional PDF-engine skips; no React cross-render warning emitted. | Passed locally | Local Playwright evidence across configured projects; absence of the warning is local-run evidence only. |
-| Offline production smoke | `2/2` passed. | Passed locally | Local offline production-mode evidence only. |
-| Device simulation | `12/12` viewport profiles reported Pass with Issues=None from clean SHA `3ec585e`. | Passed locally | Chromium viewport automation is synthetic and does not validate physical Safari/iPad behavior. |
-| Swift package | Fresh BrassTuneCore package run: `3/3` passed. | Passed locally | Shared-package evidence only. |
-| Native app units and simulator builds | Prior exact evidence: `104/104` app units and Release iPhone/iPad simulator builds passed; the native app tree is unchanged for this candidate. | Previously passed locally | Unsigned simulator evidence; not archive, signing, TestFlight, or physical-device evidence. |
-| Supabase migrations | Linked dry-run lists only `20260716201825` and expand-only `20260723021828`; linked lint reports no schema errors. | Pending authorized PR1 apply | Contract migration is deliberately absent until the privacy-aware PR1 backend is deployed and retained. |
-| Hosted Vercel/Render smoke | Exact candidate revision plus hosted endpoints/browser smoke. | Pending | No deployment identity or hosted pass is claimed. |
-| Physical-device validation | Microphone/brass, audio routes, interruptions, Files/Photos, accessibility, localization. | Unverified | Simulator and fixtures are not physical-device evidence. |
-| Apple distribution | Signed archive, TestFlight, App Store Connect, review. | Unverified | Excluded from this candidate decision. |
-| Independent review | Exact evidence revision plus completed diff/security/audio/localization/deployment/artifact review. | Pending | Required before push/merge/deploy. |
+| Backend suite | `223 passed`, `4` PostgreSQL-only skips; successor has no backend changes. | Passed locally | Not a live PostgreSQL/provider result. |
+| Backend security/dependencies | Bandit: zero issues across 6,309 lines; pip audit clean. | Passed locally | Re-run if backend inputs change. |
+| Frontend units | Successor: `38` files / `198` tests; shared metronome fixture focus: `5/5`. | Passed locally | Local only. |
+| Frontend build/locales/audit | Production build passed; `11` locale chunks; npm audit clean. | Passed locally | No Vercel deployment claim. |
+| Full local E2E | Heavy base: `398 passed`, `7` documented browser-engine skips. Successor metronome focus: `10/10` across five projects. | Passed locally | Router/UI production code is unchanged by the successor; local Playwright only. |
+| Offline and viewport | Offline `2` passed; `12` simulated viewports. | Passed locally | Synthetic browser evidence, not physical devices. |
+| Native package/app/UI/builds | Successor app units `113/113`, zero skips. Production-tree identity matches the heavy base, which passed Core `3/3`, UI `9/9` in one invocation, four builds, launch screenshots, plist, localization, and black-band checks. | Passed locally | Unsigned simulator only. |
+| Review gates | Security approve/no P0–P2; audio/scorer approve with explicit denominator-beat contract; source/deploy preflight approve. | Approved locally | Does not approve a deploy. |
+| Supabase PR1 migrations | Dry-run lists exactly `20260716201825_audio_storage_jobs_and_upload_reservations.sql` and `20260723021828_account_deletion_privacy_tombstones.sql`; neither is applied. | Pending | Provider mutation/verification required; contract migration is not in PR1. |
+| Hosted smoke | Candidate revision deployed and exercised against Vercel, Render, and Supabase. | Pending | Current production is healthy but stale. |
+| Apple/device | Physical audio, accessibility, signing/archive, TestFlight, App Store Connect. | Pending | Excluded from this candidate. |
 
-## Reproduction Commands
+## Reproduction commands
 
 - `cd backend && .venv/bin/python -m pytest`
-- `cd frontend && npm test`
-- `cd frontend && npm run build`
-- `cd frontend && npm audit --omit=dev`
-- `cd frontend && CI=true npm run e2e:local`
+- `cd frontend && npm test && npm run build && npm audit --omit=dev`
+- `cd frontend && CI=true npm run e2e:local && npm run simulate:devices`
 - `cd swift/BrassTuneCore && swift test`
-- Discover a simulator with `xcrun simctl list devices available` before the native `xcodebuild` commands in `AGENTS.md`.
 
-## Recording Rule
-
-Do not combine counts from separate reruns, branches, simulators, or historical reports. A release decision requires the exact revision, command, environment, result, and applicable provider/device boundary.
+Do not combine reruns, SHAs, simulator evidence, or hosted state into a single release claim.

@@ -1,22 +1,22 @@
 # Release Readiness Docs Index
 
-Date: 2026-07-08
-Branch: `arya-s/web-production-recovery-20260625`
+Date: 2026-07-23
+Branch: `arya/ux-parity-localization-20260722`
 
-Current audit status: PR #7 web/backend recovery is not production-complete yet. Production Render is still stale (`/api/live`, `/api/ready`, and `/api/version` return 404), production Vercel still points at the older `main` deployment, several deploy/smoke workflows are disabled, and live Supabase auth/storage/account-lifecycle acceptance remains unproven. PR #8/native remains a separate simulator/sample-mode gate.
+Current audit status: local implementation candidate `8035d6c6b69a814a419439e0aeee820464f34d36` has passed the recorded local web, backend, native simulator, security, and audio/domain gates. It is not yet pushed, reviewed, merged, migrated, or deployed. Current production is healthy but stale; physical-device, signing, TestFlight, and App Store gates remain separate and unverified.
 
 ## Canonical Current Files
 
 | Topic | Canonical File | Notes |
 |---|---|---|
-| Current PR #7 recovery status | `WEB_RECOVERY_FINDINGS.md` | Current source of truth for web/backend/provider blockers until PR #7 is deployed and smoke-tested. |
-| Historical June web beta completion | `WEB_PRODUCTION_COMPLETION_GATE.md`, `release-evidence.json` | Historical guest-first beta evidence only; not current PR #7 production evidence. |
-| Machine-readable historical evidence | `release-evidence.json` | Superseded by the 2026-07-08 provider audit for current release decisions. |
-| Local recovery inventory | `LOCAL_IMPLEMENTATION_INVENTORY.md` | Lists dirty/untracked implementation files and known gaps. |
+| Current predeployment decision | `FINAL_REPORT.md` | Human-readable current candidate, evidence, and release boundaries. |
+| Machine-readable current evidence | `release-evidence.json` | Current candidate SHAs, gate counts, migration state, provider boundaries, and rollback references. |
+| Deployment sequence and rollback | `POST_MERGE_PRODUCTION_CHECKLIST.md`, `DEPLOYMENT_ROLLBACK.md` | Required PR1 migration/backend then PR2 contract/backend/frontend sequence. |
+| Historical web recovery | `WEB_RECOVERY_FINDINGS.md`, `WEB_PRODUCTION_COMPLETION_GATE.md` | Prior recovery and beta evidence only; not the current candidate decision. |
 | Workstream ownership | `WORKSTREAM_OWNERSHIP.md` | Maps multi-agent audits, evidence, and remaining blockers. |
 | Test evidence matrix | `TEST_MATRIX.md` | Must be refreshed after final commit and CI. Treat older counts as historical. |
 | Historical failures | `FAILURE_LOG.md` | Use for prior CI/local failures and recovery backup records. |
-| Final closeout | `FINAL_REPORT.md` | Current branch closeout; refresh again after exact-SHA CI, preview, deployment, and hosted smoke. |
+| Final closeout | `FINAL_REPORT.md` | Current local closeout; refresh again after exact-SHA CI, merge, deployment, and hosted smoke. |
 
 ## Supporting Docs
 
@@ -33,11 +33,12 @@ Current audit status: PR #7 web/backend recovery is not production-complete yet.
 
 ## Duplicate Handling
 
-- `WEB_RECOVERY_FINDINGS.md` owns the current PR #7 web/backend release decision.
-- `release-evidence.json` is historical June evidence with a July 8 blocked-audit overlay; do not treat its June pass fields as current release evidence.
+- `FINAL_REPORT.md` owns the current human-readable predeployment decision.
+- `release-evidence.json` owns the current machine-readable candidate evidence.
+- `WEB_RECOVERY_FINDINGS.md` and `WEB_PRODUCTION_COMPLETION_GATE.md` are historical recovery/beta context.
 - `FAILURE_LOG.md` owns historical failure narratives.
 - `TEST_MATRIX.md` owns native simulator command/result evidence after final validation.
-- `FINAL_REPORT.md` is historical until refreshed after exact-SHA CI, preview, deployment, and hosted smoke.
+- `FINAL_REPORT.md` is current for local evidence and must be refreshed after exact-SHA CI, merge, deployment, and hosted smoke.
 - `BETA_LOAD_ABUSE_SMOKE.md` and `LOAD_ABUSE_SMOKE.md` overlap; keep one canonical load/abuse procedure in the next docs cleanup.
 - `BETA_QA_GUIDE.md` and `FRIEND_QA_SCRIPT.md` overlap; keep the beta guide canonical and make friend scripts persona-specific.
 
