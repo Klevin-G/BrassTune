@@ -67,7 +67,7 @@ from app.schemas.schemas import (
 )
 from app.services.audio_storage import AudioReplaceResult, delete_audio_for_session, prepare_audio_upload, queue_audio_delete, replace_audio_for_session, reserve_audio_upload, retry_audio_storage_jobs
 from app.services.serializers import session_to_dict
-from app.services.session_service import save_pitch_frames, start_session
+from app.services.session_service import save_pitch_frames, start_session, stop_session
 
 WEBM_AUDIO_BYTES = b"\x1a\x45\xdf\xa3webm-audio-bytes"
 
@@ -1176,6 +1176,52 @@ def test_cached_websocket_session_cannot_save_after_http_stop():
             assert rejected.value.status_code == 409
             assert websocket_db.query(PitchSample).filter(PitchSample.session_id == session["id"]).count() == 0
         finally:
+            websocket_db.close()
+
+
+def test_cached_websocket_session_cannot_refinalize_after_http_stop():
+    """Disconnect cleanup must preserve an HTTP stop's durable summary exactly."""
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        websocket_db = SessionLocal()
+        observer_db = SessionLocal()
+        try:
+            cached = websocket_db.query(PracticeSession).filter(PracticeSession.id == session["id"]).first()
+            assert cached is not None
+            assert cached.ended_at is None
+
+            stopped = client.post(f"/api/sessions/{session['id']}/stop")
+            assert stopped.status_code == 200
+            original = observer_db.query(PracticeSession).filter(PracticeSession.id == session["id"]).first()
+            assert original is not None
+            original_summary = (
+                original.ended_at,
+                original.duration_seconds,
+                original.notes_count,
+                original.average_signed_cents,
+                original.average_abs_cents,
+                original.in_tune_percentage,
+            )
+
+            stopped_again = stop_session(websocket_db, session["id"])
+            assert stopped_again is not None
+
+            observer_db.expire_all()
+            preserved = observer_db.query(PracticeSession).filter(PracticeSession.id == session["id"]).first()
+            assert preserved is not None
+            assert (
+                preserved.ended_at,
+                preserved.duration_seconds,
+                preserved.notes_count,
+                preserved.average_signed_cents,
+                preserved.average_abs_cents,
+                preserved.in_tune_percentage,
+            ) == original_summary
+        finally:
+            observer_db.close()
             websocket_db.close()
 
 

@@ -245,6 +245,10 @@ def _finalize_session(
 def stop_session(db: Session, session_id: int) -> Optional[PracticeSession]:
     session = (
         db.query(PracticeSession)
+        # Disconnect cleanup may reuse a WebSocket's long-lived Session after
+        # HTTP has already finalized this row. Refresh first so an idempotent
+        # stop never overwrites the original completion timestamp or summary.
+        .populate_existing()
         .filter(PracticeSession.id == session_id)
         .with_for_update()
         .first()
