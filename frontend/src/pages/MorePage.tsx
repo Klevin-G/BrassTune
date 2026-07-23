@@ -1,4 +1,4 @@
-import { Activity, Bug, FileText, GraduationCap, LogIn, LogOut, Music2, Settings, Timer, UserRound, Users } from 'lucide-react';
+import { Activity, FileText, GraduationCap, LogIn, LogOut, Music2, Settings, Timer, UserRound, Users } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
@@ -12,7 +12,6 @@ const moreItems = [
   { to: '/progress', title: 'Progress', detail: 'See weekly pulse, improvement, and consistency.', icon: Activity },
   { to: '/ensemble', title: 'Ensemble', detail: 'Create a class, add students, and track their practice.', icon: Users },
   { to: '/settings', title: 'Settings', detail: 'Instrument, A4 reference, and practice preferences.', icon: Settings },
-  { to: '/settings/audio-lab', title: 'Audio Lab', detail: 'Microphone and detector diagnostics for live tuning checks.', icon: Bug },
   { to: '/privacy', title: 'Privacy', detail: 'Data use, export, deletion, and recording handling.', icon: FileText },
   { to: '/terms', title: 'Terms', detail: 'Use rules for practice analytics and account data.', icon: FileText },
   { to: '/support', title: 'Support', detail: 'Help guidance for accounts, recording, playback, and ensembles.', icon: FileText },

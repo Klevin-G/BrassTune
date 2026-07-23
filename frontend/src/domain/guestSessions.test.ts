@@ -7,6 +7,7 @@ import {
   deleteGuestSession,
   getGuestSession,
   guestSessionsExport,
+  isGeneratedGuestSessionName,
   listGuestSessions,
   saveGuestSessionFromFrames,
 } from './guestSessions';
@@ -14,6 +15,12 @@ import {
 describe('guest session storage', () => {
   afterEach(() => {
     clearGuestSessions(GUEST_WORKSPACE_ACCESS);
+  });
+
+  it('identifies only automatic English guest labels for presentation-time localization', () => {
+    expect(isGeneratedGuestSessionName('Guest practice 7/23/2026')).toBe(true);
+    expect(isGeneratedGuestSessionName('Practice 7/23/2026')).toBe(true);
+    expect(isGeneratedGuestSessionName('My warmup')).toBe(false);
   });
 
   it('saves a reviewable local guest session from browser pitch frames', () => {

@@ -12,7 +12,7 @@ import { PracticeReflectionCard } from '../components/practice/PracticeReflectio
 import { WeakTransitionCard } from '../components/practice/WeakTransitionCard';
 import { LoadingSkeleton, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { describeCents, describeInTunePercent } from '../domain/tuningLanguage';
-import { getGuestSession, GUEST_WORKSPACE_ACCESS, isGuestSessionId, type GuestSessionDetail } from '../domain/guestSessions';
+import { getGuestSession, GUEST_WORKSPACE_ACCESS, isGeneratedGuestSessionName, isGuestSessionId, type GuestSessionDetail } from '../domain/guestSessions';
 import type { NoteEvent, NoteStats, PracticeSession, Recommendation } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
 import { authPathWithReturn } from '../domain/authNavigation';
@@ -173,11 +173,14 @@ export function SessionReviewPage() {
     t(session.average_signed_cents > 5 ? 'tuning.sharp' : session.average_signed_cents < -5 ? 'tuning.flat' : 'sessionReview.centered');
   const when = formatDate(new Date(session.started_at), { dateStyle: 'medium', timeStyle: 'short' });
   const verdictLabel = centsVerdict.tone === 'green' ? t('tuning.inTune') : centsVerdict.direction === 'sharp' ? t(centsVerdict.tone === 'amber' ? 'tuning.littleSharp' : 'tuning.sharp') : t(centsVerdict.tone === 'amber' ? 'tuning.littleFlat' : 'tuning.flat');
+  const sessionTitle = session.guest_session && isGeneratedGuestSessionName(session.name)
+    ? t('sessionReview.review')
+    : session.name;
 
   return (
     <ScreenContainer className="sr-screen">
       <PageHeader
-        title={session.name}
+        title={sessionTitle}
         description={
           session.guest_session
             ? t('sessionReview.deviceDescription', { when, count: formatNumber(session.notes_count) })

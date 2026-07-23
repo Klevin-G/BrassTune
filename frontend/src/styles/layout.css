@@ -8,6 +8,16 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Focus mode is a single-task workspace. The desktop sidebar must not retain
+   a grid track after it is hidden, or the practice surface becomes cramped. */
+.app-shell.focus-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell.focus-mode .sidebar {
+  display: none;
+}
+
 .sidebar {
   position: sticky;
   top: 0;

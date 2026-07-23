@@ -38,6 +38,12 @@ export interface GuestSessionDraft extends PracticeSession {
   guest_session: true;
 }
 
+/** Names created automatically before a player names a take are presentation
+ * labels, not user content. Callers can replace them with the selected locale. */
+export function isGeneratedGuestSessionName(name: string | null | undefined): boolean {
+  return /^(?:Guest practice|Practice)(?:\s|$)/.test(name ?? '');
+}
+
 function readStored(): GuestSessionDetail[] {
   if (typeof localStorage === 'undefined') return memoryGuestSessions;
   try {

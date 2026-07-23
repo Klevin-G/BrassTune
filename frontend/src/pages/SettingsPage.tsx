@@ -1,4 +1,4 @@
-import { AlertTriangle, BarChart3, Bug, Check, DatabaseBackup, Download, LogIn, LogOut, Mic, MicOff, RefreshCcw, RotateCcw, Trash2, UserRound } from 'lucide-react';
+import { AlertTriangle, BarChart3, Check, DatabaseBackup, Download, LogIn, LogOut, Mic, MicOff, RefreshCcw, RotateCcw, Trash2, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { clearLocalSessions, downloadExport, friendlyUserFacingError, repairDemoData, resetDemoData } from '../api/client';
@@ -372,10 +372,6 @@ export function SettingsPage() {
       {internalToolsEnabled && (
         <SectionCard title={t('settings.internalControls')} eyebrow={t('settings.maintenance')}>
           <div className="settings-actions">
-            <Link className="ghost-button" to="/settings/audio-lab">
-              <Bug size={18} />
-              {t('settings.openAudioLab')}
-            </Link>
             <button className="ghost-button" type="button" disabled={busyAction !== null} onClick={() => runMaintenance(t('settings.repairDemo'), repairDemoData)}>
               <RefreshCcw size={18} />
               {t('settings.repairDemo')}
