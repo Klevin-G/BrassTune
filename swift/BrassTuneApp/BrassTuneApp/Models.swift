@@ -289,13 +289,73 @@ struct MetronomeSettings: Codable, Equatable {
     var visualOnly: Bool = false
     var hapticsEnabled: Bool = false
     var volume: Double = 0.6
+    /// The downbeat is emphasized when enabled. Kept in the preset so a
+    /// saved compound-meter setup returns exactly as it was practiced.
+    var accentFirstBeat: Bool = true
+    /// Number of audible preparation beats before a started metronome enters
+    /// its regular measure. Zero intentionally means no count-in.
+    var countInBeats: Int = 0
 
     var meterLabel: String {
         "\(beatsPerMeasure)/\(beatUnit)"
     }
 
     var intervalSeconds: TimeInterval {
-        60.0 / Double(max(30, min(240, bpm))) / Double(subdivision.ticksPerBeat)
+        60.0 / Double(max(20, min(300, bpm))) / Double(subdivision.ticksPerBeat)
+    }
+
+    mutating func validate() {
+        bpm = min(300, max(20, bpm))
+        beatsPerMeasure = min(12, max(1, beatsPerMeasure))
+        beatUnit = [2, 4, 8, 16].contains(beatUnit) ? beatUnit : 4
+        countInBeats = min(16, max(0, countInBeats))
+        volume = min(1, max(0, volume))
+        if visualOnly || volume == 0 { muted = true }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case bpm, beatsPerMeasure, beatUnit, subdivision, muted, visualOnly, hapticsEnabled, volume, accentFirstBeat, countInBeats
+    }
+
+    init(
+        bpm: Int = 92,
+        beatsPerMeasure: Int = 4,
+        beatUnit: Int = 4,
+        subdivision: MetronomeSubdivision = .quarter,
+        muted: Bool = false,
+        visualOnly: Bool = false,
+        hapticsEnabled: Bool = false,
+        volume: Double = 0.6,
+        accentFirstBeat: Bool = true,
+        countInBeats: Int = 0
+    ) {
+        self.bpm = bpm
+        self.beatsPerMeasure = beatsPerMeasure
+        self.beatUnit = beatUnit
+        self.subdivision = subdivision
+        self.muted = muted
+        self.visualOnly = visualOnly
+        self.hapticsEnabled = hapticsEnabled
+        self.volume = volume
+        self.accentFirstBeat = accentFirstBeat
+        self.countInBeats = countInBeats
+        validate()
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            bpm: try container.decodeIfPresent(Int.self, forKey: .bpm) ?? 92,
+            beatsPerMeasure: try container.decodeIfPresent(Int.self, forKey: .beatsPerMeasure) ?? 4,
+            beatUnit: try container.decodeIfPresent(Int.self, forKey: .beatUnit) ?? 4,
+            subdivision: try container.decodeIfPresent(MetronomeSubdivision.self, forKey: .subdivision) ?? .quarter,
+            muted: try container.decodeIfPresent(Bool.self, forKey: .muted) ?? false,
+            visualOnly: try container.decodeIfPresent(Bool.self, forKey: .visualOnly) ?? false,
+            hapticsEnabled: try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? false,
+            volume: try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0.6,
+            accentFirstBeat: try container.decodeIfPresent(Bool.self, forKey: .accentFirstBeat) ?? true,
+            countInBeats: try container.decodeIfPresent(Int.self, forKey: .countInBeats) ?? 0
+        )
     }
 }
 

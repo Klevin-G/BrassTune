@@ -194,7 +194,7 @@ struct WeeklyPracticeGoal: Codable, Equatable {
     var targetSessions: Int = 3
 
     mutating func validate() {
-        targetMinutes = min(1_000, max(5, targetMinutes))
+        targetMinutes = min(600, max(5, targetMinutes))
         targetSessions = min(21, max(1, targetSessions))
     }
 }
@@ -290,7 +290,9 @@ enum WeakTransitionAnalyzer {
     private struct Aggregate {
         var fromNote: String
         var toNote: String
-        var scores: [Double]
+        var fromPitch: Int
+        var toPitch: Int
+        var absoluteDestinationCents: [Double]
     }
 
     static func insight(from attempts: [PlayAlongAttemptSummary], minimumEvidence: Int = 3) -> WeakTransitionInsight? {
@@ -300,40 +302,39 @@ enum WeakTransitionAnalyzer {
             for index in 1..<attempt.noteGrades.count {
                 let from = attempt.noteGrades[index - 1]
                 let to = attempt.noteGrades[index]
-                guard let fromClass = PracticePitchMath.pitchClass(for: from.writtenNoteName),
-                      let toClass = PracticePitchMath.pitchClass(for: to.writtenNoteName),
-                      fromClass != toClass else { continue }
-                let key = "\(fromClass)>\(toClass)"
-                let ratingWeight: Double
-                switch to.rating {
-                case .excellent: ratingWeight = 0
-                case .good: ratingWeight = 1
-                case .close: ratingWeight = 2
-                case .off: ratingWeight = 3
-                case .missed: ratingWeight = 4
-                }
-                let centsWeight = min(1, abs(to.medianCents ?? 50) / 50)
-                var aggregate = values[key] ?? Aggregate(fromNote: from.writtenNoteName, toNote: to.writtenNoteName, scores: [])
-                aggregate.scores.append(ratingWeight + centsWeight)
+                guard let fromPitch = PracticePitchMath.canonicalPitch(for: from.writtenNoteName),
+                      let toPitch = PracticePitchMath.canonicalPitch(for: to.writtenNoteName),
+                      fromPitch != toPitch,
+                      let destinationCents = to.medianCents else { continue }
+                let key = "\(fromPitch)>\(toPitch)"
+                var aggregate = values[key] ?? Aggregate(
+                    fromNote: PracticePitchMath.canonicalNoteName(for: fromPitch),
+                    toNote: PracticePitchMath.canonicalNoteName(for: toPitch),
+                    fromPitch: fromPitch,
+                    toPitch: toPitch,
+                    absoluteDestinationCents: []
+                )
+                aggregate.absoluteDestinationCents.append(abs(destinationCents))
                 values[key] = aggregate
             }
         }
 
         return values
-            .filter { $0.value.scores.count >= max(1, minimumEvidence) }
+            .filter { $0.value.absoluteDestinationCents.count >= max(3, minimumEvidence) }
             .map { key, value in
                 WeakTransitionInsight(
                     fromNote: value.fromNote,
                     toNote: value.toNote,
-                    evidenceCount: value.scores.count,
-                    weaknessScore: value.scores.reduce(0, +) / Double(value.scores.count)
+                    evidenceCount: value.absoluteDestinationCents.count,
+                    weaknessScore: value.absoluteDestinationCents.reduce(0, +) / Double(value.absoluteDestinationCents.count)
                 )
             }
             .sorted {
                 if $0.weaknessScore != $1.weaknessScore { return $0.weaknessScore > $1.weaknessScore }
-                let left = "\($0.fromNote)>\($0.toNote)"
-                let right = "\($1.fromNote)>\($1.toNote)"
-                return left.localizedStandardCompare(right) == .orderedAscending
+                if $0.evidenceCount != $1.evidenceCount { return $0.evidenceCount > $1.evidenceCount }
+                let left = "\(PracticePitchMath.pitchClass(for: $0.fromNote) ?? 0)>\(PracticePitchMath.pitchClass(for: $0.toNote) ?? 0)"
+                let right = "\(PracticePitchMath.pitchClass(for: $1.fromNote) ?? 0)>\(PracticePitchMath.pitchClass(for: $1.toNote) ?? 0)"
+                return left < right
             }
             .first
     }
@@ -351,7 +352,7 @@ enum TuningInterval: Int, Codable, CaseIterable, Identifiable {
     case perfectFifth = 7
     case octave = 12
 
-    static let allCases: [TuningInterval] = [.unison, .majorThird, .perfectFourth, .perfectFifth, .octave]
+    static let allCases: [TuningInterval] = [.unison, .majorSecond, .majorThird, .perfectFourth, .perfectFifth, .octave]
 
     var id: Int { rawValue }
     var title: String {
@@ -432,9 +433,21 @@ enum PracticePitchMath {
     }
 
     static func pitchClass(for note: String) -> Int? {
-        let normalized = note
+        canonicalPitch(for: note)
+    }
+
+    /// Removes optional octave notation and normalizes Unicode accidentals,
+    /// spelling enharmonics to one numeric pitch class for persisted results.
+    static func canonicalPitch(for note: String) -> Int? {
+        let cleaned = note.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "♯", with: "#")
             .replacingOccurrences(of: "♭", with: "b")
+        guard let letter = cleaned.first?.uppercased(), "ABCDEFG".contains(letter) else { return nil }
+        let suffix = cleaned.dropFirst()
+        let accidental = suffix.prefix { $0 == "#" || $0 == "b" }
+        let remaining = suffix.dropFirst(accidental.count)
+        guard remaining.isEmpty || Int(remaining) != nil else { return nil }
+        let normalized = letter + accidental
         return [
             "C": 0, "B#": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
             "E": 4, "Fb": 4, "E#": 5, "F": 5, "F#": 6, "Gb": 6, "G": 7,
@@ -448,6 +461,10 @@ enum PracticePitchMath {
               let rhsClass = pitchClass(for: rhs) else { return false }
         return lhsClass == rhsClass
     }
+
+    static func canonicalNoteName(for pitchClass: Int) -> String {
+        ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"][(pitchClass % 12 + 12) % 12]
+    }
 }
 
 // MARK: - Offline practice packs and focused workspace
@@ -459,6 +476,22 @@ enum PracticePackBlockKind: String, Codable, CaseIterable {
     case drone
 
     var title: String { NativeLocalization.string(rawValue.capitalized) }
+}
+
+enum PracticePackValidationError: LocalizedError, Equatable {
+    case invalidBlockCount
+    case emptyTitle
+    case invalidDuration
+    case missingExecutableContent(PracticePackBlockKind)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidBlockCount: return "A practice pack needs between 1 and 12 blocks."
+        case .emptyTitle: return "Every practice block needs a title."
+        case .invalidDuration: return "Every practice block needs a positive duration."
+        case .missingExecutableContent(let kind): return "The \(kind.rawValue) block is missing its practice content."
+        }
+    }
 }
 
 struct PracticePackBlock: Codable, Equatable, Identifiable {
@@ -509,6 +542,22 @@ struct PracticePack: Codable, Equatable, Identifiable {
     func displayInstruction(for block: PracticePackBlock) -> String {
         isBuiltIn ? NativeLocalization.string(block.instruction) : block.instruction
     }
+
+    func validate() throws {
+        guard (1...12).contains(blocks.count) else { throw PracticePackValidationError.invalidBlockCount }
+        for block in blocks {
+            guard !block.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw PracticePackValidationError.emptyTitle }
+            guard block.durationSeconds > 0 else { throw PracticePackValidationError.invalidDuration }
+            switch block.kind {
+            case .instruction: break
+            case .playAlong: guard block.exercise != nil else { throw PracticePackValidationError.missingExecutableContent(.playAlong) }
+            case .metronome: guard block.metronome != nil else { throw PracticePackValidationError.missingExecutableContent(.metronome) }
+            case .drone: guard block.drone != nil else { throw PracticePackValidationError.missingExecutableContent(.drone) }
+            }
+        }
+    }
+
+    var isValid: Bool { (try? validate()) != nil }
 
     static let builtIns: [PracticePack] = [
         PracticePack(
@@ -593,9 +642,17 @@ struct PracticeFeatureState: Codable, Equatable {
         reflections = try container.decodeIfPresent([PracticeReflection].self, forKey: .reflections) ?? []
         playAlongAttempts = try container.decodeIfPresent([PlayAlongAttemptSummary].self, forKey: .playAlongAttempts) ?? []
         warmupCheckpoint = try container.decodeIfPresent(GuidedWarmupCheckpoint.self, forKey: .warmupCheckpoint)
-        customPacks = try container.decodeIfPresent([PracticePack].self, forKey: .customPacks) ?? []
+        customPacks = (try container.decodeIfPresent([PracticePack].self, forKey: .customPacks) ?? []).filter(\.isValid)
         workspaceCheckpoint = try container.decodeIfPresent(FocusedWorkspaceCheckpoint.self, forKey: .workspaceCheckpoint)
         droneSettings = try container.decodeIfPresent(DroneSettings.self, forKey: .droneSettings) ?? DroneSettings()
+        weeklyGoal.validate()
+        metronomePresets = metronomePresets.map { preset in
+            var migrated = preset
+            migrated.settings.validate()
+            return migrated
+        }
+        favorites = Array(Dictionary(grouping: favorites, by: \.id).compactMap { $0.value.first }.prefix(16))
+        recents = Array(Dictionary(grouping: recents, by: \.id).compactMap { $0.value.first }.sorted { ($0.lastStartedAt ?? .distantPast) > ($1.lastStartedAt ?? .distantPast) }.prefix(10))
     }
 }
 
@@ -637,6 +694,32 @@ extension AppModel {
         }
     }
 
+    @discardableResult
+    func updateCustomExercise(id: SavedPlayAlongExercise.ID, title: String, notes: [String]) -> Result<SavedPlayAlongExercise, CustomExerciseValidationError> {
+        guard let index = practiceFeatures.customExercises.firstIndex(where: { $0.id == id }) else { return .failure(.invalidNoteCount) }
+        do {
+            let existing = practiceFeatures.customExercises[index]
+            let updated = try SavedPlayAlongExercise(id: existing.id, title: title, writtenNotes: notes, createdAt: existing.createdAt)
+            practiceFeatures.customExercises[index] = updated
+            let referenceID = updated.exercise.id
+            practiceFeatures.favorites = practiceFeatures.favorites.map { item in
+                item.kind == .playAlongExercise && item.referenceID == referenceID
+                    ? PracticeShortcut(kind: item.kind, referenceID: item.referenceID, title: updated.title, lastStartedAt: item.lastStartedAt)
+                    : item
+            }
+            practiceFeatures.recents = practiceFeatures.recents.map { item in
+                item.kind == .playAlongExercise && item.referenceID == referenceID
+                    ? PracticeShortcut(kind: item.kind, referenceID: item.referenceID, title: updated.title, lastStartedAt: item.lastStartedAt)
+                    : item
+            }
+            return .success(updated)
+        } catch let error as CustomExerciseValidationError {
+            return .failure(error)
+        } catch {
+            return .failure(.invalidNoteCount)
+        }
+    }
+
     func deleteCustomExercise(id: SavedPlayAlongExercise.ID) {
         let exerciseID = "custom:\(id.uuidString)"
         practiceFeatures.customExercises.removeAll { $0.id == id }
@@ -654,13 +737,17 @@ extension AppModel {
               !practiceFeatures.metronomePresets.contains(where: { $0.name.caseInsensitiveCompare(clean) == .orderedSame }) else {
             return false
         }
-        practiceFeatures.metronomePresets.append(MetronomePreset(name: clean, settings: metronome))
+        var validated = metronome
+        validated.validate()
+        practiceFeatures.metronomePresets.append(MetronomePreset(name: clean, settings: validated))
         return true
     }
 
     func applyMetronomePreset(id: MetronomePreset.ID) {
         guard let preset = practiceFeatures.metronomePresets.first(where: { $0.id == id }) else { return }
-        metronome = preset.settings
+        var validated = preset.settings
+        validated.validate()
+        metronome = validated
     }
 
     @discardableResult
@@ -688,6 +775,7 @@ extension AppModel {
             var favorite = shortcut
             favorite.lastStartedAt = nil
             practiceFeatures.favorites.append(favorite)
+            practiceFeatures.favorites = Array(practiceFeatures.favorites.prefix(16))
         }
     }
 
@@ -840,6 +928,7 @@ extension AppModel {
     }
 
     func startWorkspace(pack: PracticePack, now: Date = Date()) {
+        guard pack.isValid else { return }
         stopFeatureAudio()
         practiceFeatures.workspaceCheckpoint = FocusedWorkspaceCheckpoint(
             pack: pack,

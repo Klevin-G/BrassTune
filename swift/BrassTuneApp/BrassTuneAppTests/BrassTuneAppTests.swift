@@ -212,6 +212,85 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(settings.volume, 0.6, accuracy: 0.001)
     }
 
+    func testMetronomeContractClampsRangeAndMigratesLegacySettings() throws {
+        var settings = MetronomeSettings(bpm: 999, beatsPerMeasure: 99, beatUnit: 3, volume: 4, countInBeats: 99)
+        XCTAssertEqual(settings.bpm, 300)
+        XCTAssertEqual(settings.beatUnit, 4)
+        XCTAssertEqual(settings.countInBeats, 16)
+        settings.bpm = 1
+        settings.validate()
+        XCTAssertEqual(settings.bpm, 20)
+
+        let legacy = Data(#"{"bpm":72,"beatsPerMeasure":3,"beatUnit":8,"subdivision":"eighth","muted":false,"visualOnly":false,"hapticsEnabled":true,"volume":0.4}"#.utf8)
+        let decoded = try JSONDecoder().decode(MetronomeSettings.self, from: legacy)
+        XCTAssertTrue(decoded.accentFirstBeat)
+        XCTAssertEqual(decoded.countInBeats, 0)
+        XCTAssertEqual(decoded.beatUnit, 8)
+    }
+
+    @MainActor
+    func testFeatureContractsBoundShortcutsGoalsAndCascadeCustomExercise() throws {
+        let model = makeModel()
+        model.updateWeeklyGoal(minutes: 9_999, sessions: 99)
+        XCTAssertEqual(model.practiceFeatures.weeklyGoal, WeeklyPracticeGoal(targetMinutes: 600, targetSessions: 21))
+
+        for index in 0..<20 {
+            model.toggleFavorite(PracticeShortcut(kind: .drone, referenceID: "drone-\(index)", title: "Drone \(index)"))
+        }
+        XCTAssertEqual(model.practiceFeatures.favorites.count, 16)
+        model.toggleFavorite(try XCTUnwrap(model.practiceFeatures.favorites.first))
+
+        let saved = try model.saveCustomExercise(title: "Intervals", notes: ["C", "D"]).get()
+        let shortcut = PracticeShortcut(kind: .playAlongExercise, referenceID: saved.exercise.id, title: saved.title)
+        model.toggleFavorite(shortcut)
+        model.recordPracticeStart(shortcut)
+        let updated = try model.updateCustomExercise(id: saved.id, title: "Edited intervals", notes: ["D", "Eb"]).get()
+        XCTAssertEqual(updated.title, "Edited intervals")
+        XCTAssertTrue(model.practiceFeatures.favorites.contains { $0.referenceID == saved.exercise.id && $0.title == "Edited intervals" })
+        model.deleteCustomExercise(id: saved.id)
+        XCTAssertFalse(model.practiceFeatures.favorites.contains { $0.referenceID == saved.exercise.id })
+        XCTAssertFalse(model.practiceFeatures.recents.contains { $0.referenceID == saved.exercise.id })
+    }
+
+    func testWeakTransitionsNormalizeEnharmonicsOctavesAndRankDestinationCents() {
+        func attempt(_ from: String, _ to: String, _ cents: Double) -> PlayAlongAttemptSummary {
+            let exercise = PlayAlongExercise(id: UUID().uuidString, title: "Test", detail: "", difficulty: "", category: .practicePattern, writtenNotes: [from, to])
+            return PlayAlongAttemptSummary(exercise: exercise, noteGrades: [
+                PlayAlongNoteGrade(writtenNoteName: from, medianCents: 0, sampleCount: 5, rating: .excellent),
+                PlayAlongNoteGrade(writtenNoteName: to, medianCents: cents, sampleCount: 5, rating: .good),
+            ])
+        }
+        let attempts = [
+            attempt("C4", "D♭5", 18), attempt("B#3", "C#4", -24), attempt("C", "Db", 30),
+            attempt("D", "Eb", 12), attempt("D4", "D4", 99), attempt("not-a-note", "E", 90),
+        ]
+        let insight = WeakTransitionAnalyzer.insight(from: attempts)
+        XCTAssertEqual(insight?.fromNote, "C")
+        XCTAssertEqual(insight?.toNote, "C#")
+        XCTAssertEqual(insight?.evidenceCount, 3)
+        XCTAssertEqual(try XCTUnwrap(insight?.weaknessScore), 24, accuracy: 0.0001)
+        XCTAssertEqual(insight?.exercise.writtenNotes, ["C", "C#", "C", "C#", "C", "C#"])
+    }
+
+    @MainActor
+    func testPracticePacksRequireExecutableBlocksAndWorkspacePersistsPause() async throws {
+        let invalid = PracticePack(id: "invalid", name: "Invalid", detail: "", blocks: [
+            PracticePackBlock(title: "Missing", instruction: "", kind: .drone, durationSeconds: 30),
+        ], isBuiltIn: false)
+        XCTAssertFalse(invalid.isValid)
+        XCTAssertThrowsError(try invalid.validate())
+
+        let model = makeModel()
+        let pack = PracticePack.builtIns[0]
+        let started = Date(timeIntervalSinceReferenceDate: 100)
+        model.startWorkspace(pack: pack, now: started)
+        await model.beginWorkspaceCurrentBlock(now: started)
+        model.handlePracticeBackground(now: started.addingTimeInterval(9))
+        XCTAssertFalse(model.currentWorkspaceCheckpoint?.isRunning ?? true)
+        XCTAssertEqual(try XCTUnwrap(model.currentWorkspaceCheckpoint?.blockAccumulatedSeconds), 9, accuracy: 0.001)
+        XCTAssertEqual(model.currentWorkspaceCheckpoint?.blockIndex, 0)
+    }
+
     @MainActor
     func testFixtureEntryPointsDoNothingWithoutUITestLaunchFlag() {
         let model = makeModel()
@@ -1184,9 +1263,9 @@ final class BrassTuneAppTests: XCTestCase {
 
         XCTAssertEqual(model.metronome.bpm, 120)
         model.setTempo(10)
-        XCTAssertEqual(model.metronome.bpm, 30)
-        model.setTempo(260)
-        XCTAssertEqual(model.metronome.bpm, 240)
+        XCTAssertEqual(model.metronome.bpm, 20)
+        model.setTempo(999)
+        XCTAssertEqual(model.metronome.bpm, 300)
     }
 
     @MainActor

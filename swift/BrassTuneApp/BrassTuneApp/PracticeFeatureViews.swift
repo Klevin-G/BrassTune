@@ -150,15 +150,22 @@ struct SelectedExerciseFavoriteButton: View {
 struct CustomExerciseBuilderView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    @State private var notes = ["C"]
+    let exerciseToEdit: SavedPlayAlongExercise?
+    @State private var title: String
+    @State private var notes: [String]
     @State private var errorMessage: String?
+
+    init(exerciseToEdit: SavedPlayAlongExercise? = nil) {
+        self.exerciseToEdit = exerciseToEdit
+        _title = State(initialValue: exerciseToEdit?.title ?? "")
+        _notes = State(initialValue: exerciseToEdit?.writtenNotes ?? ["C"])
+    }
 
     var body: some View {
         BTScreen {
             BTPageHeader(
                 eyebrow: "Play-Along",
-                title: "Build an exercise",
+                title: exerciseToEdit == nil ? "Build an exercise" : "Edit exercise",
                 subtitle: "Add 1–32 notes. Use the visible move buttons to put them in order."
             )
 
@@ -245,18 +252,47 @@ struct CustomExerciseBuilderView: View {
             }
 
             Button {
-                switch model.saveCustomExercise(title: title, notes: notes) {
+                let result: Result<SavedPlayAlongExercise, CustomExerciseValidationError>
+                if let exerciseToEdit {
+                    result = model.updateCustomExercise(id: exerciseToEdit.id, title: title, notes: notes)
+                } else {
+                    result = model.saveCustomExercise(title: title, notes: notes)
+                }
+                switch result {
                 case .success:
                     dismiss()
                 case .failure(let error):
                     errorMessage = error.localizedDescription
                 }
             } label: {
-                Label("Save exercise", systemImage: "checkmark")
+                Label(exerciseToEdit == nil ? "Save exercise" : "Save changes", systemImage: "checkmark")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
             .accessibilityIdentifier("exerciseBuilder.save")
+
+            if exerciseToEdit == nil, !model.practiceFeatures.customExercises.isEmpty {
+                BTCard {
+                    BTSectionHeader(title: "Your exercises", subtitle: "Edit or remove saved exercises here. Removing one also clears its shortcuts.")
+                    ForEach(model.practiceFeatures.customExercises) { saved in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(saved.title).font(.headline)
+                                Text(saved.writtenNotes.joined(separator: " · "))
+                                    .font(.caption)
+                                    .foregroundStyle(BTTheme.muted)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            NavigationLink("Edit") { CustomExerciseBuilderView(exerciseToEdit: saved) }
+                                .buttonStyle(.bordered)
+                            Button("Delete", role: .destructive) { model.deleteCustomExercise(id: saved.id) }
+                                .buttonStyle(.bordered)
+                        }
+                        .accessibilityIdentifier("exerciseManager.\(saved.id.uuidString)")
+                    }
+                }
+            }
         }
         .navigationTitle("Exercise builder")
         .accessibilityIdentifier("screen.exerciseBuilder")
@@ -504,7 +540,7 @@ struct WeeklyGoalCard: View {
             Stepper(value: Binding(
                 get: { model.practiceFeatures.weeklyGoal.targetMinutes },
                 set: { model.updateWeeklyGoal(minutes: $0, sessions: model.practiceFeatures.weeklyGoal.targetSessions) }
-            ), in: 5...1_000, step: 5)
+            ), in: 5...600, step: 5)
             {
                 Text(verbatim: NativeLocalization.format("Goal: %@ minutes", String(goal.targetMinutes)))
             }

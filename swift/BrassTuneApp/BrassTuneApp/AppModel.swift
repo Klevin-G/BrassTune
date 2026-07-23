@@ -1096,11 +1096,11 @@ final class AppModel: ObservableObject {
     }
 
     func adjustTempo(by delta: Int) {
-        metronome.bpm = min(240, max(30, metronome.bpm + delta))
+        metronome.bpm = min(300, max(20, metronome.bpm + delta))
     }
 
     func setTempo(_ bpm: Int) {
-        metronome.bpm = min(240, max(30, bpm))
+        metronome.bpm = min(300, max(20, bpm))
     }
 
     func tapTempo(now: Date = Date()) {

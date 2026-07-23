@@ -172,7 +172,7 @@ final class PracticeFeatureTests: XCTestCase {
         let twoAttempts = [attempt(destinationRating: .off, cents: 42), attempt(destinationRating: .off, cents: 38)]
         XCTAssertNil(WeakTransitionAnalyzer.insight(from: twoAttempts))
 
-        let insight = WeakTransitionAnalyzer.insight(from: twoAttempts + [attempt(destinationRating: .missed, cents: nil)])
+        let insight = WeakTransitionAnalyzer.insight(from: twoAttempts + [attempt(destinationRating: .missed, cents: 50)])
         XCTAssertEqual(insight?.fromNote, "D")
         XCTAssertEqual(insight?.toNote, "F#")
         XCTAssertEqual(insight?.evidenceCount, 3)
@@ -195,7 +195,7 @@ final class PracticeFeatureTests: XCTestCase {
         let hornFifth = try XCTUnwrap(PracticePitchMath.frequency(writtenMIDI: 60, interval: .perfectFifth, instrumentID: "horn", referencePitchHz: 440))
         XCTAssertEqual(hornFifth, 261.625, accuracy: 0.01)
 
-        XCTAssertEqual(TuningInterval.allCases, [.unison, .majorThird, .perfectFourth, .perfectFifth, .octave])
+        XCTAssertEqual(TuningInterval.allCases, [.unison, .majorSecond, .majorThird, .perfectFourth, .perfectFifth, .octave])
         let unison = try XCTUnwrap(PracticePitchMath.frequencies(writtenMIDI: 71, interval: .unison, instrumentID: "trumpet", referencePitchHz: 440))
         XCTAssertEqual(unison.count, 1)
         XCTAssertEqual(unison[0], 440, accuracy: 0.01)
