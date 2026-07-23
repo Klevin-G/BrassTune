@@ -49,6 +49,19 @@ type FixtureOptions = {
   holdProfileUntilReleased?: boolean;
 };
 
+const hornProfile = {
+  id: 'horn',
+  display_name: 'French Horn in F',
+  transposition_semitones: 7,
+  min_frequency_hz: 80,
+  max_frequency_hz: 1200,
+  preferred_note_spellings: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'],
+  typical_range_written: 'F3-C6',
+  common_tuning_tendencies: ['Hand position affects resonance and intonation.'],
+  recommendation_templates: { sharp: [], flat: [], unstable: [] },
+  future_swift_notes: 'Keep transposition and horn-specific coaching in plain data.',
+};
+
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const fakeAuthModule = `
@@ -126,7 +139,7 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
       body: JSON.stringify(body),
     });
 
-    if (path === '/api/instruments') return respond([]);
+    if (path === '/api/instruments') return respond([hornProfile]);
     if (path === '/api/users/current') {
       counters.profileLoads += 1;
       if (
@@ -332,7 +345,7 @@ async function installAccountSwitchFixture(
       body: JSON.stringify(body),
     });
 
-    if (path === '/api/instruments') return respond([]);
+    if (path === '/api/instruments') return respond([hornProfile]);
     if (path === '/api/users/current') {
       if (token === 'token-b' && options.failAccountBProfile !== false) {
         counters.failedProfileLoads += 1;
@@ -535,7 +548,8 @@ test('a new signed-in account completes one-step instrument setup and retries pe
   const counters = await installSignedInClassFixture(page, {
     onboardingCompletedAt: null,
     onboardingUpdateFailures: 1,
-    onboardingUpdateDelayMs: 250,
+    // Keep the save pending while each browser verifies the no-enabled-control focus trap.
+    onboardingUpdateDelayMs: 3_000,
   });
   await page.goto('/practice');
 
@@ -546,6 +560,7 @@ test('a new signed-in account completes one-step instrument setup and retries pe
   await dialog.getByRole('combobox').selectOption('horn');
   await dialog.getByRole('button', { name: 'Open the tuner' }).click();
   await expect(dialog.getByRole('button', { name: 'Saving tour…' })).toBeDisabled();
+  await expect(dialog).toBeFocused();
   await page.keyboard.press('Escape');
   await page.keyboard.press('Tab');
   await expect(dialog).toBeVisible();

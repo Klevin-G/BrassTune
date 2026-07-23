@@ -127,6 +127,8 @@ test('tiny-phone onboarding keeps its close control clear in English and Arabic'
       // A completed legacy account/tour must not suppress a fresh guest setup.
       localStorage.setItem('brasstune.onboardingComplete', 'true');
       localStorage.removeItem('brasstune.guestOnboardingComplete');
+      // The next navigation must retain this deliberately incomplete guest setup.
+      sessionStorage.setItem('e2e.preserveOnboardingState', 'true');
     }, locale);
     await page.goto('/practice');
 

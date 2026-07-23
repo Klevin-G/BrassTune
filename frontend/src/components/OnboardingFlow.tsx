@@ -48,20 +48,30 @@ export function OnboardingFlow() {
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      const activeElement = document.activeElement;
+      if (!dialogRef.current.contains(activeElement) || activeElement === dialogRef.current) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && activeElement === first) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && activeElement === last) {
         event.preventDefault();
         first.focus();
       }
     };
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
       returnFocusRef.current?.focus();
     };
   }, [closeOnboarding, onboardingOpen]);
+
+  useEffect(() => {
+    if (!onboardingOpen || !onboardingSaving) return undefined;
+    const frame = window.requestAnimationFrame(() => dialogRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [onboardingOpen, onboardingSaving]);
 
   if (!onboardingOpen) return null;
 

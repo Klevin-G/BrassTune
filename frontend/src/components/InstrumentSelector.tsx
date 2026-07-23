@@ -4,22 +4,22 @@ import type { InstrumentProfile } from '../domain/types';
 import { useI18n } from '../i18n/LocaleContext';
 import type { MessageId } from '../i18n/messages.base';
 
+const fallbackInstruments: InstrumentProfile[] = [
+  { id: 'trumpet', display_name: 'Trumpet in Bb' } as InstrumentProfile,
+  { id: 'horn', display_name: 'French Horn in F' } as InstrumentProfile,
+  { id: 'trombone', display_name: 'Trombone' } as InstrumentProfile,
+  { id: 'euphonium', display_name: 'Euphonium' } as InstrumentProfile,
+  { id: 'tuba', display_name: 'Tuba' } as InstrumentProfile,
+];
+
 export function InstrumentSelector({ value, onChange, compact = false, label }: { value: string; onChange: (value: string) => void; compact?: boolean; label?: string }) {
   const { t } = useI18n();
   const fieldLabel = label ?? t('instrument.label');
   const [instruments, setInstruments] = useState<InstrumentProfile[]>([]);
   useEffect(() => {
     getInstruments()
-      .then(setInstruments)
-      .catch(() => {
-        setInstruments([
-          { id: 'trumpet', display_name: 'Trumpet in Bb' } as InstrumentProfile,
-          { id: 'horn', display_name: 'French Horn in F' } as InstrumentProfile,
-          { id: 'trombone', display_name: 'Trombone' } as InstrumentProfile,
-          { id: 'euphonium', display_name: 'Euphonium' } as InstrumentProfile,
-          { id: 'tuba', display_name: 'Tuba' } as InstrumentProfile,
-        ]);
-      });
+      .then((profiles) => setInstruments(profiles.length > 0 ? profiles : fallbackInstruments))
+      .catch(() => setInstruments(fallbackInstruments));
   }, []);
   return (
     <label className={`select-wrap ${compact ? 'compact' : ''}`}>

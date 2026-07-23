@@ -23,8 +23,11 @@ test('mobile practice home exposes resumable warm-up, drone, goals, packs, and v
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto('/practice');
   await expect(page.getByRole('heading', { name: 'Guided 5-minute warm-up' })).toBeVisible();
-  await page.getByRole('button', { name: 'Start warm-up' }).click();
-  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await expect(async () => {
+    const start = page.getByRole('button', { name: 'Start warm-up' });
+    if (await start.isVisible()) await start.click();
+    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+  }).toPass({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Pause' }).click();
 
   await page.getByLabel('Practice tool').getByText('Drone / intervals').click();
@@ -156,6 +159,42 @@ test('Arabic tiny-phone tuner fits the viewport while keeping the pitch axis lef
 });
 
 test('Arabic Play-Along keeps musical note order left-to-right', async ({ page }) => {
+  await page.addInitScript(() => {
+    const track = { kind: 'audio', readyState: 'live', stop() {} };
+    const stream = { getTracks: () => [track] };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: async () => stream },
+    });
+    class FakeAudioContext {
+      state = 'running';
+      destination = {};
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      createScriptProcessor() { return { connect() {}, disconnect() {}, onaudioprocess: null }; }
+    }
+    Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
+  });
+  await page.route('**/src/hooks/usePitchStream.ts*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: `
+const frame = {
+  timestamp_ms: 1, frequency_hz: 261.63, confidence: 1, rms: 0.1,
+  midi_note_float: 60, nearest_midi: 60, concert_note_name: 'C', concert_octave: 4,
+  written_note_name: 'C', written_octave: 4, cents_deviation: 0, tuning_status: 'in_tune',
+  instrument_id: 'trumpet', reference_pitch_hz: 440, is_valid_for_recording: true,
+};
+export function usePitchStream() {
+  return {
+    currentFrame: frame, micActive: true, mediaStream: { getTracks: () => [] }, statusMessage: '',
+    startMicrophone: () => navigator.mediaDevices.getUserMedia({ audio: true }), stopMicrophone() {}, captureFrame() {},
+    finishPersistingFrames: async () => ({ saved: 0, rejected: 0, failed: 0 }),
+  };
+}
+`,
+  }));
   await page.addInitScript(() => localStorage.setItem('brasstune.locale', 'ar'));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/practice/scorer');
