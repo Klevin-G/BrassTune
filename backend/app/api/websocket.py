@@ -248,7 +248,15 @@ async def pitch_socket(websocket: WebSocket):
                 pending_frames[session_id] = []
 
         def session_for_write(session_id: int) -> Optional[PracticeSession]:
-            session = db.query(PracticeSession).filter(PracticeSession.id == session_id).first()
+            # This connection owns a long-lived SQLAlchemy Session. Refresh the
+            # identity-map entry before authorizing a write; another HTTP or
+            # socket connection may have ended the practice session meanwhile.
+            session = (
+                db.query(PracticeSession)
+                .populate_existing()
+                .filter(PracticeSession.id == session_id)
+                .first()
+            )
             if session is None:
                 return None
             if auth.user.role == "admin" or session.user_id == auth.user.id:

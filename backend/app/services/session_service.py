@@ -142,6 +142,10 @@ def save_pitch_frames(db: Session, session_id: int, frames: List[Dict[str, objec
     # active/ended state instead of inserting after completion.
     session = (
         db.query(PracticeSession)
+        # WebSocket connections intentionally keep this Session open. Replace a
+        # previously cached row before the lock/ended check so an HTTP stop in a
+        # different Session cannot be followed by stale pitch inserts.
+        .populate_existing()
         .filter(PracticeSession.id == session_id)
         .with_for_update()
         .first()

@@ -1142,6 +1142,43 @@ def test_stopped_session_rejects_new_pitch_samples():
     assert "ended" in response.json()["detail"].lower()
 
 
+def test_cached_websocket_session_cannot_save_after_http_stop():
+    """A socket keeps one SQLAlchemy session open while HTTP may stop a session.
+
+    The write-side lookup must replace an identity-map-cached active session with
+    its durable state before deciding whether it may insert samples.
+    """
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        websocket_db = SessionLocal()
+        try:
+            cached = websocket_db.query(PracticeSession).filter(PracticeSession.id == session["id"]).first()
+            assert cached is not None
+            assert cached.ended_at is None
+
+            stopped = client.post(f"/api/sessions/{session['id']}/stop")
+            assert stopped.status_code == 200
+
+            frame = frequency_to_pitch_frame(
+                midi_to_frequency(60),
+                MIN_RECORDING_CONFIDENCE,
+                0.1,
+                0,
+                "trumpet",
+                440.0,
+            ).to_dict()
+            with pytest.raises(HTTPException) as rejected:
+                save_pitch_frames(websocket_db, session["id"], [frame])
+
+            assert rejected.value.status_code == 409
+            assert websocket_db.query(PitchSample).filter(PitchSample.session_id == session["id"]).count() == 0
+        finally:
+            websocket_db.close()
+
+
 def test_repeated_stop_preserves_original_end_timestamp():
     with TestClient(app) as client:
         session = client.post(
