@@ -47,18 +47,18 @@ describe('web localization', () => {
 
   it('uses reviewed music and classroom terminology in every production language', async () => {
     const terminology = {
-      en: ['Tuner', 'Play-Along', 'Class'],
-      es: ['Afinador', 'Tocar juntos', 'Clase'],
-      'zh-Hans': ['调音器', '跟练', '课堂'],
-      'zh-Hant': ['調音器', '跟練', '課堂'],
-      ar: ['الموالف', 'العزف المصاحب', 'الصف'],
-      fr: ['Accordeur', 'Accompagnement', 'Classe'],
-      de: ['Stimmgerät', 'Mitspielen', 'Klasse'],
-      ru: ['Тюнер', 'Игра под аккомпанемент', 'Класс'],
-      'pt-BR': ['Afinador', 'Tocar junto', 'Turma'],
-      ja: ['チューナー', 'プレイアロング', 'クラス'],
-      ko: ['튜너', '함께 연주', '수업'],
-      vi: ['Máy lên dây', 'Chơi cùng', 'Lớp học'],
+      en: ['Tuner', 'Practice Scorer', 'Class'],
+      es: ['Afinador', 'Evaluador de práctica', 'Clase'],
+      'zh-Hans': ['调音器', '练习评分', '课堂'],
+      'zh-Hant': ['調音器', '練習評分', '課堂'],
+      ar: ['الموالف', 'مقيّم التدريب', 'الصف'],
+      fr: ['Accordeur', 'Évaluation de pratique', 'Classe'],
+      de: ['Stimmgerät', 'Übungsbewertung', 'Klasse'],
+      ru: ['Тюнер', 'Оценка практики', 'Класс'],
+      'pt-BR': ['Afinador', 'Avaliador de prática', 'Turma'],
+      ja: ['チューナー', '練習スコア', 'クラス'],
+      ko: ['튜너', '연습 평가', '수업'],
+      vi: ['Máy lên dây', 'Chấm điểm luyện tập', 'Lớp học'],
     } as const;
     for (const locale of productionLocales) {
       const messages = await loadMessagesForLocale(locale);
