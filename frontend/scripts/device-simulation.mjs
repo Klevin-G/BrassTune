@@ -343,6 +343,10 @@ async function assertSideBySide(page, selector, issues, label) {
 async function saveScreenshot(page, viewport, key, screenshots) {
   const fileName = screenshotPlan.get(`${viewport.slug}:${key}`);
   if (!fileName) return;
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
   await page.screenshot({ path: path.join(screenshotDir, fileName), fullPage: key !== 'sessions' });
   screenshots.push(fileName);
 }
