@@ -4,6 +4,8 @@ import { expect, test } from 'playwright/test';
 const routes = [
   '/',
   '/practice',
+  '/practice/play-along',
+  '/progress',
   '/metronome',
   '/practice/score',
   '/auth/sign-in',

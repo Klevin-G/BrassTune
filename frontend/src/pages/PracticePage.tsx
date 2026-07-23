@@ -35,6 +35,18 @@ export function nextTunerHoldCount(current: number, frame: Parameters<typeof isR
   return centered ? Math.min(HOLD_TARGET_FRAMES, current + 1) : 0;
 }
 
+export function shouldShowMicrophoneDemoFallback(
+  demoMode: boolean,
+  micActive: boolean,
+  statusMessage: string,
+  audioContextState: string,
+): boolean {
+  if (demoMode || micActive) return false;
+  return audioContextState === 'unavailable'
+    || audioContextState === 'error'
+    || /denied|blocked|not allowed|need|unavailable|unsupported|cannot|disconnected/i.test(statusMessage);
+}
+
 export function PracticePage() {
   const { locale, t, formatNumber } = useI18n();
   const { instrumentId, referencePitch, demoMode, setDemoMode } = useAppSettings();
@@ -368,7 +380,12 @@ export function PracticePage() {
     recorder.setError(null);
   };
 
-  const micDenied = !demoMode && !stream.micActive && /denied|blocked|not allowed|need/i.test(stream.statusMessage);
+  const showMicrophoneDemoFallback = shouldShowMicrophoneDemoFallback(
+    demoMode,
+    stream.micActive,
+    stream.statusMessage,
+    stream.streamInfo?.audioContextState ?? 'unavailable',
+  );
 
   return (
     <ScreenContainer>
@@ -397,7 +414,7 @@ export function PracticePage() {
           <span className="tuner-ref">A = {referencePitch} Hz</span>
         </div>
 
-        {micDenied && (
+        {showMicrophoneDemoFallback && (
           <div className="tuner-banner" role="status">
             {t('practice.micDeniedBefore')} <button type="button" className="link-button" onClick={() => setMode('demo')}>{t('practice.demo')}</button>{t('practice.micDeniedAfter')}
           </div>

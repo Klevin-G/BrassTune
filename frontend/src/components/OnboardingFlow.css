@@ -32,7 +32,7 @@
 .ob-close {
   position: absolute;
   top: 14px;
-  right: 14px;
+  inset-inline-end: 14px;
 }
 
 .ob-progress {
@@ -58,6 +58,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  padding-inline-end: 52px;
 }
 
 .ob-heading-icon {
@@ -428,6 +429,7 @@
     width: 100%;
   }
   .ob-actions > .ghost-button,
+  .ob-actions > .primary-button,
   .ob-actions > div .primary-button {
     width: 100%;
   }

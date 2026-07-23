@@ -94,60 +94,54 @@ test('root gateway starts a guest practice session on the tuner', async ({ page 
   await expect(page.getByText(/Live mic/i)).toBeVisible();
 });
 
-test('explicit guest entry opens the complete feature tour even after a legacy completion', async ({ page }) => {
+test('explicit guest entry opens one-step instrument setup even after a legacy completion', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /start practicing/i }).first().click();
 
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('heading', { name: 'Welcome to BrassTune' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
   await expect(dialog).toContainText(/Practicing as a guest/);
   await expect(dialog).toContainText(/This build is guest-only/);
   await expect(dialog).toContainText(/Account sync and Class/);
-
-  await dialog.getByRole('button', { name: /show me around/i }).click();
-  await expect(dialog.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
-
-  await dialog.getByRole('button', { name: 'Next' }).click();
-  await expect(dialog.getByRole('heading', { name: 'Tuner: hear and save' })).toBeVisible();
-  await expect(dialog).toContainText(/Live mic or Demo/);
-  await expect(dialog).toContainText(/A4 reference/);
-
-  await dialog.getByRole('button', { name: 'Next' }).click();
-  await expect(dialog.getByRole('heading', { name: 'Play-Along: practice steadily' })).toBeVisible();
-  await expect(dialog).toContainText(/Hold the correct note steadily for 2 seconds/);
-  await expect(dialog).toContainText(/Skip note/);
-
-  await dialog.getByRole('button', { name: 'Next' }).click();
-  await expect(dialog.getByRole('heading', { name: 'Metronome and sheet music' })).toBeVisible();
-  await expect(dialog).toContainText(/tap the BPM/);
-  await expect(dialog).toContainText(/Import a PDF or photo/);
-
-  await dialog.getByRole('button', { name: 'Next' }).click();
-  await expect(dialog.getByRole('heading', { name: 'Recordings', exact: true })).toBeVisible();
-  await expect(dialog).toContainText(/Listen and review/);
-  await expect(dialog).toContainText(/Export/);
-
-  await dialog.getByRole('button', { name: 'Next' }).click();
-  await expect(dialog.getByRole('heading', { name: 'Progress and practice plan' })).toBeVisible();
-  await expect(dialog).toContainText(/Heatmap/);
-  await expect(dialog).toContainText(/Streak/);
-
-  await dialog.getByRole('button', { name: 'Next' }).click();
-  await expect(dialog.getByRole('heading', { name: 'Class', exact: true })).toBeVisible();
-  await expect(dialog).toContainText(/unavailable in this guest-only build/);
-  await expect(dialog).toContainText(/Students/);
-  await expect(dialog).toContainText(/Teachers/);
-
-  await dialog.getByRole('button', { name: 'Next' }).click();
-  await expect(dialog.getByRole('heading', { name: 'Settings and your next step' })).toBeVisible();
-  await expect(dialog).toContainText(/Account and data/);
-  await expect(dialog).toContainText(/Replay tour/);
+  await expect(dialog.getByRole('button', { name: /dismiss tour for now/i })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /next|back|show me around/i })).toHaveCount(0);
+  await dialog.getByRole('combobox').selectOption('horn');
+  await expect(dialog.getByRole('combobox')).toHaveValue('horn');
   await dialog.getByRole('button', { name: /open the tuner/i }).click();
   await expect(dialog).toBeHidden();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestOnboardingComplete'))).toBe('true');
   await page.reload();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('tiny-phone onboarding keeps its close control clear in English and Arabic', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+
+  for (const locale of ['en', 'ar']) {
+    await page.goto('/');
+    await page.evaluate((nextLocale) => {
+      localStorage.setItem('brasstune.locale', nextLocale);
+      localStorage.setItem('brasstune.guestAccess', 'true');
+      localStorage.removeItem('brasstune.guestOnboardingComplete');
+    }, locale);
+    await page.goto('/practice');
+
+    const dialog = page.getByRole('dialog');
+    const close = dialog.locator('.ob-close');
+    await expect(close).toBeVisible();
+    const overlapAreas = await dialog.evaluate((element) => {
+      const closeRect = element.querySelector('.ob-close')!.getBoundingClientRect();
+      return Array.from(element.querySelectorAll('.ob-heading-icon, .ob-heading h2')).map((target) => {
+        const targetRect = target.getBoundingClientRect();
+        const width = Math.max(0, Math.min(closeRect.right, targetRect.right) - Math.max(closeRect.left, targetRect.left));
+        const height = Math.max(0, Math.min(closeRect.bottom, targetRect.bottom) - Math.max(closeRect.top, targetRect.top));
+        return width * height;
+      });
+    });
+    expect(overlapAreas, `${locale} heading should not overlap the close control`).toEqual([0, 0]);
+    await close.click();
+  }
 });
 
 test('closing a guest tour is temporary until the tour is completed', async ({ page }) => {
@@ -162,7 +156,7 @@ test('closing a guest tour is temporary until the tour is completed', async ({ p
   await page.evaluate(() => sessionStorage.setItem('e2e.preserveOnboardingState', 'true'));
   await page.reload();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Welcome to BrassTune' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
 });
 
 test('settings replays the tour with a keyboard-trapped dialog', async ({ page }) => {

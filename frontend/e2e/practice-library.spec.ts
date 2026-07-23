@@ -154,6 +154,20 @@ test('Arabic tiny-phone tuner fits the viewport while keeping the pitch axis lef
   expect(layout.meterDirection).toBe('ltr');
 });
 
+test('Arabic Play-Along keeps musical note order left-to-right', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('brasstune.locale', 'ar'));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/practice/play-along');
+  await page.locator('.pa-start').click();
+  const notes = page.locator('.playalong-sequence .playalong-note');
+  await expect(notes).toHaveCount(8);
+  const first = await notes.nth(0).boundingBox();
+  const second = await notes.nth(1).boundingBox();
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  expect(first!.x).toBeLessThan(second!.x);
+});
+
 test('weekly goal drafts resync after guest hydration and an account owner switch', async ({ page }) => {
   await page.addInitScript(() => {
     const library = (owner: string, targetMinutes: number, targetSessions: number) => JSON.stringify({
