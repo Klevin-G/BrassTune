@@ -201,6 +201,69 @@ def test_backend_deploy_and_ci_use_hash_pinned_lockfiles():
         assert "--upgrade pip" not in contents
 
 
+def test_deploy_uses_an_audited_locked_local_vercel_cli_and_disallows_all_target():
+    root = Path(__file__).resolve().parents[3]
+    deploy = (root / ".github" / "workflows" / "deploy.yml").read_text()
+    security = (root / ".github" / "workflows" / "security.yml").read_text()
+    vercel_cli_dir = root / ".github" / "tools" / "vercel-cli"
+    package = json.loads((vercel_cli_dir / "package.json").read_text())
+    lock = json.loads((vercel_cli_dir / "package-lock.json").read_text())
+
+    assert package["dependencies"]["vercel"] == "54.14.0"
+    assert package["overrides"] == {
+        "@tootallnate/once": "2.0.1",
+        "ajv": "8.18.0",
+        "js-yaml": "4.3.0",
+        "minimatch@10.1.1": "10.2.5",
+        "path-to-regexp@6.1.0": "6.3.0",
+        "path-to-regexp@8.2.0": "8.4.0",
+        "path-to-regexp@8.3.0": "8.4.0",
+        "smol-toml": "1.6.1",
+        "srvx": "0.11.13",
+        "tar": "7.5.19",
+        "undici@5.28.4": "6.27.0",
+    }
+    locked_vercel = lock["packages"]["node_modules/vercel"]
+    assert locked_vercel["version"] == "54.14.0"
+    assert locked_vercel["integrity"].startswith("sha512-")
+    locked_overrides = {
+        "node_modules/@tootallnate/once": "2.0.1",
+        "node_modules/ajv": "8.18.0",
+        "node_modules/js-yaml": "4.3.0",
+        "node_modules/minimatch": "10.2.5",
+        "node_modules/path-to-regexp": "8.4.0",
+        "node_modules/@vercel/node/node_modules/path-to-regexp": "6.3.0",
+        "node_modules/smol-toml": "1.6.1",
+        "node_modules/srvx": "0.11.13",
+        "node_modules/tar": "7.5.19",
+        "node_modules/undici": "6.27.0",
+    }
+    for path, version in locked_overrides.items():
+        assert lock["packages"][path]["version"] == version
+        assert lock["packages"][path]["integrity"].startswith("sha512-")
+
+    install = "npm ci --prefix .github/tools/vercel-cli --ignore-scripts"
+    audit = "npm audit --omit=dev --prefix .github/tools/vercel-cli"
+    first_credential = "VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}"
+    assert install in deploy
+    assert audit in deploy
+    assert deploy.index(install) < deploy.index(audit) < deploy.index(first_credential)
+    assert "cache-dependency-path: .github/tools/vercel-cli/package-lock.json" in deploy
+    assert "npm install -g vercel" not in deploy
+    assert ".github/tools/vercel-cli/node_modules/.bin/vercel" in deploy
+    assert "default: all" not in deploy
+    assert "- all" not in deploy
+    assert "target == 'all'" not in deploy
+
+    assert security.count('".github/workflows/deploy.yml"') == 2
+    assert security.count('".github/tools/vercel-cli/**"') == 2
+    assert "frontend/package-lock.json\n            .github/tools/vercel-cli/package-lock.json" in security
+    assert install in security
+    assert audit in security
+    assert security.index(install) < security.index(audit) < security.index("secrets.GITHUB_TOKEN")
+    assert "VERCEL_TOKEN" not in security
+
+
 def test_render_deploy_removes_legacy_cors_regex_and_uses_authoritative_runtime_values():
     root = Path(__file__).resolve().parents[3]
     render = (root / "render.yaml").read_text()
@@ -2589,6 +2652,43 @@ def test_account_deletion_retry_executor_recovers_local_cleanup_failure(monkeypa
         db.refresh(job)
         assert job.status == "completed"
         assert job.stage == "completed"
+    finally:
+        db.close()
+
+
+def test_account_deletion_retry_executor_reports_local_retry_external_failure_as_retryable(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(id=156, username="delete156", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-156")
+        job = AccountDeletionJob(
+            user_id=user.id,
+            supabase_user_id=user.supabase_user_id,
+            idempotency_key="delete-user-156",
+            stage="local_cleanup_failed",
+            status="retryable_failure",
+            next_retry_at=dt.datetime.utcnow() - dt.timedelta(minutes=1),
+            counts_json="{}",
+        )
+        db.add_all([user, job])
+        db.commit()
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda _user_id: False)
+
+        result = retry_account_deletion_jobs(db)
+
+        assert result["processed"] == 1
+        assert result["completed"] == 0
+        assert result["still_retryable"] == 1
+        assert result["results"] == [
+            {
+                "job_id": job.id,
+                "status": "retryable_failure",
+                "stage": "external_cleanup_failed",
+                "deletion_status": "external_cleanup_queued",
+            }
+        ]
+        db.refresh(job)
+        assert job.status == "retryable_failure"
+        assert job.stage == "external_cleanup_failed"
     finally:
         db.close()
 

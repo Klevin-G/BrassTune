@@ -1,0 +1,22 @@
+{
+  "name": "brasstune-vercel-cli",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Hash-locked Vercel CLI for the production deployment workflow.",
+  "dependencies": {
+    "vercel": "54.14.0"
+  },
+  "overrides": {
+    "@tootallnate/once": "2.0.1",
+    "ajv": "8.18.0",
+    "js-yaml": "4.3.0",
+    "minimatch@10.1.1": "10.2.5",
+    "path-to-regexp@6.1.0": "6.3.0",
+    "path-to-regexp@8.2.0": "8.4.0",
+    "path-to-regexp@8.3.0": "8.4.0",
+    "smol-toml": "1.6.1",
+    "srvx": "0.11.13",
+    "tar": "7.5.19",
+    "undici@5.28.4": "6.27.0"
+  }
+}

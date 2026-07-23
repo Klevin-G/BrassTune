@@ -977,7 +977,15 @@ def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
                         db,
                         AuthContext(user=user, is_guest=False, access_token=None),
                     )
-                    results.append({"job_id": job.id, "status": payload.get("deletion_status", "unknown"), "stage": payload.get("deletion_stage")})
+                    db.refresh(job)
+                    results.append(
+                        {
+                            "job_id": job.id,
+                            "status": job.status,
+                            "stage": job.stage,
+                            "deletion_status": payload.get("deletion_status", job.status),
+                        }
+                    )
                     continue
                 except HTTPException:
                     db.refresh(job)
