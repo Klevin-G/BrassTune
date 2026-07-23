@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import { useSearchParams } from 'react-router-dom';
 import { MetronomePresetPanel } from '../components/practice/MetronomePresetPanel';
 import { PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge } from '../components/ui/AppPrimitives';
-import type { MetronomePreset } from '../domain/practiceLibrary';
+import { PRACTICE_AUDIO_PAUSE_EVENT, type MetronomePreset } from '../domain/practiceLibrary';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import { buildScheduledTicks, clampBpm, nextRampBpm, normalizeTimeSignature, secondsPerTick, subdivisionFactor, tapTempoBpm, type Subdivision } from '../domain/metronome';
 import { useI18n } from '../i18n/LocaleContext';
@@ -84,6 +84,8 @@ export function MetronomePage() {
   const scrubRef = useRef({ active: false, startX: 0, startBpm: 0, moved: false });
   const runningRef = useRef(false);
   const startInFlightRef = useRef(false);
+  const startGenerationRef = useRef(0);
+  const stopRef = useRef<() => void>(() => undefined);
   const mountedRef = useRef(true);
   const scheduledClicksRef = useRef(new Set<{ oscillator: OscillatorNode; gain: GainNode }>());
   const visualTimersRef = useRef(new Set<number>());
@@ -216,6 +218,8 @@ export function MetronomePage() {
 
   const start = async () => {
     if (runningRef.current || startInFlightRef.current) return;
+    const generation = startGenerationRef.current + 1;
+    startGenerationRef.current = generation;
     startInFlightRef.current = true;
     try {
       const context = audioRef.current ?? audioContextFactory();
@@ -227,7 +231,14 @@ export function MetronomePage() {
       if (context.state !== 'running') {
         await context.resume().catch(() => undefined);
       }
-      if (!mountedRef.current || audioRef.current !== context) return;
+      if (
+        !mountedRef.current
+        || audioRef.current !== context
+        || startGenerationRef.current !== generation
+        || document.hidden
+      ) {
+        return;
+      }
       if (context.state !== 'running') {
         setStatus(t('metronome.allowAudio'));
         return;
@@ -258,6 +269,8 @@ export function MetronomePage() {
   };
 
   const stop = () => {
+    startGenerationRef.current += 1;
+    startInFlightRef.current = false;
     runningRef.current = false;
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = null;
@@ -266,11 +279,30 @@ export function MetronomePage() {
     setBeatOn(false);
     setStatus(t('metronome.stopped'));
   };
+  stopRef.current = stop;
+
+  useEffect(() => {
+    const pauseForBackground = () => {
+      if (runningRef.current || startInFlightRef.current) stopRef.current();
+    };
+    const handleVisibility = () => {
+      if (document.hidden) pauseForBackground();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', pauseForBackground);
+    window.addEventListener(PRACTICE_AUDIO_PAUSE_EVENT, pauseForBackground);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', pauseForBackground);
+      window.removeEventListener(PRACTICE_AUDIO_PAUSE_EVENT, pauseForBackground);
+    };
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      startGenerationRef.current += 1;
       startInFlightRef.current = false;
       runningRef.current = false;
       if (timerRef.current) window.clearInterval(timerRef.current);

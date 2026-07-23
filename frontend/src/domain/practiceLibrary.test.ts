@@ -2,20 +2,27 @@ import { describe, expect, it } from 'vitest';
 import {
   PRACTICE_LIBRARY_VERSION,
   BUILT_IN_PRACTICE_PACKS,
+  addPracticeWorkspaceElapsed,
   clearAccountPracticeState,
+  completePracticeWorkspaceStep,
+  createPracticeWorkspace,
   currentWeekKey,
   emptyPracticeLibrary,
   normalizeMetronomePreset,
+  isExecutablePracticePack,
   millisecondsUntilNextPracticeWeek,
+  movePracticeWorkspace,
   ownerPracticeKey,
   ownerWorkspaceKey,
   parseExerciseNotes,
   parsePracticeLibrary,
+  parsePracticeWorkspace,
   reconcilePracticeLibraryWeek,
   recordPracticeActivity,
   resolvePracticeOwner,
   removeCustomExercise,
   removeMetronomePreset,
+  serializePracticeWorkspace,
   upsertCustomExercise,
   writePracticeLibrary,
 } from './practiceLibrary';
@@ -105,7 +112,63 @@ describe('practice library storage', () => {
 
   it('ships routable built-in packs for the focused workspace', () => {
     expect(BUILT_IN_PRACTICE_PACKS).toHaveLength(2);
-    expect(BUILT_IN_PRACTICE_PACKS.every((pack) => pack.steps.length > 0 && pack.steps.every((step) => step.href.startsWith('/')))).toBe(true);
+    expect(BUILT_IN_PRACTICE_PACKS.every((pack) => pack.steps.length >= 1 && pack.steps.length <= 12 && isExecutablePracticePack(pack))).toBe(true);
+    expect(BUILT_IN_PRACTICE_PACKS.every((pack) => Object.isFrozen(pack) && Object.isFrozen(pack.steps) && pack.steps.every(Object.isFrozen))).toBe(true);
+  });
+
+  it('persists only a canonical pack reference with active-block progress and completion', () => {
+    const pack = BUILT_IN_PRACTICE_PACKS[0];
+    const created = createPracticeWorkspace(pack, new Date('2026-07-23T12:00:00.000Z'));
+    expect(created).not.toBeNull();
+    let workspace = addPracticeWorkspaceElapsed(created!, 17);
+    workspace = movePracticeWorkspace(workspace, 1);
+    workspace = addPracticeWorkspaceElapsed(workspace, 8);
+    workspace = completePracticeWorkspaceStep(workspace);
+
+    const serialized = serializePracticeWorkspace(workspace);
+    expect(serialized).not.toBeNull();
+    const stored = JSON.parse(serialized!);
+    expect(stored).toMatchObject({
+      version: 1,
+      packId: 'daily-foundations',
+      packVersion: 1,
+      stepIndex: 1,
+      elapsedSecondsByStep: { 'guided-5': 17, 'concert-bb': 8, cmaj: 0 },
+      completedStepIds: ['guided-5', 'concert-bb'],
+    });
+    expect(stored).not.toHaveProperty('pack');
+    expect(parsePracticeWorkspace(serialized)).toEqual(workspace);
+  });
+
+  it('migrates only the exact legacy pack snapshot and rejects altered workspace storage', () => {
+    const pack = BUILT_IN_PRACTICE_PACKS[0];
+    const legacyPack = JSON.parse(JSON.stringify(pack));
+    delete legacyPack.version;
+    legacyPack.steps[1].href = '/practice?tool=drone&note=Bb';
+    legacyPack.steps[2].href = '/practice/play-along?exercise=cmaj';
+    const legacy = JSON.stringify({
+      pack: legacyPack,
+      stepIndex: 1,
+      startedAt: '2026-07-23T12:00:00.000Z',
+    });
+    expect(parsePracticeWorkspace(legacy)).toMatchObject({
+      pack,
+      stepIndex: 1,
+      completedStepIds: ['guided-5'],
+    });
+
+    const tamperedPack = JSON.parse(legacy);
+    tamperedPack.pack.steps[1].href = 'https://example.test/capture';
+    expect(parsePracticeWorkspace(JSON.stringify(tamperedPack))).toBeNull();
+
+    const stored = JSON.parse(serializePracticeWorkspace(createPracticeWorkspace(pack)!)!);
+    expect(parsePracticeWorkspace(JSON.stringify({ ...stored, stepIndex: 99 }))).toBeNull();
+    expect(parsePracticeWorkspace(JSON.stringify({ ...stored, packVersion: 99 }))).toBeNull();
+    expect(parsePracticeWorkspace(JSON.stringify({ ...stored, injectedRoute: '/admin' }))).toBeNull();
+    expect(parsePracticeWorkspace(JSON.stringify({
+      ...stored,
+      elapsedSecondsByStep: { ...stored.elapsedSecondsByStep, 'concert-bb': -1 },
+    }))).toBeNull();
   });
 
   it('retries a quota failure with bounded optional history', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import dyadCases from '../../../fixtures/drone_dyad_cases.json';
 import pitchMathCases from '../../../fixtures/pitch_math_cases.json';
 import referenceToneCases from '../../../fixtures/reference_tone_cases.json';
+import transitionDrillCases from '../../../fixtures/transition_drill_cases.json';
 import transpositionCases from '../../../fixtures/transposition_cases.json';
 import { nearestMidiForFrequency } from './localPitchDetection';
 import { demoProfileFrequencyRanges, demoProfileTransposition, frequencyToMidi, midiToNote } from './music';
@@ -62,6 +63,19 @@ describe('portable reference tone contract', () => {
 });
 
 describe('weak transition labels', () => {
+  it('matches the portable transition-drill fixtures', () => {
+    for (const testCase of transitionDrillCases) {
+      expect(generateWeakTransitionDrill(testCase.events), testCase.name).toMatchObject({
+        ready: true,
+        from: testCase.expected.from,
+        to: testCase.expected.to,
+        notes: testCase.expected.notes,
+        evidenceCount: testCase.expected.evidence_count,
+        averageError: testCase.expected.average_error,
+      });
+    }
+  });
+
   it('strips analytics octaves while preserving normalized accidentals', () => {
     expect(normalizeWeakDrillNoteLabel('B♭3')).toBe('Bb');
     expect(normalizeWeakDrillNoteLabel('f♯5')).toBe('F#');
@@ -72,7 +86,7 @@ describe('weak transition labels', () => {
       { note_label: 'C5', avg_signed_cents: 0 }, { note_label: 'D4', avg_signed_cents: 13 },
       { note_label: 'C3', avg_signed_cents: 0 }, { note_label: 'D6', avg_signed_cents: 15 },
     ]);
-    expect(result).toMatchObject({ ready: true, from: 'C', to: 'D', notes: ['C', 'D', 'C', 'D'], evidenceCount: 3 });
+    expect(result).toMatchObject({ ready: true, from: 'C', to: 'D', notes: ['C', 'D', 'C', 'D', 'C', 'D'], evidenceCount: 3 });
   });
 
   it('treats enharmonic spellings as pitch classes', () => {
@@ -85,7 +99,7 @@ describe('weak transition labels', () => {
       ready: true,
       from: 'D',
       to: 'C#',
-      notes: ['D', 'C#', 'D', 'C#'],
+      notes: ['D', 'C#', 'D', 'C#', 'D', 'C#'],
       evidenceCount: 3,
     });
   });

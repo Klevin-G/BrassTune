@@ -31,8 +31,10 @@
 .practice-pack h3, .practice-pack p { margin: 0; }
 .practice-pack p, .practice-pack small { color: var(--muted); }
 .focus-workspace { position: fixed; z-index: 70; inset: auto 1rem 1rem calc(var(--sidebar-width, 0px) + 1rem); display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.85rem 1rem; border: 1px solid var(--gold); border-radius: 1rem; background: var(--surface); box-shadow: 0 10px 40px rgb(0 0 0 / 0.25); }
-.focus-workspace > div:first-child { min-width: 0; display: grid; }
+.focus-workspace > div:first-child { min-width: 0; display: grid; gap: 0.12rem; }
 .focus-workspace small, .focus-workspace span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-workspace-progress { font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.focus-workspace progress { width: min(18rem, 100%); height: 0.35rem; accent-color: var(--gold); }
 .focus-workspace-actions { display: flex; flex: 0 0 auto; gap: 0.5rem; }
 .app-shell.focus-mode .content { padding-bottom: 9rem; }
 @media (max-width: 860px) {

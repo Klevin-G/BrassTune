@@ -1,9 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   PRACTICE_LIBRARY_VERSION,
+  addPracticeWorkspaceElapsed,
+  completePracticeWorkspaceStep,
+  createPracticeWorkspace,
   emptyPracticeLibrary,
+  movePracticeWorkspace,
   normalizeMetronomePreset,
   ownerWorkspaceKey,
+  parsePracticeWorkspace,
   persistSavedPracticeSessionActivity,
   practiceLibraryLimits,
   readPracticeLibrary,
@@ -13,6 +18,7 @@ import {
   removeCustomExercise,
   removeMetronomePreset,
   resolvePracticeOwner,
+  serializePracticeWorkspace,
   upsertById,
   upsertCustomExercise,
   writePracticeLibrary,
@@ -51,6 +57,8 @@ interface PracticeLibraryState {
   setWarmupProgress: (progress: Pick<WarmupProgress, 'elapsedSeconds' | 'stepIndex'>) => void;
   startWorkspace: (pack: PracticePack) => void;
   moveWorkspace: (stepIndex: number) => void;
+  addWorkspaceElapsed: (seconds?: number) => void;
+  completeWorkspaceStep: () => void;
   exitWorkspace: () => void;
 }
 
@@ -90,11 +98,9 @@ function createId(prefix: string): string {
 function readWorkspace(ownerId: string): PracticeWorkspace | null {
   try {
     const raw = sessionStorage.getItem(ownerWorkspaceKey(ownerId));
-    if (!raw) return null;
-    const value = JSON.parse(raw) as PracticeWorkspace;
-    if (!value?.pack?.id || !Array.isArray(value.pack.steps) || value.pack.steps.length < 1 || value.pack.steps.length > 12) return null;
-    const stepIndex = Math.max(0, Math.min(value.pack.steps.length - 1, Math.round(Number(value.stepIndex) || 0)));
-    return { ...value, stepIndex };
+    const workspace = parsePracticeWorkspace(raw);
+    if (raw && !workspace) sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
+    return workspace;
   } catch {
     return null;
   }
@@ -416,9 +422,19 @@ export function PracticeLibraryProvider({
     if (!ownerId || current.ownerId !== ownerId) return;
     let updated: LoadedPracticeState;
     try {
-      if (next) sessionStorage.setItem(ownerWorkspaceKey(ownerId), JSON.stringify(next));
-      else sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
-      updated = { ...current, workspace: next, storageError: null };
+      const serialized = next ? serializePracticeWorkspace(next) : null;
+      if (next && !serialized) {
+        sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
+        updated = {
+          ...current,
+          workspace: null,
+          storageError: 'This practice pack could not be verified, so focused mode was closed.',
+        };
+      } else {
+        if (serialized) sessionStorage.setItem(ownerWorkspaceKey(ownerId), serialized);
+        else sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
+        updated = { ...current, workspace: next, storageError: null };
+      }
     } catch {
       updated = {
         ...current,
@@ -431,13 +447,26 @@ export function PracticeLibraryProvider({
   }, [ownerId]);
 
   const startWorkspace = useCallback((pack: PracticePack) => {
-    persistWorkspace({ pack, stepIndex: 0, startedAt: new Date().toISOString() });
+    persistWorkspace(createPracticeWorkspace(pack));
   }, [persistWorkspace]);
 
   const moveWorkspace = useCallback((stepIndex: number) => {
-    if (!workspace) return;
-    persistWorkspace({ ...workspace, stepIndex: Math.max(0, Math.min(workspace.pack.steps.length - 1, stepIndex)) });
-  }, [persistWorkspace, workspace]);
+    const current = loadedStateRef.current.workspace;
+    if (!current) return;
+    persistWorkspace(movePracticeWorkspace(current, stepIndex));
+  }, [persistWorkspace]);
+
+  const addWorkspaceElapsed = useCallback((seconds = 1) => {
+    const current = loadedStateRef.current.workspace;
+    if (!current) return;
+    persistWorkspace(addPracticeWorkspaceElapsed(current, seconds));
+  }, [persistWorkspace]);
+
+  const completeWorkspaceStep = useCallback(() => {
+    const current = loadedStateRef.current.workspace;
+    if (!current) return;
+    persistWorkspace(completePracticeWorkspaceStep(current));
+  }, [persistWorkspace]);
 
   const exitWorkspace = useCallback(() => persistWorkspace(null), [persistWorkspace]);
 
@@ -462,8 +491,10 @@ export function PracticeLibraryProvider({
     setWarmupProgress,
     startWorkspace,
     moveWorkspace,
+    addWorkspaceElapsed,
+    completeWorkspaceStep,
     exitWorkspace,
-  }), [deleteExercise, deleteMetronomePreset, deleteReflection, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, recordSavedSession, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
+  }), [addWorkspaceElapsed, completeWorkspaceStep, deleteExercise, deleteMetronomePreset, deleteReflection, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, recordSavedSession, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
 
   const gateState = practiceLibraryGateState({
     loading: auth.loading,

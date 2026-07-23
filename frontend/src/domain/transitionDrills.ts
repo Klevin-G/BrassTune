@@ -34,7 +34,14 @@ function transitionPitchClass(note: string): number | null {
 }
 
 export function generateWeakTransitionDrill(events: TransitionEvent[]): TransitionDrillResult {
-  const pairs = new Map<string, { from: string; to: string; count: number; totalError: number }>();
+  const pairs = new Map<string, {
+    from: string;
+    to: string;
+    fromPitchClass: number;
+    toPitchClass: number;
+    count: number;
+    totalError: number;
+  }>();
   for (let index = 1; index < events.length; index += 1) {
     const from = normalizeWeakDrillNoteLabel(events[index - 1]?.note_label);
     const to = normalizeWeakDrillNoteLabel(events[index]?.note_label);
@@ -43,7 +50,14 @@ export function generateWeakTransitionDrill(events: TransitionEvent[]): Transiti
     const toPitchClass = transitionPitchClass(to);
     if (fromPitchClass == null || toPitchClass == null || fromPitchClass === toPitchClass) continue;
     const key = `${fromPitchClass}>${toPitchClass}`;
-    const entry = pairs.get(key) ?? { from, to, count: 0, totalError: 0 };
+    const entry = pairs.get(key) ?? {
+      from,
+      to,
+      fromPitchClass,
+      toPitchClass,
+      count: 0,
+      totalError: 0,
+    };
     entry.count += 1;
     entry.totalError += Math.abs(Number(events[index].avg_signed_cents) || 0);
     pairs.set(key, entry);
@@ -54,14 +68,17 @@ export function generateWeakTransitionDrill(events: TransitionEvent[]): Transiti
   }
   supported.sort((left, right) => {
     const errorDifference = right.totalError / right.count - left.totalError / left.count;
-    return errorDifference || right.count - left.count || `${left.from}>${left.to}`.localeCompare(`${right.from}>${right.to}`);
+    return errorDifference
+      || right.count - left.count
+      || left.fromPitchClass - right.fromPitchClass
+      || left.toPitchClass - right.toPitchClass;
   });
   const weakest = supported[0];
   return {
     ready: true,
     from: weakest.from,
     to: weakest.to,
-    notes: [weakest.from, weakest.to, weakest.from, weakest.to],
+    notes: [weakest.from, weakest.to, weakest.from, weakest.to, weakest.from, weakest.to],
     evidenceCount: weakest.count,
     averageError: Math.round((weakest.totalError / weakest.count) * 10) / 10,
   };

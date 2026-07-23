@@ -1,6 +1,9 @@
 import { clearPracticeStreakState } from './practiceStreak';
 
 export const PRACTICE_LIBRARY_VERSION = 1 as const;
+export const PRACTICE_PACK_VERSION = 1 as const;
+export const PRACTICE_WORKSPACE_VERSION = 1 as const;
+export const PRACTICE_AUDIO_PAUSE_EVENT = 'brasstune:pause-practice-audio';
 export const PRACTICE_LIBRARY_PREFIX = 'brasstune.practiceLibrary.v1.';
 export const PRACTICE_WORKSPACE_PREFIX = 'brasstune.practiceWorkspace.v1.';
 export const PLAY_ALONG_BEST_PREFIX = 'brasstune.playalong.best.';
@@ -59,16 +62,20 @@ export interface PracticePackStep extends PracticeTarget {
 }
 
 export interface PracticePack {
+  version: typeof PRACTICE_PACK_VERSION;
   id: string;
   name: string;
   description: string;
-  steps: PracticePackStep[];
+  steps: readonly PracticePackStep[];
 }
 
 export interface PracticeWorkspace {
+  version: typeof PRACTICE_WORKSPACE_VERSION;
   pack: PracticePack;
   stepIndex: number;
   startedAt: string;
+  elapsedSecondsByStep: Record<string, number>;
+  completedStepIds: string[];
 }
 
 export interface PracticeLibrary {
@@ -223,6 +230,252 @@ export function ownerPracticeKey(ownerId: string): string {
 
 export function ownerWorkspaceKey(ownerId: string): string {
   return `${PRACTICE_WORKSPACE_PREFIX}${encodeURIComponent(ownerId)}`;
+}
+
+interface StoredPracticeWorkspace {
+  version: typeof PRACTICE_WORKSPACE_VERSION;
+  packId: string;
+  packVersion: typeof PRACTICE_PACK_VERSION;
+  stepIndex: number;
+  startedAt: string;
+  elapsedSecondsByStep: Record<string, number>;
+  completedStepIds: string[];
+}
+
+const MAX_WORKSPACE_STEP_SECONDS = 24 * 60 * 60;
+
+function exactObjectKeys(value: object, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  return actual.length === expected.length
+    && actual.every((key, index) => key === [...expected].sort()[index]);
+}
+
+function executablePathMatchesKind(step: PracticePackStep): boolean {
+  try {
+    const url = new URL(step.href, 'https://brasstune.local');
+    if (url.origin !== 'https://brasstune.local') return false;
+    if (step.kind === 'warmup') return url.pathname === '/practice' && url.hash === '#warmup';
+    if (step.kind === 'drone') return url.pathname === '/practice' && url.searchParams.get('tool') === 'drone';
+    if (step.kind === 'play-along') return url.pathname === '/practice/scorer' && Boolean(url.searchParams.get('exercise'));
+    if (step.kind === 'metronome') return url.pathname === '/metronome';
+    if (step.kind === 'score') return url.pathname === '/practice/sheet-music';
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function isExecutablePracticePack(pack: PracticePack): boolean {
+  return pack.version === PRACTICE_PACK_VERSION
+    && typeof pack.id === 'string'
+    && pack.id.length > 0
+    && pack.id.length <= 80
+    && typeof pack.name === 'string'
+    && pack.name.length > 0
+    && typeof pack.description === 'string'
+    && pack.steps.length >= 1
+    && pack.steps.length <= 12
+    && pack.steps.every((step) => (
+      typeof step.id === 'string'
+      && step.id.length > 0
+      && step.id.length <= 80
+      && typeof step.label === 'string'
+      && step.label.length > 0
+      && typeof step.instruction === 'string'
+      && step.instruction.length > 0
+      && executablePathMatchesKind(step)
+    ))
+    && new Set(pack.steps.map((step) => step.id)).size === pack.steps.length;
+}
+
+function packMatchesKnownDefinition(candidate: unknown, known: PracticePack, legacy = false): boolean {
+  if (!candidate || typeof candidate !== 'object') return false;
+  const value = candidate as Partial<PracticePack>;
+  const expectedPackKeys = legacy
+    ? ['description', 'id', 'name', 'steps']
+    : ['description', 'id', 'name', 'steps', 'version'];
+  if (!exactObjectKeys(value, expectedPackKeys)) return false;
+  if (!legacy && value.version !== known.version) return false;
+  if (
+    value.id !== known.id
+    || value.name !== known.name
+    || value.description !== known.description
+    || !Array.isArray(value.steps)
+    || value.steps.length !== known.steps.length
+  ) {
+    return false;
+  }
+  return value.steps.every((candidateStep, index) => {
+    if (!candidateStep || typeof candidateStep !== 'object') return false;
+    if (!exactObjectKeys(candidateStep, ['href', 'id', 'instruction', 'kind', 'label'])) return false;
+    const step = candidateStep as PracticePackStep;
+    const knownStep = known.steps[index];
+    let legacyHref = knownStep.href;
+    if (legacy && known.id === 'daily-foundations' && knownStep.id === 'concert-bb') {
+      legacyHref = '/practice?tool=drone&note=Bb';
+    } else if (legacy && knownStep.kind === 'play-along') {
+      legacyHref = `/practice/play-along?exercise=${knownStep.id}`;
+    }
+    return step.kind === knownStep.kind
+      && step.id === knownStep.id
+      && step.label === knownStep.label
+      && step.href === legacyHref
+      && step.instruction === knownStep.instruction;
+  });
+}
+
+function canonicalPracticePack(candidate: unknown, legacy = false): PracticePack | null {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const id = (candidate as { id?: unknown }).id;
+  if (typeof id !== 'string') return null;
+  const known = BUILT_IN_PRACTICE_PACKS.find((pack) => pack.id === id);
+  return known && packMatchesKnownDefinition(candidate, known, legacy) ? known : null;
+}
+
+function emptyWorkspaceProgress(pack: PracticePack): Record<string, number> {
+  return Object.fromEntries(pack.steps.map((step) => [step.id, 0]));
+}
+
+export function createPracticeWorkspace(pack: PracticePack, now = new Date()): PracticeWorkspace | null {
+  const canonical = canonicalPracticePack(pack);
+  if (!canonical || !Number.isFinite(now.getTime())) return null;
+  return {
+    version: PRACTICE_WORKSPACE_VERSION,
+    pack: canonical,
+    stepIndex: 0,
+    startedAt: now.toISOString(),
+    elapsedSecondsByStep: emptyWorkspaceProgress(canonical),
+    completedStepIds: [],
+  };
+}
+
+export function serializePracticeWorkspace(workspace: PracticeWorkspace): string | null {
+  const canonical = canonicalPracticePack(workspace.pack);
+  if (!canonical || workspace.version !== PRACTICE_WORKSPACE_VERSION) return null;
+  const stored: StoredPracticeWorkspace = {
+    version: PRACTICE_WORKSPACE_VERSION,
+    packId: canonical.id,
+    packVersion: canonical.version,
+    stepIndex: workspace.stepIndex,
+    startedAt: workspace.startedAt,
+    elapsedSecondsByStep: workspace.elapsedSecondsByStep,
+    completedStepIds: workspace.completedStepIds,
+  };
+  return hydrateStoredWorkspace(stored, canonical) ? JSON.stringify(stored) : null;
+}
+
+function hydrateStoredWorkspace(value: StoredPracticeWorkspace, pack: PracticePack): PracticeWorkspace | null {
+  if (
+    value.version !== PRACTICE_WORKSPACE_VERSION
+    || value.packVersion !== pack.version
+    || !Number.isInteger(value.stepIndex)
+    || value.stepIndex < 0
+    || value.stepIndex >= pack.steps.length
+    || typeof value.startedAt !== 'string'
+    || !Number.isFinite(Date.parse(value.startedAt))
+    || !value.elapsedSecondsByStep
+    || typeof value.elapsedSecondsByStep !== 'object'
+    || Array.isArray(value.elapsedSecondsByStep)
+    || !Array.isArray(value.completedStepIds)
+  ) {
+    return null;
+  }
+  const stepIds = pack.steps.map((step) => step.id);
+  if (!exactObjectKeys(value.elapsedSecondsByStep, stepIds)) return null;
+  const progress: Record<string, number> = {};
+  for (const id of stepIds) {
+    const seconds = value.elapsedSecondsByStep[id];
+    if (!Number.isInteger(seconds) || seconds < 0 || seconds > MAX_WORKSPACE_STEP_SECONDS) return null;
+    progress[id] = seconds;
+  }
+  if (
+    new Set(value.completedStepIds).size !== value.completedStepIds.length
+    || value.completedStepIds.some((id) => typeof id !== 'string' || !stepIds.includes(id))
+  ) {
+    return null;
+  }
+  return {
+    version: PRACTICE_WORKSPACE_VERSION,
+    pack,
+    stepIndex: value.stepIndex,
+    startedAt: value.startedAt,
+    elapsedSecondsByStep: progress,
+    completedStepIds: [...value.completedStepIds],
+  };
+}
+
+export function parsePracticeWorkspace(raw: string | null): PracticeWorkspace | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<StoredPracticeWorkspace> & { pack?: unknown };
+    if ('pack' in value) {
+      // Migrate only the exact, previously shipped full-pack snapshot. Any
+      // modified route, label, instruction, or extra field fails closed.
+      const pack = canonicalPracticePack(value.pack, true);
+      if (
+        !pack
+        || !exactObjectKeys(value, ['pack', 'startedAt', 'stepIndex'])
+        || !Number.isInteger(value.stepIndex)
+        || (value.stepIndex as number) < 0
+        || (value.stepIndex as number) >= pack.steps.length
+        || typeof value.startedAt !== 'string'
+        || !Number.isFinite(Date.parse(value.startedAt))
+      ) {
+        return null;
+      }
+      return {
+        version: PRACTICE_WORKSPACE_VERSION,
+        pack,
+        stepIndex: value.stepIndex as number,
+        startedAt: value.startedAt,
+        elapsedSecondsByStep: emptyWorkspaceProgress(pack),
+        completedStepIds: pack.steps.slice(0, value.stepIndex as number).map((step) => step.id),
+      };
+    }
+    if (!exactObjectKeys(value, [
+      'completedStepIds',
+      'elapsedSecondsByStep',
+      'packId',
+      'packVersion',
+      'startedAt',
+      'stepIndex',
+      'version',
+    ])) {
+      return null;
+    }
+    const pack = typeof value.packId === 'string'
+      ? BUILT_IN_PRACTICE_PACKS.find((item) => item.id === value.packId)
+      : null;
+    return pack ? hydrateStoredWorkspace(value as StoredPracticeWorkspace, pack) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function addPracticeWorkspaceElapsed(workspace: PracticeWorkspace, seconds = 1): PracticeWorkspace {
+  if (!Number.isInteger(seconds) || seconds <= 0) return workspace;
+  const step = workspace.pack.steps[workspace.stepIndex];
+  const current = workspace.elapsedSecondsByStep[step.id] ?? 0;
+  const elapsed = Math.min(MAX_WORKSPACE_STEP_SECONDS, current + seconds);
+  if (elapsed === current) return workspace;
+  return {
+    ...workspace,
+    elapsedSecondsByStep: { ...workspace.elapsedSecondsByStep, [step.id]: elapsed },
+  };
+}
+
+export function completePracticeWorkspaceStep(workspace: PracticeWorkspace): PracticeWorkspace {
+  const stepId = workspace.pack.steps[workspace.stepIndex].id;
+  if (workspace.completedStepIds.includes(stepId)) return workspace;
+  return { ...workspace, completedStepIds: [...workspace.completedStepIds, stepId] };
+}
+
+export function movePracticeWorkspace(workspace: PracticeWorkspace, stepIndex: number): PracticeWorkspace {
+  if (!Number.isInteger(stepIndex) || stepIndex < 0 || stepIndex >= workspace.pack.steps.length || stepIndex === workspace.stepIndex) {
+    return workspace;
+  }
+  const current = stepIndex > workspace.stepIndex ? completePracticeWorkspaceStep(workspace) : workspace;
+  return { ...current, stepIndex };
 }
 
 export function ownerBestScorePrefix(ownerId: string): string {
@@ -435,24 +688,29 @@ export function removeMetronomePreset(library: PracticeLibrary, id: string): Pra
 
 export const practiceLibraryLimits = LIMITS;
 
-export const BUILT_IN_PRACTICE_PACKS: PracticePack[] = [
-  {
+function immutablePracticePack(pack: Omit<PracticePack, 'version'>): PracticePack {
+  const steps = Object.freeze(pack.steps.map((step) => Object.freeze({ ...step })));
+  return Object.freeze({ ...pack, version: PRACTICE_PACK_VERSION, steps });
+}
+
+export const BUILT_IN_PRACTICE_PACKS: readonly PracticePack[] = Object.freeze([
+  immutablePracticePack({
     id: 'daily-foundations',
     name: 'Daily foundations',
     description: 'Warm up, center your sound, then finish with a steady scale.',
     steps: [
       { kind: 'warmup', id: 'guided-5', label: '5-minute warm-up', href: '/practice#warmup', instruction: 'Follow the five short warm-up steps.' },
-      { kind: 'drone', id: 'concert-bb', label: 'Concert B♭ drone', href: '/practice?tool=drone&note=Bb', instruction: 'Match the drone with an easy, relaxed sound.' },
-      { kind: 'play-along', id: 'cmaj', label: 'C major scale', href: '/practice/play-along?exercise=cmaj', instruction: 'Hold every scale note for the full two seconds.' },
+      { kind: 'drone', id: 'concert-bb', label: 'Concert B♭ drone', href: '/practice?tool=drone&midi=70', instruction: 'Match the drone with an easy, relaxed sound.' },
+      { kind: 'play-along', id: 'cmaj', label: 'C major scale', href: '/practice/scorer?exercise=cmaj', instruction: 'Hold every scale note for the full two seconds.' },
     ],
-  },
-  {
+  }),
+  immutablePracticePack({
     id: 'steady-time',
     name: 'Steady time',
     description: 'Set the pulse, then use it in a focused scale round.',
     steps: [
       { kind: 'metronome', id: 'steady-80', label: 'Metronome at 80', href: '/metronome?bpm=80', instruction: 'Listen for one bar, then join the beat.' },
-      { kind: 'play-along', id: 'longtones', label: 'Long tones', href: '/practice/play-along?exercise=longtones', instruction: 'Keep each entrance clean and centered.' },
+      { kind: 'play-along', id: 'longtones', label: 'Long tones', href: '/practice/scorer?exercise=longtones', instruction: 'Keep each entrance clean and centered.' },
     ],
-  },
-];
+  }),
+]);
