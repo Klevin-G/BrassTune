@@ -6,7 +6,7 @@ import Security
 @MainActor
 final class AuthService: NSObject {
     private let session: URLSession
-    private let readSessionPayload: () -> String?
+    private let readSessionPayload: () throws -> String?
     private let saveSessionPayload: (String) throws -> Void
     private let deleteSessionPayload: () throws -> Void
 
@@ -14,13 +14,16 @@ final class AuthService: NSObject {
         session: URLSession = .shared,
         service: String = "com.brasstune.auth",
         account: String = "current-session",
-        readSessionPayload: (() -> String?)? = nil,
+        readSessionPayload: (() throws -> String?)? = nil,
         saveSessionPayload: ((String) throws -> Void)? = nil,
         deleteSessionPayload: (() throws -> Void)? = nil
     ) {
         self.session = session
         self.readSessionPayload = readSessionPayload ?? {
-            KeychainStore.read(service: service, account: account)
+            if ProcessInfo.processInfo.arguments.contains("UITEST_AUTH_EMPTY") {
+                return nil
+            }
+            return try KeychainStore.read(service: service, account: account)
         }
         self.saveSessionPayload = saveSessionPayload ?? { payload in
             try KeychainStore.save(payload, service: service, account: account)
@@ -32,16 +35,18 @@ final class AuthService: NSObject {
     }
 
     func restoreSession() -> AuthSession? {
-        guard let payload = readSessionPayload(),
+        try? restoreSessionOrThrow()
+    }
+
+    func restoreSessionOrThrow() throws -> AuthSession? {
+        guard let payload = try readSessionPayload(),
               let data = payload.data(using: .utf8) else { return nil }
         do {
             return try JSONDecoder().decode(AuthSession.self, from: data)
         } catch {
-            // Legacy/corrupt payloads may not contain the stable user ID that
-            // now defines the local storage namespace. Fail closed and remove
-            // the unusable token instead of leaving it recoverable in Keychain.
-            try? deleteSessionPayload()
-            return nil
+            // Preserve unreadable credentials for explicit recovery instead of
+            // silently treating them as absence and overwriting them.
+            throw UserVisibleError.secureStorageUnavailable
         }
     }
 
@@ -89,7 +94,7 @@ final class AuthService: NSObject {
     }
 
     func refreshStoredSession(config: AppConfig) async throws -> AuthSession? {
-        guard let existing = restoreSession() else { return nil }
+        guard let existing = try restoreSessionOrThrow() else { return nil }
         guard config.hasUsableSupabaseAuthConfiguration else {
             throw UserVisibleError.missingAuthConfiguration
         }
@@ -144,7 +149,7 @@ final class AuthService: NSObject {
     /// Keychain removal. Secure-storage deletion failures are surfaced so the
     /// caller can preserve a bounded retry marker instead of claiming success.
     func signOut(config: AppConfig) async throws {
-        let existing = restoreSession()
+        let existing = try restoreSessionOrThrow()
         var remoteError: Error?
         if let existing {
             guard config.hasUsableAccountConfiguration,
@@ -194,16 +199,16 @@ final class AuthService: NSObject {
         SHA256.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    func accessToken() -> String? {
-        restoreSession()?.accessToken
+    func accessToken() throws -> String? {
+        try restoreSessionOrThrow()?.accessToken
     }
 
     func validAccessToken(config: AppConfig) async throws -> String? {
         try await refreshStoredSession(config: config)?.accessToken
     }
 
-    func unexpiredStoredSession() -> AuthSession? {
-        guard let existing = restoreSession(), isProvablyUnexpired(existing) else { return nil }
+    func unexpiredStoredSession() throws -> AuthSession? {
+        guard let existing = try restoreSessionOrThrow(), isProvablyUnexpired(existing) else { return nil }
         return existing
     }
 
@@ -339,7 +344,7 @@ enum KeychainStore {
         guard status == errSecSuccess else { throw UserVisibleError.secureStorageUnavailable }
     }
 
-    static func read(service: String, account: String) -> String? {
+    static func read(service: String, account: String) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -348,9 +353,14 @@ enum KeychainStore {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            throw UserVisibleError.secureStorageUnavailable
+        }
+        return value
     }
 
     static func delete(service: String, account: String) throws {

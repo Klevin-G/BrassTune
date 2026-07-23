@@ -403,7 +403,7 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testLegacyAuthPayloadWithoutStableUserIDIsDeletedFailClosed() {
+    func testUnreadableAuthPayloadIsDistinguishedFromMissingAndPreservedForRecovery() {
         let store = InMemoryAuthSessionStore()
         store.payload = #"{"accessToken":"legacy-token","refreshToken":"legacy-refresh","email":"legacy@example.com"}"#
         let service = AuthService(
@@ -413,8 +413,117 @@ final class BrassTuneAppTests: XCTestCase {
             deleteSessionPayload: { store.payload = nil }
         )
 
-        XCTAssertNil(service.restoreSession())
-        XCTAssertNil(store.payload)
+        XCTAssertThrowsError(try service.restoreSessionOrThrow()) { error in
+            XCTAssertEqual(error as? UserVisibleError, .secureStorageUnavailable)
+        }
+        XCTAssertNotNil(store.payload, "An unreadable Keychain item must not be erased as though it were absent.")
+    }
+
+    @MainActor
+    func testKeychainReadFailureLocksStorageAndSurfacesRecoveryError() async {
+        let authService = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { throw UserVisibleError.secureStorageUnavailable }
+        )
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            authService: authService
+        )
+
+        await model.restoreSession()
+
+        XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+        XCTAssertFalse(model.gatewayCompleted)
+        XCTAssertEqual(model.lastError, .secureStorageUnavailable)
+        XCTAssertTrue(model.authNoticeIsError)
+    }
+
+    @MainActor
+    func testUnreadableKeychainBlocksLocalDeletionBeforePracticeDataIsCleared() async {
+        let authService = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { throw UserVisibleError.secureStorageUnavailable }
+        )
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            authService: authService
+        )
+        let session = makeSession(name: "Keep while credentials are unreadable", cents: [0])
+        model.sessions = [session]
+
+        await model.deleteAccount()
+
+        XCTAssertEqual(model.sessions, [session])
+        XCTAssertEqual(model.lastError, .secureStorageUnavailable)
+        XCTAssertTrue(model.authNoticeIsError)
+    }
+
+    @MainActor
+    func testUnreadableKeychainDuringSignOutPreservesCredentialAndPendingRemovalMarker() async {
+        var payload: String?
+        var failReads = false
+        var pendingDigests: [String] = []
+        let authService = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: {
+                if failReads { throw UserVisibleError.secureStorageUnavailable }
+                return payload
+            },
+            saveSessionPayload: { payload = $0 },
+            deleteSessionPayload: { payload = nil }
+        )
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            ),
+            pendingCredentialRemovalStore: PendingDigestStore(
+                load: { pendingDigests },
+                save: { pendingDigests = $0 }
+            ),
+            authService: authService
+        )
+        model.config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"access-a","refresh_token":"refresh-a","expires_in":3600,"user":{"id":"user-a","email":"a@example.com"}}"#.utf8)
+            )
+        }
+        await model.signIn(email: "a@example.com", password: "password")
+        failReads = true
+
+        await model.signOut()
+
+        XCTAssertNotNil(payload)
+        XCTAssertEqual(pendingDigests.count, 1)
+        XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+        XCTAssertEqual(model.lastError, .secureStorageUnavailable)
+        StubURLProtocol.handler = nil
+    }
+
+    @MainActor
+    func testCorruptSnapshotLocksStorageAndIsNeverOverwrittenWithEmptyState() async throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-corrupt-\(UUID().uuidString).json")
+        let corruptData = Data(#"{"snapshot":"truncated""#.utf8)
+        try corruptData.write(to: stateURL)
+        let authService = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { nil }
+        )
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            authService: authService
+        )
+
+        await model.restoreSession()
+        model.selectedInstrumentId = "tuba"
+
+        XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+        XCTAssertFalse(model.gatewayCompleted)
+        XCTAssertNotNil(model.persistenceErrorMessage)
+        XCTAssertEqual(try Data(contentsOf: stateURL), corruptData)
     }
 
     @MainActor
@@ -475,7 +584,7 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testNewAccountAwaitingConfirmationRequestsTutorial() async {
+    func testNewAccountAwaitingConfirmationStaysAtRecoverableLockedGateway() async {
         let session = makeStubSession()
         let authService = AuthService(session: session)
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
@@ -496,10 +605,31 @@ final class BrassTuneAppTests: XCTestCase {
         await model.signUp(email: "new@example.com", password: "long-enough-password")
 
         XCTAssertEqual(model.authState, .emailConfirmationRequired(email: "new@example.com"))
-        XCTAssertEqual(model.tutorialPresentationRequest, 1)
+        XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+        XCTAssertFalse(model.gatewayCompleted)
+        XCTAssertEqual(model.tutorialPresentationRequest, 0)
+        model.completeTutorial()
+        XCTAssertFalse(model.tutorialCompleted, "A locked confirmation flow must not be able to complete onboarding.")
         XCTAssertNil(model.lastError)
         XCTAssertEqual(model.authNotice, "Check your email to confirm this BrassTune account before signing in.")
         StubURLProtocol.handler = nil
+    }
+
+    func testPhotoLibraryUsageDescriptionIsTranslatedAcrossAllSupportedLocales() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("BrassTuneApp/Resources/InfoPlist.xcstrings")
+        let data = try Data(contentsOf: sourceURL)
+        let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: Any])
+        let entry = try XCTUnwrap(strings["NSPhotoLibraryUsageDescription"] as? [String: Any])
+        let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any])
+
+        XCTAssertEqual(
+            Set(localizations.keys),
+            Set(["ar", "de", "en", "es", "fr", "ja", "ko", "pt-BR", "ru", "vi", "zh-Hans", "zh-Hant"])
+        )
     }
 
     @MainActor
@@ -1324,7 +1454,11 @@ final class BrassTuneAppTests: XCTestCase {
     func testAccountDeletionRemovesImportedScoreFiles() async throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
-        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            authService: AuthService(session: makeStubSession(), readSessionPayload: { nil })
+        )
         model.enterGuestDemo(presentTutorial: false)
 
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Disposable score")
@@ -2755,7 +2889,11 @@ final class BrassTuneAppTests: XCTestCase {
     private func makeModel() -> AppModel {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
-        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            authService: AuthService(session: makeStubSession(), readSessionPayload: { nil })
+        )
         model.enterGuestDemo(presentTutorial: false)
         return model
     }

@@ -164,7 +164,12 @@ struct AppRootView: View {
             OnboardingView(isPresented: $onboardingPresented, selectedTab: $selectedTab)
         }
         .onChange(of: model.tutorialPresentationRequest) { _, _ in
-            onboardingPresented = true
+            onboardingPresented = model.persistenceAccessState.canPersist
+        }
+        .onChange(of: model.persistenceAccessState) { _, accessState in
+            if !accessState.canPersist {
+                onboardingPresented = false
+            }
         }
         .onChange(of: model.gatewayCompleted) { _, completed in
             if completed && !model.tutorialCompleted {
@@ -227,6 +232,25 @@ struct AuthGatewayView: View {
                     .accessibilityElement(children: .contain)
 
                     VStack(spacing: BTSpacing.md) {
+                        if case .emailConfirmationRequired(let email) = model.authState {
+                            BTCard(tint: BTTheme.surfaceWarm) {
+                                Label("Check your email to confirm this BrassTune account before signing in.", systemImage: "envelope.badge")
+                                    .font(.headline)
+                                Text(verbatim: AuthState.emailConfirmationRequired(email: email).displayTitle)
+                                .foregroundStyle(BTTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .accessibilityIdentifier("gateway.confirmationRequired")
+                        }
+
+                        if let persistenceError = model.persistenceErrorMessage {
+                            Label(persistenceError, systemImage: "externaldrive.badge.exclamationmark")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(BTTheme.danger)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("gateway.persistenceError")
+                        }
+
                         Button {
                             model.enterGuestDemo()
                         } label: {
@@ -454,6 +478,7 @@ struct OnboardingView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                .disabled(!model.persistenceAccessState.canPersist)
                 .padding(.horizontal, BTSpacing.lg)
                 .padding(.vertical, BTSpacing.sm)
                 .background(.bar)

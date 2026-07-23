@@ -35,7 +35,7 @@ final class BrassTuneAppUITests: XCTestCase {
     @MainActor
     func testFirstRunGatewayAndInstrumentSetupLeadToTunerAndPersist() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW"]
+        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"]
         app.launch()
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
@@ -61,7 +61,7 @@ final class BrassTuneAppUITests: XCTestCase {
         )
 
         app.terminate()
-        app.launchArguments = []
+        app.launchArguments = ["UITEST_AUTH_EMPTY"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.descendants(matching: .any)["onboarding.hero"].exists, "Completion must persist across relaunch")
@@ -230,6 +230,46 @@ final class BrassTuneAppUITests: XCTestCase {
             app.descendants(matching: .any)["progress.empty"].waitForExistence(timeout: 5),
             "Confirming the alert should clear local practice history"
         )
+    }
+
+    @MainActor
+    func testStartingDroneToneStopsAndSavesActiveTunerRecordingExactlyOnce() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
+        app.launch()
+
+        let tunerStart = app.descendants(matching: .any)["tuner.recordButton"]
+        XCTAssertTrue(tunerStart.waitForExistence(timeout: 8))
+        tunerStart.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["tuner.floating.stop"].waitForExistence(timeout: 8),
+            "The tuner should be recording before audio ownership moves to the drone."
+        )
+
+        let droneLink = app.descendants(matching: .any)["tuner.droneIntervalLink"]
+        tapWhenSafelyVisible(droneLink, in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["screen.droneInterval"].waitForExistence(timeout: 5))
+
+        let droneToggle = app.descendants(matching: .any)["drone.toggle"]
+        XCTAssertTrue(droneToggle.waitForExistence(timeout: 5))
+        droneToggle.tap()
+        XCTAssertTrue(
+            app.buttons["Stop reference tone"].waitForExistence(timeout: 5),
+            "The reference tone should acquire audio ownership after the tuner take is finalized."
+        )
+
+        openTab("Progress", in: app)
+        let allSessions = app.descendants(matching: .any)["progress.allSessions"]
+        XCTAssertTrue(
+            allSessions.waitForExistence(timeout: 5),
+            "Starting the drone should save the active tuner take instead of discarding it."
+        )
+        tapWhenSafelyVisible(allSessions, in: app)
+
+        let savedRows = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "sessions.row.")
+        )
+        XCTAssertEqual(savedRows.count, 1, "The tuner take must be finalized exactly once.")
     }
 
     @MainActor

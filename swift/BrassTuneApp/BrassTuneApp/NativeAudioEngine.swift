@@ -95,6 +95,7 @@ final class NativeAudioEngine: ObservableObject {
     private var routeChangeObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private let audioSessionCoordinator: NativeAudioSessionCoordinator
+    private var prepareForTonePlayback: (() -> Void)?
 
     static var defaultRecordingSource: PracticeSessionSource {
         NativeTestFixtures.areEnabled ? .sample : .live
@@ -227,6 +228,10 @@ final class NativeAudioEngine: ObservableObject {
         liveStartRequestID = nil
     }
 
+    func setTonePlaybackPreparation(_ preparation: @escaping () -> Void) {
+        prepareForTonePlayback = preparation
+    }
+
     func stopLiveRecording() -> [PitchFrame] {
         let captured = frames
         stopAndResetAudioEngine()
@@ -243,6 +248,12 @@ final class NativeAudioEngine: ObservableObject {
         guard (1...4).contains(frequenciesHz.count),
               frequenciesHz.allSatisfy({ $0.isFinite && (20...5_000).contains($0) }) else {
             throw NativeAudioEngineError.invalidToneFrequency
+        }
+        if recording {
+            prepareForTonePlayback?()
+            guard !recording else {
+                throw NativeAudioEngineError.captureActive
+            }
         }
         let frequencyHz = frequenciesHz[0]
         stopAndResetAudioEngine()
@@ -403,6 +414,7 @@ final class NativeAudioEngine: ObservableObject {
 }
 
 enum NativeAudioEngineError: Error {
+    case captureActive
     case inputUnavailable
     case outputUnavailable
     case invalidToneFrequency

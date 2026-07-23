@@ -102,6 +102,9 @@ final class AppModel: ObservableObject {
         self.classAccessTokenProvider = classAccessTokenProvider
         retryPendingAccountPurges()
         observeAudioFrames()
+        self.audioEngine.setTonePlaybackPreparation { [weak self] in
+            self?.stopRecording()
+        }
     }
 
     static let demoEnsembles = [
@@ -206,7 +209,10 @@ final class AppModel: ObservableObject {
     }
 
     func enterGuestDemo(presentTutorial: Bool = true) {
-        activateStorageNamespace(.guest)
+        guard activateStorageNamespace(.guest) else {
+            authState = .signedOut
+            return
+        }
         authState = .guest
         ensembles.removeAll()
         selectedEnsembleID = nil
@@ -229,6 +235,7 @@ final class AppModel: ObservableObject {
     }
 
     func completeTutorial() {
+        guard persistenceAccessState.canPersist else { return }
         tutorialCompleted = true
     }
 
@@ -241,12 +248,20 @@ final class AppModel: ObservableObject {
         } catch {
             signOutError = error
         }
-        if authService.restoreSession() == nil, let accountDigest {
+        let remainingSession: AuthSession?
+        do {
+            remainingSession = try authService.restoreSessionOrThrow()
+        } catch {
+            transitionToUnauthenticated(.signedOut)
+            setAuthFailure(UserVisibleError.secureStorageUnavailable)
+            return
+        }
+        if remainingSession == nil, let accountDigest {
             pendingCredentialRemovalStore.remove(accountDigest)
         }
         transitionToUnauthenticated(.signedOut)
         if let signOutError {
-            if authService.restoreSession() != nil {
+            if remainingSession != nil {
                 setAuthFailure(UserVisibleError.secureStorageDeletionFailed)
             } else {
                 setAuthFailure(signOutError)
@@ -259,8 +274,19 @@ final class AppModel: ObservableObject {
     }
 
     func restoreSession() async {
-        guard let storedSession = authService.restoreSession() else {
-            activateStorageNamespace(.guest)
+        let storedSession: AuthSession?
+        do {
+            storedSession = try authService.restoreSessionOrThrow()
+        } catch {
+            transitionToUnauthenticated(.signedOut)
+            setAuthFailure(UserVisibleError.secureStorageUnavailable)
+            return
+        }
+        guard let storedSession else {
+            guard activateStorageNamespace(.guest) else {
+                authState = .signedOut
+                return
+            }
             authState = .guest
             return
         }
@@ -280,7 +306,10 @@ final class AppModel: ObservableObject {
             }
             return
         }
-        prepareStorageNamespace(.account(userID: storedSession.userID))
+        guard prepareStorageNamespace(.account(userID: storedSession.userID)) else {
+            authState = .signedOut
+            return
+        }
         guard config.hasUsableAccountConfiguration else {
             do {
                 try authService.signOut()
@@ -296,20 +325,28 @@ final class AppModel: ObservableObject {
         do {
             if let session = try await authService.refreshStoredSession(config: config) {
                 let namespace = NativeStorageNamespace.account(userID: session.userID)
-                activateStorageNamespace(namespace)
+                guard activateStorageNamespace(namespace) else { return }
                 authState = .signedIn(email: session.email)
                 lastError = nil
             }
         } catch is CancellationError {
             return
         } catch {
-            if Self.isOfflineAuthFailure(error), let session = authService.unexpiredStoredSession() {
-                activateStorageNamespace(.account(userID: session.userID))
-                authState = .signedIn(email: session.email)
-                lastError = (error as? UserVisibleError) ?? .networkUnavailable
-                authNotice = NativeLocalization.string("You're offline. BrassTune kept your unexpired sign-in for local practice; online account features may be unavailable.")
-                authNoticeIsError = true
-                return
+            if Self.isOfflineAuthFailure(error) {
+                do {
+                    if let session = try authService.unexpiredStoredSession() {
+                        guard activateStorageNamespace(.account(userID: session.userID)) else { return }
+                        authState = .signedIn(email: session.email)
+                        lastError = (error as? UserVisibleError) ?? .networkUnavailable
+                        authNotice = NativeLocalization.string("You're offline. BrassTune kept your unexpired sign-in for local practice; online account features may be unavailable.")
+                        authNoticeIsError = true
+                        return
+                    }
+                } catch {
+                    transitionToUnauthenticated(.signedOut)
+                    setAuthFailure(UserVisibleError.secureStorageUnavailable)
+                    return
+                }
             }
             if Self.isRetryableAuthRefreshFailure(error) {
                 transitionToUnauthenticated(.signedOut)
@@ -530,7 +567,7 @@ final class AppModel: ObservableObject {
         defer { authOperationInProgress = false }
         do {
             let session = try await authService.signIn(email: email, password: password, config: config)
-            activateStorageNamespace(.account(userID: session.userID))
+            guard activateStorageNamespace(.account(userID: session.userID)) else { return }
             authState = .signedIn(email: session.email)
             gatewayCompleted = true
             lastError = nil
@@ -545,7 +582,7 @@ final class AppModel: ObservableObject {
         defer { authOperationInProgress = false }
         do {
             let session = try await authService.signUp(email: email, password: password, config: config)
-            activateStorageNamespace(.account(userID: session.userID))
+            guard activateStorageNamespace(.account(userID: session.userID)) else { return }
             authState = .signedIn(email: session.email)
             gatewayCompleted = true
             lastError = nil
@@ -555,7 +592,6 @@ final class AppModel: ObservableObject {
             transitionToUnauthenticated(.emailConfirmationRequired(email: email))
             lastError = nil
             setAuthNotice(NativeLocalization.string("Check your email to confirm this BrassTune account before signing in."))
-            requestTutorialPresentation()
         } catch {
             setAuthFailure(error)
         }
@@ -578,7 +614,7 @@ final class AppModel: ObservableObject {
         defer { authOperationInProgress = false }
         do {
             let result = try await authService.signInWithApple(identityToken: identityToken, rawNonce: rawNonce, config: config)
-            activateStorageNamespace(.account(userID: result.session.userID))
+            guard activateStorageNamespace(.account(userID: result.session.userID)) else { return }
             authState = .signedIn(email: result.session.email)
             gatewayCompleted = true
             lastError = nil
@@ -726,6 +762,13 @@ final class AppModel: ObservableObject {
             finishRemoteAccountDeletion(accountDigest: accountDigest, providerCleanupQueued: false)
             return
         }
+        let hasStoredCredential: Bool
+        do {
+            hasStoredCredential = try authService.restoreSessionOrThrow() != nil
+        } catch {
+            setAuthFailure(UserVisibleError.secureStorageUnavailable)
+            return
+        }
         resetPlayAlong()
         let clearedLocalArtifacts = clearLocalPracticeArtifacts()
         stopMetronome()
@@ -733,7 +776,7 @@ final class AppModel: ObservableObject {
         selectedEnsembleID = nil
         ensembleStatusMessage = nil
         var credentialRemovalFailed = false
-        if authService.restoreSession() != nil {
+        if hasStoredCredential {
             do {
                 try authService.deleteStoredAuth()
             } catch {
@@ -896,6 +939,7 @@ final class AppModel: ObservableObject {
     }
 
     func stopRecording() {
+        guard audioEngine.recording else { return }
         switch audioEngine.activeSource {
         case .live:
             let frames = audioEngine.stopLiveRecording()
@@ -1448,8 +1492,8 @@ final class AppModel: ObservableObject {
         return true
     }
 
-    private func restoreLocalData() {
-        guard let snapshot = persistenceStore.load() else { return }
+    private func restoreLocalData() throws {
+        guard let snapshot = try persistenceStore.load() else { return }
         let needsMetronomeDefaultMigration = (snapshot.metronomeDefaultsVersion ?? 1) < 2
             && snapshot.metronome.muted
             && snapshot.metronome.visualOnly
@@ -1493,7 +1537,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func prepareStorageNamespace(_ namespace: NativeStorageNamespace) {
+    @discardableResult
+    private func prepareStorageNamespace(_ namespace: NativeStorageNamespace) -> Bool {
         persistenceAccessState = .restoringIdentity
         stopFeatureAudio()
         isRestoringLocalState = true
@@ -1515,15 +1560,26 @@ final class AppModel: ObservableObject {
             storageDirectory: namespace.scoreDirectory(basedAt: guestScoreStorageDirectory),
             removeItem: scoreFileRemover
         )
-        restoreLocalData()
+        do {
+            try restoreLocalData()
+            persistenceErrorMessage = nil
+            return true
+        } catch {
+            persistenceAccessState = .lockedSignedOut
+            gatewayCompleted = false
+            persistenceErrorMessage = NativeLocalization.string("BrassTune couldn't read its saved practice data. Your existing data was kept; restart the app or contact support before continuing.")
+            return false
+        }
     }
 
-    private func activateStorageNamespace(_ namespace: NativeStorageNamespace) {
+    @discardableResult
+    private func activateStorageNamespace(_ namespace: NativeStorageNamespace) -> Bool {
         retryPendingAccountPurges()
         if activeStorageNamespace != namespace || !persistenceAccessState.matches(namespace) {
-            prepareStorageNamespace(namespace)
+            guard prepareStorageNamespace(namespace) else { return false }
         }
         persistenceAccessState = namespace.accessState
+        return true
     }
 
     private func transitionToUnauthenticated(_ state: AuthState) {
@@ -1722,11 +1778,16 @@ struct NativePersistenceStore {
         )
     }
 
-    func load() -> NativeLocalSnapshot? {
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+    func load() throws -> NativeLocalSnapshot? {
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return nil
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(NativeLocalSnapshot.self, from: data)
+        return try decoder.decode(NativeLocalSnapshot.self, from: data)
     }
 
     func save(_ snapshot: NativeLocalSnapshot) {
