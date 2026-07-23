@@ -93,6 +93,9 @@ def should_preserve_verbatim(value: str) -> bool:
         or re.fullmatch(r"[A-G](?:#|b|♯|♭)?", value)
         or re.fullmatch(r"[A-G](?:#|b|♯|♭)?-?[0-9]", value)
         or value.startswith(("/api/", "/auth/", "http://", "https://"))
+        # Accessibility and UI-test identifiers are technical dot-separated
+        # tokens, not reader-facing copy. Camel-case suffixes are intentional.
+        or re.fullmatch(r"[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+", value)
         or re.fullmatch(r"[a-z0-9_.-]+", value)
     )
 
