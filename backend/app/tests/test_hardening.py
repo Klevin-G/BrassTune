@@ -34,9 +34,11 @@ from app.api.routes import (
     add_member_by_username,
     clear_my_sessions,
     create_ensemble_group,
+    ensemble_group_report,
     delete_my_account,
     delete_session_audio,
     ensemble_group_roster,
+    ensemble_group_summary,
     get_ensemble_group,
     join_ensemble_by_code,
     leave_ensemble_group,
@@ -2090,7 +2092,14 @@ def test_ensemble_roster_uses_session_duration_for_tuning_averages():
     db = _test_db()
     try:
         director = User(id=780, username="director780", name="Director", role="director", primary_instrument_id="trumpet")
-        student = User(id=781, username="student781", name="Student", role="student", primary_instrument_id="horn")
+        student = User(
+            id=781,
+            username="student781",
+            name="Student",
+            role="student",
+            primary_instrument_id="horn",
+            last_active_at=dt.datetime(2026, 7, 3, 9),
+        )
         group = Group(id=782, name="Duration Contract", director_user_id=director.id)
         membership = GroupMember(
             group_id=group.id,
@@ -2107,12 +2116,14 @@ def test_ensemble_roster_uses_session_duration_for_tuning_averages():
                 PracticeSession(
                     user_id=student.id,
                     instrument_id="horn",
-                    name="Short",
+                    name="private reflection: short session",
                     started_at=dt.datetime(2026, 7, 2, 10),
                     duration_seconds=60,
                     notes_count=1,
                     average_abs_cents=20,
                     in_tune_percentage=20,
+                    audio_storage_provider="supabase",
+                    audio_object_key="private/student781/short.webm",
                 ),
                 PracticeSession(
                     user_id=student.id,
@@ -2135,9 +2146,27 @@ def test_ensemble_roster_uses_session_duration_for_tuning_averages():
         )
 
         row = payload["students"][0]
+        assert payload["practice_aggregate_scope"] == {
+            "code": "cloud_practice_sessions_since_membership_v1",
+            "source": "cloud_practice_sessions",
+            "window": "membership_active_since",
+            "excludes": ["reflections", "audio", "session_detail"],
+        }
         assert row["average_abs_cents"] == 8
         assert row["in_tune_percentage"] == 65
         assert row["practice_minutes"] == 4
+        assert "last_active_at" not in row
+        assert not {
+            "session_id",
+            "session_name",
+            "reflection",
+            "reflections",
+            "audio_object_key",
+            "audio_storage_provider",
+        } & row.keys()
+        serialized = json.dumps(payload)
+        assert "private reflection: short session" not in serialized
+        assert "private/student781/short.webm" not in serialized
     finally:
         db.close()
 
@@ -2163,6 +2192,12 @@ def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():
         db.commit()
         before = _session(db, student.id, "trumpet", dt.datetime(2026, 6, 5))
         after = _session(db, student.id, "trumpet", dt.datetime(2026, 6, 12))
+        before.name = "private pre-membership reflection"
+        before.audio_storage_provider = "supabase"
+        before.audio_object_key = "private/student81/before.webm"
+        after.name = "private in-membership reflection"
+        after.audio_storage_provider = "supabase"
+        after.audio_object_key = "private/student81/after.webm"
         member = GroupMember(
             group_id=group.id,
             user_id=student.id,
@@ -2178,6 +2213,164 @@ def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():
 
         assert [row.id for row in rows] == [after.id]
         assert before.id not in {row.id for row in rows}
+
+        auth = AuthContext(user=director, is_guest=True, access_token=None)
+        summary = ensemble_group_summary(group.id, db, auth)
+        report = ensemble_group_report(group.id, db, auth)
+        expected_scope = {
+            "code": "cloud_practice_sessions_since_membership_v1",
+            "source": "cloud_practice_sessions",
+            "window": "membership_active_since",
+            "excludes": ["reflections", "audio", "session_detail"],
+        }
+        assert summary["practice_aggregate_scope"] == expected_scope
+        assert report["practice_aggregate_scope"] == expected_scope
+        assert summary["session_count"] == 1
+        serialized = json.dumps({"summary": summary, "report": report})
+        assert "private pre-membership reflection" not in serialized
+        assert "private in-membership reflection" not in serialized
+        assert "private/student81/before.webm" not in serialized
+        assert "private/student81/after.webm" not in serialized
+    finally:
+        db.close()
+
+
+def test_multi_class_rosters_isolate_membership_admin_data_and_apply_each_membership_window():
+    db = _test_db()
+    try:
+        first_director = User(
+            id=1080,
+            username="director1080",
+            name="First Director",
+            role="director",
+            primary_instrument_id="trumpet",
+        )
+        second_director = User(
+            id=1081,
+            username="director1081",
+            name="Second Director",
+            role="director",
+            primary_instrument_id="trombone",
+        )
+        shared_student = User(
+            id=1082,
+            username="student1082",
+            name="Shared Student",
+            role="student",
+            primary_instrument_id="horn",
+            last_active_at=dt.datetime(2026, 7, 20, 10),
+        )
+        second_class_only_student = User(
+            id=1083,
+            username="student1083",
+            name="Second Class Only",
+            role="student",
+            primary_instrument_id="tuba",
+        )
+        first_group = Group(id=1084, name="First Class", director_user_id=first_director.id)
+        second_group = Group(id=1085, name="Second Class", director_user_id=second_director.id)
+        db.add_all(
+            [
+                first_director,
+                second_director,
+                shared_student,
+                second_class_only_student,
+                first_group,
+                second_group,
+            ]
+        )
+        db.commit()
+        first_membership = GroupMember(
+            group_id=first_group.id,
+            user_id=shared_student.id,
+            instrument_id="horn",
+            role_in_group="student",
+            status="active",
+            active_since=dt.datetime(2026, 7, 1),
+        )
+        second_membership = GroupMember(
+            group_id=second_group.id,
+            user_id=shared_student.id,
+            instrument_id="tuba",
+            role_in_group="assistant",
+            status="active",
+            active_since=dt.datetime(2026, 7, 10),
+        )
+        second_only_membership = GroupMember(
+            group_id=second_group.id,
+            user_id=second_class_only_student.id,
+            instrument_id="tuba",
+            role_in_group="student",
+            status="active",
+            active_since=dt.datetime(2026, 7, 1),
+        )
+        db.add_all([first_membership, second_membership, second_only_membership])
+        db.commit()
+        first_window_session = PracticeSession(
+            user_id=shared_student.id,
+            instrument_id="horn",
+            name="first class window private session",
+            started_at=dt.datetime(2026, 7, 5),
+            duration_seconds=60,
+            audio_storage_provider="supabase",
+            audio_object_key="private/student1082/first-window.webm",
+        )
+        shared_window_session = PracticeSession(
+            user_id=shared_student.id,
+            instrument_id="horn",
+            name="shared window private session",
+            started_at=dt.datetime(2026, 7, 15),
+            duration_seconds=120,
+            audio_storage_provider="supabase",
+            audio_object_key="private/student1082/shared-window.webm",
+        )
+        db.add_all([first_window_session, shared_window_session])
+        db.commit()
+
+        first_roster = ensemble_group_roster(
+            first_group.id,
+            db,
+            AuthContext(user=first_director, is_guest=True, access_token=None),
+        )
+        second_roster = ensemble_group_roster(
+            second_group.id,
+            db,
+            AuthContext(user=second_director, is_guest=True, access_token=None),
+        )
+
+        first_row = first_roster["students"][0]
+        second_shared_row = next(row for row in second_roster["students"] if row["user_id"] == shared_student.id)
+        assert first_roster["group_id"] == first_group.id
+        assert first_row["instrument_id"] == "horn"
+        assert first_row["role_in_group"] == "student"
+        assert first_row["sessions_count"] == 2
+        assert {row["user_id"] for row in first_roster["students"]} == {shared_student.id}
+        assert second_roster["group_id"] == second_group.id
+        assert second_shared_row["instrument_id"] == "tuba"
+        assert second_shared_row["role_in_group"] == "assistant"
+        assert second_shared_row["sessions_count"] == 1
+        assert {row["user_id"] for row in second_roster["students"]} == {
+            shared_student.id,
+            second_class_only_student.id,
+        }
+        assert "last_active_at" not in first_row
+        assert "last_active_at" not in second_shared_row
+        assert first_roster["practice_aggregate_scope"] == second_roster["practice_aggregate_scope"]
+        assert first_roster["practice_aggregate_scope"]["code"] == "cloud_practice_sessions_since_membership_v1"
+
+        with pytest.raises(HTTPException) as denied:
+            ensemble_group_roster(
+                second_group.id,
+                db,
+                AuthContext(user=first_director, is_guest=True, access_token=None),
+            )
+        assert denied.value.status_code == 403
+
+        serialized = json.dumps({"first": first_roster, "second": second_roster})
+        assert "first class window private session" not in serialized
+        assert "shared window private session" not in serialized
+        assert "private/student1082/first-window.webm" not in serialized
+        assert "private/student1082/shared-window.webm" not in serialized
     finally:
         db.close()
 
@@ -3604,7 +3797,7 @@ def test_manager_cannot_force_activate_invited_member():
         roster = client.get(f"/api/ensemble/groups/{gid}/roster", headers={"Authorization": "Bearer dev-user-1"}).json()
         maya = next(s for s in roster["students"] if s["username"] == "maya")
         assert maya["status"] == "invited"
-        assert maya["last_active_at"] is None
+        assert "last_active_at" not in maya
 
 
 def test_invited_student_sets_own_instrument_on_accept():

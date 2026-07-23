@@ -45,6 +45,7 @@ STALE_DELETION_JOB_SECONDS = 15 * 60
 DEFAULT_MAX_OWNED_CLASSES_PER_USER = 10
 DEFAULT_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER = 20
 DEFAULT_MAX_PENDING_CLASS_INVITATIONS_PER_USER = 20
+CLASS_PRACTICE_AGGREGATE_SCOPE_CODE = "cloud_practice_sessions_since_membership_v1"
 
 
 def _bad_instrument(instrument_id: str) -> HTTPException:
@@ -1205,19 +1206,45 @@ def _member_active_since(member: GroupMember) -> dt.datetime:
     return member.active_since or member.created_at
 
 
+def _class_practice_aggregate_scope() -> dict:
+    """Stable disclosure contract for director-visible class aggregates.
+
+    Class analytics operate on server-stored ``PracticeSession`` rows (the
+    cloud-synced sessions in production). They intentionally expose aggregate
+    metrics from the membership's current active period, never reflections,
+    recording metadata/content, or session-level detail.
+    """
+    return {
+        "code": CLASS_PRACTICE_AGGREGATE_SCOPE_CODE,
+        "source": "cloud_practice_sessions",
+        "window": "membership_active_since",
+        "excludes": ["reflections", "audio", "session_detail"],
+    }
+
+
+def _member_scoped_sessions(
+    db: Session,
+    member: GroupMember,
+    *,
+    include_note_events: bool = False,
+) -> List[PracticeSession]:
+    query = db.query(PracticeSession)
+    if include_note_events:
+        query = query.options(joinedload(PracticeSession.note_events))
+    return (
+        query.filter(
+            PracticeSession.user_id == member.user_id,
+            PracticeSession.started_at >= _member_active_since(member),
+        )
+        .all()
+    )
+
+
 def _group_scoped_sessions(db: Session, group_id: int) -> List[PracticeSession]:
     members = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()
     sessions_by_id = {}
     for member in members:
-        rows = (
-            db.query(PracticeSession)
-            .options(joinedload(PracticeSession.note_events))
-            .filter(
-                PracticeSession.user_id == member.user_id,
-                PracticeSession.started_at >= _member_active_since(member),
-            )
-            .all()
-        )
+        rows = _member_scoped_sessions(db, member, include_note_events=True)
         for session in rows:
             sessions_by_id[session.id] = session
     return list(sessions_by_id.values())
@@ -1639,14 +1666,18 @@ def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(
 def ensemble_group_summary(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_group_manager(db, group_id, auth)
     sessions = _group_scoped_sessions(db, group_id)
-    return calculate_ensemble_summary(group_id, sessions)
+    payload = calculate_ensemble_summary(group_id, sessions)
+    payload["practice_aggregate_scope"] = _class_practice_aggregate_scope()
+    return payload
 
 
 @router.get("/ensemble/groups/{group_id}/report")
 def ensemble_group_report(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_group_manager(db, group_id, auth)
     sessions = _group_scoped_sessions(db, group_id)
-    return generate_rehearsal_report(group_id, sessions)
+    payload = generate_rehearsal_report(group_id, sessions)
+    payload["practice_aggregate_scope"] = _class_practice_aggregate_scope()
+    return payload
 
 
 @router.get("/ensemble/summary")
@@ -1672,14 +1703,9 @@ def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: Au
     )
     students = []
     for member in members:
-        since = _member_active_since(member)
         sessions = []
         if member.status == "active":
-            sessions = (
-                db.query(PracticeSession)
-                .filter(PracticeSession.user_id == member.user_id, PracticeSession.started_at >= since)
-                .all()
-            )
+            sessions = _member_scoped_sessions(db, member)
         tuning_sessions = [session for session in sessions if (session.notes_count or 0) > 0]
         avg_abs_cents = duration_weighted_mean(
             tuning_sessions,
@@ -1706,11 +1732,12 @@ def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: Au
             "average_abs_cents": round(avg_abs_cents, 1) if avg_abs_cents is not None else None,
             "in_tune_percentage": round(in_tune_pct, 1) if in_tune_pct is not None else None,
             "last_practice_at": iso(last_practice_at),
-            # Do not expose a not-yet-accepted (invited) person's activity — only
-            # show it once they have consented by accepting.
-            "last_active_at": iso(getattr(user, "last_active_at", None)) if member.status == "active" else None,
         })
-    return {"group_id": group_id, "students": students}
+    return {
+        "group_id": group_id,
+        "practice_aggregate_scope": _class_practice_aggregate_scope(),
+        "students": students,
+    }
 
 
 @router.get("/admin/metrics")
