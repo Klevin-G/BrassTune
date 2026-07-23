@@ -162,6 +162,28 @@ def _ensure_sqlite_account_deletion_user_id_nullable() -> None:
         connection.execute(text("create unique index ix_account_deletion_jobs_idempotency_key on account_deletion_jobs (idempotency_key)"))
 
 
+def _ensure_sqlite_deletion_tombstone_enforcement_phase() -> None:
+    """Converge fresh and legacy local databases on the safe expand phase."""
+    columns = _sqlite_columns("deleted_identity_tombstone_config")
+    if not columns:
+        return
+    if "enforcement_phase" not in columns:
+        _add_sqlite_column(
+            "deleted_identity_tombstone_config",
+            "enforcement_phase",
+            "VARCHAR NOT NULL DEFAULT 'expand'",
+        )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "update deleted_identity_tombstone_config "
+                "set enforcement_phase = 'expand' "
+                "where enforcement_phase is null "
+                "or enforcement_phase not in ('expand', 'contract')"
+            )
+        )
+
+
 def ensure_additive_columns() -> None:
     if database_backend(DATABASE_URL) != "sqlite":
         return
@@ -203,3 +225,4 @@ def ensure_additive_columns() -> None:
             if column_name not in existing:
                 _add_sqlite_column(table_name, column_name, definition)
     _ensure_sqlite_account_deletion_user_id_nullable()
+    _ensure_sqlite_deletion_tombstone_enforcement_phase()

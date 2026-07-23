@@ -228,12 +228,13 @@ class DeletedIdentityTombstone(Base):
 
 
 class DeletedIdentityTombstoneConfig(Base):
-    """Non-identity verifier that detects accidental HMAC key rotation."""
+    """Non-identity verifier and privacy rollout state."""
 
     __tablename__ = "deleted_identity_tombstone_config"
 
     id = Column(Integer, primary_key=True)
     key_verifier = Column(String(64), nullable=False)
+    enforcement_phase = Column(String, nullable=False, default="expand", server_default="expand")
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
 
 

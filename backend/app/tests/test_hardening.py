@@ -118,6 +118,83 @@ def test_legacy_sqlite_account_deletion_jobs_are_rebuilt_nullable_without_data_l
     assert row == (42, "subject-42", "retryable_failure")
 
 
+def test_fresh_sqlite_tombstone_config_has_expand_phase_and_is_readiness_compatible(monkeypatch):
+    import app.db.readiness as readiness_module
+
+    fresh_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(fresh_engine)
+    monkeypatch.setattr(database_module, "engine", fresh_engine)
+    database_module.ensure_additive_columns()
+
+    with fresh_engine.begin() as connection:
+        columns = {
+            row[1]: row
+            for row in connection.execute(text("pragma table_info(deleted_identity_tombstone_config)"))
+        }
+        connection.execute(
+            text(
+                "insert into deleted_identity_tombstone_config (id, key_verifier, created_at) "
+                "values (1, :verifier, current_timestamp)"
+            ),
+            {"verifier": "a" * 64},
+        )
+        phase = connection.execute(
+            text("select enforcement_phase from deleted_identity_tombstone_config where id = 1")
+        ).scalar_one()
+
+    assert columns["enforcement_phase"][3] == 1
+    assert columns["enforcement_phase"][4] == "'expand'"
+    assert phase == "expand"
+    monkeypatch.setattr(
+        readiness_module,
+        "_configured_engine",
+        lambda: (fresh_engine, False, "sqlite:///:memory:"),
+    )
+    assert readiness_module.database_readiness_issues() == []
+
+
+def test_existing_sqlite_tombstone_config_adds_expand_phase(monkeypatch):
+    legacy_engine = create_engine("sqlite:///:memory:")
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                "create table deleted_identity_tombstone_config ("
+                "id integer not null primary key, key_verifier varchar(64) not null, "
+                "created_at datetime not null)"
+            )
+        )
+        connection.execute(
+            text(
+                "insert into deleted_identity_tombstone_config (id, key_verifier, created_at) "
+                "values (1, :verifier, current_timestamp)"
+            ),
+            {"verifier": "b" * 64},
+        )
+    monkeypatch.setattr(database_module, "engine", legacy_engine)
+
+    database_module.ensure_additive_columns()
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                "update deleted_identity_tombstone_config "
+                "set enforcement_phase = 'legacy-invalid'"
+            )
+        )
+    database_module.ensure_additive_columns()
+
+    with legacy_engine.connect() as connection:
+        columns = {
+            row[1]: row
+            for row in connection.execute(text("pragma table_info(deleted_identity_tombstone_config)"))
+        }
+        phase = connection.execute(
+            text("select enforcement_phase from deleted_identity_tombstone_config where id = 1")
+        ).scalar_one()
+    assert columns["enforcement_phase"][3] == 1
+    assert columns["enforcement_phase"][4] == "'expand'"
+    assert phase == "expand"
+
+
 def test_default_pytest_database_is_process_isolated():
     if os.getenv("BRASSTUNE_PYTEST_DATABASE_ISOLATED") != "1":
         pytest.skip("Caller explicitly selected the test database.")
