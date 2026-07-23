@@ -23,7 +23,7 @@ from app.db.readiness import public_readiness_report, readiness_report, version_
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
+from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
 from app.services.account_deletion import (
     DeletionTombstoneSecretError,
     complete_and_scrub_account_deletion_job,
@@ -548,10 +548,30 @@ def get_session_audio(session_id: int, db: Session = Depends(get_db), auth: Auth
 @router.delete("/sessions/{session_id}/audio")
 def delete_session_audio(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     session = _require_session_access(db, session_id, auth)
-    delete_audio_for_session(session)
-    db.add(session)
-    db.commit()
-    return {"deleted": True}
+    try:
+        job_id = queue_audio_delete(db, session, "explicit_session_audio_delete")
+        if job_id is None:
+            db.rollback()
+            return {"deleted": True, "cleanup_pending": False}
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Audio deletion could not be queued safely. The recording is unchanged.",
+        ) from exc
+    cleanup = process_audio_delete_jobs(db, [job_id])
+    payload = {
+        "deleted": True,
+        "cleanup_pending": cleanup["still_retryable"] > 0,
+        "audio_cleanup": cleanup,
+    }
+    if payload["cleanup_pending"]:
+        return JSONResponse(status_code=202, content=payload)
+    return payload
 
 
 def _filtered_sessions(
@@ -886,11 +906,33 @@ def repair_demo_data_dev(db: Session = Depends(get_db), auth: AuthContext = Depe
 def clear_my_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     sessions = db.query(PracticeSession).filter(PracticeSession.user_id == auth.user.id).all()
     deleted = len(sessions)
-    for session in sessions:
-        delete_audio_for_session(session)
-        db.delete(session)
-    db.commit()
-    return {"cleared": {"practice_sessions": deleted}}
+    try:
+        audio_job_ids = [
+            job_id
+            for session in sessions
+            if (job_id := queue_audio_delete(db, session, "clear_all_practice_sessions")) is not None
+        ]
+        for session in sessions:
+            db.delete(session)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Practice history could not be cleared safely. No remote cleanup was started.",
+        ) from exc
+    cleanup = process_audio_delete_jobs(db, audio_job_ids)
+    payload = {
+        "cleared": {"practice_sessions": deleted},
+        "audio_cleanup_pending": cleanup["still_retryable"] > 0,
+        "audio_cleanup": cleanup,
+    }
+    if payload["audio_cleanup_pending"]:
+        return JSONResponse(status_code=202, content=payload)
+    return payload
 
 
 @router.get("/users/me/export.zip")

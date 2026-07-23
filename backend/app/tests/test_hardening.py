@@ -32,8 +32,10 @@ from app.api.routes import (
     _read_limited_body,
     accept_invitation,
     add_member_by_username,
+    clear_my_sessions,
     create_ensemble_group,
     delete_my_account,
+    delete_session_audio,
     ensemble_group_roster,
     get_ensemble_group,
     join_ensemble_by_code,
@@ -63,7 +65,7 @@ from app.schemas.schemas import (
     JoinByCodeRequest,
     UpdateGroupMemberRequest,
 )
-from app.services.audio_storage import AudioReplaceResult, delete_audio_for_session, prepare_audio_upload, replace_audio_for_session, reserve_audio_upload, retry_audio_storage_jobs
+from app.services.audio_storage import AudioReplaceResult, delete_audio_for_session, prepare_audio_upload, queue_audio_delete, replace_audio_for_session, reserve_audio_upload, retry_audio_storage_jobs
 from app.services.serializers import session_to_dict
 from app.services.session_service import save_pitch_frames, start_session
 
@@ -2056,6 +2058,112 @@ def test_supabase_audio_delete_is_called_before_metadata_is_cleared(monkeypatch)
         assert calls == ["50/%s/recording.webm" % session.id]
         assert session.audio_object_key is None
         assert session.audio_storage_provider is None
+    finally:
+        db.close()
+
+
+def test_explicit_audio_delete_is_durable_when_remote_cleanup_fails(monkeypatch):
+    db = _test_db()
+    try:
+        session = _session(db, 501, "trumpet", dt.datetime(2026, 7, 20))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "501/%s/recording.webm" % session.id
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 123
+        db.commit()
+        user = db.query(User).filter(User.id == session.user_id).one()
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_supabase_object",
+            lambda _key: (_ for _ in ()).throw(HTTPException(status_code=502, detail="cleanup failed")),
+        )
+
+        response = delete_session_audio(
+            session.id,
+            db,
+            AuthContext(user=user, is_guest=True, access_token=None),
+        )
+
+        assert response.status_code == 202
+        payload = json.loads(response.body)
+        assert payload["deleted"] is True
+        assert payload["cleanup_pending"] is True
+        db.expire_all()
+        current = db.query(PracticeSession).filter(PracticeSession.id == session.id).one()
+        assert current.audio_object_key is None
+        job = db.query(AudioStorageJob).one()
+        assert job.status == "retryable_failure"
+        assert job.object_key == "501/%s/recording.webm" % session.id
+        assert job.reason == "explicit_session_audio_delete"
+    finally:
+        db.close()
+
+
+def test_audio_delete_commit_failure_does_not_touch_remote_storage(monkeypatch):
+    db = _test_db()
+    remote_deletes = []
+    try:
+        session = _session(db, 502, "trumpet", dt.datetime(2026, 7, 20))
+        object_key = "502/%s/recording.webm" % session.id
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = object_key
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 123
+        db.commit()
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_audio_object",
+            lambda provider, key: remote_deletes.append((provider, key)),
+        )
+        monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(RuntimeError("commit failed")))
+
+        queue_audio_delete(db, session, "commit_failure_test")
+        with pytest.raises(RuntimeError, match="commit failed"):
+            db.commit()
+        db.rollback()
+
+        assert remote_deletes == []
+        db.expire_all()
+        current = db.query(PracticeSession).filter(PracticeSession.id == session.id).one()
+        assert current.audio_object_key == object_key
+        assert db.query(AudioStorageJob).count() == 0
+    finally:
+        db.close()
+
+
+def test_clear_all_sessions_keeps_failed_remote_deletes_in_durable_jobs(monkeypatch):
+    db = _test_db()
+    try:
+        sessions = [
+            _session(db, 503, "trumpet", dt.datetime(2026, 7, 20, hour))
+            for hour in (10, 11)
+        ]
+        object_keys = []
+        for session in sessions:
+            session.audio_storage_provider = "supabase"
+            session.audio_object_key = "503/%s/recording.webm" % session.id
+            session.audio_mime_type = "audio/webm"
+            session.audio_size_bytes = 100
+            object_keys.append(session.audio_object_key)
+        db.commit()
+        user = db.query(User).filter(User.id == 503).one()
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_audio_object",
+            lambda *_args: (_ for _ in ()).throw(HTTPException(status_code=502, detail="cleanup failed")),
+        )
+
+        response = clear_my_sessions(
+            db,
+            AuthContext(user=user, is_guest=True, access_token=None),
+        )
+
+        assert response.status_code == 202
+        payload = json.loads(response.body)
+        assert payload["cleared"]["practice_sessions"] == 2
+        assert payload["audio_cleanup_pending"] is True
+        assert db.query(PracticeSession).filter(PracticeSession.user_id == user.id).count() == 0
+        jobs = db.query(AudioStorageJob).order_by(AudioStorageJob.id.asc()).all()
+        assert [job.status for job in jobs] == ["retryable_failure", "retryable_failure"]
+        assert [job.object_key for job in jobs] == object_keys
+        assert all(job.reason == "clear_all_practice_sessions" for job in jobs)
     finally:
         db.close()
 

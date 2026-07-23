@@ -1004,16 +1004,100 @@ def retry_audio_storage_jobs(db: Session, limit: int = 10) -> dict:
     }
 
 
-def delete_audio_for_session(session: PracticeSession) -> None:
-    if not session.audio_object_key:
-        return
-    _delete_audio_object(session.audio_storage_provider, session.audio_object_key)
+def _clear_audio_metadata(session: PracticeSession) -> None:
     session.audio_storage_provider = None
     session.audio_object_key = None
     session.audio_mime_type = None
     session.audio_duration_seconds = None
     session.audio_size_bytes = None
     session.audio_uploaded_at = None
+
+
+def queue_audio_delete(db: Session, session: PracticeSession, reason: str) -> Optional[int]:
+    """Stage logical deletion and a durable physical-cleanup tombstone.
+
+    The caller owns the transaction. Remote I/O must happen only after the
+    caller commits this job together with cleared metadata or session deletion.
+    """
+    current = _lock_audio_account_and_session(db, session)
+    if not current.audio_object_key:
+        return None
+    provider = current.audio_storage_provider or "unknown"
+    object_key = current.audio_object_key
+    idempotency_key = _audio_job_key("cleanup", provider, object_key)
+    job = (
+        db.query(AudioStorageJob)
+        .filter(AudioStorageJob.idempotency_key == idempotency_key)
+        .with_for_update()
+        .first()
+    )
+    if job is None:
+        job = AudioStorageJob(
+            user_id=current.user_id,
+            session_id=current.id,
+            idempotency_key=idempotency_key,
+            action="delete_object",
+            provider=provider,
+            object_key=object_key,
+            size_bytes=max(0, int(current.audio_size_bytes or 0)),
+            reason=reason,
+            status="pending",
+            details_json={},
+        )
+    else:
+        job.user_id = current.user_id
+        job.session_id = current.id
+        job.action = "delete_object"
+        job.provider = provider
+        job.object_key = object_key
+        job.size_bytes = max(0, int(current.audio_size_bytes or 0))
+        job.reason = reason
+        job.status = "pending"
+        job.next_retry_at = None
+        job.safe_error_category = None
+        job.completed_at = None
+        job.updated_at = dt.datetime.utcnow()
+        job.details_json = {}
+    _clear_audio_metadata(current)
+    db.add_all([current, job])
+    db.flush()
+    return int(job.id)
+
+
+def process_audio_delete_jobs(db: Session, job_ids: list[int]) -> dict:
+    """Best-effort immediate cleanup for already-committed delete tombstones."""
+    requested_ids = list(dict.fromkeys(int(job_id) for job_id in job_ids))
+    results = []
+    for job_id in requested_ids:
+        payload = _claim_audio_job(db, job_id)
+        if payload is None:
+            results.append({"job_id": job_id, "status": "pending"})
+            continue
+        if payload["action"] != "delete_object":
+            _mark_audio_job_retryable(db, payload["id"], "unexpected_audio_job_action")
+            results.append({"job_id": payload["id"], "status": "retryable_failure"})
+            continue
+        try:
+            _delete_audio_object(payload["provider"], payload["object_key"])
+        except Exception:
+            _mark_audio_job_retryable(db, payload["id"], "audio_object_cleanup_failed")
+            results.append({"job_id": payload["id"], "status": "retryable_failure"})
+            continue
+        completed = _mark_audio_job_completed(db, payload["id"])
+        results.append({"job_id": payload["id"], "status": "completed" if completed else "pending"})
+    return {
+        "requested": len(requested_ids),
+        "completed": sum(1 for row in results if row["status"] == "completed"),
+        "still_retryable": sum(1 for row in results if row["status"] != "completed"),
+        "results": results,
+    }
+
+
+def delete_audio_for_session(session: PracticeSession) -> None:
+    if not session.audio_object_key:
+        return
+    _delete_audio_object(session.audio_storage_provider, session.audio_object_key)
+    _clear_audio_metadata(session)
 
 
 def audio_bytes_for_export(session: PracticeSession) -> Optional[Tuple[str, bytes]]:
