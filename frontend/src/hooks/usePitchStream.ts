@@ -8,6 +8,7 @@ const AUDIO_FRAME_SIZE = 4096;
 const PERSIST_BATCH_SIZE = 100;
 const PERSIST_FLUSH_INTERVAL_MS = 750;
 const MAX_BUFFERED_PERSIST_FRAMES = 1500;
+export const MAX_WORKER_BACKLOG = 3;
 // Detection runs at full rate locally (~85ms/frame); only a downsampled
 // stream is persisted to the cloud to keep storage lean. Server-side note
 // segmentation merges gaps up to 340ms, so 150ms spacing is safely inside it.
@@ -56,6 +57,18 @@ export interface AudioFrameTimingObservation {
   droppedFrames: number;
   averageProcessingLatencyMs: number;
   maxProcessingLatencyMs: number;
+}
+
+export type BrowserPitchPipeline = 'worker' | 'script-processor';
+
+/** Keep microphone callbacks cheap when detection cannot keep up. */
+export function shouldDropWorkerFrame(pendingFrames: number, maximumBacklog = MAX_WORKER_BACKLOG): boolean {
+  return pendingFrames >= maximumBacklog;
+}
+
+/** Worker support is optional: older and restricted browsers retain local analysis. */
+export function selectBrowserPitchPipeline(workerAvailable: boolean, workerStarted: boolean): BrowserPitchPipeline {
+  return workerAvailable && workerStarted ? 'worker' : 'script-processor';
 }
 
 export const EMPTY_AUDIO_FRAME_TIMING: AudioFrameTimingObservation = {
@@ -161,6 +174,8 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const workerPendingRef = useRef(0);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const monitorGainRef = useRef<GainNode | null>(null);
   const microphoneStartingRef = useRef(false);
@@ -336,6 +351,11 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const cleanupMicrophone = useCallback((message?: string, finalState?: PitchStreamInfo['audioContextState']) => {
     microphoneGenerationRef.current += 1;
     if (processorRef.current) processorRef.current.onaudioprocess = null;
+    if (workerRef.current) {
+      workerRef.current.onmessage = null;
+      workerRef.current.onerror = null;
+      workerRef.current.terminate();
+    }
     processorRef.current?.disconnect();
     sourceRef.current?.disconnect();
     monitorGainRef.current?.disconnect();
@@ -346,6 +366,8 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     if (audioContextRef.current) audioContextRef.current.onstatechange = null;
     audioContextRef.current?.close().catch(() => undefined);
     processorRef.current = null;
+    workerRef.current = null;
+    workerPendingRef.current = 0;
     sourceRef.current = null;
     monitorGainRef.current = null;
     mediaStreamRef.current = null;
@@ -430,6 +452,35 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         processor.connect(monitorGain);
         monitorGain.connect(audioContext.destination);
 
+        let worker: Worker | null = null;
+        try {
+          worker = new Worker(new URL('../workers/pitchDetection.worker.ts', import.meta.url), { type: 'module' });
+          worker.onmessage = (workerEvent: MessageEvent<{ type: 'frame'; frame: PitchFrame }>) => {
+            if (!mountedRef.current || generation !== microphoneGenerationRef.current) return;
+            workerPendingRef.current = Math.max(0, workerPendingRef.current - 1);
+            handleFrame(workerEvent.data.frame);
+            if (workerEvent.data.frame.is_valid_for_recording) {
+              setStatusMessage('Sound detected. Tracking pitch now.');
+            } else if (workerEvent.data.frame.tuning_status === 'silence') {
+              setStatusMessage('Listening. No stable pitch yet.');
+            } else {
+              setStatusMessage('Sound detected. No stable pitch yet.');
+            }
+          };
+          worker.onerror = () => {
+            // The processor callback below remains a safe local fallback if a
+            // browser creates a Worker but later blocks its module execution.
+            worker?.terminate();
+            if (workerRef.current === worker) workerRef.current = null;
+            workerPendingRef.current = 0;
+            setStreamInfo((old) => ({ ...old, detectorSource: 'browser local pitch (fallback)' }));
+          };
+          workerRef.current = worker;
+        } catch {
+          worker = null;
+          setStreamInfo((old) => ({ ...old, detectorSource: 'browser local pitch (fallback)' }));
+        }
+
         if (!mountedRef.current || demoModeRef.current || generation !== microphoneGenerationRef.current) {
           processor.disconnect();
           source.disconnect();
@@ -458,7 +509,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         setStreamInfo((old) => ({
           ...old,
           sampleRate: audioContext?.sampleRate ?? null,
-          detectorSource: 'browser local pitch',
+          detectorSource: worker ? 'browser worker pitch' : 'browser local pitch (fallback)',
           sentFrames: 0,
           droppedFrames: 0,
           processingLatencyMs: 0,
@@ -473,13 +524,36 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
           const input = event.inputBuffer.getChannelData(0);
           const pcm = new Float32Array(input);
           analyzedMsRef.current += (pcm.length / audioContext!.sampleRate) * 1000;
-          const frame = pitchFrameFromPcm(
-            pcm,
-            audioContext!.sampleRate,
-            instrumentIdRef.current,
-            referencePitchRef.current,
-            Math.round(analyzedMsRef.current),
-          );
+          const timestampMs = Math.round(analyzedMsRef.current);
+          const activeWorker = workerRef.current;
+          if (activeWorker && !shouldDropWorkerFrame(workerPendingRef.current)) {
+            workerPendingRef.current += 1;
+            activeWorker.postMessage({
+              type: 'detect',
+              pcm: pcm.buffer,
+              sampleRate: audioContext!.sampleRate,
+              instrumentId: instrumentIdRef.current,
+              referencePitch: referencePitchRef.current,
+              timestampMs,
+            }, [pcm.buffer]);
+          } else if (activeWorker) {
+            // Drop stale PCM rather than queuing it: an old pitch estimate is
+            // less useful than a current one and can corrupt note timing.
+            audioFrameTimingRef.current = {
+              ...audioFrameTimingRef.current,
+              droppedFrames: audioFrameTimingRef.current.droppedFrames + 1,
+            };
+          } else {
+            const frame = pitchFrameFromPcm(pcm, audioContext!.sampleRate, instrumentIdRef.current, referencePitchRef.current, timestampMs);
+            handleFrame(frame);
+            if (frame.is_valid_for_recording) {
+              setStatusMessage('Sound detected. Tracking pitch now.');
+            } else if (frame.tuning_status === 'silence') {
+              setStatusMessage('Listening. No stable pitch yet.');
+            } else {
+              setStatusMessage('Sound detected. No stable pitch yet.');
+            }
+          }
           const processingLatencyMs = Math.max(0, performance.now() - callbackAtMs);
           const timing = observeAudioFrameTiming(
             audioFrameTimingRef.current,
@@ -496,14 +570,6 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
             averageProcessingLatencyMs: timing.averageProcessingLatencyMs,
             maxProcessingLatencyMs: timing.maxProcessingLatencyMs,
           }));
-          handleFrame(frame);
-          if (frame.is_valid_for_recording) {
-            setStatusMessage('Sound detected. Tracking pitch now.');
-          } else if (frame.tuning_status === 'silence') {
-            setStatusMessage('Listening. No stable pitch yet.');
-          } else {
-            setStatusMessage('Sound detected. No stable pitch yet.');
-          }
         };
 
         if (audioContext.state !== 'running') {

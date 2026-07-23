@@ -8,6 +8,8 @@ import {
   installMicrophoneEndedHandler,
   observeAudioFrameTiming,
   requeueFailedPersistFrames,
+  selectBrowserPitchPipeline,
+  shouldDropWorkerFrame,
   shouldPersistFrameFromFrontend,
 } from './usePitchStream';
 import type { PitchFrame } from '../domain/types';
@@ -74,6 +76,29 @@ describe('shouldPersistFrameFromFrontend', () => {
     );
 
     expect(queue).toEqual({ sessionId: 43, frames: [newFrame] });
+  });
+});
+
+describe('worker pitch pipeline fallback and backlog policy', () => {
+  it('uses the Worker only when it is available and has started', () => {
+    expect(selectBrowserPitchPipeline(true, true)).toBe('worker');
+    expect(selectBrowserPitchPipeline(false, false)).toBe('script-processor');
+    expect(selectBrowserPitchPipeline(true, false)).toBe('script-processor');
+  });
+
+  it('bounds the Worker queue and drops stale audio rather than delaying live feedback', () => {
+    expect(shouldDropWorkerFrame(2, 3)).toBe(false);
+    expect(shouldDropWorkerFrame(3, 3)).toBe(true);
+  });
+
+  it('keeps audio timing state resettable after track end or teardown', () => {
+    expect({ ...EMPTY_AUDIO_FRAME_TIMING }).toEqual({
+      lastCallbackAtMs: null,
+      processedFrames: 0,
+      droppedFrames: 0,
+      averageProcessingLatencyMs: 0,
+      maxProcessingLatencyMs: 0,
+    });
   });
 });
 

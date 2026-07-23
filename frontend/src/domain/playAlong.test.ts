@@ -307,6 +307,18 @@ describe('PlayAlongGrader', () => {
     expect(grader.results[0].grade).toBe('close');
   });
 
+  it('accrues a full hold at exactly +15 cents but never at +15.1 cents', () => {
+    const edge = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    for (let timestamp = 0; timestamp <= 300; timestamp += 100) edge.feed(frame('C', 15), timestamp);
+    expect(edge.done).toBe(true);
+    expect(edge.results[0].grade).toBe('close');
+
+    const outside = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    for (let timestamp = 0; timestamp <= 300; timestamp += 100) outside.feed(frame('C', 15.1), timestamp);
+    expect(outside.done).toBe(false);
+    expect(outside.results).toEqual([]);
+  });
+
   it('resets while receiving prolonged low-confidence frames', () => {
     const grader = new PlayAlongGrader(['C'], { holdMs: 400, minSamples: 3, maximumDropoutMs: 250 });
     grader.feed(frame('C', 4), 0);

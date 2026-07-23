@@ -290,7 +290,7 @@ export function PlayAlongPage() {
         setPhase('idle');
         setError(t('playAlong.micError'));
       } else {
-        practiceLibrary.recordRecent({ kind: 'play-along', id: exercise.id, label: localizedExerciseLabel, href: `/practice/play-along?exercise=${encodeURIComponent(exercise.id)}` });
+        practiceLibrary.recordRecent({ kind: 'play-along', id: exercise.id, label: localizedExerciseLabel, href: `/practice/scorer?exercise=${encodeURIComponent(exercise.id)}` });
       }
     } finally {
       if (generation === startGenerationRef.current) startInProgressRef.current = false;
@@ -337,18 +337,18 @@ export function PlayAlongPage() {
     return null;
   })();
 
-  const selectedTarget = { kind: 'play-along' as const, id: exercise.id, label: localizedExerciseLabel, href: `/practice/play-along?exercise=${encodeURIComponent(exercise.id)}` };
+  const selectedTarget = { kind: 'play-along' as const, id: exercise.id, label: localizedExerciseLabel, href: `/practice/scorer?exercise=${encodeURIComponent(exercise.id)}` };
   const selectExercise = (id: string) => {
     setExerciseId(id);
     setSearchParams({ exercise: id }, { replace: true });
   };
 
   return (
-    <ScreenContainer>
-      <PageHeader
-        title={t('playAlong.title')}
-        description={t('playAlong.description')}
-      />
+      <ScreenContainer>
+        <PageHeader
+          title={t('playAlong.title')}
+          description={t('playAlong.description')}
+        />
 
       {phase === 'idle' && (
         <SectionCard title={t('playAlong.choose')}>

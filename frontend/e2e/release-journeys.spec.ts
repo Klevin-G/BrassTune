@@ -26,9 +26,9 @@ test('critical routes render identifiable content', async ({ page }) => {
   const routes = [
     ['/', /Tune up, play along, and see how you sound/i],
     ['/practice', /Live mic/i],
-    ['/practice/play-along', /Play-Along/i],
+    ['/practice/scorer', /Practice Scorer/i],
     ['/metronome', /Metronome/i],
-    ['/practice/score', /Sheet Music/i],
+    ['/practice/sheet-music', /Sheet Music/i],
     ['/sessions', /Recordings/i],
     ['/progress', /Progress/i],
     ['/ensemble', /Class/i],

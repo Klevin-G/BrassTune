@@ -68,7 +68,9 @@ export default function App() {
           <Route path="/home" element={<Navigate to="/practice" replace />} />
           <Route path="/more" element={<Navigate to="/settings" replace />} />
           <Route path="/practice" element={appRoute(<PracticePage />)} />
+          <Route path="/practice/sheet-music" element={appRoute(<ScorePracticePage />)} />
           <Route path="/practice/score" element={appRoute(<ScorePracticePage />)} />
+          <Route path="/practice/scorer" element={appRoute(<PlayAlongPage />)} />
           <Route path="/practice/play-along" element={appRoute(<PlayAlongPage />)} />
           <Route path="/metronome" element={appRoute(<MetronomePage />)} />
           <Route path="/sessions" element={appRoute(<SessionsPage />)} />

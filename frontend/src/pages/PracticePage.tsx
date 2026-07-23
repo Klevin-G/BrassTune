@@ -450,7 +450,7 @@ export function PracticePage() {
             <Timer size={18} />
             <span>{t('practice.metronome')}</span>
           </Link>
-          <Link className="tuner-tool" to="/practice/score">
+          <Link className="tuner-tool" to="/practice/sheet-music">
             <FileText size={18} />
             <span>{t('practice.sheetMusic')}</span>
           </Link>

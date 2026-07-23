@@ -18,7 +18,7 @@ export function WeakTransitionCard({ events }: { events: TransitionEvent[] }) {
           <p className="muted-copy">{t('transition.pattern', { notes: drill.notes.join(' · ') })}</p>
           <button className="ghost-button" type="button" onClick={() => {
             const exercise = saveExercise({ name: t('transition.name', { from: drill.from, to: drill.to }), notes: drill.notes, source: 'generated' });
-            navigate(`/practice/play-along?exercise=${encodeURIComponent(exercise.id)}`);
+            navigate(`/practice/scorer?exercise=${encodeURIComponent(exercise.id)}`);
           }}><Target size={17} />{t('transition.save')}</button>
         </div>
       )}

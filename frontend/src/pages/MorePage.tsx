@@ -7,7 +7,7 @@ import { useAuth } from '../state/AuthContext';
 const moreItems = [
   { to: '/coach', title: 'Coach', detail: 'Personalized practice plan and recommendations.', icon: GraduationCap },
   { to: '/metronome', title: 'Metronome', detail: 'Tempo, count-in, subdivisions, and ramp practice.', icon: Timer },
-  { to: '/practice/score', title: 'Score practice', detail: 'Read imported PDF or photo sheet music while you practice.', icon: FileText },
+  { to: '/practice/sheet-music', title: 'Sheet music', detail: 'Read imported PDF or photo sheet music while you practice.', icon: FileText },
   { to: '/sessions', title: 'Sessions', detail: 'Review practice history and open saved takes.', icon: Music2 },
   { to: '/progress', title: 'Progress', detail: 'See weekly pulse, improvement, and consistency.', icon: Activity },
   { to: '/ensemble', title: 'Ensemble', detail: 'Create a class, add students, and track their practice.', icon: Users },

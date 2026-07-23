@@ -7,7 +7,7 @@ const routes = [
   '/practice/play-along',
   '/progress',
   '/metronome',
-  '/practice/score',
+  '/practice/sheet-music',
   '/auth/sign-in',
   '/settings',
   '/sessions/-12345',
@@ -112,7 +112,7 @@ test('tablet shell navigation remains accessible when labels are visually compac
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto('/practice');
   await expect(page.getByRole('link', { name: 'Tuner' }).first()).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Play-Along' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Practice Scorer' }).first()).toBeVisible();
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();

@@ -17,7 +17,7 @@ import { useI18n } from '../i18n/LocaleContext';
 // not top-level nav; Coach/Sessions are folded into Progress.
 const primaryNav = [
   { to: '/practice', labelId: 'nav.tuner' as const, icon: Gauge },
-  { to: '/practice/play-along', labelId: 'nav.playAlong' as const, icon: Target },
+  { to: '/practice/scorer', labelId: 'nav.playAlong' as const, icon: Target },
   { to: '/progress', labelId: 'nav.progress' as const, icon: BarChart3 },
   { to: '/ensemble', labelId: 'nav.class' as const, icon: Users },
   { to: '/settings', labelId: 'nav.settings' as const, icon: Settings },

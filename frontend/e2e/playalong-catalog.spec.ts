@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('groups every major and natural minor scale in accessible controls', async ({ page }) => {
-  await page.goto('/practice/play-along');
+  await page.goto('/practice/scorer');
 
   const majorGroup = page.getByRole('heading', { name: 'Major scales', exact: true }).locator('..');
   const minorGroup = page.getByRole('heading', { name: 'Minor scales', exact: true }).locator('..');
@@ -39,7 +39,7 @@ test('groups every major and natural minor scale in accessible controls', async 
 for (const width of [320, 375]) {
   test(`catalog has no horizontal page overflow at ${width} CSS pixels`, async ({ page }) => {
     await page.setViewportSize({ width, height: 720 });
-    await page.goto('/practice/play-along');
+    await page.goto('/practice/scorer');
     await expect(page.getByRole('heading', { name: 'Major scales', exact: true })).toBeVisible();
 
     const dimensions = await page.evaluate(() => ({
