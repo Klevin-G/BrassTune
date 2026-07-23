@@ -2,25 +2,20 @@
 
 Updated: 2026-07-23
 
-This matrix applies to implementation tree `0273347b7ab32da3031a13abaa4b751730c46c1b`. Historical counts elsewhere do not validate this candidate. The containing evidence commit changes only documentation and generated screenshots.
+This matrix applies to implementation tree `3ec585ec8b604b9a04cb7708872c66bef963fe3f`. Historical counts elsewhere do not validate this candidate. Device-evidence commit `9003cf4282f8aef5d1e4d5900454d57862e1519e` records the clean responsive simulation; the containing documentation commit changes reports only.
 
 | Gate | Current evidence | Status | Release boundary |
 |---|---|---|---|
-| Backend suite | Local `pytest`: `221 passed`, `4` PostgreSQL-only skips; account-deletion focus `23/23`. | Passed locally | The isolated PostgreSQL expand/legacy-writer harness remains for CI because Docker/PostgreSQL was unavailable locally. |
-| Backend SAST | Bandit reported clean. | Passed locally | Does not replace provider or runtime review. |
-| Backend dependencies | `pip-audit` reported clean. | Passed locally | Must remain tied to the tested environment and final revision. |
-| Frontend units | `npm test`: `175/175` passed. | Passed locally | Local unit evidence only. |
-| Frontend build and locale chunks | Production build passed; lazy-load assertion found `11` locale chunks. | Passed locally | Does not validate a Vercel deployment or translation quality. |
+| Backend suite | Local `pytest`: `223 passed`, `4` PostgreSQL-only skips. | Passed locally | The isolated PostgreSQL expand/legacy-writer harness remains for CI because Docker/PostgreSQL was unavailable locally. |
+| Backend SAST and dependencies | Production-code Bandit passed; current-environment `pip-audit --local` found no known vulnerabilities. | Passed locally | The direct requirements-file resolver still hits the documented local `ensurepip` crash; exact lockfile auditing remains a remote security-workflow gate. |
+| Frontend units | `npm test`: `35` test files / `188` unit tests passed. | Passed locally | Local unit evidence only. |
+| Frontend build, typecheck, PWA, and locale chunks | Production build/typecheck and PWA checks passed; lazy-load assertion found `11` locale chunks. | Passed locally | Does not validate a Vercel deployment or translation quality. |
 | Frontend production dependency audit | `npm audit --omit=dev`: `0` vulnerabilities. | Passed locally | Re-run if production dependency inputs change. |
-| Full browser matrix | `315` total: `308 passed`, `7` intentional Chromium/PDF fixture skips. | Passed locally | Local Playwright evidence across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. |
+| Full browser matrix | `365` total: `358 passed`, `7` intentional PDF-engine skips; no React cross-render warning emitted. | Passed locally | Local Playwright evidence across configured projects; absence of the warning is local-run evidence only. |
 | Offline production smoke | `2/2` passed. | Passed locally | Local offline production-mode evidence only. |
-| Targeted browser repeats | WebKit skip-link keyboard path `20/20`; Firefox reflection persistence `10/10`; restored-session recovery Chromium/WebKit `2/2`. | Passed locally | Supporting reruns overlap the full matrix and are not additional release-test totals. |
-| Device simulation | `12/12` viewport profiles reported Pass with Issues=None from clean SHA `0273347...`; changed session screenshots and narrow-phone labels were visually reviewed. | Passed locally | Chromium viewport automation is synthetic and does not validate physical Safari/iPad behavior. |
-| Swift package | BrassTuneCore `3/3`. | Passed locally | Shared-package evidence only. |
-| Native app units | `104/104`, including pending/active tuner release on scene deactivation and duplicate-transition suppression. | Passed locally | Simulator unit evidence; no physical audio or provider lifecycle claim. |
-| Native UI smoke | `8/8`. | Passed locally | Fixture-backed simulator UI evidence. |
-| Native simulator builds and launch frames | Debug and Release iPhone/iPad builds plus launch-frame checks passed. | Passed locally | Unsigned simulator evidence; not archive, signing, TestFlight, or physical-device evidence. |
-| Native localization | `556` source keys, `562` catalog entries, `159` sentinels, `1,511` locale assertions; zero violations. | Passed locally | Static coverage evidence; human linguistic and RTL review remains required. |
+| Device simulation | `12/12` viewport profiles reported Pass with Issues=None from clean SHA `3ec585e`. | Passed locally | Chromium viewport automation is synthetic and does not validate physical Safari/iPad behavior. |
+| Swift package | Fresh BrassTuneCore package run: `3/3` passed. | Passed locally | Shared-package evidence only. |
+| Native app units and simulator builds | Prior exact evidence: `104/104` app units and Release iPhone/iPad simulator builds passed; the native app tree is unchanged for this candidate. | Previously passed locally | Unsigned simulator evidence; not archive, signing, TestFlight, or physical-device evidence. |
 | Supabase migrations | Linked dry-run lists only `20260716201825` and expand-only `20260723021828`; linked lint reports no schema errors. | Pending authorized PR1 apply | Contract migration is deliberately absent until the privacy-aware PR1 backend is deployed and retained. |
 | Hosted Vercel/Render smoke | Exact candidate revision plus hosted endpoints/browser smoke. | Pending | No deployment identity or hosted pass is claimed. |
 | Physical-device validation | Microphone/brass, audio routes, interruptions, Files/Photos, accessibility, localization. | Unverified | Simulator and fixtures are not physical-device evidence. |

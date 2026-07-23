@@ -4,15 +4,15 @@ Updated: 2026-07-23
 
 ## Decision
 
-This branch is a **predeployment candidate**. It is not yet a production release, TestFlight, or App Store readiness decision. The committed implementation tree tested below is `0273347b7ab32da3031a13abaa4b751730c46c1b`; the containing evidence commit changes only reports and generated screenshots. Provider mutation and hosted validation remain pending.
+This branch is a **predeployment candidate**. It is not yet a production release, TestFlight, or App Store readiness decision. The committed implementation tree tested below is `3ec585ec8b604b9a04cb7708872c66bef963fe3f`; device-evidence commit `9003cf4282f8aef5d1e4d5900454d57862e1519e` records the clean responsive simulation, and the containing documentation commit changes reports only. Provider mutation and hosted validation remain pending.
 
 ## Evidence Recorded For This Candidate
 
 | Surface | Evidence | Boundary |
 |---|---|---|
-| Backend | Local suite: `221 passed`, `4` PostgreSQL-only skips; account-deletion focus `23/23`; production-code Bandit clean; current-environment `pip-audit` clean. | Local evidence only. The isolated PostgreSQL compatibility harness remains for CI because Docker/PostgreSQL was unavailable locally. |
-| Web | `175/175` unit tests; production build; `11` lazy locale chunks; `npm audit --omit=dev` with `0` vulnerabilities; full local Playwright matrix `308 passed`, `7` intentional skips; offline production smoke `2/2`; WebKit skip-link stress `20/20`; Firefox reflection stress `10/10`; device simulation `12/12` Pass/None. | Local browser and synthetic viewport evidence only. The final device report records `0273347...` from a clean worktree. |
-| Native | BrassTuneCore `3/3`; native units `104/104`; UI smoke `8/8`; Debug and Release iPhone/iPad simulator builds and launch-frame checks passed. Localization validation covered `556` source keys, `562` catalog entries, `159` sentinels, and `1,511` locale assertions with zero violations. | Local unsigned simulator and static localization evidence only; not physical-device, live-provider, signing, or Apple distribution evidence. |
+| Backend | Local suite: `223 passed`, `4` PostgreSQL-only skips; production-code Bandit clean; current-environment `pip-audit --local` found no known vulnerabilities. | Local evidence only. The isolated PostgreSQL compatibility harness remains for CI because Docker/PostgreSQL was unavailable locally. |
+| Web | `35` test files / `188` unit tests; production build/typecheck and PWA checks passed; `11` lazy locale chunks; `npm audit --omit=dev` found `0` vulnerabilities; full local Playwright matrix `365` total: `358 passed`, `7` intentional PDF-engine skips; offline production smoke `2/2`; device simulation `12/12` Pass/None from clean `3ec585e`. The final full matrix emitted no React cross-render warning. | Local browser and synthetic viewport evidence only. |
+| Native | Fresh BrassTuneCore package tests passed `3/3`; the native app tree is unchanged, with prior exact evidence of `104/104` app units and Release iPhone/iPad simulator builds. | Local package plus prior unsigned simulator evidence only; not physical-device, live-provider, signing, or Apple distribution evidence. |
 | Supabase | Linked list/dry-run shows only `20260716201825` and the PR1 expand migration `20260723021828` pending; linked schema lint reports no errors. | No provider mutation was made for this candidate. The contract migration is intentionally absent until PR2. |
 
 ## Candidate Scope And Evidence Boundaries
@@ -20,8 +20,8 @@ This branch is a **predeployment candidate**. It is not yet a production release
 - The candidate includes committed backend, web, fixture, localization, native SwiftUI, and release-workflow changes.
 - Test fixtures, simulator execution, browser automation, launch-frame checks, and static localization assertions are synthetic or local evidence unless an individual result states otherwise. They do not validate real brass audio, microphone routing, accessibility assistive technology, human translation quality, Apple signing, or deployed-provider behavior.
 - The two pending migrations are `20260716201825_audio_storage_jobs_and_upload_reservations.sql` and the expand-only `20260723021828_account_deletion_privacy_tombstones.sql`. Their repository presence is not evidence of an applied migration.
-- The full browser rerun exposed and then verified the restored-session recovery fix across all five configured projects. A WebKit keyboard-harness race was resolved by waiting for the lazy tuner route; the exact path then passed `20/20`.
-- The final blocker-closure pass added exact Render deployment-ID/provider-SHA locking, normalized auth-return rejection, an awaited guest-session escape, open-tab weekly rollover reconciliation, deterministic native tuner release on scene deactivation, five music-terminology corrections, and CI tombstone-secret coverage. The integrated backend, frontend, native-unit, browser, and device checks above include those changes.
+- The final full local browser matrix contains no React cross-render warning. This is local-run evidence, not a hosted-runtime claim.
+- Production-code Bandit, current-environment `pip-audit --local`, and `npm audit --omit=dev` were refreshed after the implementation tree was frozen. The requirements-file `pip-audit` resolver still hits the documented local `ensurepip` crash before analysis; exact lockfile auditing remains a remote security-workflow gate.
 
 ## Required Gates Before A Release Decision
 
