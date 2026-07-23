@@ -1,6 +1,6 @@
 import { AlertTriangle, BarChart3, Bug, Check, DatabaseBackup, Download, LogIn, LogOut, Mic, MicOff, RefreshCcw, RotateCcw, Trash2, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { clearLocalSessions, downloadExport, friendlyUserFacingError, repairDemoData, resetDemoData } from '../api/client';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { ThemeSelector } from '../components/ThemeSelector';
@@ -13,6 +13,10 @@ import { useAuth } from '../state/AuthContext';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import { useTheme } from '../state/ThemeContext';
 import './SettingsPage.css';
+import { gatewayPathWithReturn } from '../domain/authNavigation';
+import { LocaleSelector } from '../components/LocaleSelector';
+import { useI18n } from '../i18n/LocaleContext';
+import { PracticeReflectionCard } from '../components/practice/PracticeReflectionCard';
 
 function downloadTextFile(content: string, filename: string, type = 'application/json') {
   const blob = new Blob([content], { type });
@@ -31,8 +35,10 @@ type MicCheck = 'idle' | 'listening' | 'pass' | 'fail' | 'blocked';
 export function SettingsPage() {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
   const auth = useAuth();
+  const location = useLocation();
   const practiceLibrary = usePracticeLibrary();
   const { setTheme } = useTheme();
+  const { t } = useI18n();
   const internalToolsEnabled = import.meta.env.VITE_ENABLE_INTERNAL_TOOLS === 'true';
   const [maintenanceStatus, setMaintenanceStatus] = useState('');
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -241,7 +247,13 @@ export function SettingsPage() {
         <SectionCard className="set-group" title="Appearance">
           <ThemeSelector />
         </SectionCard>
+        <SectionCard className="set-group" title={t('locale.title')}>
+          <p className="set-hint">{t('locale.hint')}</p>
+          <LocaleSelector />
+        </SectionCard>
       </div>
+
+      <PracticeReflectionCard />
 
       <SectionCard className="settings-profile-card set-group" title="Account">
         <div className="account-card vertical">
@@ -263,7 +275,11 @@ export function SettingsPage() {
               Sign out
             </button>
           ) : (
-            <Link className="primary-button" to={auth.configured ? '/' : '/home'} onClick={!auth.configured ? auth.continueAsGuest : undefined}>
+            <Link
+              className="primary-button"
+              to={auth.configured ? gatewayPathWithReturn(`${location.pathname}${location.search}${location.hash}`) : '/home'}
+              onClick={auth.configured ? auth.exitGuest : auth.continueAsGuest}
+            >
               <LogIn size={18} />
               {auth.configured ? 'Sign in' : 'Continue as guest'}
             </Link>

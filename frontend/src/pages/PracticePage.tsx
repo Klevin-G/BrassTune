@@ -1,6 +1,6 @@
 import { FileText, Timer } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { friendlyUserFacingError } from '../api/client';
 import { NoteDisplay } from '../components/NoteDisplay';
 import { SessionControls } from '../components/SessionControls';
@@ -20,6 +20,7 @@ import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import './PracticePage.css';
+import { gatewayPathWithReturn } from '../domain/authNavigation';
 
 // How many consecutive centered frames count as a full "held in tune" reward.
 const HOLD_TARGET_FRAMES = 16;
@@ -27,6 +28,7 @@ const HOLD_TARGET_FRAMES = 16;
 export function PracticePage() {
   const { instrumentId, referencePitch, demoMode, setDemoMode } = useAppSettings();
   const auth = useAuth();
+  const location = useLocation();
   const { recordActivity, storageError } = usePracticeLibrary();
   const [searchParams, setSearchParams] = useSearchParams();
   const practiceTool = searchParams.get('tool') === 'drone' ? 'drone' : 'tuner';
@@ -241,7 +243,7 @@ export function PracticePage() {
 
         {!cloudSessionEnabled && (
           <p className="tuner-signin-note">
-            <Link to="/">Sign in</Link> to save your practice history and join your class.
+            <Link to={gatewayPathWithReturn(`${location.pathname}${location.search}${location.hash}`)} onClick={auth.exitGuest}>Sign in</Link> to save your practice history and join your class.
           </p>
         )}
 

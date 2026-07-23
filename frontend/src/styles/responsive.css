@@ -223,7 +223,7 @@
     bottom: calc(84px + env(safe-area-inset-bottom));
   }
 
-  .tuner-surface .session-controls {
+  .tuner-stage .session-controls {
     position: sticky;
     bottom: calc(86px + env(safe-area-inset-bottom));
     z-index: 21;
@@ -753,7 +753,7 @@
     height: 16px;
   }
 
-  .tuner-surface .session-controls {
+  .tuner-stage .session-controls {
     position: sticky;
     bottom: calc(74px + env(safe-area-inset-bottom));
     z-index: 21;
@@ -824,7 +824,7 @@
     order: 2;
   }
 
-  .tuner-surface .session-controls {
+  .tuner-stage .session-controls {
     order: 3;
   }
 

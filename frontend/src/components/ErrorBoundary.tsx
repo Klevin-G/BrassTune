@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { useI18n } from '../i18n/LocaleContext';
 
 interface Props {
   children: ReactNode;
@@ -6,6 +7,22 @@ interface Props {
 
 interface State {
   hasError: boolean;
+}
+
+function ErrorFallback({ onReset }: { onReset: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="route-error" role="alert">
+      <div className="route-error-card">
+        <h2>{t('error.screenTitle')}</h2>
+        <p className="muted-copy">{t('error.screenBody')}</p>
+        <div className="settings-actions">
+          <button className="primary-button" type="button" onClick={() => window.location.reload()}>{t('error.reload')}</button>
+          <a className="ghost-button" href="/home" onClick={onReset}>{t('error.dashboard')}</a>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -30,17 +47,6 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render(): ReactNode {
     if (!this.state.hasError) return this.props.children;
-    return (
-      <div className="route-error" role="alert">
-        <div className="route-error-card">
-          <h2>Something went wrong on this screen</h2>
-          <p className="muted-copy">Your saved practice is safe. Try reloading, or head back to your dashboard.</p>
-          <div className="settings-actions">
-            <button className="primary-button" type="button" onClick={() => window.location.reload()}>Reload</button>
-            <a className="ghost-button" href="/home" onClick={this.reset}>Go to dashboard</a>
-          </div>
-        </div>
-      </div>
-    );
+    return <ErrorFallback onReset={this.reset} />;
   }
 }

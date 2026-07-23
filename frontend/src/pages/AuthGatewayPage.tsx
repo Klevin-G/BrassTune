@@ -4,31 +4,20 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
+import { readPendingAuthReturn, safeReturnPath } from '../domain/authNavigation';
+import { useI18n } from '../i18n/LocaleContext';
 import './AuthGatewayPage.css';
 
-const pendingAuthNextKey = 'brasstune.pendingAuthNext';
-
 function consumePendingAuthNext() {
-  try {
-    const value = sessionStorage.getItem(pendingAuthNextKey);
-    sessionStorage.removeItem(pendingAuthNextKey);
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-function safeNext(value: string | null) {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/home';
-  if (value === '/' || value.startsWith('/auth/')) return '/home';
-  return value;
+  return readPendingAuthReturn({ consume: true });
 }
 
 export function AuthGatewayPage() {
   const auth = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const next = useMemo(() => safeNext(params.get('next')), [params]);
+  const next = useMemo(() => safeReturnPath(params.get('next')), [params]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
@@ -38,7 +27,7 @@ export function AuthGatewayPage() {
   useEffect(() => {
     if (!auth.loading && auth.isSignedIn) {
       const storedNext = consumePendingAuthNext();
-      const destination = params.has('next') ? next : safeNext(storedNext);
+      const destination = params.has('next') ? next : safeReturnPath(storedNext);
       navigate(destination, { replace: true });
     }
   }, [auth.isSignedIn, auth.loading, navigate, next, params]);
@@ -52,7 +41,7 @@ export function AuthGatewayPage() {
       consumePendingAuthNext();
       navigate(next, { replace: true });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Couldn’t sign in right now. You can start as a guest instead.');
+      setMessage(error instanceof Error ? error.message : t('auth.failure'));
     } finally {
       setBusy(false);
     }
@@ -78,29 +67,29 @@ export function AuthGatewayPage() {
               <strong>BrassTune</strong>
             </span>
           </div>
-          <h1>Tune up, play along, and see how you sound.</h1>
+          <h1>{t('auth.heading')}</h1>
           <p className="ag-lead">
-            A tuner, metronome, and play-along grader for brass players — solo or with your band. Guest mode saves your work on this device only.
+            {t('auth.lead')}
           </p>
           <span className="ag-noaccount">
             <CheckCircle2 size={16} />
-            No account needed to start.
+            {t('auth.noAccount')}
           </span>
         </section>
 
         <div className="gateway-stack">
           <SectionCard>
-            {auth.loading && <p className="muted-copy" role="status">Restoring your session…</p>}
+            {auth.loading && <p className="muted-copy" role="status">{t('auth.restore')}</p>}
 
             {!auth.loading && !auth.configured && (
               <>
                 <EmptyActionState
-                  title="Ready when you are"
-                  body="Just start practicing — no sign-in needed."
+                  title={t('auth.ready')}
+                  body={t('auth.readyBody')}
                   icon={Music2}
                 />
                 <button className="primary-button ag-block ag-guest" type="button" onClick={continueAsGuest}>
-                  Start practicing
+                  {t('auth.start')}
                   <ArrowRight size={18} />
                 </button>
               </>
@@ -112,27 +101,27 @@ export function AuthGatewayPage() {
                   <>
                     <div className="ag-providers">
                       {auth.providers.google && (
-                        <button className="google-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.'))}>
+                        <button className="google-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : t('auth.googleFailure')))}>
                           <GoogleIcon size={18} />
-                          Continue with Google
+                          {t('auth.google')}
                         </button>
                       )}
                       {auth.providers.apple && (
-                        <button className="ghost-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithApple(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : 'Apple sign-in could not start. Try again later.'))}>
+                        <button className="ghost-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithApple(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : t('auth.appleFailure')))}>
                           <ShieldCheck size={18} />
-                          Continue with Apple
+                          {t('auth.apple')}
                         </button>
                       )}
                     </div>
-                    <div className="auth-divider" aria-hidden="true"><span>or</span></div>
+                    <div className="auth-divider" aria-hidden="true"><span>{t('auth.or')}</span></div>
                   </>
                 )}
 
                 <button className="primary-button ag-block ag-guest" type="button" onClick={continueAsGuest}>
-                  Start practicing
+                  {t('auth.start')}
                   <ArrowRight size={18} />
                 </button>
-                <p className="ag-nudge">New here? Jump right in — no account needed.</p>
+                <p className="ag-nudge">{t('auth.newHere')}</p>
 
                 <button
                   type="button"
@@ -143,7 +132,7 @@ export function AuthGatewayPage() {
                 >
                   <span className="ag-email-toggle-label">
                     <Mail size={16} />
-                    Sign in with email
+                    {t('auth.emailToggle')}
                   </span>
                   <ChevronDown className="ag-chevron" size={16} />
                 </button>
@@ -152,26 +141,26 @@ export function AuthGatewayPage() {
                   <div className="ag-email-region" id="ag-email-region">
                     <form className="auth-form" onSubmit={signIn}>
                       <label>
-                        Email
+                        {t('auth.email')}
                         <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="you@example.com" />
                       </label>
                       <label>
-                        Password
+                        {t('auth.password')}
                         <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder="At least 6 characters" />
                       </label>
                       <button className="primary-button ag-block" disabled={busy} type="submit">
                         <LogIn size={18} />
-                        {busy ? 'Signing in…' : 'Sign in'}
+                        {busy ? t('auth.signingIn') : t('nav.signIn')}
                       </button>
                     </form>
                     <div className="auth-switcher">
                       <Link to={`/auth/sign-up?next=${encodeURIComponent(next)}`}>
                         <UserPlus size={16} />
-                        Create account
+                        {t('auth.create')}
                       </Link>
                       <Link to={`/auth/reset-password?next=${encodeURIComponent(next)}`}>
                         <KeyRound size={16} />
-                        Forgot password
+                        {t('auth.forgot')}
                       </Link>
                     </div>
                   </div>
@@ -183,10 +172,10 @@ export function AuthGatewayPage() {
         </div>
       </div>
 
-      <footer className="ag-footer" aria-label="Legal and support links">
-        <Link to="/privacy">Privacy</Link>
-        <Link to="/terms">Terms</Link>
-        <Link to="/support">Support</Link>
+      <footer className="ag-footer" aria-label={t('auth.legal')}>
+        <Link to="/privacy">{t('legal.privacy')}</Link>
+        <Link to="/terms">{t('legal.terms')}</Link>
+        <Link to="/support">{t('legal.support')}</Link>
       </footer>
     </ScreenContainer>
   );

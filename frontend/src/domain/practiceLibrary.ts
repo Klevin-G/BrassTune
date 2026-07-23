@@ -1,6 +1,7 @@
 export const PRACTICE_LIBRARY_VERSION = 1 as const;
 export const PRACTICE_LIBRARY_PREFIX = 'brasstune.practiceLibrary.v1.';
 export const PRACTICE_WORKSPACE_PREFIX = 'brasstune.practiceWorkspace.v1.';
+export const PLAY_ALONG_BEST_PREFIX = 'brasstune.playalong.best.';
 
 export type PracticeTargetKind = 'warmup' | 'play-along' | 'metronome' | 'drone' | 'score';
 
@@ -47,6 +48,8 @@ export interface WeeklyGoal {
   week: string;
   targetMinutes: number;
   completedMinutes: number;
+  targetSessions: number;
+  completedSessions: number;
 }
 
 export interface PracticePackStep extends PracticeTarget {
@@ -81,7 +84,7 @@ const LIMITS = {
   customExercises: 24,
   metronomePresets: 16,
   favorites: 16,
-  recents: 8,
+  recents: 10,
   reflections: 40,
 } as const;
 
@@ -103,7 +106,7 @@ export function emptyPracticeLibrary(now = new Date()): PracticeLibrary {
     recents: [],
     reflections: [],
     warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: now.toISOString() },
-    weeklyGoal: { week: currentWeekKey(now), targetMinutes: 60, completedMinutes: 0 },
+    weeklyGoal: { week: currentWeekKey(now), targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
   };
 }
 
@@ -113,6 +116,27 @@ export function ownerPracticeKey(ownerId: string): string {
 
 export function ownerWorkspaceKey(ownerId: string): string {
   return `${PRACTICE_WORKSPACE_PREFIX}${encodeURIComponent(ownerId)}`;
+}
+
+export function ownerBestScorePrefix(ownerId: string): string {
+  return `${PLAY_ALONG_BEST_PREFIX}${encodeURIComponent(ownerId)}.`;
+}
+
+export function clearAccountPracticeState(
+  local: Pick<Storage, 'removeItem' | 'length' | 'key'>,
+  session: Pick<Storage, 'removeItem'>,
+  ownerId: string,
+): number {
+  if (!ownerId.startsWith('account:')) return 0;
+  const keys = [ownerPracticeKey(ownerId)];
+  const bestPrefix = ownerBestScorePrefix(ownerId);
+  for (let index = 0; index < local.length; index += 1) {
+    const key = local.key(index);
+    if (key?.startsWith(bestPrefix)) keys.push(key);
+  }
+  keys.forEach((key) => local.removeItem(key));
+  session.removeItem(ownerWorkspaceKey(ownerId));
+  return keys.length + 1;
 }
 
 export function resolvePracticeOwner(auth: { loading: boolean; hasAuthSession: boolean; isSignedIn: boolean; profileId?: string | number | null }): string | null {
@@ -219,6 +243,8 @@ export function parsePracticeLibrary(raw: string | null, now = new Date()): Prac
         week: goalWeek.week,
         targetMinutes: Math.max(5, Math.min(600, Math.round(finiteNumber(goalWeek.targetMinutes, 60)))),
         completedMinutes: Math.max(0, Math.min(10_000, Math.round(finiteNumber(goalWeek.completedMinutes, 0)))),
+        targetSessions: Math.max(1, Math.min(21, Math.round(finiteNumber(goalWeek.targetSessions, 3)))),
+        completedSessions: Math.max(0, Math.min(1_000, Math.round(finiteNumber(goalWeek.completedSessions, 0)))),
       },
     };
   } catch {
@@ -252,6 +278,24 @@ export function writePracticeLibrary(storage: Pick<Storage, 'setItem'>, ownerId:
 
 export function upsertById<T extends { id: string }>(items: T[], item: T, limit: number): T[] {
   return [item, ...items.filter((existing) => existing.id !== item.id)].slice(0, limit);
+}
+
+export function removeCustomExercise(library: PracticeLibrary, id: string): PracticeLibrary {
+  return {
+    ...library,
+    customExercises: library.customExercises.filter((item) => item.id !== id),
+    favorites: library.favorites.filter((item) => !(item.kind === 'play-along' && item.id === id)),
+    recents: library.recents.filter((item) => !(item.kind === 'play-along' && item.id === id)),
+  };
+}
+
+export function removeMetronomePreset(library: PracticeLibrary, id: string): PracticeLibrary {
+  return {
+    ...library,
+    metronomePresets: library.metronomePresets.filter((item) => item.id !== id),
+    favorites: library.favorites.filter((item) => !(item.kind === 'metronome' && item.id === id)),
+    recents: library.recents.filter((item) => !(item.kind === 'metronome' && item.id === id)),
+  };
 }
 
 export const practiceLibraryLimits = LIMITS;

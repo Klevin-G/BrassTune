@@ -5,6 +5,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './state/AuthContext';
 import { AuthGatewayPage } from './pages/AuthGatewayPage';
 import { AuthPage } from './pages/AuthPage';
+import { gatewayPathWithReturn } from './domain/authNavigation';
+import { useI18n } from './i18n/LocaleContext';
 
 const AdminMetricsPage = lazy(() => import('./pages/AdminMetricsPage').then((module) => ({ default: module.AdminMetricsPage })));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })));
@@ -24,14 +26,14 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => 
 function RequireAppAccess({ children }: { children: JSX.Element }) {
   const auth = useAuth();
   const location = useLocation();
+  const { t } = useI18n();
   if (auth.loading) {
-    return <div className="route-loading" role="status">Restoring session</div>;
+    return <div className="route-loading" role="status">{t('loading.session')}</div>;
   }
   if (auth.isSignedIn || auth.guestMode) {
     return children;
   }
-  const next = encodeURIComponent(`${location.pathname}${location.search}`);
-  return <Navigate to={`/?next=${next}`} replace />;
+  return <Navigate to={gatewayPathWithReturn(`${location.pathname}${location.search}${location.hash}`)} replace />;
 }
 
 function appRoute(element: JSX.Element) {
@@ -39,10 +41,11 @@ function appRoute(element: JSX.Element) {
 }
 
 export default function App() {
+  const { t } = useI18n();
   return (
     <AppShell>
       <ErrorBoundary>
-      <Suspense fallback={<div className="route-loading" role="status">Loading</div>}>
+      <Suspense fallback={<div className="route-loading" role="status">{t('loading.page')}</div>}>
         <Routes>
           <Route path="/" element={<AuthGatewayPage />} />
           <Route path="/home" element={<Navigate to="/practice" replace />} />

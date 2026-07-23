@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   PRACTICE_LIBRARY_VERSION,
+  BUILT_IN_PRACTICE_PACKS,
+  clearAccountPracticeState,
   currentWeekKey,
   emptyPracticeLibrary,
   normalizeMetronomePreset,
   ownerPracticeKey,
+  ownerWorkspaceKey,
   parseExerciseNotes,
   parsePracticeLibrary,
   resolvePracticeOwner,
+  removeCustomExercise,
+  removeMetronomePreset,
   writePracticeLibrary,
 } from './practiceLibrary';
 
@@ -31,7 +36,25 @@ describe('practice library storage', () => {
     expect(parsed.favorites[0].id).toHaveLength(80);
     expect(parsed.favorites[0].label).toHaveLength(80);
     expect(parsed.favorites[0].href.length).toBeLessThanOrEqual(240);
-    expect(parsed.weeklyGoal).toEqual({ week: currentWeekKey(new Date('2026-07-16T12:00:00')), targetMinutes: 60, completedMinutes: 0 });
+    expect(parsed.weeklyGoal).toEqual({ week: currentWeekKey(new Date('2026-07-16T12:00:00')), targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 });
+  });
+
+  it('uses canonical limits for 60-character exercise names and ten recents', () => {
+    const raw = JSON.stringify({
+      ...emptyPracticeLibrary(),
+      customExercises: [{ id: 'custom', name: 'x'.repeat(61), notes: ['A', 'G'], source: 'custom', createdAt: new Date().toISOString() }],
+      recents: Array.from({ length: 12 }, (_, index) => ({ kind: 'warmup', id: String(index), label: `Recent ${index}`, href: '/practice' })),
+    });
+    const parsed = parsePracticeLibrary(raw);
+    expect(parsed.customExercises[0].name).toHaveLength(60);
+    expect(parsed.customExercises[0].notes).toEqual(['A', 'G']);
+    expect(parsed.recents).toHaveLength(10);
+    expect(parsed.weeklyGoal).toMatchObject({ targetMinutes: 60, targetSessions: 3, completedMinutes: 0, completedSessions: 0 });
+  });
+
+  it('ships routable built-in packs for the focused workspace', () => {
+    expect(BUILT_IN_PRACTICE_PACKS).toHaveLength(2);
+    expect(BUILT_IN_PRACTICE_PACKS.every((pack) => pack.steps.length > 0 && pack.steps.every((step) => step.href.startsWith('/')))).toBe(true);
   });
 
   it('retries a quota failure with bounded optional history', () => {
@@ -39,12 +62,54 @@ describe('practice library storage', () => {
     let saved = '';
     const storage = { setItem: (_key: string, value: string) => { calls += 1; if (calls === 1) throw new Error('quota'); saved = value; } };
     const library = emptyPracticeLibrary();
-    library.recents = Array.from({ length: 8 }, (_, index) => ({ kind: 'warmup', id: String(index), label: String(index), href: '/practice' }));
+    library.recents = Array.from({ length: 10 }, (_, index) => ({ kind: 'warmup', id: String(index), label: String(index), href: '/practice' }));
     library.reflections = Array.from({ length: 20 }, (_, index) => ({ id: String(index), text: 'note', createdAt: new Date().toISOString() }));
     expect(writePracticeLibrary(storage, 'guest', library)).toBe(true);
     expect(calls).toBe(2);
     expect(JSON.parse(saved).recents).toHaveLength(3);
     expect(JSON.parse(saved).reflections).toHaveLength(10);
+  });
+
+  it('removes only the deleted custom item and its matching shortcuts', () => {
+    const library = emptyPracticeLibrary();
+    library.customExercises = [{ id: 'custom-1', name: 'My scale', notes: ['C'], source: 'custom', createdAt: new Date().toISOString() }];
+    library.metronomePresets = [{ id: 'preset-1', name: 'March', bpm: 96, numerator: 4, denominator: 4, subdivision: 'quarter', accentDownbeat: true, countIn: true }];
+    library.favorites = [
+      { kind: 'play-along', id: 'custom-1', label: 'My scale', href: '/practice/play-along?exercise=custom-1' },
+      { kind: 'metronome', id: 'preset-1', label: 'March', href: '/metronome' },
+    ];
+    library.recents = [...library.favorites];
+
+    const withoutExercise = removeCustomExercise(library, 'custom-1');
+    expect(withoutExercise.customExercises).toEqual([]);
+    expect(withoutExercise.favorites.map((item) => item.id)).toEqual(['preset-1']);
+    const withoutPreset = removeMetronomePreset(withoutExercise, 'preset-1');
+    expect(withoutPreset.metronomePresets).toEqual([]);
+    expect(withoutPreset.favorites).toEqual([]);
+    expect(withoutPreset.recents).toEqual([]);
+  });
+
+  it('clears an account library, workspace, and best scores while preserving guest state', () => {
+    const values = new Map<string, string>([
+      [ownerPracticeKey('account:42'), 'account-library'],
+      [ownerPracticeKey('guest'), 'guest-library'],
+      ['brasstune.playalong.best.account%3A42.cmaj', '90'],
+      ['brasstune.playalong.best.guest.cmaj', '80'],
+      ['brasstune.theme', 'brass-night'],
+    ]);
+    const local = {
+      get length() { return values.size; },
+      key: (index: number) => [...values.keys()][index] ?? null,
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const removedSessionKeys: string[] = [];
+    const removed = clearAccountPracticeState(local, { removeItem: (key: string) => removedSessionKeys.push(key) }, 'account:42');
+    expect(removed).toBe(3);
+    expect(values.has(ownerPracticeKey('account:42'))).toBe(false);
+    expect(values.has('brasstune.playalong.best.account%3A42.cmaj')).toBe(false);
+    expect(values.get(ownerPracticeKey('guest'))).toBe('guest-library');
+    expect(values.get('brasstune.playalong.best.guest.cmaj')).toBe('80');
+    expect(removedSessionKeys).toEqual([ownerWorkspaceKey('account:42')]);
   });
 });
 

@@ -1,4 +1,5 @@
 import { Circle, Mic, Square, Timer } from 'lucide-react';
+import { useThrottledAnnouncement } from '../hooks/useThrottledAnnouncement';
 
 export function SessionControls({
   recording,
@@ -27,6 +28,10 @@ export function SessionControls({
   const seconds = String(elapsedSeconds % 60).padStart(2, '0');
   const actionLabel = busy ? (recording ? 'Saving your take' : 'Starting your take') : recording ? 'Stop and save' : 'Save this take';
   const actionText = busy ? (recording ? 'Saving' : 'Starting') : recording ? 'Stop & save' : 'Save this take';
+  const timerAnnouncement = useThrottledAnnouncement(
+    recording ? `Recording timer ${minutes} minutes ${seconds} seconds` : 'Recording stopped',
+    15_000,
+  );
   return (
     <div className="session-controls">
       <button className={`${recording ? 'primary-button' : 'ghost-button'} icon-first-action`} aria-label={actionLabel} aria-busy={busy || undefined} disabled={busy} onClick={recording ? onStop : onStart} type="button">
@@ -40,11 +45,12 @@ export function SessionControls({
         </button>
       )}
       {recording && (
-        <div className="timer-chip" role="timer" aria-live="polite" aria-label={`Recording timer ${minutes} minutes ${seconds} seconds`}>
+        <div className="timer-chip" role="timer" aria-label={`Recording timer ${minutes} minutes ${seconds} seconds`}>
           <Timer size={17} />
           {minutes}:{seconds}
         </div>
       )}
+      <span className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{timerAnnouncement}</span>
     </div>
   );
 }

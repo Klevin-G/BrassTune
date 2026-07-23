@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/client';
 import { apiBase } from '../api/runtimeConfig';
 import { authProviders, supabase, supabaseConfigured } from '../lib/supabase';
+import { clearAccountPracticeState } from '../domain/practiceLibrary';
 
 interface BackendProfile {
   id: number;
@@ -352,7 +353,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile, resetAccountState]);
 
   const deleteAccount = useCallback(async (confirmation: string) => {
+    const ownerId = profileRef.current?.id != null ? `account:${profileRef.current.id}` : null;
     const result = await deleteMyAccount(confirmation);
+    if (ownerId) clearAccountPracticeState(localStorage, sessionStorage, ownerId);
     if (supabase) {
       await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
     }

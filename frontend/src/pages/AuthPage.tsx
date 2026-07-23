@@ -5,43 +5,20 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
+import {
+  authPathWithReturn,
+  clearPendingAuthReturn,
+  readPendingAuthReturn,
+  rememberPendingAuthReturn,
+  safeReturnPath,
+} from '../domain/authNavigation';
+import { useI18n } from '../i18n/LocaleContext';
 import './AuthPage.css';
 
 const PASSWORD_MIN = 8;
-const pendingAuthNextKey = 'brasstune.pendingAuthNext';
 
-export function safeAuthNext(value: string | null | undefined) {
-  if (!value || !value.startsWith('/') || value.startsWith('//') || value === '/' || value.startsWith('/auth/')) return '/home';
-  return value;
-}
-
-export function authPathWithNext(path: '/auth/sign-in' | '/auth/sign-up' | '/auth/reset-password', next: string) {
-  return `${path}?next=${encodeURIComponent(safeAuthNext(next))}`;
-}
-
-function rememberPendingAuthNext(next: string) {
-  try {
-    sessionStorage.setItem(pendingAuthNextKey, safeAuthNext(next));
-  } catch {
-    // The URL still carries next during the current auth flow.
-  }
-}
-
-function clearPendingAuthNext() {
-  try {
-    sessionStorage.removeItem(pendingAuthNextKey);
-  } catch {
-    // Storage can be unavailable in privacy-restricted browsers.
-  }
-}
-
-function readPendingAuthNext() {
-  try {
-    return sessionStorage.getItem(pendingAuthNextKey);
-  } catch {
-    return null;
-  }
-}
+export const safeAuthNext = safeReturnPath;
+export const authPathWithNext = authPathWithReturn;
 
 type Message = { type: 'success' | 'error'; text: string };
 
@@ -57,11 +34,12 @@ function callbackParams() {
 }
 
 function AuthFooter() {
+  const { t } = useI18n();
   return (
-    <footer className="au-footer" aria-label="Legal and support links">
-      <Link to="/privacy">Privacy</Link>
-      <Link to="/terms">Terms</Link>
-      <Link to="/support">Support</Link>
+    <footer className="au-footer" aria-label={t('auth.legal')}>
+      <Link to="/privacy">{t('legal.privacy')}</Link>
+      <Link to="/terms">{t('legal.terms')}</Link>
+      <Link to="/support">{t('legal.support')}</Link>
     </footer>
   );
 }
@@ -132,12 +110,13 @@ function PasswordField({
 
 export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'callback' }) {
   const auth = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const storedRecoveryNext = mode === 'reset' && auth.hasAuthSession
-    ? readPendingAuthNext()
+    ? readPendingAuthReturn()
     : null;
-  const next = safeAuthNext(params.get('next') ?? storedRecoveryNext);
+  const next = safeReturnPath(params.get('next') ?? storedRecoveryNext);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -173,7 +152,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   useEffect(() => {
     if (mode !== 'callback') return;
     if (auth.isSignedIn) {
-      clearPendingAuthNext();
+      clearPendingAuthReturn();
       navigate(next, { replace: true });
     }
   }, [mode, auth.isSignedIn, navigate, next]);
@@ -191,7 +170,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     if (auth.hasAuthSession) {
       setMessage({ type: 'success', text: "You're all set — taking you to practice…" });
       const timer = setTimeout(() => {
-        clearPendingAuthNext();
+        clearPendingAuthReturn();
         navigate(next, { replace: true });
       }, 1100);
       return () => clearTimeout(timer);
@@ -209,10 +188,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     try {
       if (mode === 'sign-in') {
         await auth.signIn(email, password);
-        clearPendingAuthNext();
+        clearPendingAuthReturn();
         navigate(next);
       } else if (mode === 'sign-up') {
-        rememberPendingAuthNext(next);
+        rememberPendingAuthReturn(next);
         await auth.signUp({ email, password, username, displayName, primaryInstrumentId: instrumentId });
         setPendingSignup(true);
       } else if (isPasswordRecovery) {
@@ -225,7 +204,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
         setPasswordUpdated(true);
         setNewPassword('');
       } else {
-        rememberPendingAuthNext(next);
+        rememberPendingAuthReturn(next);
         await auth.requestPasswordReset(email);
         setMessage({ type: 'success', text: 'Check your email — we sent you a link to set a new password.' });
       }
@@ -241,14 +220,14 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     return (
       <ScreenContainer>
         <div className="au-callback">
-          <SectionCard title={showError ? "Sign-in didn't finish" : 'Signing you in'}>
+          <SectionCard title={showError ? t('auth.callbackFailedTitle') : t('auth.callbackTitle')}>
             {!auth.configured ? (
               <>
                 <p className="muted-copy" role="status">
-                  Accounts aren't turned on yet — you can start practicing right now as a guest.
+                  {t('auth.accountsOffBody')}
                 </p>
                 <Link className="primary-button au-block" to={next} onClick={auth.continueAsGuest}>
-                  Start practicing
+                  {t('auth.start')}
                   <ArrowRight size={18} />
                 </Link>
               </>
@@ -257,31 +236,31 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 <MessageBanner
                   message={{
                     type: 'error',
-                    text: auth.profileError ?? "That sign-in didn't finish. Try again, or keep practicing as a guest.",
+                    text: auth.profileError ?? t('auth.callbackFailed'),
                   }}
                 />
                 <div className="au-stack">
                   <Link className="primary-button au-block" to={`/auth/sign-in?next=${encodeURIComponent(next)}`}>
                     <LogIn size={18} />
-                    Try again
+                    {t('auth.tryAgain')}
                   </Link>
                   <Link className="ghost-button au-block" to={next} onClick={auth.continueAsGuest}>
-                    Keep practicing as a guest
+                    {t('auth.keepGuest')}
                   </Link>
                 </div>
               </>
             ) : (
               <div className="au-callback-progress">
-                <span className="au-spinner" role="status" aria-live="polite" aria-label="Signing you in" />
-                <p>Signing you in…</p>
+                <span className="au-spinner" role="status" aria-live="polite" aria-label={t('auth.callbackTitle')} />
+                <p>{t('auth.signingIn')}</p>
                 {callbackStalled && (
                   <div className="au-stack">
                     <Link className="primary-button au-block" to={next}>
-                      Continue
+                      {t('auth.continue')}
                       <ArrowRight size={18} />
                     </Link>
                     <Link className="ghost-button au-block" to={`/auth/sign-in?next=${encodeURIComponent(next)}`}>
-                      Try again
+                      {t('auth.tryAgain')}
                     </Link>
                   </div>
                 )}
@@ -295,16 +274,16 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   }
 
   const heroTitle = isSignup
-    ? 'Create your free BrassTune account.'
+    ? t('auth.heroSignup')
     : mode === 'reset'
-      ? 'Reset your password.'
-      : 'Welcome back.';
+      ? t('auth.heroReset')
+      : t('auth.heroWelcome');
   const heroBody = isPasswordRecovery
-    ? 'Choose a new password, then continue where you left off.'
+    ? t('auth.heroRecoveryBody')
     : mode === 'reset'
-      ? "Enter your email and we'll send you a link to choose a new password."
-    : 'Save your practice history and progress, and join your band’s ensemble. You can also keep practicing as a guest.';
-  const cardTitle = isSignup ? 'Create account' : isPasswordRecovery ? 'Set a new password' : mode === 'reset' ? 'Reset password' : 'Sign in';
+      ? t('auth.heroResetBody')
+    : t('auth.heroBody');
+  const cardTitle = isSignup ? t('auth.create') : isPasswordRecovery ? t('auth.setPassword') : mode === 'reset' ? t('auth.resetPassword') : t('nav.signIn');
 
   return (
     <ScreenContainer>
@@ -315,12 +294,12 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
               {!auth.configured && (
                 <>
                   <EmptyActionState
-                    title="Accounts aren't turned on yet"
-                    body="You can start practicing right now as a guest."
+                    title={t('auth.accountsOff')}
+                    body={t('auth.accountsOffBody')}
                     icon={Mail}
                   />
                   <Link className="primary-button au-block" to={next} onClick={auth.continueAsGuest}>
-                    Continue as guest
+                    {t('auth.continueGuest')}
                     <ArrowRight size={18} />
                   </Link>
                 </>
@@ -335,13 +314,13 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                     onClick={() =>
                       auth
                         .signInWithGoogle(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`)
-                        .catch((error) => setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Google sign-in could not start. Try again later.' }))
+                        .catch((error) => setMessage({ type: 'error', text: error instanceof Error ? error.message : t('auth.googleFailure') }))
                     }
                   >
                     <GoogleIcon size={18} />
-                    {isSignup ? 'Sign up with Google' : 'Continue with Google'}
+                    {isSignup ? t('auth.signupGoogle') : t('auth.google')}
                   </button>
-                  <div className="auth-divider" aria-hidden="true"><span>or use your email</span></div>
+                  <div className="auth-divider" aria-hidden="true"><span>{t('auth.orEmail')}</span></div>
                 </>
               )}
 
@@ -349,7 +328,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 <form className="auth-form" onSubmit={onSubmit}>
                   {!isPasswordRecovery && (
                     <label>
-                      Email
+                      {t('auth.email')}
                       <input
                         value={email}
                         onChange={(event) => setEmail(event.target.value)}
@@ -365,7 +344,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
 
                   {mode === 'sign-in' && (
                     <PasswordField
-                      label="Password"
+                      label={t('auth.password')}
                       value={password}
                       onChange={setPassword}
                       name="password"
@@ -377,7 +356,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                   {isSignup && (
                     <>
                       <PasswordField
-                        label="Password"
+                        label={t('auth.password')}
                         value={password}
                         onChange={setPassword}
                         name="new-password"
@@ -386,7 +365,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                         hint={`At least ${PASSWORD_MIN} characters.`}
                       />
                       <label>
-                        Username
+                        {t('auth.username')}
                         <input
                           value={username}
                           onChange={(event) => setUsername(event.target.value.toLowerCase())}
@@ -399,7 +378,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                         <span className="au-field-hint">Your unique handle. Lowercase letters and numbers, e.g. avery.</span>
                       </label>
                       <label>
-                        Display name
+                        {t('auth.displayName')}
                         <input
                           value={displayName}
                           onChange={(event) => setDisplayName(event.target.value)}
@@ -416,7 +395,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
 
                   {isPasswordRecovery && (
                     <PasswordField
-                      label="New password"
+                      label={t('auth.newPassword')}
                       value={newPassword}
                       onChange={setNewPassword}
                       name="new-password"
@@ -428,7 +407,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
 
                   <button className="primary-button au-block" disabled={busy || (isPasswordRecovery && newPassword.length < PASSWORD_MIN)} type="submit">
                     {isSignup ? <UserPlus size={18} /> : mode === 'reset' ? <KeyRound size={18} /> : <LogIn size={18} />}
-                    {busy ? 'Working…' : isSignup ? 'Create account' : isPasswordRecovery ? 'Update password' : mode === 'reset' ? 'Send reset link' : 'Sign in'}
+                    {busy ? t('auth.working') : isSignup ? t('auth.create') : isPasswordRecovery ? t('auth.updatePassword') : mode === 'reset' ? t('auth.sendReset') : t('nav.signIn')}
                   </button>
                 </form>
               )}
@@ -438,11 +417,11 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                   className="primary-button au-block"
                   type="button"
                   onClick={() => {
-                    clearPendingAuthNext();
+                    clearPendingAuthReturn();
                     navigate(next, { replace: true });
                   }}
                 >
-                  Continue to BrassTune
+                  {t('auth.continueApp')}
                   <ArrowRight size={18} />
                 </button>
               )}
@@ -456,11 +435,11 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                     onClick={() =>
                       auth
                         .signInWithApple(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`)
-                        .catch((error) => setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Apple sign-in could not start. Try again later.' }))
+                        .catch((error) => setMessage({ type: 'error', text: error instanceof Error ? error.message : t('auth.appleFailure') }))
                     }
                   >
                     <ShieldCheck size={18} />
-                    Continue with Apple
+                    {t('auth.apple')}
                   </button>
                 </div>
               )}
@@ -468,21 +447,36 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
               {message && <MessageBanner message={message} />}
 
               {auth.configured && !passwordUpdated && (
-                <div className="auth-switcher">
-                  {isSignup ? (
-                    <Link to={authPathWithNext('/auth/sign-in', next)}>Already have an account?</Link>
-                  ) : (
-                    <Link to={authPathWithNext('/auth/sign-up', next)}>Create account</Link>
+                <>
+                  <div className="auth-switcher">
+                    {isSignup ? (
+                      <Link to={authPathWithNext('/auth/sign-in', next)}>{t('auth.haveAccount')}</Link>
+                    ) : (
+                      <Link to={authPathWithNext('/auth/sign-up', next)}>{t('auth.create')}</Link>
+                    )}
+                    {mode !== 'reset' && <Link to={authPathWithNext('/auth/reset-password', next)}>{t('auth.forgot')}?</Link>}
+                  </div>
+                  {!isPasswordRecovery && (
+                    <Link
+                      className="ghost-button au-block"
+                      to={next}
+                      onClick={() => {
+                        clearPendingAuthReturn();
+                        auth.continueAsGuest();
+                      }}
+                    >
+                      {t('auth.keepGuest')}
+                      <ArrowRight size={18} />
+                    </Link>
                   )}
-                  {mode !== 'reset' && <Link to={authPathWithNext('/auth/reset-password', next)}>Forgot password?</Link>}
-                </div>
+                </>
               )}
             </SectionCard>
 
             {auth.configured && (
               <p className="au-reassure">
                 <LockKeyhole size={15} />
-                We only use your email to save your practice. No spam.
+                {t('auth.reassure')}
               </p>
             )}
           </div>

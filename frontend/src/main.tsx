@@ -8,20 +8,23 @@ import { PracticeLibraryProvider } from './state/PracticeLibraryContext';
 import { ThemeProvider } from './state/ThemeContext';
 import { registerOfflineShell } from './registerOfflineShell';
 import './styles.css';
+import { LocaleProvider } from './i18n/LocaleContext';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <AuthProvider>
-          <AppSettingsProvider>
-            <PracticeLibraryProvider>
-              <App />
-            </PracticeLibraryProvider>
-          </AppSettingsProvider>
-        </AuthProvider>
-      </BrowserRouter>
-    </ThemeProvider>
+    <LocaleProvider>
+      <ThemeProvider>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <AuthProvider>
+            <AppSettingsProvider>
+              <PracticeLibraryProvider>
+                <App />
+              </PracticeLibraryProvider>
+            </AppSettingsProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </ThemeProvider>
+    </LocaleProvider>
   </React.StrictMode>,
 );
 

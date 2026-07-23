@@ -11,8 +11,27 @@ describe('auth navigation', () => {
   });
 
   it('fails closed for external, root, and recursive auth destinations', () => {
-    for (const unsafe of [null, '', 'https://example.com', '//example.com', '/', '/auth/callback']) {
+    for (const unsafe of [
+      null,
+      '',
+      'https://example.com',
+      '//example.com',
+      '\\\\example.com/steal',
+      '/%5c%5cexample.com/steal',
+      '/%2f%2fexample.com/steal',
+      '/ensemble%0d%0aSet-Cookie:bad',
+      'javascript:alert(1)',
+      '/',
+      '/auth/callback',
+      '/auth/sign-in?next=/ensemble',
+    ]) {
       expect(safeAuthNext(unsafe)).toBe('/home');
     }
+  });
+
+  it('normalizes an explicit same-origin URL and rejects a different origin', () => {
+    expect(safeAuthNext('https://brasstune.test/ensemble?join=BRASS#invite', 'https://brasstune.test'))
+      .toBe('/ensemble?join=BRASS#invite');
+    expect(safeAuthNext('https://brasstune.test.evil.example/ensemble', 'https://brasstune.test')).toBe('/home');
   });
 });

@@ -25,6 +25,7 @@ import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPr
 import { instrumentDisplayName } from '../domain/instrumentNames';
 import { describeInTunePercent } from '../domain/tuningLanguage';
 import { useAuth } from '../state/AuthContext';
+import { gatewayPathWithReturn } from '../domain/authNavigation';
 import './EnsemblePage.css';
 
 // Instruments a student can be tagged with. Kept in sync with the display-name catalog.
@@ -647,7 +648,7 @@ export function EnsemblePage() {
         <SectionCard title="Sign in to see your class">
           <p className="muted-copy">Sign in so your class rosters stay private and sync across your devices.</p>
           {auth.configured ? (
-            <Link to="/?next=/ensemble" className="primary-button ec-signin-btn">Sign in or create an account</Link>
+            <Link to={gatewayPathWithReturn('/ensemble')} className="primary-button ec-signin-btn" onClick={auth.exitGuest}>Sign in or create an account</Link>
           ) : (
             <p className="settings-status" role="status">Cloud sign-in isn’t set up in this local environment.</p>
           )}

@@ -7,6 +7,7 @@ describe('guided warm-up', () => {
   it('is exactly five minutes and resolves resumable positions', () => {
     expect(GUIDED_WARMUP_SECONDS).toBe(300);
     expect(GUIDED_WARMUP_STEPS).toHaveLength(5);
+    expect(GUIDED_WARMUP_STEPS.map((step) => step.seconds)).toEqual([45, 45, 75, 75, 60]);
     expect(warmupStepAt(46)).toEqual({ index: 1, elapsedInStep: 1 });
     expect(warmupStepAt(300)).toEqual({ index: 4, elapsedInStep: 60 });
   });

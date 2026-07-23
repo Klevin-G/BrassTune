@@ -16,6 +16,7 @@ import { describeCents, describeInTunePercent } from '../domain/tuningLanguage';
 import { getGuestSession, isGuestSessionId, type GuestSessionDetail } from '../domain/guestSessions';
 import type { NoteEvent, NoteStats, PracticeSession, Recommendation } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
+import { authPathWithReturn } from '../domain/authNavigation';
 import './SessionReviewPage.css';
 
 type SessionDetail = PracticeSession & { samples_count: number; note_events: NoteEvent[] };
@@ -132,7 +133,7 @@ export function SessionReviewPage() {
         <SectionCard title="Sign in to review this recording" eyebrow="Account required">
           <p className="muted-copy">This recording belongs to a BrassTune account. Sign in with that account to open it.</p>
           <div className="settings-actions">
-            <Link className="primary-button" to={`/auth/sign-in?next=${encodeURIComponent(next)}`}>Sign in</Link>
+            <Link className="primary-button" to={authPathWithReturn('/auth/sign-in', next)} onClick={auth.exitGuest}>Sign in</Link>
             <Link className="ghost-button" to="/sessions">All recordings</Link>
           </div>
         </SectionCard>

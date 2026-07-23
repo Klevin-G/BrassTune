@@ -6,6 +6,8 @@ import {
   ownerWorkspaceKey,
   practiceLibraryLimits,
   readPracticeLibrary,
+  removeCustomExercise,
+  removeMetronomePreset,
   resolvePracticeOwner,
   upsertById,
   writePracticeLibrary,
@@ -32,9 +34,11 @@ interface PracticeLibraryState {
   toggleFavorite: (target: PracticeTarget) => void;
   isFavorite: (target: PracticeTarget) => boolean;
   recordRecent: (target: PracticeTarget) => void;
-  setWeeklyGoal: (minutes: number) => void;
+  setWeeklyGoal: (minutes: number, sessions?: number) => void;
   recordActivity: (minutes: number) => void;
   saveReflection: (text: string, sessionId?: string) => PracticeReflection | null;
+  updateReflection: (id: string, text: string) => boolean;
+  deleteReflection: (id: string) => void;
   setWarmupProgress: (progress: Pick<WarmupProgress, 'elapsedSeconds' | 'stepIndex'>) => void;
   startWorkspace: (pack: PracticePack) => void;
   moveWorkspace: (stepIndex: number) => void;
@@ -99,7 +103,7 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
   }, [updateLibrary]);
 
   const deleteExercise = useCallback((id: string) => {
-    updateLibrary((current) => ({ ...current, customExercises: current.customExercises.filter((item) => item.id !== id) }));
+    updateLibrary((current) => removeCustomExercise(current, id));
   }, [updateLibrary]);
 
   const saveMetronomePreset = useCallback((preset: Omit<MetronomePreset, 'id'> & { id?: string }) => {
@@ -110,7 +114,7 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
   }, [updateLibrary]);
 
   const deleteMetronomePreset = useCallback((id: string) => {
-    updateLibrary((current) => ({ ...current, metronomePresets: current.metronomePresets.filter((item) => item.id !== id) }));
+    updateLibrary((current) => removeMetronomePreset(current, id));
   }, [updateLibrary]);
 
   const targetKey = (target: PracticeTarget) => `${target.kind}:${target.id}`;
@@ -140,10 +144,14 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     });
   }, [updateLibrary]);
 
-  const setWeeklyGoal = useCallback((minutes: number) => {
+  const setWeeklyGoal = useCallback((minutes: number, sessions?: number) => {
     updateLibrary((current) => ({
       ...current,
-      weeklyGoal: { ...current.weeklyGoal, targetMinutes: Math.max(5, Math.min(600, Math.round(minutes) || 5)) },
+      weeklyGoal: {
+        ...current.weeklyGoal,
+        targetMinutes: Math.max(5, Math.min(600, Math.round(minutes) || 5)),
+        targetSessions: Math.max(1, Math.min(21, Math.round(sessions ?? current.weeklyGoal.targetSessions) || 1)),
+      },
     }));
   }, [updateLibrary]);
 
@@ -153,6 +161,7 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
       weeklyGoal: {
         ...current.weeklyGoal,
         completedMinutes: Math.min(10_000, current.weeklyGoal.completedMinutes + Math.max(1, Math.round(minutes) || 1)),
+        completedSessions: Math.min(1_000, current.weeklyGoal.completedSessions + 1),
       },
     }));
   }, [updateLibrary]);
@@ -163,6 +172,20 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     const reflection: PracticeReflection = { id: createId('reflection'), text: trimmed, createdAt: new Date().toISOString(), sessionId };
     updateLibrary((current) => ({ ...current, reflections: [reflection, ...current.reflections].slice(0, practiceLibraryLimits.reflections) }));
     return reflection;
+  }, [updateLibrary]);
+
+  const updateReflection = useCallback((id: string, text: string) => {
+    const trimmed = text.trim().slice(0, 280);
+    if (!trimmed) return false;
+    updateLibrary((current) => ({
+      ...current,
+      reflections: current.reflections.map((item) => item.id === id ? { ...item, text: trimmed } : item),
+    }));
+    return true;
+  }, [updateLibrary]);
+
+  const deleteReflection = useCallback((id: string) => {
+    updateLibrary((current) => ({ ...current, reflections: current.reflections.filter((item) => item.id !== id) }));
   }, [updateLibrary]);
 
   const setWarmupProgress = useCallback((progress: Pick<WarmupProgress, 'elapsedSeconds' | 'stepIndex'>) => {
@@ -213,11 +236,13 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     setWeeklyGoal,
     recordActivity,
     saveReflection,
+    updateReflection,
+    deleteReflection,
     setWarmupProgress,
     startWorkspace,
     moveWorkspace,
     exitWorkspace,
-  }), [deleteExercise, deleteMetronomePreset, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, workspace]);
+  }), [deleteExercise, deleteMetronomePreset, deleteReflection, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
 
   return <PracticeLibraryContext.Provider value={value}>{children}</PracticeLibraryContext.Provider>;
 }

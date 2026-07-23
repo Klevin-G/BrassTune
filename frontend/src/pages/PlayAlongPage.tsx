@@ -25,6 +25,7 @@ import { instrumentDisplayName } from '../domain/instrumentNames';
 import { writtenNoteFrequency } from '../domain/referenceTone';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
+import { ownerBestScorePrefix } from '../domain/practiceLibrary';
 
 type Phase = 'idle' | 'running' | 'done';
 
@@ -93,7 +94,7 @@ function verdictHeadline(stars: number): string {
 }
 
 function bestKey(ownerId: string, exerciseId: string): string {
-  return `brasstune.playalong.best.${encodeURIComponent(ownerId)}.${exerciseId}`;
+  return `${ownerBestScorePrefix(ownerId)}${exerciseId}`;
 }
 
 function readBest(ownerId: string | null, exerciseId: string): number | null {

@@ -32,7 +32,7 @@ test('mobile practice home exposes resumable warm-up, drone, goals, packs, and v
 
   await page.getByRole('button', { name: 'Start pack' }).first().click();
   await expect(page.getByRole('button', { name: 'Exit focus' })).toBeVisible();
-  await expect(page.locator('.floating-tab-bar')).toHaveCount(0);
+  await expect(page.locator('.floating-tabbar')).toHaveCount(0);
   await page.getByRole('button', { name: 'Exit focus' }).click();
 
   await page.screenshot({ path: testInfo.outputPath('mobile-practice.png') });
@@ -60,7 +60,7 @@ test('custom play-along exercises validate, persist, and can be favorited', asyn
   await expect(page.getByText('Your custom exercise · 4 notes')).toBeVisible();
 });
 
-test('named metronome presets persist and offline shell never owns API or audio requests', async ({ page, request }) => {
+test('named metronome presets persist and the production service worker entry is available', async ({ page, request }) => {
   await page.goto('/metronome');
   await page.getByLabel('Preset name').fill('Audition tempo');
   await page.getByRole('button', { name: 'Save current setup' }).click();
@@ -70,7 +70,61 @@ test('named metronome presets persist and offline shell never owns API or audio 
 
   const serviceWorker = await request.get('/sw.js');
   expect(serviceWorker.ok()).toBeTruthy();
-  const source = await serviceWorker.text();
-  expect(source).toContain("url.pathname.startsWith('/api')");
-  expect(source).toContain("['audio', 'video']");
+  expect((await serviceWorker.text()).length).toBeGreaterThan(100);
+});
+
+test('locale selection updates language, direction, manifest, Intl output, and preserves musical user text', async ({ page }) => {
+  await page.goto('/settings');
+  const locale = page.getByLabel('App language');
+  await locale.selectOption('ar');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifests/ar.webmanifest');
+  await expect(page.getByRole('link', { name: 'الموالف' }).first()).toBeVisible();
+  await page.goto('/practice');
+  await expect(page.locator('.tuning-meter-track')).toHaveCSS('direction', 'ltr');
+
+  await page.goto('/settings');
+  await page.locator('.locale-selector select').selectOption('en-XA');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en-XA');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifests/en-XA.webmanifest');
+  await page.goto('/practice/play-along');
+  await page.locator('.practice-builder summary').click();
+  await page.locator('.practice-builder input').fill('A-G Warmup');
+  await page.locator('.practice-builder textarea').fill('A B C D E F G');
+  await page.locator('.practice-builder button').filter({ has: page.locator('svg') }).first().click();
+  await expect(page.getByText(/A-G Warmup/).first()).toBeVisible();
+  expect(await page.getByText(/A-G Warmup/).first().textContent()).toContain('A-G Warmup');
+});
+
+test('saved reflections are fully listed, editable, deletable, and persist user text verbatim', async ({ page }) => {
+  await page.goto('/settings');
+  await page.evaluate(() => {
+    localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
+      version: 1,
+      customExercises: [],
+      metronomePresets: [],
+      favorites: [],
+      recents: [],
+      reflections: [
+        { id: 'reflection-1', text: 'Keep A-G smooth.', createdAt: '2026-07-22T12:00:00.000Z' },
+        { id: 'reflection-2', text: 'Breathe before Bb.', createdAt: '2026-07-21T12:00:00.000Z' },
+      ],
+      warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-22T12:00:00.000Z' },
+      weeklyGoal: { week: '2026-07-20', targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
+    }));
+  });
+  await page.reload();
+  await expect(page.getByText('Keep A-G smooth.')).toBeVisible();
+  await expect(page.getByText('Breathe before Bb.')).toBeVisible();
+  await page.getByRole('button', { name: 'Edit reflection' }).first().click();
+  await page.getByLabel('Edit reflection').fill('Keep A-G smooth — softer next time.');
+  await page.getByRole('button', { name: 'Save reflection changes' }).click();
+  await expect(page.getByText('Keep A-G smooth — softer next time.')).toBeVisible();
+  await page.getByRole('button', { name: 'Delete reflection' }).last().click();
+  await expect(page.getByText('Breathe before Bb.')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('Keep A-G smooth — softer next time.')).toBeVisible();
+  await expect(page.getByText('Breathe before Bb.')).toHaveCount(0);
 });

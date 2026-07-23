@@ -1238,6 +1238,33 @@ meter {
   border: 0;
 }
 
+.skip-link {
+  position: fixed;
+  z-index: 1000;
+  top: 8px;
+  left: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: var(--bg-deep);
+  background: var(--gold-soft);
+  font-weight: 700;
+  transform: translateY(calc(-100% - 16px));
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Musical pitch increases left-to-right even when surrounding copy is RTL. */
+.tuning-meter-track,
+.tuning-meter-labels,
+.note-display,
+.playalong-ring,
+.pa-live-cents {
+  direction: ltr;
+}
+
 .heatmap {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
