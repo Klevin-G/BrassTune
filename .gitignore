@@ -15,6 +15,9 @@ swift/**/.build/
 swift/**/.swiftpm/
 swift/**/*.xcodeproj/project.xcworkspace/
 swift/**/*.xcodeproj/xcuserdata/
+DerivedData/
+*.xcresult
+*.xcarchive
 .DS_Store
 .idea/
 .pytest_cache/
