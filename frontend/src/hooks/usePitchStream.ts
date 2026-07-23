@@ -3,12 +3,16 @@ import { nextDemoPitchFrame } from '../domain/demoPitch';
 import { pitchFrameFromPcm } from '../domain/localPitchDetection';
 import type { PitchFrame } from '../domain/types';
 import { recordPitchFramesInBatches } from '../api/client';
+import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 
 const AUDIO_FRAME_SIZE = 4096;
 const PERSIST_BATCH_SIZE = 100;
 const PERSIST_FLUSH_INTERVAL_MS = 750;
 const MAX_BUFFERED_PERSIST_FRAMES = 1500;
 export const MAX_WORKER_BACKLOG = 3;
+/** A silent worker must not turn the live callback into a permanent drop-only path. */
+export const WORKER_RESPONSE_TIMEOUT_MS = 1_500;
 // Detection runs at full rate locally (~85ms/frame); only a downsampled
 // stream is persisted to the cloud to keep storage lean. Server-side note
 // segmentation merges gaps up to 340ms, so 150ms spacing is safely inside it.
@@ -64,6 +68,15 @@ export type BrowserPitchPipeline = 'worker' | 'script-processor';
 /** Keep microphone callbacks cheap when detection cannot keep up. */
 export function shouldDropWorkerFrame(pendingFrames: number, maximumBacklog = MAX_WORKER_BACKLOG): boolean {
   return pendingFrames >= maximumBacklog;
+}
+
+/** The oldest outstanding request is the only one that can prove a stalled worker. */
+export function shouldFallbackFromWorkerWatchdog(
+  oldestRequestAtMs: number | null,
+  nowMs: number,
+  timeoutMs = WORKER_RESPONSE_TIMEOUT_MS,
+): boolean {
+  return oldestRequestAtMs != null && nowMs - oldestRequestAtMs >= timeoutMs;
 }
 
 /** Worker support is optional: older and restricted browsers retain local analysis. */
@@ -132,8 +145,8 @@ export interface PitchFrameFlushResult {
   failed: number;
 }
 
-export const MICROPHONE_DISCONNECTED_MESSAGE = 'Microphone disconnected. Reconnect it, then turn the microphone on again.';
-export const MICROPHONE_PAUSED_MESSAGE = 'Microphone audio paused. Select Turn on microphone to resume listening.';
+export const MICROPHONE_DISCONNECTED_MESSAGE = 'practice.micDisconnected' as const;
+export const MICROPHONE_PAUSED_MESSAGE = 'practice.micPaused' as const;
 
 export function hasLiveMicrophoneTrack(stream: Pick<MediaStream, 'getTracks'> | null): boolean {
   if (!stream) return false;
@@ -149,14 +162,14 @@ export function installMicrophoneEndedHandler(
   });
 }
 
-export function audioContextRecoveryStatus(state: AudioContextState): { micActive: boolean; statusMessage: string } {
+export function audioContextRecoveryStatus(state: AudioContextState): { micActive: boolean; statusMessage: typeof MICROPHONE_PAUSED_MESSAGE | 'practice.micReady' | 'practice.micClosed' } {
   if (state === 'running') {
-    return { micActive: true, statusMessage: 'Listening. Play a steady note.' };
+    return { micActive: true, statusMessage: 'practice.micReady' };
   }
   return {
     micActive: false,
     statusMessage: state === 'closed'
-      ? 'Microphone audio closed. Select Turn on microphone to reconnect.'
+      ? 'practice.micClosed'
       : MICROPHONE_PAUSED_MESSAGE,
   };
 }
@@ -182,9 +195,11 @@ function audioContextConstructor() {
 }
 
 export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch, recording, sessionId, persistDemoFramesToBackend = true, onFrame }: UsePitchStreamOptions) {
+  const { t } = useI18n();
   const [currentFrame, setCurrentFrame] = useState<PitchFrame | null>(null);
   const [history, setHistory] = useState<PitchFrame[]>([]);
-  const [statusMessage, setStatusMessage] = useState('Guest demo mode is ready. Pitch data is simulated on this device.');
+  const [statusMessageId, setStatusMessage] = useState<MessageId>('practice.demoReady');
+  const statusMessage = t(statusMessageId);
   const [micActive, setMicActive] = useState(false);
   const [streamInfo, setStreamInfo] = useState<PitchStreamInfo>({
     frameSize: AUDIO_FRAME_SIZE,
@@ -289,9 +304,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         });
         const retryable = pendingPersistQueueRef.current.sessionId === currentSessionId && pendingPersistQueueRef.current.frames.length > 0;
         setStatusMessage(
-          retryable
-            ? 'Pitch is visible, but cloud sync could not save the latest frames. Guest practice still works on this device.'
-            : 'Session stopped before the latest pitch frames could sync. New recordings will start with a clean frame queue.',
+          retryable ? 'practice.pitchSyncPending' : 'practice.pitchSyncStopped',
         );
         if (retryable && flushTimerRef.current === null) {
           flushTimerRef.current = window.setTimeout(() => {
@@ -364,7 +377,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
 
   useEffect(() => {
     if (!enabled || !demoMode) return;
-    setStatusMessage('Guest demo mode is ready. Pitch data is simulated on this device.');
+    setStatusMessage('practice.demoReady');
     setStreamInfo((old) => ({ ...old, sampleRate: null, detectorSource: 'guest demo', audioContextState: 'demo' }));
     const timer = window.setInterval(() => {
       const frame = nextDemoPitchFrame(indexRef.current, instrumentId, referencePitch);
@@ -379,7 +392,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     setHistory([]);
   }, [demoMode]);
 
-  const cleanupMicrophone = useCallback((message?: string, finalState?: PitchStreamInfo['audioContextState']) => {
+  const cleanupMicrophone = useCallback((message?: MessageId, finalState?: PitchStreamInfo['audioContextState']) => {
     microphoneGenerationRef.current += 1;
     if (processorRef.current) processorRef.current.onaudioprocess = null;
     if (workerRef.current) {
@@ -442,11 +455,11 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
       }
       if (existingContext.state === 'running') {
         setMicActive(true);
-        setStatusMessage('Listening. Play a steady note.');
+        setStatusMessage('practice.micReady');
         return existingStream;
       }
       setMicActive(false);
-      setStatusMessage('Tap Turn on mic to start listening. Your browser paused audio until you interact with the page.');
+      setStatusMessage('practice.micPaused');
       return null;
     }
     if (existingStream || existingContext) cleanupMicrophone();
@@ -454,13 +467,13 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     const AudioContextClass = audioContextConstructor();
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextClass) {
       setStreamInfo((old) => ({ ...old, audioContextState: 'unavailable' }));
-      setStatusMessage('Microphone input is unavailable in this browser. Guest demo practice still works on this device.');
+      setStatusMessage('practice.micUnavailable');
       return null;
     }
     const generation = ++microphoneGenerationRef.current;
     microphoneStartingRef.current = true;
     setStreamInfo((old) => ({ ...old, audioContextState: 'starting' }));
-    setStatusMessage('Asking for microphone access.');
+    setStatusMessage('practice.micRequesting');
     const promise = (async (): Promise<MediaStream | null> => {
       let stream: MediaStream | null = null;
       let audioContext: AudioContext | null = null;
@@ -490,6 +503,22 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         monitorGain.connect(audioContext.destination);
 
         let worker: Worker | null = null;
+        const fallBackToLocalPitch = (activeWorker: Worker | null) => {
+          if (!activeWorker) return;
+          activeWorker.onmessage = null;
+          activeWorker.onerror = null;
+          activeWorker.terminate();
+          if (workerRef.current === activeWorker) workerRef.current = null;
+          const abandonedFrames = workerPendingRef.current;
+          workerPendingRef.current = 0;
+          workerRequestTimesRef.current.clear();
+          audioFrameTimingRef.current = Array.from({ length: abandonedFrames }).reduce(recordDroppedAudioFrame, audioFrameTimingRef.current);
+          setStreamInfo((old) => ({
+            ...old,
+            detectorSource: browserPitchPipelineLabel('script-processor'),
+            droppedFrames: audioFrameTimingRef.current.droppedFrames,
+          }));
+        };
         try {
           worker = new Worker(new URL('../workers/pitchDetection.worker.ts', import.meta.url), { type: 'module' });
           worker.onmessage = (workerEvent: MessageEvent<{ type: 'frame'; timestampMs: number; frame: PitchFrame }>) => {
@@ -511,27 +540,17 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
             }));
             handleFrame(workerEvent.data.frame, 'worker');
             if (workerEvent.data.frame.is_valid_for_recording) {
-              setStatusMessage('Sound detected. Tracking pitch now.');
+              setStatusMessage('practice.micTracking');
             } else if (workerEvent.data.frame.tuning_status === 'silence') {
-              setStatusMessage('Listening. No stable pitch yet.');
+              setStatusMessage('practice.micListening');
             } else {
-              setStatusMessage('Sound detected. No stable pitch yet.');
+              setStatusMessage('practice.micUnstable');
             }
           };
           worker.onerror = () => {
             // The processor callback below remains a safe local fallback if a
             // browser creates a Worker but later blocks its module execution.
-            worker?.terminate();
-            if (workerRef.current === worker) workerRef.current = null;
-            const abandonedFrames = workerPendingRef.current;
-            workerPendingRef.current = 0;
-            workerRequestTimesRef.current.clear();
-            audioFrameTimingRef.current = Array.from({ length: abandonedFrames }).reduce(recordDroppedAudioFrame, audioFrameTimingRef.current);
-            setStreamInfo((old) => ({
-              ...old,
-              detectorSource: browserPitchPipelineLabel('script-processor'),
-              droppedFrames: audioFrameTimingRef.current.droppedFrames,
-            }));
+            fallBackToLocalPitch(worker);
           };
           workerRef.current = worker;
         } catch {
@@ -583,7 +602,17 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
           const pcm = new Float32Array(input);
           analyzedMsRef.current += (pcm.length / audioContext!.sampleRate) * 1000;
           const timestampMs = Math.round(analyzedMsRef.current);
-          const activeWorker = workerRef.current;
+          let activeWorker = workerRef.current;
+          const oldestRequestAtMs = activeWorker && workerRequestTimesRef.current.size > 0
+            ? Math.min(...workerRequestTimesRef.current.values())
+            : null;
+          if (activeWorker && shouldFallbackFromWorkerWatchdog(oldestRequestAtMs, callbackAtMs)) {
+            // Once the bounded queue is full, a worker that never responds
+            // otherwise turns every later audio callback into a dropped frame.
+            // Terminate it deterministically and analyze this current PCM locally.
+            fallBackToLocalPitch(activeWorker);
+            activeWorker = null;
+          }
           if (activeWorker && !shouldDropWorkerFrame(workerPendingRef.current)) {
             try {
               workerPendingRef.current += 1;
@@ -597,14 +626,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
                 timestampMs,
               }, [pcm.buffer]);
             } catch {
-              workerPendingRef.current = Math.max(0, workerPendingRef.current - 1);
-              workerRequestTimesRef.current.delete(timestampMs);
-              audioFrameTimingRef.current = recordDroppedAudioFrame(audioFrameTimingRef.current);
-              setStreamInfo((old) => ({ ...old, droppedFrames: audioFrameTimingRef.current.droppedFrames, detectorSource: browserPitchPipelineLabel('script-processor') }));
-              if (workerRef.current === activeWorker) {
-                activeWorker.terminate();
-                workerRef.current = null;
-              }
+              fallBackToLocalPitch(activeWorker);
             }
           } else if (activeWorker) {
             // Drop stale PCM rather than queuing it: an old pitch estimate is
@@ -627,11 +649,11 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
             }));
             handleFrame(frame, 'script-processor');
             if (frame.is_valid_for_recording) {
-              setStatusMessage('Sound detected. Tracking pitch now.');
+              setStatusMessage('practice.micTracking');
             } else if (frame.tuning_status === 'silence') {
-              setStatusMessage('Listening. No stable pitch yet.');
+              setStatusMessage('practice.micListening');
             } else {
-              setStatusMessage('Sound detected. No stable pitch yet.');
+              setStatusMessage('practice.micUnstable');
             }
           }
         };
@@ -645,15 +667,15 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         }
         if (audioContext.state !== 'running') {
           setMicActive(false);
-          setStatusMessage('Tap Turn on mic to start listening. Your browser paused audio until you interact with the page.');
+          setStatusMessage('practice.micPaused');
           return null;
         }
         setMicActive(true);
-        setStatusMessage('Listening. Play a steady note.');
+        setStatusMessage('practice.micReady');
         return stream;
       } catch {
         if (generation === microphoneGenerationRef.current) {
-          cleanupMicrophone('Microphone blocked or unavailable. Guest demo practice still works on this device.', 'error');
+          cleanupMicrophone('practice.micBlocked', 'error');
         } else {
           stream?.getTracks().forEach((track) => track.stop());
           await audioContext?.close().catch(() => undefined);

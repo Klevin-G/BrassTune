@@ -948,6 +948,19 @@ const messages = {
   "admin.featureUsage": "Utilisation des fonctionnalités",
   "admin.eventsLastDays": "Événements, les derniers {count} jours",
   "admin.privacyNote": "Uniquement les comptages basiques dans l'application. Aucun traceur tiers. L'activité est basée sur la dernière connexion de chaque compte."
+  ,"practice.demoReady": "Commencez simplement à vous entraîner – aucune connexion n’est nécessaire.",
+  "practice.pitchSyncPending": "Cet appareil n'a plus de stockage dans le navigateur. Votre dernière modification dans la bibliothèque de pratique n'a pas pu être enregistrée.",
+  "practice.pitchSyncStopped": "Cet appareil n'a plus de stockage dans le navigateur. Votre dernière modification dans la bibliothèque de pratique n'a pas pu être enregistrée.",
+  "practice.micReady": "Écoute…",
+  "practice.micPaused": "Nous n'avons pas pu allumer votre microphone. Autorisez l'accès au micro dans votre navigateur, puis sélectionnez à nouveau Démarrer.",
+  "practice.micUnavailable": "Nous n'avons pas pu allumer votre microphone. Autorisez l'accès au micro dans votre navigateur, puis sélectionnez à nouveau Démarrer.",
+  "practice.micRequesting": "Écoute…",
+  "practice.micDisconnected": "Nous n'avons pas pu allumer votre microphone. Autorisez l'accès au micro dans votre navigateur, puis sélectionnez à nouveau Démarrer.",
+  "practice.micClosed": "Nous n'avons pas pu allumer votre microphone. Autorisez l'accès au micro dans votre navigateur, puis sélectionnez à nouveau Démarrer.",
+  "practice.micTracking": "Écoute…",
+  "practice.micListening": "Écoute…",
+  "practice.micUnstable": "Écoute…",
+  "practice.micBlocked": "Nous n'avons pas pu allumer votre microphone. Autorisez l'accès au micro dans votre navigateur, puis sélectionnez à nouveau Démarrer.",
 } satisfies MessageCatalog;
 
 export default messages;

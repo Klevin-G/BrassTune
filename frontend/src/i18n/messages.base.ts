@@ -946,6 +946,19 @@ export const englishMessages = {
   'error.screenBody': 'Your saved practice is safe. Try reloading, or head back to your dashboard.',
   'error.reload': 'Reload',
   'error.dashboard': 'Go to dashboard',
+  'practice.demoReady': 'Guest demo mode is ready. Pitch data is simulated on this device.',
+  'practice.pitchSyncPending': 'Pitch is visible, but cloud sync could not save the latest frames. Guest practice still works on this device.',
+  'practice.pitchSyncStopped': 'Session stopped before the latest pitch frames could sync. New recordings will start with a clean frame queue.',
+  'practice.micReady': 'Listening. Play a steady note.',
+  'practice.micPaused': 'Microphone audio paused. Select Turn on microphone to resume listening.',
+  'practice.micUnavailable': 'Microphone input is unavailable in this browser. Guest demo practice still works on this device.',
+  'practice.micRequesting': 'Asking for microphone access.',
+  'practice.micDisconnected': 'Microphone disconnected. Reconnect it, then turn the microphone on again.',
+  'practice.micClosed': 'Microphone audio closed. Select Turn on microphone to reconnect.',
+  'practice.micTracking': 'Sound detected. Tracking pitch now.',
+  'practice.micListening': 'Listening. No stable pitch yet.',
+  'practice.micUnstable': 'Sound detected. No stable pitch yet.',
+  'practice.micBlocked': 'Microphone blocked or unavailable. Guest demo practice still works on this device.',
 } as const;
 
 export type MessageId = keyof typeof englishMessages;

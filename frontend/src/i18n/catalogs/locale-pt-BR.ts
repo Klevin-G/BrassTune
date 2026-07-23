@@ -948,6 +948,19 @@ const messages = {
   "admin.featureUsage": "Uso de recursos",
   "admin.eventsLastDays": "Eventos, últimos {count} dias",
   "admin.privacyNote": "Apenas contagens básicas dentro do app. Sem rastreadores de terceiros. A atividade é baseada no último login de cada conta."
+  ,"practice.demoReady": "Basta começar a praticar – não é necessário fazer login.",
+  "practice.pitchSyncPending": "Este dispositivo está sem armazenamento do navegador. Não foi possível salvar sua última alteração na biblioteca de exercícios.",
+  "practice.pitchSyncStopped": "Este dispositivo está sem armazenamento do navegador. Não foi possível salvar sua última alteração na biblioteca de exercícios.",
+  "practice.micReady": "Audição…",
+  "practice.micPaused": "Não foi possível ligar seu microfone. Permita o acesso ao microfone em seu navegador e selecione Iniciar novamente.",
+  "practice.micUnavailable": "Não foi possível ligar seu microfone. Permita o acesso ao microfone em seu navegador e selecione Iniciar novamente.",
+  "practice.micRequesting": "Audição…",
+  "practice.micDisconnected": "Não foi possível ligar seu microfone. Permita o acesso ao microfone em seu navegador e selecione Iniciar novamente.",
+  "practice.micClosed": "Não foi possível ligar seu microfone. Permita o acesso ao microfone em seu navegador e selecione Iniciar novamente.",
+  "practice.micTracking": "Audição…",
+  "practice.micListening": "Audição…",
+  "practice.micUnstable": "Audição…",
+  "practice.micBlocked": "Não foi possível ligar seu microfone. Permita o acesso ao microfone em seu navegador e selecione Iniciar novamente.",
 } satisfies MessageCatalog;
 
 export default messages;

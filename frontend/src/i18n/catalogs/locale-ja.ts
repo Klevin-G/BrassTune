@@ -948,6 +948,19 @@ const messages = {
   "admin.featureUsage": "機能の利用",
   "admin.eventsLastDays": "ここ{count}日の出来事",
   "admin.privacyNote": "基本的なアプリ内カウントのみです。サードパーティのトラッカーは使いません。アクティビティは各アカウントの最後のサインインに基づいています。"
+  ,"practice.demoReady": "練習を始めてください。サインインは必要ありません。",
+  "practice.pitchSyncPending": "このデバイスにはブラウザのストレージが不足しています。最新の練習ライブラリの変更を保存できませんでした。",
+  "practice.pitchSyncStopped": "このデバイスにはブラウザのストレージが不足しています。最新の練習ライブラリの変更を保存できませんでした。",
+  "practice.micReady": "リスニング…",
+  "practice.micPaused": "マイクをオンにできませんでした。ブラウザでマイクへのアクセスを許可し、[もう一度開始] を選択します。",
+  "practice.micUnavailable": "マイクをオンにできませんでした。ブラウザでマイクへのアクセスを許可し、[もう一度開始] を選択します。",
+  "practice.micRequesting": "リスニング…",
+  "practice.micDisconnected": "マイクをオンにできませんでした。ブラウザでマイクへのアクセスを許可し、[もう一度開始] を選択します。",
+  "practice.micClosed": "マイクをオンにできませんでした。ブラウザでマイクへのアクセスを許可し、[もう一度開始] を選択します。",
+  "practice.micTracking": "リスニング…",
+  "practice.micListening": "リスニング…",
+  "practice.micUnstable": "リスニング…",
+  "practice.micBlocked": "マイクをオンにできませんでした。ブラウザでマイクへのアクセスを許可し、[もう一度開始] を選択します。",
 } satisfies MessageCatalog;
 
 export default messages;

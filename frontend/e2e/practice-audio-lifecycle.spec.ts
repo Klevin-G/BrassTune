@@ -670,6 +670,83 @@ test('an ended audio track from a minimal MediaStream fixture returns the tuner 
   await expect.poll(() => page.evaluate(() => (window as unknown as { __trackEndedTest: { stops: number } }).__trackEndedTest.stops)).toBe(1);
 });
 
+test('the real pitch Worker accepts a transferred PCM frame and returns its matching result', async ({ page }) => {
+  await page.goto('/practice');
+  const frame = await page.evaluate(async () => {
+    const module = await import('/src/workers/pitchDetection.worker.ts?worker');
+    const worker = new module.default();
+    const pcm = new Float32Array(4096);
+    pcm[0] = 0.5;
+    return await new Promise<{ timestampMs: number; valid: boolean }>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error('pitch Worker did not respond')), 5_000);
+      worker.onmessage = (event: MessageEvent<{ timestampMs: number; frame: { is_valid_for_recording: boolean } }>) => {
+        window.clearTimeout(timeout);
+        worker.terminate();
+        resolve({ timestampMs: event.data.timestampMs, valid: event.data.frame.is_valid_for_recording });
+      };
+      worker.postMessage({ type: 'detect', pcm: pcm.buffer, sampleRate: 48_000, instrumentId: 'trumpet', referencePitch: 440, timestampMs: 42 }, [pcm.buffer]);
+    });
+  });
+  expect(frame.timestampMs).toBe(42);
+});
+
+test('a silent runtime Worker falls back after its bounded backlog watchdog', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state: { processor?: (event: { inputBuffer: { getChannelData: () => Float32Array } }) => void; workerPosts: number; workerTerminates: number } = {
+      workerPosts: 0,
+      workerTerminates: 0,
+    };
+    class SilentWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: (() => void) | null = null;
+      postMessage() { state.workerPosts += 1; }
+      terminate() { state.workerTerminates += 1; }
+    }
+    class FakeAudioContext {
+      state: AudioContextState = 'running';
+      sampleRate = 48_000;
+      destination = {};
+      resume() { return Promise.resolve(); }
+      close() { this.state = 'closed'; return Promise.resolve(); }
+      createMediaStreamSource() { return { connect: () => undefined, disconnect: () => undefined }; }
+      createScriptProcessor() {
+        const processor = { connect: () => undefined, disconnect: () => undefined, onaudioprocess: null as typeof state.processor };
+        Object.defineProperty(processor, 'onaudioprocess', {
+          get: () => state.processor,
+          set: (value) => { state.processor = value; },
+        });
+        return processor;
+      }
+      createGain() { return { gain: { value: 1 }, connect: () => undefined, disconnect: () => undefined }; }
+    }
+    Object.defineProperty(window, 'Worker', { configurable: true, value: SilentWorker });
+    Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: async () => ({ getTracks: () => [{ kind: 'audio', readyState: 'live', stop() {} }] }) },
+    });
+    (window as unknown as { __workerWatchdogTest: unknown }).__workerWatchdogTest = state;
+  });
+
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Turn on microphone' }).click();
+  await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __workerWatchdogTest: { processor?: unknown } }).__workerWatchdogTest.processor))).toBe(true);
+  await page.evaluate(() => {
+    const state = (window as unknown as { __workerWatchdogTest: { processor?: (event: { inputBuffer: { getChannelData: () => Float32Array } }) => void } }).__workerWatchdogTest;
+    const event = { inputBuffer: { getChannelData: () => new Float32Array(4096) } };
+    state.processor?.(event);
+    state.processor?.(event);
+    state.processor?.(event);
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __workerWatchdogTest: { workerPosts: number } }).__workerWatchdogTest.workerPosts)).toBe(3);
+  await page.waitForTimeout(1_550);
+  await page.evaluate(() => {
+    const state = (window as unknown as { __workerWatchdogTest: { processor?: (event: { inputBuffer: { getChannelData: () => Float32Array } }) => void } }).__workerWatchdogTest;
+    state.processor?.({ inputBuffer: { getChannelData: () => new Float32Array(4096) } });
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __workerWatchdogTest: { workerTerminates: number } }).__workerWatchdogTest.workerTerminates)).toBe(1);
+});
+
 test('Stop cancels scheduled count-in clicks and unmount closes the metronome context', async ({ page }) => {
   await page.addInitScript(() => {
     const state = { closeCalls: 0, oscillators: [] as Array<{ stops: number[] }> };

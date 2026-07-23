@@ -948,6 +948,19 @@ const messages = {
   "admin.featureUsage": "功能使用",
   "admin.eventsLastDays": "活動，過去 {count} 天",
   "admin.privacyNote": "僅限基本應用內計數。 沒有第三方追蹤器。 活動是基於每個帳戶的上次登入情況。"
+  ,"practice.demoReady": "只需開始練習即可 - 無需登入。",
+  "practice.pitchSyncPending": "該設備的瀏覽器儲存空間不足。無法儲存您最新的練習庫變更。",
+  "practice.pitchSyncStopped": "該設備的瀏覽器儲存空間不足。無法儲存您最新的練習庫變更。",
+  "practice.micReady": "正在聽…",
+  "practice.micPaused": "我們無法打開您的麥克風。在瀏覽器中允許麥克風訪問，然後再次選擇“開始”。",
+  "practice.micUnavailable": "我們無法打開您的麥克風。在瀏覽器中允許麥克風訪問，然後再次選擇“開始”。",
+  "practice.micRequesting": "正在聽…",
+  "practice.micDisconnected": "我們無法打開您的麥克風。在瀏覽器中允許麥克風訪問，然後再次選擇“開始”。",
+  "practice.micClosed": "我們無法打開您的麥克風。在瀏覽器中允許麥克風訪問，然後再次選擇“開始”。",
+  "practice.micTracking": "正在聽…",
+  "practice.micListening": "正在聽…",
+  "practice.micUnstable": "正在聽…",
+  "practice.micBlocked": "我們無法打開您的麥克風。在瀏覽器中允許麥克風訪問，然後再次選擇“開始”。",
 } satisfies MessageCatalog;
 
 export default messages;

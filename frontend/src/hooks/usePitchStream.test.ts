@@ -13,6 +13,7 @@ import {
   recordProcessedWorkerFrame,
   requeueFailedPersistFrames,
   selectBrowserPitchPipeline,
+  shouldFallbackFromWorkerWatchdog,
   shouldDropWorkerFrame,
   shouldPersistFrameFromFrontend,
 } from './usePitchStream';
@@ -100,6 +101,12 @@ describe('worker pitch pipeline fallback and backlog policy', () => {
     expect(shouldDropWorkerFrame(3, 3)).toBe(true);
   });
 
+  it('falls back when the oldest unanswered Worker frame exceeds the watchdog', () => {
+    expect(shouldFallbackFromWorkerWatchdog(1_000, 2_499)).toBe(false);
+    expect(shouldFallbackFromWorkerWatchdog(1_000, 2_500)).toBe(true);
+    expect(shouldFallbackFromWorkerWatchdog(null, 9_999)).toBe(false);
+  });
+
   it('keeps audio timing state resettable after track end or teardown', () => {
     expect({ ...EMPTY_AUDIO_FRAME_TIMING }).toEqual({
       lastCallbackAtMs: null,
@@ -156,7 +163,7 @@ describe('browser audio recovery', () => {
     });
     expect(audioContextRecoveryStatus('closed')).toEqual({
       micActive: false,
-      statusMessage: 'Microphone audio closed. Select Turn on microphone to reconnect.',
+      statusMessage: 'practice.micClosed',
     });
     expect(audioContextRecoveryStatus('running').micActive).toBe(true);
   });

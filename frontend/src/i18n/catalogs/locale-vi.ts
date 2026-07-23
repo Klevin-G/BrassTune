@@ -948,6 +948,19 @@ const messages = {
   "admin.featureUsage": "Sử dụng tính năng",
   "admin.eventsLastDays": "Sự kiện, {count} ngày qua",
   "admin.privacyNote": "Chỉ đếm cơ bản trong ứng dụng. Không có thiết bị theo dõi bên thứ ba. Hoạt động dựa trên lần đăng nhập cuối cùng của mỗi tài khoản."
+  ,"practice.demoReady": "Chỉ cần bắt đầu thực hành - không cần đăng nhập.",
+  "practice.pitchSyncPending": "Thiết bị này đã hết bộ nhớ của trình duyệt. Không thể lưu thay đổi thư viện thực hành mới nhất của bạn.",
+  "practice.pitchSyncStopped": "Thiết bị này đã hết bộ nhớ của trình duyệt. Không thể lưu thay đổi thư viện thực hành mới nhất của bạn.",
+  "practice.micReady": "Đang nghe…",
+  "practice.micPaused": "Chúng tôi không thể bật micrô của bạn. Cho phép truy cập micrô trong trình duyệt của bạn, sau đó chọn Bắt đầu lại.",
+  "practice.micUnavailable": "Chúng tôi không thể bật micrô của bạn. Cho phép truy cập micrô trong trình duyệt của bạn, sau đó chọn Bắt đầu lại.",
+  "practice.micRequesting": "Đang nghe…",
+  "practice.micDisconnected": "Chúng tôi không thể bật micrô của bạn. Cho phép truy cập micrô trong trình duyệt của bạn, sau đó chọn Bắt đầu lại.",
+  "practice.micClosed": "Chúng tôi không thể bật micrô của bạn. Cho phép truy cập micrô trong trình duyệt của bạn, sau đó chọn Bắt đầu lại.",
+  "practice.micTracking": "Đang nghe…",
+  "practice.micListening": "Đang nghe…",
+  "practice.micUnstable": "Đang nghe…",
+  "practice.micBlocked": "Chúng tôi không thể bật micrô của bạn. Cho phép truy cập micrô trong trình duyệt của bạn, sau đó chọn Bắt đầu lại.",
 } satisfies MessageCatalog;
 
 export default messages;

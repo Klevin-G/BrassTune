@@ -56,6 +56,11 @@ function appRoute(element: JSX.Element) {
   return <RequireAppAccess>{element}</RequireAppAccess>;
 }
 
+function CanonicalScorerRedirect() {
+  const location = useLocation();
+  return <Navigate to={{ pathname: '/practice/scorer', search: location.search, hash: location.hash }} replace />;
+}
+
 export default function App() {
   const { t } = useI18n();
   return (
@@ -70,7 +75,7 @@ export default function App() {
           <Route path="/practice/sheet-music" element={appRoute(<ScorePracticePage />)} />
           <Route path="/practice/score" element={appRoute(<ScorePracticePage />)} />
           <Route path="/practice/scorer" element={appRoute(<PlayAlongPage />)} />
-          <Route path="/practice/play-along" element={appRoute(<PlayAlongPage />)} />
+          <Route path="/practice/play-along" element={appRoute(<CanonicalScorerRedirect />)} />
           <Route path="/metronome" element={appRoute(<MetronomePage />)} />
           <Route path="/sessions" element={appRoute(<SessionsPage />)} />
           <Route path="/sessions/:id" element={appRoute(<SessionReviewPage />)} />

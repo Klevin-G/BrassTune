@@ -948,6 +948,19 @@ const messages = {
   "admin.featureUsage": "기능 사용",
   "admin.eventsLastDays": "지난 {count}일 사건들",
   "admin.privacyNote": "기본 앱 내 인카운트만 가능합니다. 서드파티 트래커는 사용하지 않습니다. 활동은 각 계정의 마지막 로그인 시점에 기반합니다."
+  ,"practice.demoReady": "연습을 시작하세요. 로그인이 필요하지 않습니다.",
+  "practice.pitchSyncPending": "기기의 브라우저 저장 공간이 부족합니다. 최근 실습 라이브러리 변경사항을 저장할 수 없습니다.",
+  "practice.pitchSyncStopped": "기기의 브라우저 저장 공간이 부족합니다. 최근 실습 라이브러리 변경사항을 저장할 수 없습니다.",
+  "practice.micReady": "청취…",
+  "practice.micPaused": "마이크를 켤 수 없습니다. 브라우저에서 마이크 액세스를 허용한 다음 다시 시작을 선택합니다.",
+  "practice.micUnavailable": "마이크를 켤 수 없습니다. 브라우저에서 마이크 액세스를 허용한 다음 다시 시작을 선택합니다.",
+  "practice.micRequesting": "청취…",
+  "practice.micDisconnected": "마이크를 켤 수 없습니다. 브라우저에서 마이크 액세스를 허용한 다음 다시 시작을 선택합니다.",
+  "practice.micClosed": "마이크를 켤 수 없습니다. 브라우저에서 마이크 액세스를 허용한 다음 다시 시작을 선택합니다.",
+  "practice.micTracking": "청취…",
+  "practice.micListening": "청취…",
+  "practice.micUnstable": "청취…",
+  "practice.micBlocked": "마이크를 켤 수 없습니다. 브라우저에서 마이크 액세스를 허용한 다음 다시 시작을 선택합니다.",
 } satisfies MessageCatalog;
 
 export default messages;

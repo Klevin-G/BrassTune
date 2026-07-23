@@ -948,6 +948,19 @@ const messages = {
   "admin.featureUsage": "Funktionsnutzung",
   "admin.eventsLastDays": "Ereignisse, letzte {count} Tage",
   "admin.privacyNote": "Nur grundlegende In-App-Zählungen. Keine Drittanbieter-Tracker. Die Aktivität basiert auf der letzten Anmeldung jedes Kontos."
+  ,"practice.demoReady": "Beginnen Sie einfach mit dem Üben – keine Anmeldung erforderlich.",
+  "practice.pitchSyncPending": "Der Browserspeicher dieses Geräts ist erschöpft. Ihre letzte Änderung in der Übungsbibliothek konnte nicht gespeichert werden.",
+  "practice.pitchSyncStopped": "Der Browserspeicher dieses Geräts ist erschöpft. Ihre letzte Änderung in der Übungsbibliothek konnte nicht gespeichert werden.",
+  "practice.micReady": "Hören…",
+  "practice.micPaused": "Wir konnten Ihr Mikrofon nicht einschalten. Erlauben Sie den Mikrofonzugriff in Ihrem Browser und wählen Sie dann erneut „Starten“ aus.",
+  "practice.micUnavailable": "Wir konnten Ihr Mikrofon nicht einschalten. Erlauben Sie den Mikrofonzugriff in Ihrem Browser und wählen Sie dann erneut „Starten“ aus.",
+  "practice.micRequesting": "Hören…",
+  "practice.micDisconnected": "Wir konnten Ihr Mikrofon nicht einschalten. Erlauben Sie den Mikrofonzugriff in Ihrem Browser und wählen Sie dann erneut „Starten“ aus.",
+  "practice.micClosed": "Wir konnten Ihr Mikrofon nicht einschalten. Erlauben Sie den Mikrofonzugriff in Ihrem Browser und wählen Sie dann erneut „Starten“ aus.",
+  "practice.micTracking": "Hören…",
+  "practice.micListening": "Hören…",
+  "practice.micUnstable": "Hören…",
+  "practice.micBlocked": "Wir konnten Ihr Mikrofon nicht einschalten. Erlauben Sie den Mikrofonzugriff in Ihrem Browser und wählen Sie dann erneut „Starten“ aus.",
 } satisfies MessageCatalog;
 
 export default messages;

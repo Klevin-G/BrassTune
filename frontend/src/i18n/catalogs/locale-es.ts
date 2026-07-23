@@ -948,6 +948,19 @@ const messages = {
   "admin.featureUsage": "Uso de funciones",
   "admin.eventsLastDays": "Eventos, últimos {count} días",
   "admin.privacyNote": "Solo cuenta en la aplicación básica. No hay rastreadores de terceros. La actividad se basa en el último inicio de sesión de cada cuenta."
+  ,"practice.demoReady": "Simplemente comience a practicar, no es necesario iniciar sesión.",
+  "practice.pitchSyncPending": "Este dispositivo no tiene espacio de almacenamiento en el navegador. No se pudo guardar el último cambio en la biblioteca de prácticas.",
+  "practice.pitchSyncStopped": "Este dispositivo no tiene espacio de almacenamiento en el navegador. No se pudo guardar el último cambio en la biblioteca de prácticas.",
+  "practice.micReady": "Escuchando…",
+  "practice.micPaused": "No pudimos encender su micrófono. Permita el acceso al micrófono en su navegador, luego seleccione Iniciar nuevamente.",
+  "practice.micUnavailable": "No pudimos encender su micrófono. Permita el acceso al micrófono en su navegador, luego seleccione Iniciar nuevamente.",
+  "practice.micRequesting": "Escuchando…",
+  "practice.micDisconnected": "No pudimos encender su micrófono. Permita el acceso al micrófono en su navegador, luego seleccione Iniciar nuevamente.",
+  "practice.micClosed": "No pudimos encender su micrófono. Permita el acceso al micrófono en su navegador, luego seleccione Iniciar nuevamente.",
+  "practice.micTracking": "Escuchando…",
+  "practice.micListening": "Escuchando…",
+  "practice.micUnstable": "Escuchando…",
+  "practice.micBlocked": "No pudimos encender su micrófono. Permita el acceso al micrófono en su navegador, luego seleccione Iniciar nuevamente.",
 } satisfies MessageCatalog;
 
 export default messages;
