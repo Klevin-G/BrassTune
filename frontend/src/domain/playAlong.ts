@@ -265,12 +265,13 @@ export class PlayAlongGrader {
 
   snapshot(frame?: PitchFrame): GraderSnapshot {
     const heldFraction = this.firstMatchTs == null ? 0 : Math.min(1, this.heldMs / this.holdMs);
+    const confidentDetection = Boolean(frame && frame.confidence >= this.minConfidence && frame.frequency_hz != null);
     return {
       index: this.idx,
       currentName: this.currentName,
       heldFraction,
-      detectedName: frame?.written_note_name ?? null,
-      detectedCents: frame?.cents_deviation ?? null,
+      detectedName: confidentDetection ? frame?.written_note_name ?? null : null,
+      detectedCents: confidentDetection ? frame?.cents_deviation ?? null : null,
       done: this.done,
       results: this.results,
     };

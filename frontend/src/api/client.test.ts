@@ -104,6 +104,21 @@ describe('API client runtime URLs', () => {
     expect(headers.get('x-audio-duration-seconds')).toBe('1.5');
   });
 
+  it('preserves accepted audio-upload reconciliation flags and message', async () => {
+    const { uploadSessionAudio } = await loadClient('', 'https://api.example.test');
+    const accepted = {
+      uploaded: true,
+      audio: { id: 7 },
+      cleanup_pending: true,
+      reconciliation_pending: true,
+      activation_pending: false,
+      message: 'The new recording is active. Metadata confirmation and previous-recording cleanup are queued.',
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 202, json: async () => accepted }));
+
+    await expect(uploadSessionAudio(7, new Blob(['audio'], { type: 'audio/webm' }))).resolves.toEqual(accepted);
+  });
+
   it('leaves only the requested class membership through the self-service endpoint', async () => {
     const { leaveEnsembleGroup, setAuthTokenProvider } = await loadClient('', 'https://api.example.test');
     const fetchMock = vi.fn().mockResolvedValue({

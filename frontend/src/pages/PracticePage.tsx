@@ -22,9 +22,15 @@ import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import './PracticePage.css';
 import { gatewayPathWithReturn } from '../domain/authNavigation';
 import { useI18n } from '../i18n/LocaleContext';
+import { isReliableTunerFrame } from '../domain/pitchFrameStatus';
 
 // How many consecutive centered frames count as a full "held in tune" reward.
 const HOLD_TARGET_FRAMES = 16;
+
+export function nextTunerHoldCount(current: number, frame: Parameters<typeof isReliableTunerFrame>[0]): number {
+  const centered = isReliableTunerFrame(frame) && Math.abs(frame.cents_deviation!) <= 5;
+  return centered ? Math.min(HOLD_TARGET_FRAMES, current + 1) : 0;
+}
 
 export function PracticePage() {
   const { locale, t, formatNumber } = useI18n();
@@ -84,8 +90,7 @@ export function PracticePage() {
     const frame = stream.currentFrame;
     if (!frame || frame.timestamp_ms === lastFrameTsRef.current) return;
     lastFrameTsRef.current = frame.timestamp_ms;
-    const centered = frame.tuning_status !== 'silence' && frame.cents_deviation != null && Math.abs(frame.cents_deviation) <= 5;
-    holdCountRef.current = centered ? Math.min(HOLD_TARGET_FRAMES, holdCountRef.current + 1) : 0;
+    holdCountRef.current = nextTunerHoldCount(holdCountRef.current, frame);
     setHoldFraction(holdCountRef.current / HOLD_TARGET_FRAMES);
   }, [stream.currentFrame]);
 
@@ -229,6 +234,11 @@ export function PracticePage() {
           {recorder.error && <div className="alert" role="alert">{recorder.error}</div>}
           {audioRecorder.error && audioRecorder.error !== recorder.error && (
             <div className="alert" role="alert">{audioRecorder.error}</div>
+          )}
+          {audioRecorder.pendingReason && (
+            <div className="tuner-banner" role="status">
+              {t(`audioUpload.${audioRecorder.pendingReason}` as import('../i18n/messages.base').MessageId)}
+            </div>
           )}
         </section>
 

@@ -133,8 +133,15 @@
 
   .page-header {
     align-items: start;
+    flex-direction: column;
     min-height: 0;
     padding: 18px;
+  }
+
+  .page-header > div {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .settings-screen .page-header > div > p:not(.eyebrow),
@@ -145,7 +152,20 @@
   }
 
   .page-header-action {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     justify-content: flex-start;
+  }
+
+  .page-header-action .primary-button,
+  .page-header-action .ghost-button {
+    min-width: 0;
+    max-width: 100%;
+    height: auto;
+    padding-block: 10px;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 
   .practice-layout,
@@ -293,6 +313,13 @@
 @media (min-width: 741px) and (max-width: 860px) {
   .content {
     padding: 22px 22px 152px;
+  }
+
+  .pa-start {
+    position: sticky;
+    bottom: calc(86px + env(safe-area-inset-bottom));
+    z-index: 21;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
   }
 
   .practice-layout,
@@ -520,6 +547,23 @@
     padding: 0 8px;
   }
 
+  /* Practice uses two long, localized choices. Give both controls their real
+     two-column shape and allow labels to wrap instead of widening the page. */
+  .tuner-page > .segmented-control,
+  .tuner-topline .segmented-control {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tuner-page .segmented-control button {
+    min-width: 0;
+    height: auto;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
   .analytics-main-grid,
   .analytics-chart-grid,
   .analytics-control-row,
@@ -635,6 +679,15 @@
   .content {
     padding-right: 8px;
     padding-left: 8px;
+  }
+
+  .segmented-control button {
+    min-width: 0;
+    height: auto;
+    padding-block: 8px;
+    overflow-wrap: anywhere;
+    line-height: 1.2;
+    white-space: normal;
   }
 
   .section-card,

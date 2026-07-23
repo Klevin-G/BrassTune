@@ -212,15 +212,15 @@ export function SessionReviewPage() {
       </section>
 
       <div className="stats-grid">
-        <MetricTile label={t('tuning.inTune')} value={`${formatNumber(pct)}%`} icon={Percent} tone={tone} />
-        <MetricTile label={t('sessionReview.howClose')} value={`${formatNumber(session.average_abs_cents, { maximumFractionDigits: 1 })}¢`} detail={t('sessionReview.offCenter')} icon={Gauge} />
+        <MetricTile label={t('tuning.inTune')} value={<bdi dir="ltr">{formatNumber(pct)}%</bdi>} icon={Percent} tone={tone} />
+        <MetricTile label={t('sessionReview.howClose')} value={<bdi dir="ltr">{formatNumber(session.average_abs_cents, { maximumFractionDigits: 1 })}¢</bdi>} detail={t('sessionReview.offCenter')} icon={Gauge} />
         <MetricTile
           label={t('sessionReview.sharpFlat')}
-          value={`${session.average_signed_cents > 0 ? '+' : ''}${formatNumber(session.average_signed_cents, { maximumFractionDigits: 1 })}¢`}
+          value={<bdi dir="ltr">{session.average_signed_cents > 0 ? '+' : ''}{formatNumber(session.average_signed_cents, { maximumFractionDigits: 1 })}¢</bdi>}
           detail={signedDirection}
           icon={Music2}
         />
-        <MetricTile label={t('sessionReview.length')} value={t('sessionReview.secondsShort', { count: formatNumber(Math.round(session.duration_seconds)) })} detail={t('playAlong.noteCount', { count: session.notes_count })} icon={Timer} />
+        <MetricTile label={t('sessionReview.length')} value={<bdi dir="ltr">{t('sessionReview.secondsShort', { count: formatNumber(Math.round(session.duration_seconds)) })}</bdi>} detail={t('playAlong.noteCount', { count: session.notes_count })} icon={Timer} />
       </div>
       <p className="sr-cents-note">
         {t('sessionReview.centsHelp')}
@@ -243,9 +243,9 @@ export function SessionReviewPage() {
             <div className="timeline-stack">
               {session.note_events.slice(0, 8).map((event) => (
                 <div className="timeline-row" key={event.id}>
-                  <strong>{event.note_label}</strong>
-                  <span>{event.avg_signed_cents > 0 ? '+' : ''}{event.avg_signed_cents.toFixed(1)}¢</span>
-                  <em>{event.duration_seconds.toFixed(1)}s</em>
+                  <strong><bdi dir="ltr">{event.note_label}</bdi></strong>
+                  <span><bdi dir="ltr">{event.avg_signed_cents > 0 ? '+' : ''}{event.avg_signed_cents.toFixed(1)}¢</bdi></span>
+                  <em><bdi dir="ltr">{event.duration_seconds.toFixed(1)}s</bdi></em>
                 </div>
               ))}
             </div>

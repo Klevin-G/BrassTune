@@ -11,6 +11,7 @@ import {
 } from './ProgressPage';
 import { classifySessionReviewError } from './SessionReviewPage';
 import { resolveDeleteDialogReturnTarget, resolvePostDeleteFocusTarget } from './SessionsPage';
+import { LocaleProvider } from '../i18n/LocaleContext';
 
 describe('recording and progress data-view safeguards', () => {
   it('distinguishes unavailable recordings from connection failures', () => {
@@ -35,14 +36,14 @@ describe('recording and progress data-view safeguards', () => {
     const transition = invalidRangeOwnerTransition(accountA, accountB, Boolean(rangeError));
 
     expect(transition).toEqual({ dataOwnerKey: accountB, clearData: true });
-    const markup = renderToStaticMarkup(createElement(ProgressRangeControls, {
+    const markup = renderToStaticMarkup(createElement(LocaleProvider, null, createElement(ProgressRangeControls, {
       period: 'custom',
       range,
       rangeError,
       showHeading: false,
       onPeriodChange: () => undefined,
       onRangeChange: () => undefined,
-    }));
+    })));
     expect(markup.match(/type="date"/g)).toHaveLength(2);
     expect(markup).toContain('The start date must be on or before the end date.');
   });

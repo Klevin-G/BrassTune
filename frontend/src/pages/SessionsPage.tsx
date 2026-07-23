@@ -5,22 +5,16 @@ import { listSessions } from '../api/client';
 import { ExportButtons } from '../components/ExportButtons';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { EmptyActionState, LoadingSkeleton, PageHeader, ScreenContainer, SectionCard, SelectionChip, StatusBadge } from '../components/ui/AppPrimitives';
-import { instrumentDisplayName } from '../domain/instrumentNames';
 import { describeInTunePercent } from '../domain/tuningLanguage';
 import { deleteGuestSession, GUEST_WORKSPACE_ACCESS, listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
 import type { PracticeSession } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
+import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 import './SessionsPage.css';
 
 type SessionFilter = 'all' | 'audio';
 type SessionsLoadState = 'loading' | 'ready' | 'error';
-
-function formatWhen(dateText: string) {
-  const date = new Date(dateText);
-  const day = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  return `${day} · ${time}`;
-}
 
 export function resolveDeleteDialogReturnTarget(trigger: HTMLElement) {
   return trigger.closest('details')?.querySelector<HTMLElement>('summary') ?? null;
@@ -41,6 +35,7 @@ export function resolvePostDeleteFocusTarget(savedTarget: HTMLElement | null, ro
 }
 
 export function SessionsPage() {
+  const { t, formatDate } = useI18n();
   const auth = useAuth();
   const guestAccess = !auth.loading && !auth.isSignedIn && auth.guestMode ? GUEST_WORKSPACE_ACCESS : undefined;
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
@@ -116,11 +111,11 @@ export function SessionsPage() {
       const deleted = deleteGuestSession(session.id, guestAccess);
       if (!deleted) throw new Error('Guest workspace access is unavailable.');
       setSessions((current) => current.filter((item) => item.id !== session.id));
-      setStatus('Recording deleted.');
+      setStatus(t('sessions.deleted'));
       setPendingDelete(null);
       restoreDeleteFocus();
     } catch {
-      setStatus('We could not delete that recording. Please try again.');
+      setStatus(t('sessions.deleteFailed'));
     } finally {
       setDeleteBusy(false);
     }
@@ -161,67 +156,67 @@ export function SessionsPage() {
   return (
     <ScreenContainer className="ps-screen">
       <PageHeader
-        eyebrow="Sessions"
-        title="Your recordings"
-        description="Every practice recording you make shows up here so you can listen back and see how in-tune you were."
+        eyebrow={t('sessions.eyebrow')}
+        title={t('sessions.title')}
+        description={t('sessions.description')}
         action={
           hasSessions ? (
             <Link to="/practice" className="primary-button" data-delete-focus-fallback>
               <Mic size={18} />
-              New recording
+              {t('sessions.new')}
             </Link>
           ) : undefined
         }
       />
 
       {loadState === 'loading' && !hasSessions ? (
-        <SectionCard title="Loading recordings" eyebrow="Sessions">
+        <SectionCard title={t('sessions.loading')} eyebrow={t('sessions.eyebrow')}>
           <LoadingSkeleton rows={4} />
         </SectionCard>
       ) : loadState === 'error' && !hasSessions ? (
-        <SectionCard title="Couldn’t load your recordings" eyebrow="Connection problem">
-          <p className="ps-load-copy">Check your connection, then try again. Your recordings have not been removed.</p>
+        <SectionCard title={t('sessions.loadFailed')} eyebrow={t('sessionReview.connection')}>
+          <p className="ps-load-copy">{t('sessions.loadFailedBody')}</p>
           <button className="primary-button" type="button" onClick={() => setRetryKey((current) => current + 1)}>
-            Try again
+            {t('auth.tryAgain')}
           </button>
         </SectionCard>
       ) : !hasSessions ? (
         <EmptyActionState
           icon={Music2}
-          title="No recordings yet"
-          body="Record your first practice session and it will appear here."
+          title={t('sessions.empty')}
+          body={t('sessions.emptyBody')}
           action={
             <Link to="/practice" className="primary-button" data-delete-focus-fallback>
               <Mic size={18} />
-              Start practicing
+              {t('auth.start')}
             </Link>
           }
         />
       ) : (
-        <SectionCard title="Your recordings" eyebrow={`${sessions.length} ${sessions.length === 1 ? 'recording' : 'recordings'}`}>
+        <SectionCard title={t('sessions.title')} eyebrow={t('sessions.count', { count: sessions.length })}>
           {status && <p className="settings-status" aria-live="polite">{status}</p>}
           {loadState === 'loading' && (
-            <p className="ps-load-status" role="status" aria-live="polite">Loading cloud recordings…</p>
+            <p className="ps-load-status" role="status" aria-live="polite">{t('sessions.loadingCloud')}</p>
           )}
           {loadState === 'error' && (
             <div className="ps-load-warning" role="status" aria-live="polite">
-              <p>Cloud recordings could not load. Recordings saved on this device are still shown.</p>
-              <button className="ghost-button" type="button" onClick={() => setRetryKey((current) => current + 1)}>Try again</button>
+              <p>{t('sessions.cloudFailed')}</p>
+              <button className="ghost-button" type="button" onClick={() => setRetryKey((current) => current + 1)}>{t('auth.tryAgain')}</button>
             </div>
           )}
           <div className="ps-filter-row">
-            <SelectionChip active={filter === 'all'} onClick={() => setFilter('all')}>All</SelectionChip>
-            <SelectionChip active={filter === 'audio'} onClick={() => setFilter('audio')} tone="green">With audio</SelectionChip>
+            <SelectionChip active={filter === 'all'} onClick={() => setFilter('all')}>{t('sessions.all')}</SelectionChip>
+            <SelectionChip active={filter === 'audio'} onClick={() => setFilter('audio')} tone="green">{t('sessions.withAudio')}</SelectionChip>
           </div>
 
           {filtered.length === 0 ? (
             <EmptyActionState
               icon={Play}
-              title="No recordings with audio yet"
-              body="Recordings you save with sound will show up here."
+              title={t('sessions.noAudio')}
+              body={t('sessions.noAudioBody')}
               action={
                 <button className="ghost-button" type="button" onClick={() => setFilter('all')}>
-                  Show all recordings
+                  {t('sessions.showAll')}
                 </button>
               }
             />
@@ -239,14 +234,14 @@ export function SessionsPage() {
                           <Music2 size={18} />
                         </span>
                         <span className="ps-item-text">
-                          <span className="ps-instrument">{instrumentDisplayName(session.instrument_id)}</span>
+                          <span className="ps-instrument">{t(`instrument.${session.instrument_id}` as MessageId)}</span>
                           <span className="ps-date">
-                            {formatWhen(session.started_at)}
-                            {isGuest ? ' · Saved on this device' : ''}
+                            {formatDate(new Date(session.started_at), { dateStyle: 'medium', timeStyle: 'short' })}
+                            {isGuest ? ` · ${t('sessionReview.savedDevice')}` : ''}
                           </span>
                         </span>
                         <span className="ps-badge-slot">
-                          <StatusBadge tone={verdict.tone}>{verdict.label}</StatusBadge>
+                          <StatusBadge tone={verdict.tone}>{t(verdict.tone === 'green' ? 'tuning.inTune' : verdict.tone === 'amber' ? 'playAlong.grade.close' : verdict.tone === 'red' ? 'playAlong.grade.off' : 'class.noPlays')}</StatusBadge>
                         </span>
                       </Link>
 
@@ -256,18 +251,18 @@ export function SessionsPage() {
                             type="button"
                             className="ps-icon-btn"
                             aria-pressed={expanded}
-                            aria-label={expanded ? 'Hide playback' : 'Listen back'}
+                            aria-label={t(expanded ? 'sessions.hidePlayback' : 'sessionAudio.listenBack')}
                             onClick={() => setExpandedId(expanded ? null : session.id)}
                           >
                             <Play size={17} />
                           </button>
                         )}
                         <details className="ps-overflow">
-                          <summary aria-label="More options">
+                          <summary aria-label={t('sessions.moreOptions')}>
                             <MoreHorizontal size={18} />
                           </summary>
                           <div className="ps-overflow-menu">
-                            <p className="ps-overflow-label">Download · for teachers</p>
+                            <p className="ps-overflow-label">{t('sessions.downloadTeacher')}</p>
                             <ExportButtons
                               sessionId={session.id}
                               guestSession={isGuest ? (session as GuestSessionDetail) : null}
@@ -285,7 +280,7 @@ export function SessionsPage() {
                                 }}
                               >
                                 <Trash2 size={16} />
-                                Delete recording
+                                {t('sessions.deleteRecording')}
                               </button>
                             )}
                           </div>
@@ -319,14 +314,14 @@ export function SessionsPage() {
             onClick={(event) => event.stopPropagation()}
             onKeyDown={handleDialogKeyDown}
           >
-            <h2 id="ps-delete-title">Delete this recording?</h2>
-            <p id="ps-delete-description">This can&apos;t be undone.</p>
+            <h2 id="ps-delete-title">{t('sessions.deleteTitle')}</h2>
+            <p id="ps-delete-description">{t('sessions.deleteBody')}</p>
             <div className="ps-dialog-actions">
               <button ref={cancelButtonRef} className="ghost-button" type="button" onClick={dismissDeleteDialog} disabled={deleteBusy}>
-                Keep it
+                {t('sessions.keep')}
               </button>
               <button className="ps-dialog-delete" type="button" onClick={confirmDelete} disabled={deleteBusy}>
-                {deleteBusy ? 'Deleting…' : 'Delete'}
+                {t(deleteBusy ? 'sessions.deleting' : 'common.delete')}
               </button>
             </div>
           </div>

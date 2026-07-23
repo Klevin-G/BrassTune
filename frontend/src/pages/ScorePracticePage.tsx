@@ -2,9 +2,14 @@ import { Camera, ChevronLeft, ChevronRight, FileText, Image as ImageIcon, Maximi
 import { useCallback, useEffect, useRef, useState } from 'react';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
-import './ScorePracticePage.css';
 import { SCORE_DOCUMENTS_DB_NAME, SCORE_DOCUMENTS_STORE_NAME } from '../domain/scoreDocuments';
-import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
+import { MAX_SCORE_FILE_BYTES, MAX_SCORE_PAGES, MAX_SCORE_PIXELS, pdfPageLimitMessage, scoreAcceptAttribute, verifiedScoreSourceKind, verifyScoreFile, type ScoreImportSummary } from '../domain/scorePractice';
+import { useI18n } from '../i18n/LocaleContext';
+import './ScorePracticePage.css';
+
+function bidiIsolate(value: string | number) {
+  return `\u2068${value}\u2069`;
+}
 
 interface ImportedScorePage {
   id: string;
@@ -259,15 +264,16 @@ function PdfCanvasPreview({
   rotation: number;
   onPageCount: (count: number) => void;
 }) {
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [renderStatus, setRenderStatus] = useState('Opening PDF…');
+  const [renderStatus, setRenderStatus] = useState(() => t('score.openingPdf'));
 
   useEffect(() => {
     let cancelled = false;
     let cleanup: (() => void) | undefined;
 
     async function renderPdfPage() {
-      setRenderStatus('Opening PDF…');
+      setRenderStatus(t('score.openingPdf'));
       const pdfjs = await import('pdfjs-dist');
       pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
       const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
@@ -297,7 +303,7 @@ function PdfCanvasPreview({
         await renderTask.promise;
         if (!cancelled) setRenderStatus('');
       } catch (error) {
-        if (!cancelled) setRenderStatus(error instanceof Error && error.message !== 'Rendering cancelled, page 0' ? 'This PDF page could not open in this browser.' : '');
+        if (!cancelled) setRenderStatus(error instanceof Error && error.message !== 'Rendering cancelled, page 0' ? t('score.pdfOpenFailed') : '');
       }
     }
 
@@ -306,17 +312,18 @@ function PdfCanvasPreview({
       cancelled = true;
       cleanup?.();
     };
-  }, [file, name, onPageCount, pageNumber, rotation, zoom]);
+  }, [file, name, onPageCount, pageNumber, rotation, t, zoom]);
 
   return (
     <>
-      <canvas ref={canvasRef} aria-label={`Sheet music page for ${name}`} />
+      <canvas ref={canvasRef} aria-label={t('score.pageFor', { name: bidiIsolate(name) })} />
       {renderStatus && <span className="sm-render-status" role="status">{renderStatus}</span>}
     </>
   );
 }
 
 export function ScorePracticePage() {
+  const { t, formatNumber } = useI18n();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const photosInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -380,14 +387,14 @@ export function ScorePracticePage() {
           setPages((current) => current.filter((page) => page.id !== oversizedPage.id));
           setSelectedId((current) => current === oversizedPage.id ? null : current);
           setStatus(cleanupFailed
-            ? `${limitMessage} It couldn't be removed from saved music, so it was hidden. Clear this site's browser data to remove it.`
-            : limitMessage);
+            ? t('score.pageLimitCleanup', { count: formatNumber(count), limit: formatNumber(MAX_SCORE_PAGES) })
+            : t('score.pageLimit', { count: formatNumber(count), limit: formatNumber(MAX_SCORE_PAGES) }));
         })();
       }
     }
     setPdfPageCount(count);
     setPdfPageNumber((value) => Math.min(Math.max(1, value), count));
-  }, [selectedId]);
+  }, [formatNumber, selectedId, t]);
 
   useEffect(() => {
     pagesRef.current = pages;
@@ -482,45 +489,46 @@ export function ScorePracticePage() {
           setSelectedId((current) => current ?? stored[0].id);
         }
         if (cleanupFailures.length > 0) {
-          setStatus(`${cleanupFailures.length === 1 ? cleanupFailures[0] : 'Some saved files'} couldn't be removed from saved music and ${cleanupFailures.length === 1 ? 'was' : 'were'} hidden. Clear this site's browser data to remove ${cleanupFailures.length === 1 ? 'it' : 'them'}.`);
+          setStatus(t('score.savedCleanupFailed', { count: cleanupFailures.length }));
         } else if (removedInvalidCount > 0) {
-          setStatus(`Removed ${removedInvalidCount === 1 ? 'a saved file that could not be opened safely' : `${removedInvalidCount} saved files that could not be opened safely`}.`);
+          setStatus(t('score.removedInvalid', { count: removedInvalidCount }));
         } else if (stored.length > 0) {
-          setStatus('Your music is here.');
+          setStatus(t('score.musicReady'));
         }
       })
       .catch(() => {
-        if (!cancelled) setStatus('Saved music could not be opened in this browser.');
+        if (!cancelled) setStatus(t('score.savedOpenFailed'));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   const importFiles = async (files: File[], source: ImportedScorePage['source']) => {
     const imported: PreparedScorePage[] = [];
     for (const file of files) {
       try {
         if (file.size > MAX_SCORE_FILE_BYTES) {
-          setStatus(`${file.name} is too large to add.`);
+          setStatus(t('score.tooLarge', { filename: bidiIsolate(file.name) }));
           continue;
         }
         const kind = await verifiedScoreSourceKind(file);
         if (kind === 'unsupported') {
-          setStatus(`${file.name} isn't a photo or PDF we can open.`);
+          setStatus(t('score.unsupportedFile', { filename: bidiIsolate(file.name) }));
           continue;
         }
         if (kind === 'pdf') {
-          const limitMessage = pdfPageLimitMessage(await readPdfPageCount(file));
+          const pageCount = await readPdfPageCount(file);
+          const limitMessage = pdfPageLimitMessage(pageCount);
           if (limitMessage) {
-            setStatus(limitMessage);
+            setStatus(t('score.pageLimit', { count: formatNumber(pageCount), limit: formatNumber(MAX_SCORE_PAGES) }));
             continue;
           }
         }
         const prepared = kind === 'image' ? await sanitizeImageFile(file) : { dimensions: undefined, file };
         const summary = verifyScoreFile(prepared.file, prepared.dimensions, kind);
         if (!summary.supported) {
-          setStatus(`${file.name}: ${summary.quality.messages.join(' ')}`);
+          setStatus(t('score.unsupportedFile', { filename: bidiIsolate(file.name) }));
           continue;
         }
         imported.push({
@@ -533,11 +541,11 @@ export function ScorePracticePage() {
           summary,
         });
       } catch {
-        setStatus(`${file.name} could not be decoded as a valid ${/\.pdf$/i.test(file.name) || file.type === 'application/pdf' ? 'PDF' : 'image'}.`);
+        setStatus(t(/\.pdf$/i.test(file.name) || file.type === 'application/pdf' ? 'score.invalidPdf' : 'score.invalidImage', { filename: bidiIsolate(file.name) }));
       }
     }
     if (!imported.length) return;
-    setStatus(imported.length === 1 ? 'Saving your page…' : `Saving ${imported.length} pages…`);
+    setStatus(t('score.savingPages', { count: imported.length }));
     const saved = await Promise.all(imported.map(async (page) => {
       try {
         await saveScoreDocument({ ...page, url: '', persisted: false });
@@ -556,20 +564,20 @@ export function ScorePracticePage() {
     setSelectedId(ready[0].id);
     setImportOpen(false);
     setStatus(saved.some(({ persisted }) => !persisted)
-      ? 'Added — but this browser may not keep every page after you close the tab.'
-      : ready.length === 1 ? 'Added your page.' : `Added ${ready.length} pages.`);
+      ? t('score.addedNotPersisted')
+      : t('score.addedPages', { count: ready.length }));
   };
 
   const startCamera = async () => {
     if (!canUseCamera) {
-      setStatus('This browser can’t use the camera. Choose Photos or Files instead.');
+      setStatus(t('score.cameraUnavailable'));
       return;
     }
     if (cameraStartingRef.current) return;
     const generation = ++cameraRequestGenerationRef.current;
     cameraStartingRef.current = true;
     setCameraStarting(true);
-    setStatus('Opening your camera…');
+    setStatus(t('score.openingCamera'));
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       if (!mountedRef.current || generation !== cameraRequestGenerationRef.current) {
@@ -579,10 +587,10 @@ export function ScorePracticePage() {
       cameraStreamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       setCameraActive(true);
-      setStatus('Point at your music, then Capture page.');
+      setStatus(t('score.cameraReady'));
     } catch {
       if (mountedRef.current && generation === cameraRequestGenerationRef.current) {
-        setStatus('Camera permission was blocked. Choose Photos or Files instead.');
+        setStatus(t('score.cameraBlocked'));
       }
     } finally {
       if (generation === cameraRequestGenerationRef.current) {
@@ -601,7 +609,7 @@ export function ScorePracticePage() {
   const captureCameraPage = async () => {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
-      setStatus('Camera isn’t ready yet.');
+      setStatus(t('score.cameraNotReady'));
       return;
     }
     const canvas = document.createElement('canvas');
@@ -612,7 +620,7 @@ export function ScorePracticePage() {
     context.drawImage(video, 0, 0);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
     if (!blob) {
-      setStatus('Capture failed. Try again.');
+      setStatus(t('score.captureFailed'));
       return;
     }
     stopCamera();
@@ -626,14 +634,14 @@ export function ScorePracticePage() {
       try {
         await deleteScoreDocument(selected.id);
       } catch {
-        setStatus(`${selected.name} couldn't be removed. It is still in your saved music.`);
+        setStatus(t('score.removeFailed', { filename: bidiIsolate(selected.name) }));
         return;
       }
     }
     URL.revokeObjectURL(selected.url);
     setPages((current) => current.filter((page) => page.id !== selected.id));
     setSelectedId(null);
-    setStatus('Page removed.');
+    setStatus(t('score.removed'));
   };
 
   const toggleFullscreen = () => {
@@ -671,44 +679,44 @@ export function ScorePracticePage() {
       }}
     >
       {!hasPages && (
-        <p className="sm-import-lead"><Music2 size={20} />Add your sheet music to read while you play.</p>
+        <p className="sm-import-lead"><Music2 size={20} />{t('score.importLead')}</p>
       )}
       <div className="sm-import-actions">
         {canUseCamera && (
           <button className="primary-button" type="button" disabled={cameraStarting} onClick={cameraActive ? captureCameraPage : startCamera}>
             <Camera size={18} />
-            {cameraStarting ? 'Opening camera…' : cameraActive ? 'Capture page' : 'Scan with camera'}
+            {t(cameraStarting ? 'score.openingCamera' : cameraActive ? 'score.capturePage' : 'score.scanCamera')}
           </button>
         )}
         <button className={canUseCamera ? 'ghost-button' : 'primary-button'} type="button" onClick={() => photosInputRef.current?.click()}>
           <ImageIcon size={18} />
-          Choose from Photos
+          {t('score.choosePhotos')}
         </button>
         <button className="ghost-button" type="button" onClick={() => fileInputRef.current?.click()}>
           <Upload size={18} />
-          Choose Files
+          {t('score.chooseFiles')}
         </button>
       </div>
-      <p className="sm-import-hint">Or drag and drop a file here.</p>
+      <p className="sm-import-hint">{t('score.dragDrop')}</p>
       {cameraActive && (
         <div className="camera-preview">
-          <video ref={videoRef} autoPlay playsInline muted aria-label="Camera preview" />
-          <button className="ghost-button" type="button" onClick={stopCamera}>Stop camera</button>
+          <video ref={videoRef} autoPlay playsInline muted aria-label={t('score.cameraPreview')} />
+          <button className="ghost-button" type="button" onClick={stopCamera}>{t('score.stopCamera')}</button>
         </div>
       )}
-      <p className="sm-import-note">Your music stays on this device.</p>
+      <p className="sm-import-note">{t('score.localOnly')}</p>
     </div>
   );
 
   return (
     <ScreenContainer className="score-practice-screen sm-screen">
       <PageHeader
-        title="Sheet Music"
-        description="Add a photo, PDF, or scan of your sheet music to read while you play."
+        title={t('score.title')}
+        description={t('score.description')}
         action={hasPages ? (
           <button className="ghost-button" type="button" onClick={() => setImportOpen((value) => !value)}>
             <Plus size={18} />
-            Add music
+            {t('score.addMusic')}
           </button>
         ) : undefined}
       />
@@ -717,37 +725,37 @@ export function ScorePracticePage() {
         <SectionCard className="sm-viewer-card">
           <div className={`sm-viewer ${focusMode ? 'is-focus' : ''}`} ref={viewerRef}>
             <div className="sm-toolbar">
-              <button className="icon-button labeled" type="button" onClick={() => { setFitWidth(true); setZoom(1); }} aria-pressed={fitWidth} title="Fit to width">
-                <MoveHorizontal size={17} />Fit width
+              <button className="icon-button labeled" type="button" onClick={() => { setFitWidth(true); setZoom(1); }} aria-pressed={fitWidth} title={t('score.fitWidth')}>
+                <MoveHorizontal size={17} />{t('score.fitWidth')}
               </button>
-              <button className="icon-button labeled" type="button" onClick={zoomOut} title="Zoom out">
-                <ZoomOut size={17} />Zoom out
+              <button className="icon-button labeled" type="button" onClick={zoomOut} title={t('score.zoomOut')}>
+                <ZoomOut size={17} />{t('score.zoomOut')}
               </button>
-              <button className="icon-button labeled" type="button" onClick={zoomIn} title="Zoom in">
-                <ZoomIn size={17} />Zoom in
+              <button className="icon-button labeled" type="button" onClick={zoomIn} title={t('score.zoomIn')}>
+                <ZoomIn size={17} />{t('score.zoomIn')}
               </button>
-              <button className="icon-button labeled" type="button" onClick={() => setRotation((value) => (value + 90) % 360)} title="Rotate">
-                <RotateCw size={17} />Rotate
+              <button className="icon-button labeled" type="button" onClick={() => setRotation((value) => (value + 90) % 360)} title={t('score.rotate')}>
+                <RotateCw size={17} />{t('score.rotate')}
               </button>
               {selected.kind === 'pdf' && pdfPageCount > 1 && (
                 <div className="sm-pager">
-                  <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.max(1, value - 1))} disabled={pdfPageNumber <= 1} aria-label="Previous page"><ChevronLeft size={18} /></button>
-                  <span className="sm-pager-label">Page {pdfPageNumber} / {pdfPageCount}</span>
-                  <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.min(pdfPageCount, value + 1))} disabled={pdfPageNumber >= pdfPageCount} aria-label="Next page"><ChevronRight size={18} /></button>
+                  <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.max(1, value - 1))} disabled={pdfPageNumber <= 1} aria-label={t('common.previous')}><ChevronLeft size={18} /></button>
+                  <span className="sm-pager-label"><bdi dir="ltr">{t('score.pageCount', { current: formatNumber(pdfPageNumber), total: formatNumber(pdfPageCount) })}</bdi></span>
+                  <button className="icon-button" type="button" onClick={() => setPdfPageNumber((value) => Math.min(pdfPageCount, value + 1))} disabled={pdfPageNumber >= pdfPageCount} aria-label={t('common.next')}><ChevronRight size={18} /></button>
                 </div>
               )}
-              <button className="icon-button labeled" type="button" onClick={toggleFullscreen} aria-pressed={focusMode} title={focusMode ? 'Exit full screen' : 'Full screen'}>
+              <button className="icon-button labeled" type="button" onClick={toggleFullscreen} aria-pressed={focusMode} title={t(focusMode ? 'score.exitFullscreen' : 'score.fullscreen')}>
                 {focusMode ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
-                {focusMode ? 'Exit full screen' : 'Full screen'}
+                {t(focusMode ? 'score.exitFullscreen' : 'score.fullscreen')}
               </button>
               <div className="sm-menu-wrap">
-                <button className="icon-button" ref={moreOptionsRef} type="button" onClick={() => setMenuOpen((value) => !value)} aria-label="More options" aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertical size={18} /></button>
+                <button className="icon-button" ref={moreOptionsRef} type="button" onClick={() => setMenuOpen((value) => !value)} aria-label={t('sessions.moreOptions')} aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertical size={18} /></button>
                 {menuOpen && (
                   <>
-                    <button className="sm-menu-scrim" type="button" aria-label="Close menu" onClick={() => setMenuOpen(false)} />
+                    <button className="sm-menu-scrim" type="button" aria-label={t('score.closeMenu')} onClick={() => setMenuOpen(false)} />
                     <div className="sm-menu" role="menu">
                       <button className="sm-menu-item sm-menu-danger" type="button" role="menuitem" onClick={openDeleteDialog}>
-                        <Trash2 size={17} />Delete this page
+                        <Trash2 size={17} />{t('score.deletePage')}
                       </button>
                     </div>
                   </>
@@ -757,16 +765,16 @@ export function ScorePracticePage() {
 
             <div className={`sm-viewer-body ${showFilmstrip ? 'has-strip' : ''}`}>
               {showFilmstrip && (
-                <aside className="sm-filmstrip" aria-label="Pages">
+                <aside className="sm-filmstrip" aria-label={t('score.pages')}>
                   {pages.map((page, index) => (
                     <button className={`sm-thumb ${page.id === selected.id ? 'is-active' : ''}`} key={page.id} type="button" onClick={() => setSelectedId(page.id)}>
                       <span className="sm-thumb-img">
                         {page.kind === 'image' ? <img src={page.url} alt="" /> : <FileText size={22} />}
                       </span>
                       <span className="sm-thumb-meta">
-                        <strong>Page {index + 1}</strong>
-                        {!page.summary.supported && <StatusBadge tone="amber">Can’t open</StatusBadge>}
-                        <em className="sm-thumb-name">{page.name}</em>
+                        <strong><bdi dir="ltr">{t('score.pageNumber', { count: formatNumber(index + 1) })}</bdi></strong>
+                        {!page.summary.supported && <StatusBadge tone="amber">{t('score.cantOpen')}</StatusBadge>}
+                        <em className="sm-thumb-name"><bdi dir="auto">{page.name}</bdi></em>
                       </span>
                     </button>
                   ))}
@@ -786,7 +794,7 @@ export function ScorePracticePage() {
                   ) : (
                     <img
                       className={`sm-page ${fitWidth ? 'sm-page-fit' : ''}`}
-                      alt={`Sheet music ${selected.name}`}
+                      alt={t('score.musicAlt', { name: bidiIsolate(selected.name) })}
                       src={selected.url}
                       style={fitWidth ? { transform: rotation ? `rotate(${rotation}deg)` : undefined } : { transform: `scale(${zoom}) rotate(${rotation}deg)` }}
                     />
@@ -800,9 +808,9 @@ export function ScorePracticePage() {
 
       {showImport && (
         <SectionCard
-          title={hasPages ? 'Add music' : undefined}
+          title={hasPages ? t('score.addMusic') : undefined}
           action={hasPages ? (
-            <button className="icon-button" type="button" onClick={() => setImportOpen(false)} aria-label="Close"><X size={18} /></button>
+            <button className="icon-button" type="button" onClick={() => setImportOpen(false)} aria-label={t('common.close')}><X size={18} /></button>
           ) : undefined}
         >
           {importPanel}
@@ -823,7 +831,7 @@ export function ScorePracticePage() {
             input.value = '';
           });
         }}
-        aria-label="Choose sheet music from Photos"
+        aria-label={t('score.choosePhotos')}
       />
       <input
         ref={fileInputRef}
@@ -837,18 +845,18 @@ export function ScorePracticePage() {
             input.value = '';
           });
         }}
-        aria-label="Choose sheet music files"
+        aria-label={t('score.chooseFiles')}
       />
 
       {pendingDelete && (
         <div className="sm-confirm-backdrop" role="dialog" aria-modal="true" aria-labelledby="sm-delete-title" aria-describedby="sm-delete-description">
           <div className="sm-confirm" ref={deleteDialogRef}>
-            <h3 id="sm-delete-title">Remove this page?</h3>
-            <p id="sm-delete-description">You can add it again anytime.</p>
+            <h3 id="sm-delete-title">{t('score.removeTitle')}</h3>
+            <p id="sm-delete-description">{t('score.removeBody')}</p>
             <div className="sm-confirm-actions">
-              <button className="ghost-button" ref={deleteCancelRef} type="button" onClick={() => setPendingDelete(false)}>Cancel</button>
+              <button className="ghost-button" ref={deleteCancelRef} type="button" onClick={() => setPendingDelete(false)}>{t('common.cancel')}</button>
               <button className="sm-danger-button" type="button" onClick={() => void performDelete()}>
-                <Trash2 size={17} />Remove
+                <Trash2 size={17} />{t('score.remove')}
               </button>
             </div>
           </div>

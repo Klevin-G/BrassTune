@@ -161,6 +161,38 @@ describe('exercise catalog', () => {
 });
 
 describe('PlayAlongGrader', () => {
+  it('replays every portable temporal timeline at its declared checkpoints', () => {
+    expect(scorerContract.temporal_evidence_kind).toContain('synthetic deterministic pitch-frame timelines');
+
+    for (const testCase of scorerContract.temporal_cases) {
+      const grader = new PlayAlongGrader(testCase.notes);
+      const checkpoints = new Map(testCase.checkpoints.map((checkpoint) => [checkpoint.after_frame_index, checkpoint]));
+
+      testCase.frames.forEach((testFrame, frameIndex) => {
+        const snapshot = grader.feed(frame(testFrame.written_note, testFrame.cents, testFrame.confidence), testFrame.timestamp_ms);
+        const checkpoint = checkpoints.get(frameIndex);
+        if (!checkpoint) return;
+        expect(snapshot.currentName, `${testCase.name}: current note after frame ${frameIndex}`).toBe(checkpoint.expected_current_note);
+        expect(snapshot.heldFraction * grader.holdMs, `${testCase.name}: held ms after frame ${frameIndex}`).toBeCloseTo(
+          checkpoint.expected_held_ms,
+          8,
+        );
+        expect(snapshot.results, `${testCase.name}: result count after frame ${frameIndex}`).toHaveLength(checkpoint.expected_result_count);
+        expect(snapshot.done, `${testCase.name}: done after frame ${frameIndex}`).toBe(checkpoint.expected_done);
+      });
+
+      expect(
+        grader.results.map((result) => ({
+          name: result.name,
+          median_cents: result.avgCents,
+          sample_count: result.samples,
+          rating: result.grade,
+        })),
+        testCase.name,
+      ).toEqual(testCase.expected_results);
+    }
+  });
+
   it('uses a 2-second default and does not advance before the full hold', () => {
     const grader = new PlayAlongGrader(['C']);
     expect(grader.holdMs).toBe(DEFAULT_PLAY_ALONG_HOLD_MS);
@@ -312,8 +344,12 @@ describe('PlayAlongGrader', () => {
 
   it('ignores low-confidence frames entirely', () => {
     const grader = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
-    for (let t = 0; t <= 600; t += 100) grader.feed(frame('C', 5, 0.4), t); // below 0.65 gate
+    let snapshot = grader.snapshot();
+    for (let t = 0; t <= 600; t += 100) snapshot = grader.feed(frame('C', 0, 0.4), t); // centered, but below 0.65 gate
     expect(grader.results.length).toBe(0);
+    expect(snapshot.heldFraction).toBe(0);
+    expect(snapshot.detectedName).toBeNull();
+    expect(snapshot.detectedCents).toBeNull();
   });
 
   it('marks a skipped note as missed', () => {

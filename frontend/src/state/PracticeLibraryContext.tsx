@@ -47,6 +47,12 @@ interface PracticeLibraryState {
 
 const PracticeLibraryContext = createContext<PracticeLibraryState | null>(null);
 
+interface LoadedPracticeState {
+  ownerId: string | null;
+  library: PracticeLibrary;
+  workspace: PracticeWorkspace | null;
+}
+
 function createId(prefix: string): string {
   const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -70,23 +76,32 @@ function readWorkspace(ownerId: string): PracticeWorkspace | null {
 export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const ownerId = resolvePracticeOwner({ loading: auth.loading, hasAuthSession: auth.hasAuthSession, isSignedIn: auth.isSignedIn, profileId: auth.profile?.id });
-  const [library, setLibrary] = useState(() => ownerId ? readPracticeLibrary(localStorage, ownerId) : emptyPracticeLibrary());
-  const [workspace, setWorkspace] = useState<PracticeWorkspace | null>(() => ownerId ? readWorkspace(ownerId) : null);
+  const [loadedState, setLoadedState] = useState<LoadedPracticeState>(() => ({
+    ownerId,
+    library: ownerId ? readPracticeLibrary(localStorage, ownerId) : emptyPracticeLibrary(),
+    workspace: ownerId ? readWorkspace(ownerId) : null,
+  }));
   const [storageError, setStorageError] = useState<string | null>(null);
+  const ownerReady = ownerId != null && loadedState.ownerId === ownerId;
+  const library = loadedState.library;
+  const workspace = loadedState.workspace;
 
   useEffect(() => {
-    setLibrary(ownerId ? readPracticeLibrary(localStorage, ownerId) : emptyPracticeLibrary());
-    setWorkspace(ownerId ? readWorkspace(ownerId) : null);
+    setLoadedState({
+      ownerId,
+      library: ownerId ? readPracticeLibrary(localStorage, ownerId) : emptyPracticeLibrary(),
+      workspace: ownerId ? readWorkspace(ownerId) : null,
+    });
     setStorageError(null);
   }, [ownerId]);
 
   const updateLibrary = useCallback((update: (current: PracticeLibrary) => PracticeLibrary) => {
-    setLibrary((current) => {
-      const next = update(current);
-      if (!ownerId) return current;
+    setLoadedState((current) => {
+      if (!ownerId || current.ownerId !== ownerId) return current;
+      const next = update(current.library);
       const saved = writePracticeLibrary(localStorage, ownerId, next);
       setStorageError(saved ? null : 'This device is out of browser storage. Your latest practice-library change could not be saved.');
-      return saved ? next : current;
+      return saved ? { ...current, library: next } : current;
     });
   }, [ownerId]);
 
@@ -200,14 +215,16 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
   }, [updateLibrary]);
 
   const persistWorkspace = useCallback((next: PracticeWorkspace | null) => {
-    if (!ownerId) return;
-    setWorkspace(next);
-    try {
-      if (next) sessionStorage.setItem(ownerWorkspaceKey(ownerId), JSON.stringify(next));
-      else sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
-    } catch {
-      setStorageError('Focused mode will work for this page, but this browser could not remember it between pages.');
-    }
+    setLoadedState((current) => {
+      if (!ownerId || current.ownerId !== ownerId) return current;
+      try {
+        if (next) sessionStorage.setItem(ownerWorkspaceKey(ownerId), JSON.stringify(next));
+        else sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
+      } catch {
+        setStorageError('Focused mode will work for this page, but this browser could not remember it between pages.');
+      }
+      return { ...current, workspace: next };
+    });
   }, [ownerId]);
 
   const startWorkspace = useCallback((pack: PracticePack) => {
@@ -244,6 +261,7 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     exitWorkspace,
   }), [deleteExercise, deleteMetronomePreset, deleteReflection, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
 
+  if (!ownerReady) return null;
   return <PracticeLibraryContext.Provider value={value}>{children}</PracticeLibraryContext.Provider>;
 }
 

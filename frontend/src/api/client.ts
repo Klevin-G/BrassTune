@@ -201,10 +201,19 @@ export function getSession(sessionId: string | number) {
   return request<PracticeSession & { samples_count: number; note_events: NoteEvent[] }>(`/api/sessions/${sessionId}`);
 }
 
+export interface SessionAudioUploadResponse {
+  uploaded: boolean;
+  audio: PracticeSession;
+  cleanup_pending?: boolean;
+  reconciliation_pending?: boolean;
+  activation_pending?: boolean;
+  message?: string;
+}
+
 export function uploadSessionAudio(sessionId: number, blob: Blob, durationSeconds?: number) {
   const headers: Record<string, string> = { 'Content-Type': blob.type || 'audio/webm' };
   if (durationSeconds !== undefined) headers['X-Audio-Duration-Seconds'] = String(durationSeconds);
-  return request<{ uploaded: boolean; audio: PracticeSession }>(`/api/sessions/${sessionId}/audio`, {
+  return request<SessionAudioUploadResponse>(`/api/sessions/${sessionId}/audio`, {
     method: 'POST',
     headers,
     body: blob,

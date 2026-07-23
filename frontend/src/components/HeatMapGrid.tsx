@@ -1,4 +1,5 @@
 import type { NoteStats } from '../domain/types';
+import { useI18n } from '../i18n/LocaleContext';
 
 const noteOrder = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
 
@@ -17,16 +18,25 @@ export function HeatMapGrid({
   selectedNote?: string;
   onSelect?: (row: NoteStats) => void;
 }) {
+  const { t, formatNumber } = useI18n();
   const sorted = [...rows].sort((a, b) => noteSortValue(a) - noteSortValue(b) || a.note_label.localeCompare(b.note_label));
   return (
     <div className={`heatmap ${compact ? 'compact' : ''}`}>
-      {sorted.length === 0 && <p className="empty-state">No heat map data yet.</p>}
+      {sorted.length === 0 && <p className="empty-state">{t('heatmap.empty')}</p>}
       {sorted.map((row) => {
-        const detail = row.has_data === false ? 'no recorded attempts' : `${row.avg_signed_cents.toFixed(1)} cents signed, ${row.avg_abs_cents.toFixed(1)} cents average absolute, ${Math.round(row.in_tune_percentage)} percent in tune, ${Math.round(row.duration_seconds)} seconds, ${row.recommendation_summary ?? row.severity}`;
+        const detail = row.has_data === false
+          ? t('heatmap.noAttempts')
+          : t('heatmap.detail', {
+              signed: formatNumber(row.avg_signed_cents, { maximumFractionDigits: 1 }),
+              absolute: formatNumber(row.avg_abs_cents, { maximumFractionDigits: 1 }),
+              percent: formatNumber(Math.round(row.in_tune_percentage)),
+              seconds: formatNumber(Math.round(row.duration_seconds)),
+              summary: row.recommendation_summary ?? row.severity,
+            });
         const content = (
           <>
-            <strong>{row.note_label}</strong>
-            <span>{row.has_data === false ? 'no data' : `${Math.round(row.avg_signed_cents)}c`}</span>
+            <strong><bdi dir="ltr">{row.note_label}</bdi></strong>
+            <span>{row.has_data === false ? t('heatmap.noData') : <bdi dir="ltr">{formatNumber(Math.round(row.avg_signed_cents))}c</bdi>}</span>
           </>
         );
         if (!onSelect) {

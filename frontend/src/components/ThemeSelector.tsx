@@ -1,5 +1,7 @@
 import { Check, Contrast, Monitor, Moon, Sun, type LucideIcon } from 'lucide-react';
 import { themeOptions, useTheme, type ThemePreference } from '../state/ThemeContext';
+import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 
 const themeIcons: Record<ThemePreference, LucideIcon> = {
   system: Monitor,
@@ -9,13 +11,14 @@ const themeIcons: Record<ThemePreference, LucideIcon> = {
 };
 
 export function ThemeSelector({ compact = false }: { compact?: boolean }) {
+  const { t } = useI18n();
   const { theme, setTheme, resolvedTheme } = useTheme();
 
   return (
     <div
       className={compact ? 'theme-picker compact' : 'theme-picker'}
       role="radiogroup"
-      aria-label="Appearance theme"
+      aria-label={t('theme.appearance')}
     >
       {themeOptions.map((option) => {
         const Icon = themeIcons[option.value];
@@ -48,12 +51,12 @@ export function ThemeSelector({ compact = false }: { compact?: boolean }) {
             <span className="theme-card-meta">
               <span className="theme-card-name">
                 <Icon size={15} />
-                {option.label}
+                {t(`theme.${option.value}.label` as MessageId)}
               </span>
               <span className="theme-card-hint">
                 {showsResolved
-                  ? `Now ${resolvedTheme === 'brass-white' ? 'light' : 'dark'}`
-                  : option.hint}
+                  ? t(resolvedTheme === 'brass-white' ? 'theme.nowLight' : 'theme.nowDark')
+                  : t(`theme.${option.value}.hint` as MessageId)}
               </span>
             </span>
             <span className="theme-card-check" aria-hidden="true">

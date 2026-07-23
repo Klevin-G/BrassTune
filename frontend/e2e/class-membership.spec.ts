@@ -376,7 +376,7 @@ test('switching Supabase users clears the prior profile and class data before re
   });
   await expect.poll(() => counters.failedProfileLoads).toBeGreaterThan(0);
   await expect(page.getByRole('heading', { name: 'Account A Class' })).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('Cloud practice is unavailable right now.');
+  await expect(page.getByText('Account A', { exact: true })).toHaveCount(0);
   expect(counters.failedAccountGroupLoads).toBe(0);
 
   await page.evaluate(() => {

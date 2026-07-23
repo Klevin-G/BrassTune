@@ -86,8 +86,8 @@ export function MetricTile({
   tone = 'default',
 }: {
   label: string;
-  value: string;
-  detail?: string;
+  value: ReactNode;
+  detail?: ReactNode;
   icon?: LucideIcon;
   tone?: Tone;
 }) {

@@ -1,6 +1,7 @@
 import type { PitchFrame } from '../domain/types';
 import { describeCents } from '../domain/tuningLanguage';
 import { useI18n } from '../i18n/LocaleContext';
+import { isReliableTunerFrame } from '../domain/pitchFrameStatus';
 
 const RANGE = 50; // cents shown to each side of center
 
@@ -11,7 +12,7 @@ const RANGE = 50; // cents shown to each side of center
  */
 export function TuningMeter({ frame, holdFraction = 0 }: { frame: PitchFrame | null; holdFraction?: number }) {
   const { t, formatNumber } = useI18n();
-  const hasPitch = frame != null && frame.cents_deviation != null && frame.tuning_status !== 'silence';
+  const hasPitch = isReliableTunerFrame(frame);
   const cents = hasPitch ? Math.max(-RANGE, Math.min(RANGE, frame!.cents_deviation!)) : 0;
   const verdict = describeCents(hasPitch ? frame!.cents_deviation : null);
   const pct = 50 + (cents / RANGE) * 50; // 0..100 across the strip

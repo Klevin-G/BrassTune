@@ -29,8 +29,8 @@ test('critical routes render identifiable content', async ({ page }) => {
     ['/practice/play-along', /Play-Along/i],
     ['/metronome', /Metronome/i],
     ['/practice/score', /Sheet Music/i],
-    ['/sessions', /Your recordings/i],
-    ['/progress', /Your progress/i],
+    ['/sessions', /Recordings/i],
+    ['/progress', /Progress/i],
     ['/ensemble', /Class/i],
     ['/settings', /Settings/i],
     ['/auth/sign-in', /Welcome back/i],
@@ -50,15 +50,24 @@ test('critical routes render identifiable content', async ({ page }) => {
 });
 
 test('merged and retired routes redirect to their new home', async ({ page }) => {
-  for (const [from, expected] of [
-    ['/home', /\/practice$/],
-    ['/analytics', /\/progress$/],
-    ['/coach', /\/progress$/],
-    ['/more', /\/settings$/],
+  const runtimeErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') runtimeErrors.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => runtimeErrors.push(`pageerror: ${error.message}`));
+
+  for (const [from, expected, destinationText] of [
+    ['/home', /\/practice$/, /Live mic/i],
+    ['/analytics', /\/progress$/, /Progress/i],
+    ['/coach', /\/progress$/, /Progress/i],
+    ['/more', /\/settings$/, /Settings/i],
   ] as const) {
     await page.goto(from);
     await expect(page).toHaveURL(expected);
+    await expect(page.getByRole('main').getByText(destinationText, { exact: true }).first()).toBeVisible();
   }
+
+  expect(runtimeErrors).toEqual([]);
 });
 
 test('guest class route invites sign-in without exposing director controls', async ({ page }) => {
@@ -235,7 +244,7 @@ test('short mobile tuner controls stay clear of the bottom navigation', async ({
 test('tiny-phone empty-state actions stay clear of the bottom navigation', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   for (const [route, actionName] of [
-    ['/progress', /record your first note/i],
+    ['/progress', /record your first take/i],
     ['/sessions', /start practicing/i],
   ] as const) {
     await page.goto(route);

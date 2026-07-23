@@ -6,6 +6,7 @@ import { PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge
 import type { MetronomePreset } from '../domain/practiceLibrary';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import { buildScheduledTicks, clampBpm, nextRampBpm, normalizeTimeSignature, secondsPerTick, subdivisionFactor, tapTempoBpm, type Subdivision } from '../domain/metronome';
+import { useI18n } from '../i18n/LocaleContext';
 import './MetronomePage.css';
 
 type TimeSignaturePreset = '2/4' | '3/4' | '4/4' | '5/4' | '6/8' | '7/8' | 'custom';
@@ -39,6 +40,7 @@ function tempoName(bpm: number): string {
 }
 
 export function MetronomePage() {
+  const { t, formatNumber } = useI18n();
   const practiceLibrary = usePracticeLibrary();
   const [searchParams] = useSearchParams();
   const [bpm, setBpm] = useState(() => Number(localStorage.getItem('brasstune.metronome.bpm') ?? 96));
@@ -58,7 +60,7 @@ export function MetronomePage() {
   const [targetBpm, setTargetBpm] = useState(120);
   const [rampStep, setRampStep] = useState(4);
   const [barsPerStep, setBarsPerStep] = useState(4);
-  const [status, setStatus] = useState('Press Start to begin.');
+  const [status, setStatus] = useState(() => t('metronome.ready'));
   const [editing, setEditing] = useState(false);
   const [draftBpm, setDraftBpm] = useState('');
 
@@ -102,7 +104,7 @@ export function MetronomePage() {
       setCustomDenominator(preset.denominator);
       setSignaturePreset('custom');
     }
-    setStatus(`Loaded “${preset.name}”. Press Start when you are ready.`);
+    setStatus(t('metronome.loadedPreset', { name: preset.name }));
   };
 
   useEffect(() => {
@@ -120,7 +122,7 @@ export function MetronomePage() {
     if (!Number.isFinite(queryBpm) || appliedPresetRef.current === `bpm:${queryBpm}`) return;
     appliedPresetRef.current = `bpm:${queryBpm}`;
     setBpm(clampBpm(queryBpm));
-  }, [practiceLibrary.library.metronomePresets, searchParams]);
+  }, [practiceLibrary.library.metronomePresets, searchParams, t]);
 
   useEffect(() => {
     bpmRef.current = clampBpm(bpm);
@@ -192,7 +194,7 @@ export function MetronomePage() {
           if (!runningRef.current) return;
           setBeat(beatIndex);
           setBeatOn(true);
-          setStatus('Playing');
+          setStatus(t('metronome.playing'));
         }, visualDelayMs);
         visualTimersRef.current.add(timer);
       }
@@ -218,7 +220,7 @@ export function MetronomePage() {
     try {
       const context = audioRef.current ?? audioContextFactory();
       if (!context) {
-        setStatus("Sorry — the metronome isn't supported in this browser. Try Chrome or Safari.");
+        setStatus(t('metronome.unsupported'));
         return;
       }
       audioRef.current = context;
@@ -227,7 +229,7 @@ export function MetronomePage() {
       }
       if (!mountedRef.current || audioRef.current !== context) return;
       if (context.state !== 'running') {
-        setStatus('Tap Start again to allow metronome audio in this browser.');
+        setStatus(t('metronome.allowAudio'));
         return;
       }
       cancelScheduledOutput();
@@ -244,7 +246,7 @@ export function MetronomePage() {
         scheduleClick(context, tick.time, tick.accented, tick.subdivisionIndex > 0);
       }
       setRunning(true);
-      setStatus(countIn ? 'Counting you in…' : 'Playing');
+      setStatus(t(countIn ? 'metronome.countingIn' : 'metronome.playing'));
       const preset = practiceLibrary.library.metronomePresets.find((item) => item.id === searchParams.get('preset'));
       practiceLibrary.recordRecent(preset
         ? { kind: 'metronome', id: preset.id, label: `${preset.name} · ${preset.bpm} BPM`, href: `/metronome?preset=${encodeURIComponent(preset.id)}` }
@@ -262,7 +264,7 @@ export function MetronomePage() {
     cancelScheduledOutput();
     setRunning(false);
     setBeatOn(false);
-    setStatus('Stopped');
+    setStatus(t('metronome.stopped'));
   };
 
   useEffect(() => {
@@ -352,18 +354,18 @@ export function MetronomePage() {
   };
 
   const badgeTone = running ? (beatOn ? 'green' : 'gold') : 'muted';
-  const badgeLabel = running ? (beatOn ? 'Playing' : 'Counting in') : 'Stopped';
+  const badgeLabel = t(running ? (beatOn ? 'metronome.playing' : 'metronome.countingInShort') : 'metronome.stopped');
 
   return (
     <ScreenContainer className="mt-screen">
       <PageHeader
-        title="Metronome"
-        description="Set your tempo and press start. Tap the tempo to change it, or tap along to find it."
+        title={t('practice.metronome')}
+        description={t('metronome.description')}
         action={<StatusBadge tone={badgeTone}>{badgeLabel}</StatusBadge>}
       />
 
       <SectionCard className="mt-stage">
-        <div className="mt-beats" role="img" aria-label={`${signature.numerator} beats per bar`}>
+        <div className="mt-beats" role="img" aria-label={t('metronome.beatsPerBar', { count: formatNumber(signature.numerator) })}>
           {Array.from({ length: signature.numerator }, (_, index) => (
             <span
               key={index}
@@ -378,7 +380,7 @@ export function MetronomePage() {
             <button
               type="button"
               className="ghost-button mt-nudge"
-              aria-label="Slower by 5"
+              aria-label={t('metronome.slowerBy', { count: formatNumber(5) })}
               onPointerDown={() => startHold(-5)}
               onPointerUp={stopHold}
               onPointerLeave={stopHold}
@@ -402,20 +404,20 @@ export function MetronomePage() {
                   if (event.key === 'Enter') commitEdit();
                   if (event.key === 'Escape') setEditing(false);
                 }}
-                aria-label="Beats per minute"
+                aria-label={t('metronome.beatsPerMinute')}
               />
             ) : (
               <div
                 className="mt-bpm"
                 role="button"
                 tabIndex={0}
-                aria-label={`Tempo ${clampBpm(bpm)} beats per minute. Tap to type, drag to change.`}
+                aria-label={t('metronome.tempoControl', { count: formatNumber(clampBpm(bpm)) })}
                 onPointerDown={onBpmPointerDown}
                 onPointerMove={onBpmPointerMove}
                 onPointerUp={onBpmPointerUp}
                 onKeyDown={onBpmKeyDown}
               >
-                <span className="mt-bpm-num">{clampBpm(bpm)}</span>
+                <span className="mt-bpm-num"><bdi dir="ltr">{formatNumber(clampBpm(bpm))}</bdi></span>
                 <span className="mt-bpm-unit">BPM</span>
               </div>
             )}
@@ -423,7 +425,7 @@ export function MetronomePage() {
             <button
               type="button"
               className="ghost-button mt-nudge"
-              aria-label="Faster by 5"
+              aria-label={t('metronome.fasterBy', { count: formatNumber(5) })}
               onPointerDown={() => startHold(5)}
               onPointerUp={stopHold}
               onPointerLeave={stopHold}
@@ -442,19 +444,19 @@ export function MetronomePage() {
             max={300}
             value={clampBpm(bpm)}
             onChange={(event) => setBpm(clampBpm(Number(event.target.value)))}
-            aria-label="Tempo"
+            aria-label={t('metronome.tempo')}
           />
 
           <button type="button" className="ghost-button mt-tap" onClick={tap}>
             <Timer size={18} />
-            Tap tempo
+            {t('metronome.tapTempo')}
           </button>
         </div>
 
         <div className="mt-transport-row">
           <button type="button" className={`mt-transport${running ? ' is-running' : ''}`} onClick={running ? stop : start}>
             {running ? <Square size={22} /> : <Play size={22} />}
-            {running ? 'Stop' : 'Start'}
+            {t(running ? 'playAlong.stop' : 'common.start')}
           </button>
           <button
             type="button"
@@ -462,7 +464,7 @@ export function MetronomePage() {
             onClick={toggleMuted}
           >
             {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-            {muted ? 'Unmute' : 'Mute'}
+            {t(muted ? 'metronome.unmute' : 'metronome.mute')}
           </button>
         </div>
 
@@ -470,9 +472,9 @@ export function MetronomePage() {
 
         <div className="mt-quick">
           <div className="mt-quick-group">
-            <span className="mt-quick-label">Beat</span>
+            <span className="mt-quick-label">{t('metronome.beat')}</span>
             <SegmentedControl
-              ariaLabel="Time signature"
+              ariaLabel={t('metronome.timeSignature')}
               value={signaturePreset}
               options={[
                 { value: '4/4', label: '4/4' },
@@ -482,9 +484,9 @@ export function MetronomePage() {
             />
           </div>
           <div className="mt-quick-group">
-            <span className="mt-quick-label">Notes per beat</span>
+            <span className="mt-quick-label">{t('metronome.notesPerBeat')}</span>
             <SegmentedControl
-              ariaLabel="Subdivision"
+              ariaLabel={t('metronome.subdivision')}
               value={subdivision}
               options={[
                 { value: 'quarter', label: '1' },
@@ -504,12 +506,12 @@ export function MetronomePage() {
       />
 
       <details className="mt-advanced">
-        <summary>Advanced</summary>
+        <summary>{t('metronome.advanced')}</summary>
         <div className="mt-advanced-body">
           <div className="mt-adv-block">
-            <span className="mt-quick-label">Time signature</span>
+            <span className="mt-quick-label">{t('metronome.timeSignature')}</span>
             <SegmentedControl
-              ariaLabel="All time signatures"
+              ariaLabel={t('metronome.allSignatures')}
               value={signaturePreset}
               options={[
                 { value: '2/4', label: '2/4' },
@@ -518,18 +520,18 @@ export function MetronomePage() {
                 { value: '5/4', label: '5/4' },
                 { value: '6/8', label: '6/8' },
                 { value: '7/8', label: '7/8' },
-                { value: 'custom', label: 'Custom' },
+                { value: 'custom', label: t('progress.custom') },
               ]}
               onChange={setSignaturePreset}
             />
             {signaturePreset === 'custom' && (
               <div className="two-field-row">
                 <label className="field">
-                  <span>Beats per bar</span>
+                  <span>{t('metronome.beatsPerBarLabel')}</span>
                   <input type="number" min={1} max={16} value={customNumerator} onChange={(event) => setCustomNumerator(Number(event.target.value))} />
                 </label>
                 <label className="field">
-                  <span>Note value</span>
+                  <span>{t('metronome.noteValue')}</span>
                   <select value={customDenominator} onChange={(event) => setCustomDenominator(Number(event.target.value))}>
                     <option value={2}>2</option>
                     <option value={4}>4</option>
@@ -542,36 +544,36 @@ export function MetronomePage() {
           </div>
 
           <label className="field">
-            <span>Volume</span>
+            <span>{t('metronome.volume')}</span>
             <input type="range" min={0} max={1} step={0.05} value={volume} onChange={(event) => setVolume(Number(event.target.value))} />
           </label>
 
           <label className="switch-row">
-            <span>Accent the first beat</span>
+            <span>{t('metronome.accentFirst')}</span>
             <input type="checkbox" checked={accentDownbeat} onChange={(event) => setAccentDownbeat(event.target.checked)} />
           </label>
           <label className="switch-row">
-            <span>Count me in one bar first</span>
+            <span>{t('metronome.countInFirst')}</span>
             <input type="checkbox" checked={countIn} onChange={(event) => setCountIn(event.target.checked)} />
           </label>
 
           <div className="mt-adv-block">
             <label className="switch-row">
-              <span>Speed up automatically</span>
+              <span>{t('metronome.ramp')}</span>
               <input type="checkbox" checked={rampEnabled} onChange={(event) => setRampEnabled(event.target.checked)} />
             </label>
-            <p className="mt-adv-hint">Start slow and let the tempo climb toward your goal while you play.</p>
+            <p className="mt-adv-hint">{t('metronome.rampHelp')}</p>
             <div className="mt-field-row">
               <label className="field">
-                <span>Goal tempo</span>
+                <span>{t('metronome.goalTempo')}</span>
                 <input type="number" min={20} max={300} value={targetBpm} onChange={(event) => setTargetBpm(clampBpm(Number(event.target.value)))} />
               </label>
               <label className="field">
-                <span>Speed up by</span>
+                <span>{t('metronome.speedUpBy')}</span>
                 <input type="number" min={1} max={30} value={rampStep} onChange={(event) => setRampStep(Number(event.target.value))} />
               </label>
               <label className="field">
-                <span>Every N bars</span>
+                <span>{t('metronome.everyBars')}</span>
                 <input type="number" min={1} max={32} value={barsPerStep} onChange={(event) => setBarsPerStep(Number(event.target.value))} />
               </label>
             </div>

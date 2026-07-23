@@ -12,6 +12,38 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test('a centered low-confidence frame never renders or announces an in-tune reward', async ({ page }) => {
+  await page.route('**/src/hooks/usePitchStream.ts*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: `
+const frame = {
+  timestamp_ms: 1, frequency_hz: 440, confidence: 0.94, rms: 0.1,
+  midi_note_float: 69, nearest_midi: 69, concert_note_name: 'A', concert_octave: 4,
+  written_note_name: 'B', written_octave: 4, cents_deviation: 0, tuning_status: 'unstable',
+  instrument_id: 'trumpet', reference_pitch_hz: 440, is_valid_for_recording: false,
+  save_eligibility_reason: 'confidence below 95%'
+};
+export function usePitchStream() {
+  return {
+    currentFrame: frame, micActive: false, mediaStream: null, statusMessage: '',
+    startMicrophone: async () => null, stopMicrophone() {}, captureFrame() {},
+    finishPersistingFrames: async () => ({ saved: 0, rejected: 0, failed: 0 })
+  };
+}
+`,
+  }));
+
+  await page.goto('/practice');
+  const note = page.locator('.note-display');
+  await expect(note).toHaveAttribute('aria-label', 'Play a note');
+  await expect(note.locator('.note-display-verdict')).toHaveText('Play a note');
+  await expect(note).not.toHaveClass(/tone-green/);
+  await expect(page.locator('.tuning-meter')).toHaveAttribute('aria-valuetext', 'No note');
+  await expect(page.locator('.tuning-meter-reward')).toHaveCount(0);
+  await expect(note.locator('[aria-live="polite"]')).not.toContainText('In tune');
+});
+
 test('switching to Demo cancels a microphone grant that resolves later', async ({ page }) => {
   await page.addInitScript(() => {
     let resolveRequest: ((stream: unknown) => void) | undefined;
@@ -284,8 +316,8 @@ test('Metronome serializes rapid Start activation while AudioContext resume is p
 test('sheet delete confirmation traps focus, closes on Escape, and restores focus', async ({ page }) => {
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
   await page.goto('/practice/score');
-  await page.getByLabel('Choose sheet music files').setInputFiles({ name: 'focus-test.png', mimeType: 'image/png', buffer: png });
-  await expect(page.getByAltText('Sheet music focus-test.jpg')).toBeVisible();
+  await page.locator('input[type="file"][aria-label="Choose Files"]').setInputFiles({ name: 'focus-test.png', mimeType: 'image/png', buffer: png });
+  await expect(page.getByRole('img', { name: /Sheet music.*focus-test\.jpg/i })).toBeVisible();
   const moreOptions = page.getByRole('button', { name: 'More options' });
   await moreOptions.click();
   await page.getByRole('menuitem', { name: /Delete this page/i }).click();

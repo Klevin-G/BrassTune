@@ -6,6 +6,7 @@ import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui
 import { useAuth } from '../state/AuthContext';
 import { readPendingAuthReturn, safeReturnPath } from '../domain/authNavigation';
 import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 import './AuthGatewayPage.css';
 
 function consumePendingAuthNext() {
@@ -24,6 +25,19 @@ export function AuthGatewayPage() {
   const [busy, setBusy] = useState(false);
   const [showEmail, setShowEmail] = useState(false);
 
+  function localizeAuthError(error: unknown, fallback: MessageId) {
+    const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+    const lower = raw.toLowerCase();
+    if (lower.includes('email or password') || lower.includes('credentials')) return t('auth.errorCredentials');
+    if (lower.includes('already exists') || lower.includes('already registered')) return t('auth.errorExists');
+    if (lower.includes('stronger password') || lower.includes('weak password')) return t('auth.errorWeakPassword');
+    if (lower.includes('confirm your email')) return t('auth.errorConfirmEmail');
+    if (lower.includes('expired')) return t('auth.errorExpired');
+    if (lower.includes('cancel')) return t('auth.errorCancelled');
+    if (lower.includes('network') || lower.includes('reach the server')) return t('auth.errorNetwork');
+    return t(fallback);
+  }
+
   useEffect(() => {
     if (!auth.loading && auth.isSignedIn) {
       const storedNext = consumePendingAuthNext();
@@ -41,7 +55,7 @@ export function AuthGatewayPage() {
       consumePendingAuthNext();
       navigate(next, { replace: true });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : t('auth.failure'));
+      setMessage(localizeAuthError(error, 'auth.failure'));
     } finally {
       setBusy(false);
     }
@@ -101,13 +115,13 @@ export function AuthGatewayPage() {
                   <>
                     <div className="ag-providers">
                       {auth.providers.google && (
-                        <button className="google-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : t('auth.googleFailure')))}>
+                        <button className="google-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(localizeAuthError(error, 'auth.googleFailure')))}>
                           <GoogleIcon size={18} />
                           {t('auth.google')}
                         </button>
                       )}
                       {auth.providers.apple && (
-                        <button className="ghost-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithApple(callbackNext).catch((error) => setMessage(error instanceof Error ? error.message : t('auth.appleFailure')))}>
+                        <button className="ghost-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithApple(callbackNext).catch((error) => setMessage(localizeAuthError(error, 'auth.appleFailure')))}>
                           <ShieldCheck size={18} />
                           {t('auth.apple')}
                         </button>
@@ -142,11 +156,11 @@ export function AuthGatewayPage() {
                     <form className="auth-form" onSubmit={signIn}>
                       <label>
                         {t('auth.email')}
-                        <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="you@example.com" />
+                        <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder={t('auth.emailPlaceholder')} />
                       </label>
                       <label>
                         {t('auth.password')}
-                        <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder="At least 6 characters" />
+                        <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required minLength={6} placeholder={t('auth.passwordMinHint', { count: 6 })} />
                       </label>
                       <button className="primary-button ag-block" disabled={busy} type="submit">
                         <LogIn size={18} />
@@ -167,7 +181,11 @@ export function AuthGatewayPage() {
                 )}
               </>
             )}
-            {(message || auth.profileError) && <div className="alert" role="status">{message ?? auth.profileError}</div>}
+            {(message || auth.profileError) && (
+              <div className="alert" role="status">
+                {message ?? localizeAuthError(auth.profileError, 'auth.failure')}
+              </div>
+            )}
           </SectionCard>
         </div>
       </div>

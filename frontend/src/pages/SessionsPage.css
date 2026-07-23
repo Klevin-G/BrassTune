@@ -128,7 +128,7 @@
 }
 
 .ps-badge-slot {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex-shrink: 0;
 }
 
@@ -186,7 +186,7 @@
 
 .ps-overflow-menu {
   position: absolute;
-  right: 0;
+  inset-inline-end: 0;
   top: calc(100% + 0.35rem);
   z-index: 30;
   width: min(16rem, 80vw);
@@ -311,6 +311,6 @@
     flex-wrap: wrap;
   }
   .ps-badge-slot {
-    margin-left: 3.05rem;
+    margin-inline-start: 3.05rem;
   }
 }

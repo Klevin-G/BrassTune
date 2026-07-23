@@ -2,6 +2,7 @@ import type { PitchFrame } from '../domain/types';
 import { describeCents } from '../domain/tuningLanguage';
 import { useThrottledAnnouncement } from '../hooks/useThrottledAnnouncement';
 import { useI18n } from '../i18n/LocaleContext';
+import { isReliableTunerFrame } from '../domain/pitchFrameStatus';
 
 /**
  * The single, unmissable tuner readout: one big note name, a plain-language
@@ -10,7 +11,7 @@ import { useI18n } from '../i18n/LocaleContext';
  */
 export function NoteDisplay({ frame }: { frame: PitchFrame | null }) {
   const { t, formatNumber } = useI18n();
-  const hasPitch = Boolean(frame?.written_note_name) && frame?.tuning_status !== 'silence';
+  const hasPitch = isReliableTunerFrame(frame) && Boolean(frame.written_note_name);
   const note = hasPitch ? `${frame!.written_note_name}${frame!.written_octave}` : '—';
   const concert = frame?.concert_note_name ? `${frame.concert_note_name}${frame.concert_octave}` : null;
   const verdict = describeCents(hasPitch ? frame?.cents_deviation : null);

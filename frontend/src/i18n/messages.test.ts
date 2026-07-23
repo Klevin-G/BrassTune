@@ -8,6 +8,12 @@ import {
 } from './LocaleContext';
 import { englishMessages, pseudoLocalizeMessage } from './messages.base';
 
+function messageArguments(message: string) {
+  return [...message.matchAll(/\{\s*([A-Za-z][\w]*)\s*(?=[,}])/g)]
+    .map((match) => match[1])
+    .sort();
+}
+
 describe('web localization', () => {
   it('ships twelve complete production catalogs plus an explicit pseudo-locale', async () => {
     expect(productionLocales).toEqual([
@@ -77,6 +83,26 @@ describe('web localization', () => {
     }
   });
 
+  it('preserves every ICU argument exactly once per English occurrence', async () => {
+    for (const locale of productionLocales) {
+      const messages = await loadMessagesForLocale(locale);
+      for (const id of Object.keys(englishMessages) as Array<keyof typeof englishMessages>) {
+        expect(messageArguments(messages[id]), `${locale}:${id}`).toEqual(messageArguments(englishMessages[id]));
+      }
+    }
+  });
+
+  it('keeps reviewed Arabic music terms distinct from literal non-music meanings', async () => {
+    const messages = await loadMessagesForLocale('ar');
+    expect(messages['progress.centsHelp']).toContain('السنتات الموسيقية');
+    expect(messages['metronome.timeSignature']).toBe('الميزان الموسيقي');
+    expect(messages['metronome.subdivision']).toBe('تقسيم الإيقاع');
+    expect(messages['metronome.volume']).toBe('مستوى الصوت');
+    expect(messages['noteStats.avgAbs']).toBe('متوسط الانحراف المطلق');
+    expect(messages['signal.confidence']).toBe('نسبة الثقة في اكتشاف طبقة الصوت');
+    expect(messages['score.captureFailed']).toBe('تعذّر التقاط الصفحة. حاول مرة أخرى.');
+  });
+
   it('uses musical rather than literal translations for slurs, pitch, drones, scores, and notes', async () => {
     const expected = {
       es: ['Ligaduras relajadas', 'Nota pedal e intervalos', 'Partituras'],
@@ -137,6 +163,17 @@ describe('web localization', () => {
       sessions: 3,
       minutes: 45,
       exercise: 'C major',
+      size: '2 MB',
+      filename: 'take.webm',
+      signed: '+2.1',
+      absolute: '3.4',
+      summary: 'steady',
+      attempted: 5,
+      saved: 4,
+      rejected: 1,
+      limit: 64,
+      detail: 'A little sharp',
+      cue: 'ease down',
     };
     for (const locale of productionLocales) {
       const messages = await loadMessagesForLocale(locale);
