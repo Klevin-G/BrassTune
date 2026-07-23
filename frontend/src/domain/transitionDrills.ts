@@ -7,11 +7,20 @@ export type TransitionDrillResult =
   | { ready: true; from: string; to: string; notes: string[]; evidenceCount: number; averageError: number }
   | { ready: false; reason: string };
 
+/** Convert analytics labels such as Bb3 or F♯5 into exercise pitch classes. */
+export function normalizeWeakDrillNoteLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim().replace(/♯/g, '#').replace(/♭/g, 'b');
+  const match = /^([A-Ga-g])([#b]?)(?:-?\d+)?$/.exec(normalized);
+  if (!match) return null;
+  return `${match[1].toUpperCase()}${match[2] ?? ''}`;
+}
+
 export function generateWeakTransitionDrill(events: TransitionEvent[]): TransitionDrillResult {
   const pairs = new Map<string, { from: string; to: string; count: number; totalError: number }>();
   for (let index = 1; index < events.length; index += 1) {
-    const from = events[index - 1]?.note_label?.trim();
-    const to = events[index]?.note_label?.trim();
+    const from = normalizeWeakDrillNoteLabel(events[index - 1]?.note_label);
+    const to = normalizeWeakDrillNoteLabel(events[index]?.note_label);
     if (!from || !to || from === to) continue;
     const key = `${from}>${to}`;
     const entry = pairs.get(key) ?? { from, to, count: 0, totalError: 0 };

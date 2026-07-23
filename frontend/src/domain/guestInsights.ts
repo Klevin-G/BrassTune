@@ -1,4 +1,10 @@
-import { listGuestSessions, type GuestSessionDetail } from './guestSessions';
+import {
+  GUEST_WORKSPACE_ACCESS,
+  buildGuestRecommendations as buildRecommendationsFromStats,
+  calculateGuestNoteStats,
+  listGuestSessions,
+  type GuestSessionDetail,
+} from './guestSessions';
 import { noteLabelToMidi, midiToNote } from './music';
 import type { NoteStats, PracticePlan, ProgressMetrics, Recommendation } from './types';
 
@@ -15,17 +21,6 @@ const guestHeatmapNotes: Record<string, string[]> = {
   tuba: ['Bb1', 'F2', 'Bb2', 'C3', 'D3', 'Eb3', 'F3', 'G3'],
 };
 
-function average(values: number[]) {
-  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-}
-
-function severityFor(avgAbs: number): { severity: string; color: NoteStats['severity_color'] } {
-  if (avgAbs >= 16) return { severity: 'red', color: 'red' };
-  if (avgAbs >= 11) return { severity: 'orange', color: 'orange' };
-  if (avgAbs >= 7) return { severity: 'yellow', color: 'yellow' };
-  return { severity: 'green', color: 'green' };
-}
-
 function inRange(session: GuestSessionDetail, range?: GuestInsightRange) {
   const started = new Date(session.started_at).getTime();
   if (range?.date_from && started < new Date(`${range.date_from}T00:00:00.000`).getTime()) return false;
@@ -34,46 +29,11 @@ function inRange(session: GuestSessionDetail, range?: GuestInsightRange) {
 }
 
 function sessionsForInstrument(instrumentId: string, range?: GuestInsightRange) {
-  return listGuestSessions().filter((session) => session.instrument_id === instrumentId && inRange(session, range));
+  return listGuestSessions(GUEST_WORKSPACE_ACCESS).filter((session) => session.instrument_id === instrumentId && inRange(session, range));
 }
 
 export function buildGuestNoteStats(instrumentId: string, range?: GuestInsightRange): NoteStats[] {
-  const groups = new Map<string, NoteStats[]>();
-  sessionsForInstrument(instrumentId, range).forEach((session) => {
-    session.note_stats.forEach((row) => {
-      groups.set(row.note_label, [...(groups.get(row.note_label) ?? []), row]);
-    });
-  });
-
-  return [...groups.values()]
-    .map((rows) => {
-      const first = rows[0];
-      const eventCount = rows.reduce((sum, row) => sum + row.event_count, 0);
-      const sampleCount = rows.reduce((sum, row) => sum + row.sample_count, 0);
-      const durationMs = rows.reduce((sum, row) => sum + row.duration_ms, 0);
-      const avgAbs = average(rows.map((row) => row.avg_abs_cents));
-      const severity = severityFor(avgAbs);
-      return {
-        ...first,
-        avg_signed_cents: average(rows.map((row) => row.avg_signed_cents)),
-        avg_abs_cents: avgAbs,
-        median_cents: average(rows.map((row) => row.median_cents)),
-        stddev_cents: average(rows.map((row) => row.stddev_cents)),
-        in_tune_percentage: average(rows.map((row) => row.in_tune_percentage)),
-        duration_ms: durationMs,
-        duration_seconds: durationMs / 1000,
-        sample_count: sampleCount,
-        event_count: eventCount,
-        stability_score: average(rows.map((row) => row.stability_score)),
-        trend: 'guest_local',
-        severity: severity.severity,
-        severity_color: severity.color,
-        problem_severity: avgAbs,
-        has_data: eventCount > 0,
-        recommendation_summary: `${first.note_label} averaged ${avgAbs.toFixed(1)} cents across guest sessions saved in this browser.`,
-      } satisfies NoteStats;
-    })
-    .sort((a, b) => b.problem_severity - a.problem_severity);
+  return calculateGuestNoteStats(sessionsForInstrument(instrumentId, range).flatMap((session) => session.note_events));
 }
 
 function emptyHeatmapRow(instrumentId: string, label: string): NoteStats {
@@ -109,24 +69,11 @@ export function buildGuestHeatmap(instrumentId: string, stats: NoteStats[]): Not
 }
 
 export function buildGuestRecommendations(stats: NoteStats[]): Recommendation[] {
-  return stats.slice(0, 4).map((row) => ({
-    title: `${row.note_label}: center the pitch before adding speed`,
-    message: `${row.note_label} is averaging ${row.avg_abs_cents.toFixed(1)} cents of absolute error in guest practice.`,
-    severity: row.severity,
-    category: 'guest_practice',
-    related_note: row.note_label,
-    suggested_exercises: [
-      'Hold the note for four slow counts against a steady air stream',
-      'Reset the breath and repeat until the attack matches the sustain',
-      'Move from the anchor note into the problem note without changing embouchure pressure',
-    ],
-    suggested_focus: row.avg_signed_cents > 0 ? 'Let the pitch settle slightly lower.' : 'Support the air and bring the center slightly higher.',
-    explanation: 'This recommendation is derived from guest sessions stored in this browser.',
-  }));
+  return buildRecommendationsFromStats(stats, 8);
 }
 
 export function buildGuestPracticePlan(stats: NoteStats[], instrumentId: string): PracticePlan | null {
-  const focus = stats.slice(0, 2);
+  const focus = [...stats].sort((left, right) => right.problem_severity - left.problem_severity).slice(0, 2);
   if (!focus.length) return null;
   return {
     title: 'Guest intonation plan',
@@ -179,8 +126,9 @@ export function buildGuestProgress(instrumentId: string, stats: NoteStats[], ran
   const currentStats = aggregateSessionStats(sorted.slice(midpoint));
   const mostImproved: Array<NoteStats & { improvement: number; previous_avg_abs_cents: number }> = currentStats
     .flatMap((row) => {
-      const previous = previousStats.find((old) => old.note_label === row.note_label);
-      if (!previous) return [];
+    const previous = previousStats.find((old) => old.note_label === row.note_label);
+    if (!previous) return [];
+    if (row.duration_seconds < 3 || previous.duration_seconds < 3) return [];
       const improvement = previous.avg_abs_cents - row.avg_abs_cents;
       return improvement > 0 ? [{ ...row, improvement, previous_avg_abs_cents: previous.avg_abs_cents }] : [];
     })
@@ -200,30 +148,13 @@ export function buildGuestProgress(instrumentId: string, stats: NoteStats[], ran
       practice_streak_days: practiceStreakDays(sorted),
     },
     most_improved_notes: mostImproved,
-    worst_notes: stats.slice(0, 5),
-    most_consistently_sharp_notes: [...stats].filter((row) => row.avg_signed_cents > 5).sort((a, b) => b.avg_signed_cents - a.avg_signed_cents),
-    most_consistently_flat_notes: [...stats].filter((row) => row.avg_signed_cents < -5).sort((a, b) => a.avg_signed_cents - b.avg_signed_cents),
+    worst_notes: [...stats].sort((left, right) => right.avg_abs_cents - left.avg_abs_cents).slice(0, 5),
+    most_consistently_sharp_notes: [...stats].filter((row) => row.avg_signed_cents > 0).sort((a, b) => b.avg_signed_cents - a.avg_signed_cents).slice(0, 5),
+    most_consistently_flat_notes: [...stats].filter((row) => row.avg_signed_cents < 0).sort((a, b) => a.avg_signed_cents - b.avg_signed_cents).slice(0, 5),
     period: { current: 'Guest browser data' },
   };
 }
 
 function aggregateSessionStats(sessions: GuestSessionDetail[]) {
-  const groups = new Map<string, NoteStats[]>();
-  sessions.forEach((session) => {
-    session.note_stats.forEach((row) => groups.set(row.note_label, [...(groups.get(row.note_label) ?? []), row]));
-  });
-  return [...groups.values()].map((rows) => {
-    const first = rows[0];
-    const avgAbs = average(rows.map((row) => row.avg_abs_cents));
-    const severity = severityFor(avgAbs);
-    return {
-      ...first,
-      avg_signed_cents: average(rows.map((row) => row.avg_signed_cents)),
-      avg_abs_cents: avgAbs,
-      in_tune_percentage: average(rows.map((row) => row.in_tune_percentage)),
-      problem_severity: avgAbs,
-      severity: severity.severity,
-      severity_color: severity.color,
-    };
-  });
+  return calculateGuestNoteStats(sessions.flatMap((session) => session.note_events));
 }

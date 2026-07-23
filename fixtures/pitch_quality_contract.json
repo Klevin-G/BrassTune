@@ -1,0 +1,24 @@
+{
+  "evidence_kind": "synthetic deterministic harmonic tones; not physical microphone evidence",
+  "sample_rate_hz": 48000,
+  "frame_size": 4096,
+  "harmonic_amplitudes": [0.75, 0.2, 0.05],
+  "thresholds": {
+    "steady_note_octave_accuracy_min_percent": 99,
+    "gross_octave_error_max_percent": 0.5,
+    "median_abs_cents_error_max": 3,
+    "p95_abs_cents_error_max": 8,
+    "onset_p95_ms_max": 300,
+    "cross_platform_p95_cents_delta_max": 5
+  },
+  "cases": [
+    { "note": "E2", "midi": 40, "frequency_hz": 82.4068892282175, "expected_python_signed_cents_error": 0.0002491345597396046 },
+    { "note": "Bb2", "midi": 46, "frequency_hz": 116.54094037952248, "expected_python_signed_cents_error": 0.0027141707177676315 },
+    { "note": "F3", "midi": 53, "frequency_hz": 174.61411571650194, "expected_python_signed_cents_error": 0.008673508432495158 },
+    { "note": "C4", "midi": 60, "frequency_hz": 261.6255653005986, "expected_python_signed_cents_error": 0.007921096921170614 },
+    { "note": "A4", "midi": 69, "frequency_hz": 440, "expected_python_signed_cents_error": 0.06676723103957193 },
+    { "note": "C5", "midi": 72, "frequency_hz": 523.2511306011972, "expected_python_signed_cents_error": 0.07296483414584488 },
+    { "note": "G5", "midi": 79, "frequency_hz": 783.9908719634985, "expected_python_signed_cents_error": 0.19773296940690482 },
+    { "note": "C6", "midi": 84, "frequency_hz": 1046.5022612023945, "expected_python_signed_cents_error": 0.3590330452139119 }
+  ]
+}

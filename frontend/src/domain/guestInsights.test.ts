@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { nextDemoPitchFrame } from './demoPitch';
 import { buildGuestHeatmap, buildGuestNoteStats, buildGuestPracticePlan, buildGuestProgress, buildGuestRecommendations } from './guestInsights';
-import { clearGuestSessions, createGuestSession, saveGuestSessionFromFrames } from './guestSessions';
+import { GUEST_WORKSPACE_ACCESS, clearGuestSessions, createGuestSession, saveGuestSessionFromFrames } from './guestSessions';
 
 describe('guest insights', () => {
   afterEach(() => {
-    clearGuestSessions();
+    clearGuestSessions(GUEST_WORKSPACE_ACCESS);
   });
 
   it('builds analytics, coach, and progress from guest sessions saved in the browser', () => {
@@ -19,7 +19,7 @@ describe('guest insights', () => {
     const progress = buildGuestProgress('trumpet', stats);
 
     expect(stats.length).toBeGreaterThan(0);
-    expect(stats[0].recommendation_summary).toMatch(/guest sessions saved in this browser/i);
+    expect(stats[0].recommendation_summary).toMatch(/centered|sharp|flat|inconsistent/i);
     expect(recommendations[0].explanation).toMatch(/guest sessions stored in this browser/i);
     expect(plan?.title).toBe('Guest intonation plan');
     expect(plan?.focus_notes.length).toBeGreaterThan(0);

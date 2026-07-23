@@ -23,6 +23,15 @@ def generate_note_recommendation(note_stats: Dict[str, object], instrument_profi
         message = "You need more recorded attempts on written %s before BrassTune can identify a reliable pattern." % label
         category = "Insufficient data"
         suggestions = ["Record at least three steady long-tone attempts on this note."]
+    elif trend == "Unstable":
+        title = "%s is inconsistent" % label
+        message = "Your pitch on written %s changes too much for BrassTune to call it centered yet." % label
+        category = "Inconsistent pitch"
+        suggestions = [
+            "Hold the note for 8-12 seconds and aim for a steady needle.",
+            "Use a drone and focus on minimizing motion.",
+            "Record several repetitions with full breaths.",
+        ] + _instrument_suggestions(instrument_profile, "unstable")
     elif signed >= 10:
         title = "%s tends sharp" % label
         message = "You consistently play written %s %.0f cents sharp." % (label, abs(signed))
@@ -41,15 +50,6 @@ def generate_note_recommendation(note_stats: Dict[str, object], instrument_profi
             "Support the air stream and avoid letting the pitch sag.",
             "Check posture and breath support.",
         ] + _instrument_suggestions(instrument_profile, "flat")
-    elif stddev >= 12:
-        title = "%s is inconsistent" % label
-        message = "Your pitch on written %s changes a lot from attempt to attempt." % label
-        category = "Inconsistent pitch"
-        suggestions = [
-            "Hold the note for 8-12 seconds and aim for a steady needle.",
-            "Use a drone and focus on minimizing motion.",
-            "Record several repetitions with full breaths.",
-        ] + _instrument_suggestions(instrument_profile, "unstable")
     elif severity == "severe issue":
         title = "%s needs focused intonation work" % label
         message = "Written %s averages %.0f cents away from center." % (label, avg_abs)
@@ -109,4 +109,3 @@ def generate_practice_plan(problem_notes: Iterable[Dict[str, object]], instrumen
         ],
         "coach_message": "Focus on %s. The plan prioritizes your largest recurring intonation patterns for %s." % (", ".join(focus), instrument_profile.display_name),
     }
-

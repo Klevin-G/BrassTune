@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { referenceToneVoice } from '../domain/referenceTone';
 
 export function useReferenceTone() {
   const contextRef = useRef<AudioContext | null>(null);
@@ -37,14 +38,16 @@ export function useReferenceTone() {
     gain.gain.exponentialRampToValueAtTime(frequencies.length > 1 ? 0.035 : 0.055, context.currentTime + 0.08);
     gain.connect(context.destination);
     gainRef.current = gain;
-    oscillatorsRef.current = frequencies.map((frequency, index) => {
+    oscillatorsRef.current = frequencies.flatMap((frequency, index) => {
+      const voice = referenceToneVoice(frequency, index);
+      if (!voice) return [];
       const oscillator = context.createOscillator();
-      oscillator.type = index === 0 ? 'sine' : 'triangle';
-      oscillator.frequency.value = frequency;
-      oscillator.detune.value = index === 0 ? -2 : 2;
+      oscillator.type = voice.oscillatorType;
+      oscillator.frequency.value = voice.frequency;
+      oscillator.detune.value = voice.detuneCents;
       oscillator.connect(gain);
       oscillator.start();
-      return oscillator;
+      return [oscillator];
     });
     setPlaying(true);
     return true;

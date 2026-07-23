@@ -1,17 +1,26 @@
 import { describe, expect, it } from 'vitest';
+import scorerContract from '../../../fixtures/play_along_contract.json';
 import {
   EXERCISES,
+  DEFAULT_PLAY_ALONG_ATTACK_TRIM_MS,
   DEFAULT_PLAY_ALONG_HOLD_MS,
+  DEFAULT_PLAY_ALONG_MAX_DROPOUT_MS,
+  DEFAULT_PLAY_ALONG_MIN_CONFIDENCE,
+  DEFAULT_PLAY_ALONG_MIN_SAMPLES,
   MAJOR_SCALES,
   MINOR_SCALES,
   OTHER_EXERCISES,
+  PLAY_ALONG_ACCEPTED_CENTS,
+  PLAY_ALONG_CENTERED_CENTS,
   PlayAlongGrader,
   centsGrade,
+  isAcceptedPlayAlongCents,
   normalizePitchClass,
   samePitchClass,
   summarizeGrades,
 } from './playAlong';
 import type { PitchFrame } from './types';
+import { starsForPercent } from './tuningLanguage';
 
 function frame(note: string | null, cents: number | null, confidence = 0.9): PitchFrame {
   return {
@@ -36,10 +45,48 @@ function frame(note: string | null, cents: number | null, confidence = 0.9): Pit
 describe('centsGrade', () => {
   it('classifies by absolute cents', () => {
     expect(centsGrade(3)).toBe('excellent');
-    expect(centsGrade(-12)).toBe('good');
-    expect(centsGrade(25)).toBe('close');
+    expect(centsGrade(-12)).toBe('close');
+    expect(centsGrade(25)).toBe('off');
     expect(centsGrade(60)).toBe('off');
     expect(centsGrade(null)).toBe('missed');
+  });
+
+  it('loads rating, acceptance, and star thresholds from the portable contract', () => {
+    expect({
+      centered_cents_inclusive: PLAY_ALONG_CENTERED_CENTS,
+      accepted_cents_inclusive: PLAY_ALONG_ACCEPTED_CENTS,
+      hold_ms: DEFAULT_PLAY_ALONG_HOLD_MS,
+      minimum_confidence: DEFAULT_PLAY_ALONG_MIN_CONFIDENCE,
+      minimum_samples: DEFAULT_PLAY_ALONG_MIN_SAMPLES,
+      attack_trim_ms: DEFAULT_PLAY_ALONG_ATTACK_TRIM_MS,
+      maximum_dropout_ms: DEFAULT_PLAY_ALONG_MAX_DROPOUT_MS,
+    }).toEqual(scorerContract.policy);
+
+    for (const testCase of scorerContract.rating_cases) {
+      expect(centsGrade(testCase.cents), testCase.name).toBe(testCase.expected_rating);
+      expect(isAcceptedPlayAlongCents(testCase.cents), testCase.name).toBe(testCase.expected_accepted);
+      expect(testCase.cents != null && Math.abs(testCase.cents) <= PLAY_ALONG_CENTERED_CENTS, testCase.name).toBe(testCase.expected_centered);
+    }
+    for (const testCase of scorerContract.star_cases) {
+      expect(starsForPercent(testCase.in_tune_percent), String(testCase.in_tune_percent)).toBe(testCase.expected_stars);
+    }
+    for (const testCase of scorerContract.summary_cases) {
+      const results = testCase.ratings.map((rating, index) => ({
+        name: `N${index}`,
+        avgCents: rating.cents,
+        samples: rating.cents == null ? 0 : 5,
+        grade: rating.rating as ReturnType<typeof centsGrade>,
+      }));
+      const summary = summarizeGrades(results);
+      expect(summary, testCase.name).toEqual({
+        total: testCase.expected_total,
+        hit: testCase.expected_hit,
+        inTune: testCase.expected_in_tune,
+        inTunePercent: testCase.expected_in_tune_percent,
+        averageAbsCents: testCase.expected_average_abs_cents,
+      });
+      expect(starsForPercent(summary.inTunePercent), testCase.name).toBe(testCase.expected_stars);
+    }
   });
 });
 
@@ -145,7 +192,7 @@ describe('PlayAlongGrader', () => {
     expect(grader.results.length).toBe(1);
     expect(grader.results[0].name).toBe('C');
     expect(grader.results[0].avgCents).toBeCloseTo(10, 5);
-    expect(grader.results[0].grade).toBe('good');
+    expect(grader.results[0].grade).toBe('close');
     expect(grader.currentName).toBe('D');
   });
 
@@ -184,7 +231,7 @@ describe('PlayAlongGrader', () => {
     grader.feed(frame('C', 8), 400);
     grader.feed(frame('C', 8), 600); // 400ms of confirmed matching time
     expect(grader.results.length).toBe(1);
-    expect(grader.results[0].grade).toBe('good');
+    expect(grader.results[0].grade).toBe('close');
   });
 
   it('pauses visible held progress during a tolerated detector dropout', () => {
@@ -210,6 +257,22 @@ describe('PlayAlongGrader', () => {
     for (let t = 600; t <= 800; t += 100) grader.feed(frame('C', 4), t);
     expect(grader.done).toBe(false);
     expect(grader.results).toEqual([]);
+  });
+
+  it('does not advance until the matching note is within the accepted 15-cent window', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    grader.feed(frame('C', 16), 0);
+    grader.feed(frame('C', 16), 100);
+    grader.feed(frame('C', 16), 200);
+    grader.feed(frame('C', 16), 300);
+    expect(grader.results).toEqual([]);
+    expect(grader.snapshot().heldFraction).toBe(0);
+
+    for (let timestamp = 400; timestamp <= 700; timestamp += 100) {
+      grader.feed(frame('C', 15), timestamp);
+    }
+    expect(grader.done).toBe(true);
+    expect(grader.results[0].grade).toBe('close');
   });
 
   it('resets while receiving prolonged low-confidence frames', () => {

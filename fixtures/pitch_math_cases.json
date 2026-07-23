@@ -34,5 +34,29 @@
     "expected_written_octave": 4,
     "expected_nearest_midi": 69,
     "expected_cents": 10.0
+  },
+  {
+    "name": "Exact lower half-step rounds toward the higher MIDI note",
+    "frequency_hz": 427.4740541075866,
+    "reference_pitch_hz": 440.0,
+    "instrument_id": "trombone",
+    "expected_concert_note": "A",
+    "expected_concert_octave": 4,
+    "expected_written_note": "A",
+    "expected_written_octave": 4,
+    "expected_nearest_midi": 69,
+    "expected_cents": -50.0
+  },
+  {
+    "name": "Exact upper half-step also rounds toward the higher MIDI note",
+    "frequency_hz": 479.82340237271336,
+    "reference_pitch_hz": 440.0,
+    "instrument_id": "trombone",
+    "expected_concert_note": "B",
+    "expected_concert_octave": 4,
+    "expected_written_note": "B",
+    "expected_written_octave": 4,
+    "expected_nearest_midi": 71,
+    "expected_cents": -50.0
   }
 ]

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "swift_expectation": "Swift PlayAlongGrader and PlayAlongGrade must load these values and produce the same rating, acceptance, hold, and star results.",
+  "policy": {
+    "centered_cents_inclusive": 5,
+    "accepted_cents_inclusive": 15,
+    "hold_ms": 2000,
+    "minimum_confidence": 0.65,
+    "minimum_samples": 5,
+    "attack_trim_ms": 120,
+    "maximum_dropout_ms": 250
+  },
+  "rating_cases": [
+    { "name": "missing", "cents": null, "expected_rating": "missed", "expected_centered": false, "expected_accepted": false },
+    { "name": "negative centered edge", "cents": -5, "expected_rating": "excellent", "expected_centered": true, "expected_accepted": true },
+    { "name": "positive centered edge", "cents": 5, "expected_rating": "excellent", "expected_centered": true, "expected_accepted": true },
+    { "name": "negative close edge", "cents": -15, "expected_rating": "close", "expected_centered": false, "expected_accepted": true },
+    { "name": "positive close edge", "cents": 15, "expected_rating": "close", "expected_centered": false, "expected_accepted": true },
+    { "name": "outside accepted window", "cents": 15.1, "expected_rating": "off", "expected_centered": false, "expected_accepted": false }
+  ],
+  "star_cases": [
+    { "in_tune_percent": null, "expected_stars": 0 },
+    { "in_tune_percent": 69.9, "expected_stars": 0 },
+    { "in_tune_percent": 70, "expected_stars": 1 },
+    { "in_tune_percent": 85, "expected_stars": 2 },
+    { "in_tune_percent": 95, "expected_stars": 3 }
+  ],
+  "summary_cases": [
+    {
+      "name": "Only centered notes count toward in-tune percentage",
+      "ratings": [
+        { "cents": 4, "rating": "excellent" },
+        { "cents": 12, "rating": "close" },
+        { "cents": 20, "rating": "off" },
+        { "cents": null, "rating": "missed" }
+      ],
+      "expected_total": 4,
+      "expected_hit": 3,
+      "expected_in_tune": 1,
+      "expected_in_tune_percent": 25,
+      "expected_average_abs_cents": 12,
+      "expected_stars": 0
+    },
+    {
+      "name": "All centered notes earn a full percentage and three stars",
+      "ratings": [
+        { "cents": -5, "rating": "excellent" },
+        { "cents": 0, "rating": "excellent" },
+        { "cents": 5, "rating": "excellent" },
+        { "cents": 2, "rating": "excellent" }
+      ],
+      "expected_total": 4,
+      "expected_hit": 4,
+      "expected_in_tune": 4,
+      "expected_in_tune_percent": 100,
+      "expected_average_abs_cents": 3,
+      "expected_stars": 3
+    }
+  ]
+}

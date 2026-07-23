@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { enqueuePendingPersistFrame, requeueFailedPersistFrames, shouldPersistFrameFromFrontend } from './usePitchStream';
+import {
+  EMPTY_AUDIO_FRAME_TIMING,
+  enqueuePendingPersistFrame,
+  observeAudioFrameTiming,
+  requeueFailedPersistFrames,
+  shouldPersistFrameFromFrontend,
+} from './usePitchStream';
 import type { PitchFrame } from '../domain/types';
 
 const validFrame = { is_valid_for_recording: true } as PitchFrame;
@@ -64,5 +70,24 @@ describe('shouldPersistFrameFromFrontend', () => {
     );
 
     expect(queue).toEqual({ sessionId: 43, frames: [newFrame] });
+  });
+});
+
+describe('browser audio observability', () => {
+  it('counts missed callback intervals and tracks processing latency without wall-clock dependencies', () => {
+    const first = observeAudioFrameTiming(EMPTY_AUDIO_FRAME_TIMING, 100, 4, 100);
+    const second = observeAudioFrameTiming(first, 200, 6, 100);
+    const afterGap = observeAudioFrameTiming(second, 500, 10, 100);
+
+    expect(afterGap.processedFrames).toBe(3);
+    expect(afterGap.droppedFrames).toBe(2);
+    expect(afterGap.averageProcessingLatencyMs).toBeCloseTo(20 / 3, 9);
+    expect(afterGap.maxProcessingLatencyMs).toBe(10);
+  });
+
+  it('sanitizes invalid latency samples', () => {
+    const observed = observeAudioFrameTiming(EMPTY_AUDIO_FRAME_TIMING, 100, Number.NaN, 0);
+    expect(observed.averageProcessingLatencyMs).toBe(0);
+    expect(observed.droppedFrames).toBe(0);
   });
 });

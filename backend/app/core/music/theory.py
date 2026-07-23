@@ -62,6 +62,13 @@ def midi_to_frequency(midi_note: float, reference_pitch_hz: float = DEFAULT_REFE
     return reference_pitch_hz * (2 ** ((midi_note - 69) / 12))
 
 
+def round_midi_half_up(midi_note: float) -> int:
+    """Match JavaScript Math.round and Swift's default midpoint behavior."""
+    if not math.isfinite(midi_note):
+        raise ValueError("midi_note must be finite")
+    return int(math.floor(midi_note + 0.5))
+
+
 def midi_to_note_name(midi_note: int, spelling_preference=None) -> Dict[str, object]:
     names = spelling_preference or NOTE_NAMES
     pitch_class = midi_note % 12
@@ -197,7 +204,7 @@ def frequency_to_pitch_frame(
         )
 
     midi_float = frequency_to_midi(frequency_hz, reference_pitch_hz)
-    nearest_midi = int(round(midi_float))
+    nearest_midi = round_midi_half_up(midi_float)
     target_frequency = midi_to_frequency(nearest_midi, reference_pitch_hz)
     cents = calculate_cents_deviation(frequency_hz, target_frequency)
     concert = midi_to_note_name(nearest_midi, profile.preferred_note_spellings)

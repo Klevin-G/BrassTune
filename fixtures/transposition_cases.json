@@ -4,20 +4,49 @@
     "instrument_id": "trumpet",
     "concert_midi": 60,
     "expected_written_midi": 62,
-    "expected_written_label": "D4"
+    "expected_written_label": "D4",
+    "expected_min_frequency_hz": 130,
+    "expected_max_frequency_hz": 1500,
+    "expected_typical_range_written": "F#3-C6"
   },
   {
     "name": "Horn in F raises written pitch by perfect fifth",
     "instrument_id": "horn",
     "concert_midi": 60,
     "expected_written_midi": 67,
-    "expected_written_label": "G4"
+    "expected_written_label": "G4",
+    "expected_min_frequency_hz": 80,
+    "expected_max_frequency_hz": 1200,
+    "expected_typical_range_written": "F3-C6"
   },
   {
     "name": "Trombone reads concert pitch",
     "instrument_id": "trombone",
     "concert_midi": 60,
     "expected_written_midi": 60,
-    "expected_written_label": "C4"
+    "expected_written_label": "C4",
+    "expected_min_frequency_hz": 50,
+    "expected_max_frequency_hz": 700,
+    "expected_typical_range_written": "E2-Bb4"
+  },
+  {
+    "name": "Euphonium reads concert pitch",
+    "instrument_id": "euphonium",
+    "concert_midi": 60,
+    "expected_written_midi": 60,
+    "expected_written_label": "C4",
+    "expected_min_frequency_hz": 55,
+    "expected_max_frequency_hz": 800,
+    "expected_typical_range_written": "E2-Bb4"
+  },
+  {
+    "name": "Tuba reads concert pitch",
+    "instrument_id": "tuba",
+    "concert_midi": 60,
+    "expected_written_midi": 60,
+    "expected_written_label": "C4",
+    "expected_min_frequency_hz": 30,
+    "expected_max_frequency_hz": 500,
+    "expected_typical_range_written": "D1-F4"
   }
 ]

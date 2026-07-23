@@ -44,6 +44,47 @@ export interface PitchStreamInfo {
   sentFrames: number;
   droppedFrames: number;
   detectorSource: string;
+  processingLatencyMs: number;
+  averageProcessingLatencyMs: number;
+  maxProcessingLatencyMs: number;
+  audioContextState: AudioContextState | 'demo' | 'unavailable' | 'starting' | 'error';
+}
+
+export interface AudioFrameTimingObservation {
+  lastCallbackAtMs: number | null;
+  processedFrames: number;
+  droppedFrames: number;
+  averageProcessingLatencyMs: number;
+  maxProcessingLatencyMs: number;
+}
+
+export const EMPTY_AUDIO_FRAME_TIMING: AudioFrameTimingObservation = {
+  lastCallbackAtMs: null,
+  processedFrames: 0,
+  droppedFrames: 0,
+  averageProcessingLatencyMs: 0,
+  maxProcessingLatencyMs: 0,
+};
+
+/** Pure timing reducer used by the browser callback and deterministic tests. */
+export function observeAudioFrameTiming(
+  previous: AudioFrameTimingObservation,
+  callbackAtMs: number,
+  processingLatencyMs: number,
+  expectedFrameDurationMs: number,
+): AudioFrameTimingObservation {
+  const safeLatency = Math.max(0, Number.isFinite(processingLatencyMs) ? processingLatencyMs : 0);
+  const callbackGap = previous.lastCallbackAtMs == null ? 0 : Math.max(0, callbackAtMs - previous.lastCallbackAtMs);
+  const intervals = expectedFrameDurationMs > 0 ? Math.max(1, Math.round(callbackGap / expectedFrameDurationMs)) : 1;
+  const dropped = previous.lastCallbackAtMs == null ? 0 : Math.max(0, intervals - 1);
+  const processedFrames = previous.processedFrames + 1;
+  return {
+    lastCallbackAtMs: callbackAtMs,
+    processedFrames,
+    droppedFrames: previous.droppedFrames + dropped,
+    averageProcessingLatencyMs: previous.averageProcessingLatencyMs + (safeLatency - previous.averageProcessingLatencyMs) / processedFrames,
+    maxProcessingLatencyMs: Math.max(previous.maxProcessingLatencyMs, safeLatency),
+  };
 }
 
 export interface PitchFrameFlushResult {
@@ -82,6 +123,10 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     sentFrames: 0,
     droppedFrames: 0,
     detectorSource: 'guest demo',
+    processingLatencyMs: 0,
+    averageProcessingLatencyMs: 0,
+    maxProcessingLatencyMs: 0,
+    audioContextState: 'demo',
   });
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -107,6 +152,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const pendingPersistQueueRef = useRef<PendingPersistFrameQueue>({ sessionId: null, frames: [] });
   const flushTimerRef = useRef<number | null>(null);
   const flushPromiseRef = useRef<Promise<PitchFrameFlushResult> | null>(null);
+  const audioFrameTimingRef = useRef<AudioFrameTimingObservation>(EMPTY_AUDIO_FRAME_TIMING);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -244,7 +290,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   useEffect(() => {
     if (!enabled || !demoMode) return;
     setStatusMessage('Guest demo mode is ready. Pitch data is simulated on this device.');
-    setStreamInfo((old) => ({ ...old, sampleRate: null, detectorSource: 'guest demo' }));
+    setStreamInfo((old) => ({ ...old, sampleRate: null, detectorSource: 'guest demo', audioContextState: 'demo' }));
     const timer = window.setInterval(() => {
       const frame = nextDemoPitchFrame(indexRef.current, instrumentId, referencePitch);
       indexRef.current += 1;
@@ -258,12 +304,14 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     setHistory([]);
   }, [demoMode]);
 
-  const cleanupMicrophone = useCallback((message?: string) => {
+  const cleanupMicrophone = useCallback((message?: string, finalState?: PitchStreamInfo['audioContextState']) => {
     microphoneGenerationRef.current += 1;
+    if (processorRef.current) processorRef.current.onaudioprocess = null;
     processorRef.current?.disconnect();
     sourceRef.current?.disconnect();
     monitorGainRef.current?.disconnect();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    if (audioContextRef.current) audioContextRef.current.onstatechange = null;
     audioContextRef.current?.close().catch(() => undefined);
     processorRef.current = null;
     sourceRef.current = null;
@@ -273,11 +321,17 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     microphoneStartingRef.current = false;
     microphoneStartPromiseRef.current = null;
     analyzedMsRef.current = 0;
+    audioFrameTimingRef.current = EMPTY_AUDIO_FRAME_TIMING;
     if (mountedRef.current) {
       setMediaStream(null);
       setMicActive(false);
       if (message) setStatusMessage(message);
-      setStreamInfo((old) => ({ ...old, sampleRate: null, detectorSource: demoModeRef.current ? 'guest demo' : 'browser local pitch' }));
+      setStreamInfo((old) => ({
+        ...old,
+        sampleRate: null,
+        detectorSource: demoModeRef.current ? 'guest demo' : 'browser local pitch',
+        audioContextState: finalState ?? (demoModeRef.current ? 'demo' : 'closed'),
+      }));
     }
   }, []);
 
@@ -308,11 +362,13 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
 
     const AudioContextClass = audioContextConstructor();
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextClass) {
+      setStreamInfo((old) => ({ ...old, audioContextState: 'unavailable' }));
       setStatusMessage('Microphone input is unavailable in this browser. Guest demo practice still works on this device.');
       return null;
     }
     const generation = ++microphoneGenerationRef.current;
     microphoneStartingRef.current = true;
+    setStreamInfo((old) => ({ ...old, audioContextState: 'starting' }));
     setStatusMessage('Asking for microphone access.');
     const promise = (async (): Promise<MediaStream | null> => {
       let stream: MediaStream | null = null;
@@ -325,6 +381,11 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         }
 
         audioContext = new AudioContextClass();
+        audioContext.onstatechange = () => {
+          if (mountedRef.current && generation === microphoneGenerationRef.current) {
+            setStreamInfo((old) => ({ ...old, audioContextState: audioContext?.state ?? 'closed' }));
+          }
+        };
         const source = audioContext.createMediaStreamSource(stream);
         const processor = audioContext.createScriptProcessor(AUDIO_FRAME_SIZE, 1, 1);
         const monitorGain = audioContext.createGain();
@@ -348,10 +409,22 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         processorRef.current = processor;
         monitorGainRef.current = monitorGain;
         setMediaStream(stream);
-        setStreamInfo((old) => ({ ...old, sampleRate: audioContext?.sampleRate ?? null, detectorSource: 'browser local pitch', sentFrames: 0, droppedFrames: 0 }));
+        audioFrameTimingRef.current = EMPTY_AUDIO_FRAME_TIMING;
+        setStreamInfo((old) => ({
+          ...old,
+          sampleRate: audioContext?.sampleRate ?? null,
+          detectorSource: 'browser local pitch',
+          sentFrames: 0,
+          droppedFrames: 0,
+          processingLatencyMs: 0,
+          averageProcessingLatencyMs: 0,
+          maxProcessingLatencyMs: 0,
+          audioContextState: audioContext?.state ?? 'closed',
+        }));
 
         processor.onaudioprocess = (event) => {
           if (!mountedRef.current || generation !== microphoneGenerationRef.current) return;
+          const callbackAtMs = performance.now();
           const input = event.inputBuffer.getChannelData(0);
           const pcm = new Float32Array(input);
           analyzedMsRef.current += (pcm.length / audioContext!.sampleRate) * 1000;
@@ -362,7 +435,22 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
             referencePitchRef.current,
             Math.round(analyzedMsRef.current),
           );
-          setStreamInfo((old) => ({ ...old, sentFrames: old.sentFrames + 1 }));
+          const processingLatencyMs = Math.max(0, performance.now() - callbackAtMs);
+          const timing = observeAudioFrameTiming(
+            audioFrameTimingRef.current,
+            callbackAtMs,
+            processingLatencyMs,
+            (AUDIO_FRAME_SIZE / audioContext!.sampleRate) * 1000,
+          );
+          audioFrameTimingRef.current = timing;
+          setStreamInfo((old) => ({
+            ...old,
+            sentFrames: timing.processedFrames,
+            droppedFrames: timing.droppedFrames,
+            processingLatencyMs,
+            averageProcessingLatencyMs: timing.averageProcessingLatencyMs,
+            maxProcessingLatencyMs: timing.maxProcessingLatencyMs,
+          }));
           handleFrame(frame);
           if (frame.is_valid_for_recording) {
             setStatusMessage('Sound detected. Tracking pitch now.');
@@ -390,7 +478,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
         return stream;
       } catch {
         if (generation === microphoneGenerationRef.current) {
-          cleanupMicrophone('Microphone blocked or unavailable. Guest demo practice still works on this device.');
+          cleanupMicrophone('Microphone blocked or unavailable. Guest demo practice still works on this device.', 'error');
         } else {
           stream?.getTracks().forEach((track) => track.stop());
           await audioContext?.close().catch(() => undefined);
