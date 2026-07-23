@@ -20,7 +20,13 @@
 .practice-saved-list > div { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 0.4rem; }
 .practice-preset-list { display: grid; gap: 0.4rem; }
 .practice-preset-list > div { display: flex; align-items: center; gap: 0.35rem; border-top: 1px solid var(--line); padding-top: 0.45rem; }
-.practice-preset-list .link-button { flex: 1; text-align: left; }
+.practice-preset-list .link-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap, 44px);
+  flex: 1;
+  text-align: start;
+}
 .practice-reflection-list { display: grid; gap: 0.7rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .practice-reflection-list h3 { margin: 0; font-size: 0.95rem; }
 .practice-reflection { display: grid; gap: 0.6rem; padding: 0.8rem; border: 1px solid var(--line); border-radius: 0.85rem; background: var(--surface-raised); }
@@ -30,7 +36,7 @@
 .practice-pack { display: grid; grid-template-columns: auto 1fr auto; gap: 0.8rem; align-items: center; padding: 0.85rem; border: 1px solid var(--line); border-radius: 1rem; }
 .practice-pack h3, .practice-pack p { margin: 0; }
 .practice-pack p, .practice-pack small { color: var(--muted); }
-.focus-workspace { position: fixed; z-index: 70; inset: auto 1rem 1rem calc(var(--sidebar-width, 0px) + 1rem); display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.85rem 1rem; border: 1px solid var(--gold); border-radius: 1rem; background: var(--surface); box-shadow: 0 10px 40px rgb(0 0 0 / 0.25); }
+.focus-workspace { position: fixed; z-index: 70; inset-block-end: 1rem; inset-inline-start: calc(var(--sidebar-width, 0px) + 1rem); inset-inline-end: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.85rem 1rem; border: 1px solid var(--gold); border-radius: 1rem; background: var(--surface); box-shadow: 0 10px 40px rgb(0 0 0 / 0.25); }
 .focus-workspace > div:first-child { min-width: 0; display: grid; gap: 0.12rem; }
 .focus-workspace small, .focus-workspace span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focus-workspace-progress { font-size: 0.75rem; font-variant-numeric: tabular-nums; }
@@ -38,7 +44,7 @@
 .focus-workspace-actions { display: flex; flex: 0 0 auto; gap: 0.5rem; }
 .app-shell.focus-mode .content { padding-bottom: 9rem; }
 @media (max-width: 860px) {
-  .focus-workspace { inset: auto 0.5rem 0.5rem; flex-direction: column; align-items: stretch; }
+  .focus-workspace { inset-block-end: 0.5rem; inset-inline: 0.5rem; flex-direction: column; align-items: stretch; }
   .focus-workspace-actions { justify-content: stretch; }
   .focus-workspace-actions button { flex: 1; }
   .app-shell.focus-mode .floating-tab-bar { display: none; }

@@ -10,7 +10,6 @@ import { useI18n } from './i18n/LocaleContext';
 
 const AdminMetricsPage = lazy(() => import('./pages/AdminMetricsPage').then((module) => ({ default: module.AdminMetricsPage })));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })));
-const AudioLabPage = lazy(() => import('./pages/AudioLabPage').then((module) => ({ default: module.AudioLabPage })));
 const CoachPage = lazy(() => import('./pages/CoachPage').then((module) => ({ default: module.CoachPage })));
 const EnsemblePage = lazy(() => import('./pages/EnsemblePage').then((module) => ({ default: module.EnsemblePage })));
 const LegalPage = lazy(() => import('./pages/LegalPage').then((module) => ({ default: module.LegalPage })));
@@ -80,7 +79,8 @@ export default function App() {
           <Route path="/coach" element={appRoute(<CoachPage />)} />
           <Route path="/ensemble" element={appRoute(<EnsemblePage />)} />
           <Route path="/settings" element={appRoute(<SettingsPage />)} />
-          <Route path="/settings/audio-lab" element={appRoute(<AudioLabPage />)} />
+          {/* Retire the developer diagnostics page from normal navigation. */}
+          <Route path="/settings/audio-lab" element={appRoute(<Navigate to="/settings" replace />)} />
           <Route path="/admin" element={appRoute(<AdminMetricsPage />)} />
           <Route path="/privacy" element={<LegalPage kind="privacy" />} />
           <Route path="/terms" element={<LegalPage kind="terms" />} />

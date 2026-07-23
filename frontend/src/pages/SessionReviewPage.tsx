@@ -257,7 +257,11 @@ export function SessionReviewPage() {
         <SectionCard title={t('sessionReview.nextWork')}>
           <div className="recommendation-grid">
             {recommendations.map((recommendation) => (
-              <RecommendationCard key={`${recommendation.related_note}-${recommendation.category}`} recommendation={recommendation} />
+              <RecommendationCard
+                key={`${recommendation.related_note}-${recommendation.category}`}
+                recommendation={recommendation}
+                localizeGuestRecommendation={Boolean(session.guest_session)}
+              />
             ))}
           </div>
         </SectionCard>

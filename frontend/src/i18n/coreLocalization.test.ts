@@ -81,4 +81,9 @@ describe('core routed localization coverage', () => {
       expect(fileSource, fileName).toContain('useI18n');
     }
   });
+
+  it('renders persisted guest recommendations through locale-backed copy in session review', () => {
+    expect(recommendationSource).toContain('useI18n');
+    expect(sessionReviewSource).toContain('localizeGuestRecommendation={Boolean(session.guest_session)}');
+  });
 });
