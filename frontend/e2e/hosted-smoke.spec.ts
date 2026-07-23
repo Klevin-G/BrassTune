@@ -11,6 +11,10 @@ const webBaseURL = process.env.E2E_BASE_URL;
 const productionHostedAuth = hostedMode && webBaseURL
   ? new URL(webBaseURL).hostname === 'brasstune.vercel.app'
   : false;
+const harmlessBrowserErrors = new Set([
+  'ResizeObserver loop completed with undelivered notifications.',
+  'ResizeObserver loop limit exceeded',
+]);
 
 const routes = [
   '/',
@@ -149,7 +153,7 @@ test.describe('hosted read-only smoke', () => {
       await expect(page.locator('body')).not.toContainText(/vercel authentication|log in to vercel|single sign-on|authentication required/i);
     }
 
-    expect(consoleErrors.filter((message) => !/favicon|ResizeObserver/i.test(message))).toEqual([]);
+    expect(consoleErrors.filter((message) => !harmlessBrowserErrors.has(message))).toEqual([]);
   });
 
   test('hosted runtime URLs do not fall back to localhost or Vercel same-origin API paths', async ({ page }) => {

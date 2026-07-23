@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,6 +75,26 @@ async function isReachable(url) {
   }
 }
 
+export function assertSimulationPortsAvailable({ apiReachable, appReachable }) {
+  const occupied = [apiReachable ? apiUrl : null, appReachable ? appUrl : null].filter(Boolean);
+  if (occupied.length > 0) {
+    throw new Error(`Device simulation refuses to reuse unverified servers at ${occupied.join(', ')}. Stop them so this checkout can start and own both servers.`);
+  }
+}
+
+export function formatCheckoutIdentity(sha, dirty) {
+  return `${sha}${dirty ? ' (dirty worktree)' : ' (clean worktree)'}`;
+}
+
+function currentCheckoutIdentity() {
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: rootDir, encoding: 'utf8', shell: false });
+  const status = spawnSync('git', ['status', '--porcelain'], { cwd: rootDir, encoding: 'utf8', shell: false });
+  if (revision.status !== 0 || status.status !== 0) {
+    throw new Error('Device simulation could not verify the checkout Git identity.');
+  }
+  return { sha: revision.stdout.trim(), dirty: status.stdout.trim().length > 0 };
+}
+
 async function waitFor(url, label, timeoutMs = 20000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -122,25 +142,23 @@ async function backendServerCommand() {
 async function ensureServers() {
   const started = [];
   try {
-    if (!(await isReachable(apiUrl))) {
-      const backend = await backendServerCommand();
-      started.push(spawnServer(backend.command, backend.args, backendDir, {
-        APP_ENV: 'local',
-        FRONTEND_ORIGIN: appUrl,
-        CORS_ALLOWED_ORIGINS: `${appUrl},http://localhost:5173,http://127.0.0.1:5173`,
-      }));
-    }
-    if (!(await isReachable(appUrl))) {
-      const viteBin = path.join(frontendDir, 'node_modules', 'vite', 'bin', 'vite.js');
-      started.push(spawnServer(process.execPath, [viteBin, '--host', '127.0.0.1', '--port', '5173'], frontendDir, {
-        VITE_API_BASE_URL: 'http://127.0.0.1:8000',
-        VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
-        VITE_SUPABASE_URL: '',
-        VITE_SUPABASE_PUBLISHABLE_KEY: '',
-        VITE_E2E_DISABLE_SUPABASE: 'true',
-        VITE_ENABLE_INTERNAL_TOOLS: 'false',
-      }));
-    }
+    const [apiReachable, appReachable] = await Promise.all([isReachable(apiUrl), isReachable(appUrl)]);
+    assertSimulationPortsAvailable({ apiReachable, appReachable });
+    const backend = await backendServerCommand();
+    started.push(spawnServer(backend.command, backend.args, backendDir, {
+      APP_ENV: 'local',
+      FRONTEND_ORIGIN: appUrl,
+      CORS_ALLOWED_ORIGINS: `${appUrl},http://localhost:5173,http://127.0.0.1:5173`,
+    }));
+    const viteBin = path.join(frontendDir, 'node_modules', 'vite', 'bin', 'vite.js');
+    started.push(spawnServer(process.execPath, [viteBin, '--host', '127.0.0.1', '--port', '5173'], frontendDir, {
+      VITE_API_BASE_URL: 'http://127.0.0.1:8000',
+      VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_PUBLISHABLE_KEY: '',
+      VITE_E2E_DISABLE_SUPABASE: 'true',
+      VITE_ENABLE_INTERNAL_TOOLS: 'false',
+    }));
     await waitFor(apiUrl, 'FastAPI');
     await waitFor(appUrl, 'Vite');
     return started;
@@ -465,11 +483,12 @@ async function runViewport(browser, viewport) {
   return { viewport, issues, screenshots, routes };
 }
 
-async function writeReport(results) {
+async function writeReport(results, checkoutIdentity) {
   const lines = [
     '# Device Simulation Report',
     '',
     `Generated: ${new Date().toISOString()}`,
+    `Checkout: ${formatCheckoutIdentity(checkoutIdentity.sha, checkoutIdentity.dirty)}`,
     '',
     'The committed Playwright harness was used for repeatable multi-viewport browser automation.',
     '',
@@ -495,6 +514,8 @@ async function writeReport(results) {
 }
 
 async function main() {
+  const checkoutIdentity = currentCheckoutIdentity();
+  console.log(`Device simulation checkout: ${formatCheckoutIdentity(checkoutIdentity.sha, checkoutIdentity.dirty)}`);
   await fs.mkdir(screenshotDir, { recursive: true });
   await fs.rm(screenshotDir, { recursive: true, force: true });
   await fs.mkdir(screenshotDir, { recursive: true });
@@ -520,7 +541,7 @@ async function main() {
       cleanupError ??= error;
     }
   }
-  await writeReport(results);
+  await writeReport(results, checkoutIdentity);
   if (cleanupError) throw cleanupError;
   const failures = results.filter((result) => result.issues.length > 0);
   if (failures.length > 0) {

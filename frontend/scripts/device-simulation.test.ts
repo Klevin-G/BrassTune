@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  assertSimulationPortsAvailable,
   dismissOnboardingDialog,
+  formatCheckoutIdentity,
   selectViewports,
   trackConditionalRoute,
   trackVerifiedRoute,
@@ -91,5 +93,16 @@ describe('device simulation route evidence', () => {
     expect(() => selectViewports(configured, 'iphone-modern')).toThrow(
       'Unknown device simulation viewport: iphone-modern',
     );
+  });
+
+  it('refuses unverified existing servers and reports the exact checkout identity', () => {
+    expect(() => assertSimulationPortsAvailable({ apiReachable: true, appReachable: false })).toThrow(
+      /refuses to reuse unverified servers.*8000/,
+    );
+    expect(() => assertSimulationPortsAvailable({ apiReachable: false, appReachable: true })).toThrow(
+      /refuses to reuse unverified servers.*5173/,
+    );
+    expect(() => assertSimulationPortsAvailable({ apiReachable: false, appReachable: false })).not.toThrow();
+    expect(formatCheckoutIdentity('abc123', true)).toBe('abc123 (dirty worktree)');
   });
 });

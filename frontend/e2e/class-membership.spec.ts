@@ -45,6 +45,8 @@ type FixtureOptions = {
   onboardingCompletedAt?: string | null;
   onboardingUpdateFailures?: number;
   onboardingUpdateDelayMs?: number;
+  initialProfileFailures?: number;
+  holdProfileUntilReleased?: boolean;
 };
 
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -65,6 +67,7 @@ export const supabase = {
 `;
 
 async function installSignedInClassFixture(page: Page, options: FixtureOptions = {}) {
+  let profileFailureReleased = false;
   let onboardingCompletedAt = options.onboardingCompletedAt === undefined
     ? '2026-07-16T12:00:00Z'
     : options.onboardingCompletedAt;
@@ -85,6 +88,10 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
     leaves: 0,
     removes: 0,
     onboardingUpdates: 0,
+    profileLoads: 0,
+    releaseProfileFailure: () => {
+      profileFailureReleased = true;
+    },
     joinPayload: null as { code?: string; instrument_id?: string } | null,
   };
 
@@ -104,6 +111,13 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
 
     if (path === '/api/instruments') return respond([]);
     if (path === '/api/users/current') {
+      counters.profileLoads += 1;
+      if (
+        (options.holdProfileUntilReleased && !profileFailureReleased) ||
+        counters.profileLoads <= (options.initialProfileFailures ?? 0)
+      ) {
+        return respond({ detail: 'Temporary profile failure.' }, 503);
+      }
       return respond({
         id: 99,
         supabase_user_id: 'class-user',
@@ -364,6 +378,48 @@ async function installAccountSwitchFixture(
 
   return counters;
 }
+
+test('a restored session profile failure keeps recovery controls visible and retries without crossing practice owners', async ({ page }) => {
+  const counters = await installSignedInClassFixture(page, { holdProfileUntilReleased: true });
+  await page.addInitScript(() => {
+    const library = (label: string) => JSON.stringify({
+      version: 1,
+      customExercises: [],
+      metronomePresets: [],
+      favorites: [],
+      recents: [],
+      reflections: [],
+      warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-23T00:00:00.000Z' },
+      weeklyGoal: { week: '2026-07-20', targetMinutes: label === 'account' ? 91 : 37, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
+    });
+    localStorage.setItem('brasstune.practiceLibrary.v1.guest', library('guest'));
+    localStorage.setItem('brasstune.practiceLibrary.v1.account%3A99', library('account'));
+  });
+
+  await page.goto('/practice');
+  await expect(page.getByRole('heading', { name: 'We could not finish restoring your account' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue as guest' })).toBeVisible();
+  await expect(page.getByText('Live mic', { exact: true })).toHaveCount(0);
+  const beforeRetry = await page.evaluate(() => ({
+    guest: localStorage.getItem('brasstune.practiceLibrary.v1.guest'),
+    account: localStorage.getItem('brasstune.practiceLibrary.v1.account%3A99'),
+  }));
+
+  counters.releaseProfileFailure();
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText('Live mic', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Goal in minutes')).toHaveValue('91');
+  expect(counters.profileLoads).toBeGreaterThan(1);
+  const afterRetry = await page.evaluate(() => ({
+    guest: localStorage.getItem('brasstune.practiceLibrary.v1.guest'),
+    account: localStorage.getItem('brasstune.practiceLibrary.v1.account%3A99'),
+  }));
+  expect(afterRetry.guest).toBe(beforeRetry.guest);
+  expect(JSON.parse(afterRetry.guest ?? '{}').weeklyGoal.targetMinutes).toBe(37);
+  expect(JSON.parse(afterRetry.account ?? '{}').weeklyGoal.targetMinutes).toBe(91);
+});
 
 test('switching Supabase users clears the prior profile and class data before reloading', async ({ page }) => {
   const counters = await installAccountSwitchFixture(page);

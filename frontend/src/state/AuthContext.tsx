@@ -4,6 +4,7 @@ import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/cl
 import { apiBase } from '../api/runtimeConfig';
 import { authProviders, supabase, supabaseConfigured } from '../lib/supabase';
 import { clearAccountPracticeState } from '../domain/practiceLibrary';
+import { passwordResetRedirectURL } from '../domain/authNavigation';
 
 interface BackendProfile {
   id: number;
@@ -43,7 +44,7 @@ interface AuthState {
   signUp: (payload: SignUpPayload) => Promise<void>;
   signInWithGoogle: (redirectTo?: string) => Promise<void>;
   signInWithApple: (redirectTo?: string) => Promise<void>;
-  requestPasswordReset: (email: string) => Promise<void>;
+  requestPasswordReset: (email: string, next?: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
   deleteAccount: (confirmation: string) => Promise<{ deletionStatus?: string }>;
@@ -314,11 +315,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const requestPasswordReset = useCallback(async (email: string) => {
+  const requestPasswordReset = useCallback(async (email: string, next = '/home') => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/reset-password`,
+        redirectTo: passwordResetRedirectURL(next, window.location.origin),
       });
       if (error) throw error;
     } catch (error) {

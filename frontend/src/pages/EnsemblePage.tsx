@@ -418,7 +418,7 @@ export function EnsemblePage() {
       }
       if (!isCurrentMutation(token)) return;
       if (!await reloadForMutation(token, accept ? invitation.group_id : undefined)) return;
-      setEnsembleStatus(accept ? `You joined “${invitation.group_name}”.` : `You declined “${invitation.group_name}”.`);
+      setEnsembleStatus(t(accept ? 'class.joined' : 'class.declined', { name: invitation.group_name }));
     } catch (error) {
       if (isCurrentMutation(token)) {
         setEnsembleStatus(localizedError(error, 'class.errorInvitation'));
@@ -454,7 +454,7 @@ export function EnsemblePage() {
       setJoinInstrument('');
       setShowJoin(false);
       if (!await reloadForMutation(token, result.group_id)) return;
-      setEnsembleStatus(`You joined “${result.group_name}”.`);
+      setEnsembleStatus(t('class.joined', { name: result.group_name }));
       if (searchParams.has('join')) {
         const next = new URLSearchParams(searchParams);
         next.delete('join');
@@ -495,7 +495,7 @@ export function EnsemblePage() {
       await auth.refreshProfile().catch(() => undefined);
       if (!isCurrentMutation(token)) return;
       if (!await reloadForMutation(token, group.id)) return;
-      setEnsembleStatus(`“${group.name}” is ready. Add students below.`);
+      setEnsembleStatus(t('class.created', { name: group.name }));
     } catch (error) {
       if (isCurrentMutation(token)) {
         setEnsembleStatus(localizedError(error, 'class.errorCreate'));
@@ -563,7 +563,7 @@ export function EnsemblePage() {
       await removeEnsembleMember(groupId, memberId);
       if (!isCurrentMutation(token)) return;
       if (!await reloadGroupForMutation(token, groupId)) return;
-      setEnsembleStatus(`${label} removed.`);
+      setEnsembleStatus(t('class.removed', { name: label }));
     } catch (error) {
       if (isCurrentMutation(token)) {
         setEnsembleStatus(localizedError(error, 'class.errorRemove'));
@@ -588,7 +588,7 @@ export function EnsemblePage() {
       await leaveEnsembleGroup(leaving.groupId);
       if (!isCurrentMutation(token)) return;
       if (!await reloadForMutation(token)) return;
-      setEnsembleStatus(`You left “${leaving.label}”.`);
+      setEnsembleStatus(t('class.left', { name: leaving.label }));
     } catch (error) {
       if (isCurrentMutation(token)) {
         setEnsembleStatus(localizedError(error, 'class.errorLeave'));

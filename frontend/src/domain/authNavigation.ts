@@ -56,6 +56,12 @@ export function gatewayPathWithReturn(next: string): string {
   return `/?next=${encodeURIComponent(safeReturnPath(next))}`;
 }
 
+export function passwordResetRedirectURL(next: string, origin = currentOrigin()): string {
+  const redirect = new URL('/auth/reset-password', origin);
+  redirect.searchParams.set('next', safeReturnPath(next, origin));
+  return redirect.toString();
+}
+
 export function rememberPendingAuthReturn(next: string): void {
   try {
     sessionStorage.setItem(PENDING_AUTH_RETURN_KEY, safeReturnPath(next));

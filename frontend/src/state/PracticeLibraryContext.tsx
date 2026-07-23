@@ -20,6 +20,7 @@ import {
   type PracticeWorkspace,
   type WarmupProgress,
 } from '../domain/practiceLibrary';
+import { useI18n } from '../i18n/LocaleContext';
 import { useAuth } from './AuthContext';
 
 interface PracticeLibraryState {
@@ -53,6 +54,23 @@ interface LoadedPracticeState {
   workspace: PracticeWorkspace | null;
 }
 
+export function practiceLibraryGateState({
+  loading,
+  hasAuthSession,
+  hasProfile,
+  ownerReady,
+}: {
+  loading: boolean;
+  hasAuthSession: boolean;
+  hasProfile: boolean;
+  ownerReady: boolean;
+}): 'loading' | 'recovery' | 'ready' {
+  if (loading) return 'loading';
+  if (hasAuthSession && !hasProfile) return 'recovery';
+  if (!ownerReady) return 'loading';
+  return 'ready';
+}
+
 function createId(prefix: string): string {
   const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -73,8 +91,71 @@ function readWorkspace(ownerId: string): PracticeWorkspace | null {
   }
 }
 
+function UnresolvedIdentityRecovery({
+  retry,
+  signOut,
+  continueAsGuest,
+}: {
+  retry: () => Promise<void>;
+  signOut: () => Promise<void>;
+  continueAsGuest: () => void;
+}) {
+  const { t } = useI18n();
+  const [busyAction, setBusyAction] = useState<'retry' | 'sign-out' | 'guest' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const retryProfile = async () => {
+    if (busyAction) return;
+    setBusyAction('retry');
+    setActionError(null);
+    try {
+      await retry();
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const leaveAccount = async (asGuest: boolean) => {
+    if (busyAction) return;
+    setBusyAction(asGuest ? 'guest' : 'sign-out');
+    setActionError(null);
+    try {
+      await signOut();
+    } catch {
+      if (!asGuest) setActionError(t('settings.signOutFailed'));
+    } finally {
+      if (asGuest) continueAsGuest();
+      setBusyAction(null);
+    }
+  };
+
+  return (
+    <main className="content" id="main-content" tabIndex={-1}>
+      <section className="section-card" aria-labelledby="identity-recovery-title" aria-busy={busyAction != null}>
+        <p className="eyebrow">BrassTune</p>
+        <h1 id="identity-recovery-title">{t('auth.profileRecoveryTitle')}</h1>
+        <p>{t('auth.profileRecoveryBody')}</p>
+        <div className="alert" role="status">{t('error.authUnavailable')}</div>
+        {actionError && <div className="alert" role="alert">{actionError}</div>}
+        <div className="button-row">
+          <button className="primary-button" type="button" disabled={busyAction != null} onClick={() => void retryProfile()}>
+            {busyAction === 'retry' ? t('auth.restore') : t('auth.tryAgain')}
+          </button>
+          <button className="ghost-button" type="button" disabled={busyAction != null} onClick={() => void leaveAccount(false)}>
+            {t('settings.signOut')}
+          </button>
+          <button className="ghost-button" type="button" disabled={busyAction != null} onClick={() => void leaveAccount(true)}>
+            {t('auth.continueGuest')}
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
+  const { t } = useI18n();
   const ownerId = resolvePracticeOwner({ loading: auth.loading, hasAuthSession: auth.hasAuthSession, isSignedIn: auth.isSignedIn, profileId: auth.profile?.id });
   const [loadedState, setLoadedState] = useState<LoadedPracticeState>(() => ({
     ownerId,
@@ -261,7 +342,24 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
     exitWorkspace,
   }), [deleteExercise, deleteMetronomePreset, deleteReflection, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
 
-  if (!ownerReady) return null;
+  const gateState = practiceLibraryGateState({
+    loading: auth.loading,
+    hasAuthSession: auth.hasAuthSession,
+    hasProfile: auth.profile != null,
+    ownerReady,
+  });
+  if (gateState === 'loading') {
+    return <div className="route-loading" role="status">{t('loading.session')}</div>;
+  }
+  if (gateState === 'recovery') {
+    return (
+      <UnresolvedIdentityRecovery
+        retry={auth.refreshProfile}
+        signOut={auth.signOut}
+        continueAsGuest={auth.continueAsGuest}
+      />
+    );
+  }
   return <PracticeLibraryContext.Provider value={value}>{children}</PracticeLibraryContext.Provider>;
 }
 

@@ -23,14 +23,31 @@ const SessionReviewPage = lazy(() => import('./pages/SessionReviewPage').then((m
 const SessionsPage = lazy(() => import('./pages/SessionsPage').then((module) => ({ default: module.SessionsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })));
 
+export function appRouteAccessState({
+  loading,
+  hasAuthSession,
+  isSignedIn,
+  guestMode,
+}: {
+  loading: boolean;
+  hasAuthSession: boolean;
+  isSignedIn: boolean;
+  guestMode: boolean;
+}): 'loading' | 'allow' | 'redirect' {
+  if (loading) return 'loading';
+  if (hasAuthSession || isSignedIn || guestMode) return 'allow';
+  return 'redirect';
+}
+
 function RequireAppAccess({ children }: { children: JSX.Element }) {
   const auth = useAuth();
   const location = useLocation();
   const { t } = useI18n();
-  if (auth.loading) {
+  const accessState = appRouteAccessState(auth);
+  if (accessState === 'loading') {
     return <div className="route-loading" role="status">{t('loading.session')}</div>;
   }
-  if (auth.isSignedIn || auth.guestMode) {
+  if (accessState === 'allow') {
     return children;
   }
   return <Navigate to={gatewayPathWithReturn(`${location.pathname}${location.search}${location.hash}`)} replace />;

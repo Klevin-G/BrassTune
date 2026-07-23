@@ -123,6 +123,17 @@ function localizedAuthError(error: unknown, t: ReturnType<typeof useI18n>['t']):
   return t('auth.failure');
 }
 
+export function localizedOAuthError(
+  error: unknown,
+  t: ReturnType<typeof useI18n>['t'],
+  providerFailure: 'auth.googleFailure' | 'auth.appleFailure',
+): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (message.includes('cancel') || message.includes('popup closed')) return t('auth.errorCancelled');
+  if (message.includes('network') || message.includes('fetch') || message.includes('reach the server')) return t('auth.errorNetwork');
+  return t(providerFailure);
+}
+
 export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'callback' }) {
   const auth = useAuth();
   const { locale, t } = useI18n();
@@ -220,7 +231,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
         setNewPassword('');
       } else {
         rememberPendingAuthReturn(next);
-        await auth.requestPasswordReset(email);
+        await auth.requestPasswordReset(email, next);
         setMessage({ type: 'success', text: t('auth.resetSent') });
       }
     } catch (error) {
@@ -329,7 +340,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                     onClick={() =>
                       auth
                         .signInWithGoogle(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`)
-                        .catch((error) => setMessage({ type: 'error', text: error instanceof Error ? error.message : t('auth.googleFailure') }))
+                        .catch((error) => setMessage({ type: 'error', text: localizedOAuthError(error, t, 'auth.googleFailure') }))
                     }
                   >
                     <GoogleIcon size={18} />
@@ -453,7 +464,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                     onClick={() =>
                       auth
                         .signInWithApple(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`)
-                        .catch((error) => setMessage({ type: 'error', text: error instanceof Error ? error.message : t('auth.appleFailure') }))
+                        .catch((error) => setMessage({ type: 'error', text: localizedOAuthError(error, t, 'auth.appleFailure') }))
                     }
                   >
                     <ShieldCheck size={18} />

@@ -30,15 +30,19 @@ export function isVercelHostedOrigin(hostname = currentHostname()) {
   return hostname.endsWith('.vercel.app');
 }
 
+export function defaultApiBase(hostname: string, production: boolean) {
+  if (isKnownBrassTuneHostedOrigin(hostname)) return HOSTED_RENDER_API_BASE;
+  return production ? UNRESOLVED_BASE : '';
+}
+
 export function apiBase() {
   if (CONFIGURED_API_BASE) return cleanBase(CONFIGURED_API_BASE);
   // The frontend (Vercel) calls the Render backend cross-origin. VITE_API_BASE_URL
   // is the primary source (baked at build time); this hosted default is a safety net
   // so a Vercel production/preview build still reaches the backend if the env is absent.
-  if (isKnownBrassTuneHostedOrigin() || isVercelHostedOrigin()) return HOSTED_RENDER_API_BASE;
-  // Unknown origin: same-origin ('') is only acceptable during local development.
-  // In a production build we must never silently hit an unconfigured host.
-  return import.meta.env.PROD ? UNRESOLVED_BASE : '';
+  // Unknown origins, including unrelated *.vercel.app deployments, must never
+  // inherit the BrassTune backend. Same-origin ('') is local-development only.
+  return defaultApiBase(currentHostname(), import.meta.env.PROD);
 }
 
 export function wsBase() {
@@ -57,7 +61,7 @@ export function runtimeDiagnostics() {
     apiConfigured: Boolean(CONFIGURED_API_BASE),
     wsConfigured: Boolean(CONFIGURED_WS_BASE),
     usingKnownHostedFallback: !CONFIGURED_API_BASE && isKnownBrassTuneHostedOrigin(),
-    usingVercelHostedFallback: !CONFIGURED_API_BASE && isVercelHostedOrigin(),
+    usingVercelHostedFallback: !CONFIGURED_API_BASE && isKnownBrassTuneHostedOrigin(),
     hostname: currentHostname(),
   };
 }

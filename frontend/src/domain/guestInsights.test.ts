@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { nextDemoPitchFrame } from './demoPitch';
 import { buildGuestHeatmap, buildGuestNoteStats, buildGuestPracticePlan, buildGuestProgress, buildGuestRecommendations } from './guestInsights';
 import { GUEST_WORKSPACE_ACCESS, clearGuestSessions, createGuestSession, saveGuestSessionFromFrames } from './guestSessions';
+import type { MessageId } from '../i18n/messages.base';
 
 describe('guest insights', () => {
   afterEach(() => {
@@ -41,6 +42,39 @@ describe('guest insights', () => {
 
     expect(buildGuestProgress('trumpet', buildGuestNoteStats('trumpet')).session_count).toBe(1);
     expect(buildGuestProgress('horn', buildGuestNoteStats('horn')).session_count).toBe(0);
+  });
+
+  it('localizes generated guest coaching while preserving note names and formatting selected-locale dates', () => {
+    saveGuestSessionFromFrames(
+      { ...createGuestSession('trumpet', 440, 'Localized take'), started_at: '2026-07-21T12:00:00.000Z', created_at: '2026-07-21T12:00:00.000Z' },
+      Array.from({ length: 80 }, (_, index) => nextDemoPitchFrame(index, 'trumpet', 440)),
+    );
+    const formattedDates: string[] = [];
+    const localizer = {
+      t: (id: MessageId, values?: Record<string, string | number>) => (
+        values?.note ? `${id}:${values.note}` : id
+      ),
+      formatDate: (value: Date | number | string) => {
+        formattedDates.push(String(value));
+        return '21 jul';
+      },
+    };
+
+    const stats = buildGuestNoteStats('trumpet', undefined, localizer);
+    const recommendations = buildGuestRecommendations(stats, localizer);
+    const plan = buildGuestPracticePlan(stats, 'trumpet', localizer);
+    const progress = buildGuestProgress('trumpet', stats, undefined, localizer);
+    const heatmap = buildGuestHeatmap('trumpet', stats, localizer);
+
+    expect(stats[0].trend).toMatch(/^(progress|tuning|sessionReview)\./);
+    expect(recommendations[0].title).toBe(`progress.needsMostWork:${recommendations[0].related_note}`);
+    expect(plan?.title).toBe('progress.plan');
+    expect(plan?.focus_notes[0]).toMatch(/^[A-G](?:b|#)?\d$/);
+    expect(progress.timeseries[0].period).toBe('21 jul');
+    expect(progress.consistency.practice_days_label).toBe('guestInsights.practiceDays');
+    expect(progress.period?.current).toBe('nav.guest');
+    expect(formattedDates).toEqual(['2026-07-21T12:00:00.000Z']);
+    expect(heatmap.find((row) => !row.has_data)?.recommendation_summary).toBe('progress.notTriedBody');
   });
 
   it('filters guest analytics by date range and ignores malformed local rows', () => {

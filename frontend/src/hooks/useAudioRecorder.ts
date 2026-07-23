@@ -1,9 +1,19 @@
 import { useCallback, useRef, useState } from 'react';
 import { friendlyUserFacingError, uploadSessionAudio, type SessionAudioUploadResponse } from '../api/client';
 import type { GuestAudio } from '../domain/guestSessions';
+import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 
 export type UploadStatus = 'idle' | 'recording' | 'uploading' | 'pending' | 'uploaded' | 'saved' | 'failed' | 'unavailable';
 export type AudioUploadPendingReason = 'activation' | 'reconciliation' | 'cleanup_reconciliation' | 'cleanup';
+export type AudioRecorderErrorCode = 'capture_unavailable' | 'microphone_denied' | 'upload_failed' | 'local_save_failed';
+
+export const audioRecorderErrorMessageIds = {
+  capture_unavailable: 'audioRecorder.captureUnavailable',
+  microphone_denied: 'audioRecorder.microphoneDenied',
+  upload_failed: 'audioRecorder.uploadFailed',
+  local_save_failed: 'practice.errorLocalSave',
+} as const satisfies Record<AudioRecorderErrorCode, MessageId>;
 
 export function classifyAudioUploadResponse(result: SessionAudioUploadResponse): {
   status: 'uploaded' | 'pending';
@@ -73,8 +83,10 @@ function dataUrlForBlob(blob: Blob) {
 }
 
 export function useAudioRecorder() {
+  const { locale, t } = useI18n();
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<AudioRecorderErrorCode | null>(null);
   const [pendingReason, setPendingReason] = useState<AudioUploadPendingReason | null>(null);
   const [lastSessionId, setLastSessionId] = useState<number | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -89,6 +101,7 @@ export function useAudioRecorder() {
     if (startPromiseRef.current) return startPromiseRef.current;
     if (status === 'recording') return undefined;
     setError(null);
+    setErrorCode(null);
     setPendingReason(null);
     setLastSessionId(sessionId);
     startedAtRef.current = Date.now();
@@ -101,7 +114,8 @@ export function useAudioRecorder() {
         }
         if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
           setStatus('unavailable');
-          setError('Audio playback capture is unavailable in this browser.');
+          setErrorCode('capture_unavailable');
+          setError(t(audioRecorderErrorMessageIds.capture_unavailable));
           return;
         }
         const stream = inputStream ?? await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
@@ -116,14 +130,15 @@ export function useAudioRecorder() {
         setStatus('recording');
       } catch {
         setStatus('unavailable');
-        setError('Microphone permission was denied, so this session may not include playback audio.');
+        setErrorCode('microphone_denied');
+        setError(t(audioRecorderErrorMessageIds.microphone_denied));
       } finally {
         startPromiseRef.current = null;
       }
     })();
     startPromiseRef.current = promise;
     return promise;
-  }, [status]);
+  }, [status, t]);
 
   const recordedBlob = useCallback(async (demoMode: boolean, durationSeconds: number) => {
     if (demoMode) {
@@ -165,7 +180,10 @@ export function useAudioRecorder() {
       return result.audio;
     } catch (uploadError) {
       setStatus('failed');
-      setError(friendlyUserFacingError(uploadError, 'Audio upload failed. Pitch analytics remain available.'));
+      setErrorCode('upload_failed');
+      setError(locale === 'en'
+        ? friendlyUserFacingError(uploadError, t(audioRecorderErrorMessageIds.upload_failed))
+        : t(audioRecorderErrorMessageIds.upload_failed));
       return null;
     } finally {
       cleanup();
@@ -174,7 +192,7 @@ export function useAudioRecorder() {
     })();
     stopPromiseRef.current = promise;
     return promise;
-  }, [cleanup, recordedBlob]);
+  }, [cleanup, locale, recordedBlob, t]);
 
   const stopLocal = useCallback(async (demoMode: boolean): Promise<GuestAudio | null> => {
     if (stopPromiseRef.current) return stopPromiseRef.current as Promise<GuestAudio | null>;
@@ -196,7 +214,10 @@ export function useAudioRecorder() {
         };
       } catch (localError) {
         setStatus('failed');
-        setError(friendlyUserFacingError(localError, 'Audio could not be saved on this device.'));
+        setErrorCode('local_save_failed');
+        setError(locale === 'en'
+          ? friendlyUserFacingError(localError, t(audioRecorderErrorMessageIds.local_save_failed))
+          : t(audioRecorderErrorMessageIds.local_save_failed));
         return null;
       } finally {
         cleanup();
@@ -205,18 +226,20 @@ export function useAudioRecorder() {
     })();
     stopPromiseRef.current = promise;
     return promise;
-  }, [cleanup, recordedBlob]);
+  }, [cleanup, locale, recordedBlob, t]);
 
   const markLocalSaved = useCallback(() => {
     setStatus('saved');
     setError(null);
+    setErrorCode(null);
     setPendingReason(null);
   }, []);
 
   const markLocalSaveFailed = useCallback((message: string) => {
     setStatus('failed');
+    setErrorCode('local_save_failed');
     setError(message);
   }, []);
 
-  return { status, error, pendingReason, lastSessionId, start, stopAndUpload, stopLocal, markLocalSaved, markLocalSaveFailed };
+  return { status, error, errorCode, pendingReason, lastSessionId, start, stopAndUpload, stopLocal, markLocalSaved, markLocalSaveFailed };
 }

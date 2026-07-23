@@ -18,6 +18,12 @@ import {
   buildGuestProgress,
   buildGuestRecommendations,
 } from '../domain/guestInsights';
+import {
+  localizeProgressMetrics,
+  localizeProgressNoteStats,
+  localizeProgressPlan,
+  localizeProgressRecommendations,
+} from '../domain/progressLocalization';
 import { describeCents, describeInTunePercent } from '../domain/tuningLanguage';
 import type { NoteStats, PracticePlan, ProgressMetrics, Recommendation } from '../domain/types';
 import { useAppSettings } from '../state/AppSettingsContext';
@@ -111,7 +117,7 @@ export function ProgressRangeControls({
 }
 
 export function ProgressPage() {
-  const { t, formatNumber } = useI18n();
+  const { locale, t, formatNumber } = useI18n();
   const { instrumentId } = useAppSettings();
   const auth = useAuth();
   const [stats, setStats] = useState<NoteStats[]>([]);
@@ -153,12 +159,18 @@ export function ProgressPage() {
     setLoadState('loading');
     if (!auth.isSignedIn) {
       try {
-        const guestStats = buildGuestNoteStats(instrumentId, range);
+        const localizer = {
+          t,
+          formatDate: (value: Date | number | string, options?: Intl.DateTimeFormatOptions) => (
+            new Intl.DateTimeFormat(locale, options).format(new Date(value))
+          ),
+        };
+        const guestStats = buildGuestNoteStats(instrumentId, range, localizer);
         setStats(guestStats);
-        setHeatmap(buildGuestHeatmap(instrumentId, guestStats));
-        setProgress(buildGuestProgress(instrumentId, guestStats, range));
-        setPlan(buildGuestPracticePlan(guestStats, instrumentId));
-        setRecommendations(buildGuestRecommendations(guestStats));
+        setHeatmap(buildGuestHeatmap(instrumentId, guestStats, localizer));
+        setProgress(buildGuestProgress(instrumentId, guestStats, range, localizer));
+        setPlan(buildGuestPracticePlan(guestStats, instrumentId, localizer));
+        setRecommendations(buildGuestRecommendations(guestStats, localizer));
         setDataOwnerKey(currentOwnerKey);
         setLoadState('ready');
       } catch {
@@ -177,11 +189,17 @@ export function ProgressPage() {
     ])
       .then(([noteData, heatmapData, progressData, planData, recommendationData]) => {
         if (!active) return;
-        setStats(noteData);
-        setHeatmap(heatmapData);
-        setProgress(progressData);
-        setPlan(planData);
-        setRecommendations(recommendationData);
+        const localizer = {
+          t,
+          formatDate: (value: Date | number | string, options?: Intl.DateTimeFormatOptions) => (
+            new Intl.DateTimeFormat(locale, options).format(new Date(value))
+          ),
+        };
+        setStats(localizeProgressNoteStats(noteData, localizer));
+        setHeatmap(localizeProgressNoteStats(heatmapData, localizer));
+        setProgress(localizeProgressMetrics(progressData, localizer));
+        setPlan(localizeProgressPlan(planData, localizer));
+        setRecommendations(localizeProgressRecommendations(recommendationData, localizer));
         setDataOwnerKey(currentOwnerKey);
         setLoadState('ready');
       })
@@ -192,7 +210,7 @@ export function ProgressPage() {
     return () => {
       active = false;
     };
-  }, [auth.isSignedIn, currentOwnerKey, instrumentId, range, rangeError, retryKey]);
+  }, [auth.isSignedIn, currentOwnerKey, instrumentId, locale, range, rangeError, retryKey, t]);
 
   useEffect(() => {
     const nextSelection = selectDefaultNoteLabel(heatmap, selectedNote);

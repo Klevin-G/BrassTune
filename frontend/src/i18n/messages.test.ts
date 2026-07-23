@@ -71,10 +71,10 @@ describe('web localization', () => {
       'auth.emailPlaceholder', 'auth.usernamePlaceholder', 'auth.displayNamePlaceholder',
       'common.start', 'common.pause', 'instrument.label', 'instrument.trombone',
       'instrument.euphonium', 'instrument.tuba', 'tuning.noteVerdict',
-      'tuning.concertNote', 'practice.demo', 'practice.micDeniedAfter',
+      'tuning.concertNote', 'tuning.meterValue', 'practice.demo', 'practice.micDeniedAfter',
       'sessionReview.secondsShort', 'settings.actionProgress', 'settings.admin',
       'class.minutesShort', 'class.student', 'locale.pseudo', 'drone.interval.octave',
-      'playAlong.title', 'exercise.noteCount', 'playAlong.noteCount',
+      'playAlong.title', 'exercise.noteCount', 'playAlong.noteCount', 'onboarding.cents',
     ]);
     for (const locale of productionLocales.filter((value) => value !== 'en')) {
       const messages = await loadMessagesForLocale(locale);
@@ -101,6 +101,49 @@ describe('web localization', () => {
     expect(messages['noteStats.avgAbs']).toBe('متوسط الانحراف المطلق');
     expect(messages['signal.confidence']).toBe('نسبة الثقة في اكتشاف طبقة الصوت');
     expect(messages['score.captureFailed']).toBe('تعذّر التقاط الصفحة. حاول مرة أخرى.');
+  });
+
+  it('guards confirmed musical false friends across production catalogs', async () => {
+    const reviewedLocales = ['es', 'zh-Hans', 'zh-Hant', 'ar', 'fr', 'de', 'ru', 'pt-BR', 'ja', 'ko', 'vi'] as const;
+    const [es, zhHans, zhHant, ar, fr, de, ru, ptBr, ja, ko, vi] = await Promise.all(
+      reviewedLocales.map((locale) => loadMessagesForLocale(locale)),
+    );
+
+    expect([
+      es['tuning.meterValue'],
+      es['sessionReview.centsHelp'],
+      es['settings.inTuneHelp'],
+      es['progress.centsHelp'],
+    ].join(' ')).not.toMatch(/centav/i);
+
+    expect([
+      zhHans['practice.droneIntervals'],
+      zhHans['packs.daily.drone.label'],
+      zhHans['onboarding.tunerBody'],
+    ].join(' ')).not.toMatch(/无人机/);
+    expect([
+      zhHant['practice.droneIntervals'],
+      zhHant['packs.daily.drone.label'],
+      zhHant['onboarding.tunerBody'],
+    ].join(' ')).not.toMatch(/無人機/);
+
+    expect(ar['tuning.concertNote']).toBe('النغمة الكونشرتية {note}');
+    expect(ar['practice.droneIntervals']).not.toMatch(/طائرة/);
+    expect(ar['localMedia.noteEvents']).not.toMatch(/حدث/);
+
+    expect(fr['sessionReview.driftSharp']).toContain('trop haut');
+    expect(fr['sessionReview.driftFlat']).toContain('trop bas');
+    expect(fr['progress.centsHelp']).not.toMatch(/forte|fort|faible/i);
+
+    expect(de['score.captureFailed']).toBe('Die Seite konnte nicht aufgenommen werden. Versuchen Sie es erneut.');
+    expect(ja['score.captureFailed']).toBe('ページを取り込めませんでした。もう一度お試しください。');
+    expect(ko['score.captureFailed']).toBe('페이지를 촬영하지 못했습니다. 다시 시도하세요.');
+
+    expect(ru['sessionReview.driftSharp']).toBe('Вы имели тенденцию играть выше.');
+    expect(ru['sessionReview.driftFlat']).toBe('Вы имели тенденцию играть ниже.');
+    expect(ptBr['metronome.timeSignature']).toBe('Compasso');
+    expect(vi['practice.droneIntervals']).toBe('Âm nền và quãng');
+    expect(vi['score.captureFailed']).toBe('Không thể chụp trang. Hãy thử lại.');
   });
 
   it('uses musical rather than literal translations for slurs, pitch, drones, scores, and notes', async () => {

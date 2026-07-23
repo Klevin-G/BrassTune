@@ -120,6 +120,8 @@ test('tablet shell navigation remains accessible when labels are visually compac
 
 test('skip navigation, radio arrows, and throttled tuner announcements work from the keyboard', async ({ page, browserName }) => {
   await page.goto('/practice');
+  const source = page.getByRole('radiogroup', { name: 'Sound source' });
+  await expect(source).toBeVisible();
   // WebKit follows Safari's macOS convention: Option/Alt+Tab includes links
   // in keyboard focus order when full keyboard access is not enabled.
   await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
@@ -128,7 +130,6 @@ test('skip navigation, radio arrows, and throttled tuner announcements work from
   await page.keyboard.press('Enter');
   await expect(page.getByRole('main')).toBeFocused();
 
-  const source = page.getByRole('radiogroup', { name: 'Sound source' });
   const demo = source.getByRole('radio', { name: 'Demo' });
   await demo.focus();
   await page.keyboard.press('ArrowLeft');
