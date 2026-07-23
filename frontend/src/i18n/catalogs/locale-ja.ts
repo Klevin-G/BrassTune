@@ -247,7 +247,7 @@ const messages = {
   "drone.eyebrow": "あなたの楽器のために書かれた",
   "drone.warning": "小さな音量から始めてください。ヘッドフォンは音程の違いを聞き取りやすくし、周囲の人を守ります。",
   "drone.writtenNote": "メモ",
-  "drone.interval": "間隔",
+  "drone.interval": "音程",
   "drone.hearPair": "{intervalNote} と書かれた {note} が聞こえます。どちらも正しいコンサートピッチに移調されます。",
   "drone.stop": "ストップトーン",
   "drone.start": "スタート音",

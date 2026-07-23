@@ -99,6 +99,44 @@ export function currentWeekKey(now = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function boundedInteger(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  return Math.max(minimum, Math.min(maximum, Math.round(finiteNumber(value, fallback))));
+}
+
+/**
+ * Keeps weekly targets while resetting completion when a long-lived client
+ * crosses into a new Monday-to-Sunday week. Call this at the point activity is
+ * recorded as well as when persisted data is read: a provider can otherwise
+ * keep an old week's library in memory indefinitely.
+ */
+export function reconcileWeeklyGoal(goal: Partial<WeeklyGoal> | undefined, now = new Date()): WeeklyGoal {
+  const week = currentWeekKey(now);
+  const targetMinutes = boundedInteger(goal?.targetMinutes, 5, 600, 60);
+  const targetSessions = boundedInteger(goal?.targetSessions, 1, 21, 3);
+  if (goal?.week !== week) {
+    return { week, targetMinutes, completedMinutes: 0, targetSessions, completedSessions: 0 };
+  }
+  return {
+    week,
+    targetMinutes,
+    completedMinutes: boundedInteger(goal.completedMinutes, 0, 10_000, 0),
+    targetSessions,
+    completedSessions: boundedInteger(goal.completedSessions, 0, 1_000, 0),
+  };
+}
+
+export function recordPracticeActivity(library: PracticeLibrary, minutes: number, now = new Date()): PracticeLibrary {
+  const weeklyGoal = reconcileWeeklyGoal(library.weeklyGoal, now);
+  return {
+    ...library,
+    weeklyGoal: {
+      ...weeklyGoal,
+      completedMinutes: Math.min(10_000, weeklyGoal.completedMinutes + Math.max(1, Math.round(minutes) || 1)),
+      completedSessions: Math.min(1_000, weeklyGoal.completedSessions + 1),
+    },
+  };
+}
+
 export function emptyPracticeLibrary(now = new Date()): PracticeLibrary {
   return {
     version: PRACTICE_LIBRARY_VERSION,
@@ -231,15 +269,7 @@ export function parsePracticeLibrary(raw: string | null, now = new Date()): Prac
     if (!value || value.version !== PRACTICE_LIBRARY_VERSION) return fallback;
     const exercises = Array.isArray(value.customExercises) ? value.customExercises.map(normalizeExercise).filter(Boolean) as CustomExercise[] : [];
     const presets = Array.isArray(value.metronomePresets) ? value.metronomePresets.map((item) => normalizeMetronomePreset(item)).filter(Boolean) as MetronomePreset[] : [];
-    const persistedGoal = value.weeklyGoal;
-    const isCurrentWeek = persistedGoal?.week === currentWeekKey(now);
-    const goalWeek = isCurrentWeek ? persistedGoal : {
-      ...fallback.weeklyGoal,
-      // Targets are preferences, not weekly progress. Carry valid custom
-      // targets forward while resetting only the completion counters.
-      targetMinutes: finiteNumber(persistedGoal?.targetMinutes, fallback.weeklyGoal.targetMinutes),
-      targetSessions: finiteNumber(persistedGoal?.targetSessions, fallback.weeklyGoal.targetSessions),
-    };
+    const goalWeek = reconcileWeeklyGoal(value.weeklyGoal, now);
     return {
       version: PRACTICE_LIBRARY_VERSION,
       customExercises: exercises.slice(0, LIMITS.customExercises),
@@ -253,11 +283,7 @@ export function parsePracticeLibrary(raw: string | null, now = new Date()): Prac
         updatedAt: typeof value.warmup?.updatedAt === 'string' ? value.warmup.updatedAt : now.toISOString(),
       },
       weeklyGoal: {
-        week: goalWeek.week,
-        targetMinutes: Math.max(5, Math.min(600, Math.round(finiteNumber(goalWeek.targetMinutes, 60)))),
-        completedMinutes: Math.max(0, Math.min(10_000, Math.round(finiteNumber(goalWeek.completedMinutes, 0)))),
-        targetSessions: Math.max(1, Math.min(21, Math.round(finiteNumber(goalWeek.targetSessions, 3)))),
-        completedSessions: Math.max(0, Math.min(1_000, Math.round(finiteNumber(goalWeek.completedSessions, 0)))),
+        ...goalWeek,
       },
     };
   } catch {

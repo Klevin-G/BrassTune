@@ -61,9 +61,17 @@ export function AuthGatewayPage() {
     }
   }
 
-  function continueAsGuest() {
-    auth.continueAsGuest();
-    navigate(next, { replace: true });
+  async function continueAsGuest() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await auth.continueAsGuest();
+      navigate(next, { replace: true });
+    } catch (error) {
+      setMessage(localizeAuthError(error, 'auth.failure'));
+    } finally {
+      setBusy(false);
+    }
   }
 
   const callbackNext = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
@@ -102,7 +110,7 @@ export function AuthGatewayPage() {
                   body={t('auth.readyBody')}
                   icon={Music2}
                 />
-                <button className="primary-button ag-block ag-guest" type="button" onClick={continueAsGuest}>
+                <button className="primary-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                   {t('auth.start')}
                   <ArrowRight size={18} />
                 </button>
@@ -131,7 +139,7 @@ export function AuthGatewayPage() {
                   </>
                 )}
 
-                <button className="primary-button ag-block ag-guest" type="button" onClick={continueAsGuest}>
+                <button className="primary-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                   {t('auth.start')}
                   <ArrowRight size={18} />
                 </button>

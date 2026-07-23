@@ -6,6 +6,7 @@ import {
   ownerWorkspaceKey,
   practiceLibraryLimits,
   readPracticeLibrary,
+  recordPracticeActivity,
   removeCustomExercise,
   removeMetronomePreset,
   resolvePracticeOwner,
@@ -252,14 +253,7 @@ export function PracticeLibraryProvider({ children }: { children: ReactNode }) {
   }, [updateLibrary]);
 
   const recordActivity = useCallback((minutes: number) => {
-    updateLibrary((current) => ({
-      ...current,
-      weeklyGoal: {
-        ...current.weeklyGoal,
-        completedMinutes: Math.min(10_000, current.weeklyGoal.completedMinutes + Math.max(1, Math.round(minutes) || 1)),
-        completedSessions: Math.min(1_000, current.weeklyGoal.completedSessions + 1),
-      },
-    }));
+    updateLibrary((current) => recordPracticeActivity(current, minutes));
   }, [updateLibrary]);
 
   const saveReflection = useCallback((text: string, sessionId?: string) => {

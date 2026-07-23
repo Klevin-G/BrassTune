@@ -8,11 +8,11 @@ Precondition: the final integration head must have reviewed Backend, Frontend, S
 
 1. Merge PR1 with additive migrations through `20260723021828_account_deletion_privacy_tombstones.sql` (expand). Confirm PR1 does not contain `20260723052642_enforce_account_deletion_terminal_privacy.sql`.
 2. Record the PR1 `main` SHA. Inspect, dry-run, and apply all linked pending migrations while the contract file is absent.
-3. Dispatch `.github/workflows/deploy.yml` with `target=backend` at the PR1 SHA. Require the Render wait and exact `/api/version` protocol to pass.
+3. Dispatch `.github/workflows/deploy.yml` with `target=backend` at the PR1 SHA. Require the captured Render deployment ID to reach provider status `live` with `commit.id` equal to the PR1 SHA, then require public readiness and exact `/api/version` to pass.
 4. Confirm the privacy-aware backend initialized `deleted_identity_tombstone_config.enforcement_phase` as `expand` and scrubbed legacy terminal jobs. Retain the successful Render deployment ID and PR1 SHA as the post-contract rollback target.
 5. Add the reserved `20260723052642_enforce_account_deletion_terminal_privacy.sql` contract migration in PR2, review it, and merge PR2.
 6. Record the PR2 `main` SHA. Confirm the retained PR1 Render artifact and completed expand cleanup, then inspect, dry-run, and apply all linked pending migrations. The contract must fail closed if the compatibility checks are not satisfied.
-7. Dispatch `.github/workflows/deploy.yml` first with `target=backend` and then with `target=frontend`, both at the exact PR2 SHA. Require Vercel evidence to show `READY`, production, matching deployment/canonical-alias IDs, and provider `githubCommitSha` equal to the PR2 SHA.
+7. Dispatch `.github/workflows/deploy.yml` first with `target=backend` and then with `target=frontend`, both at the exact PR2 SHA. Require backend evidence to identify the captured Render deployment ID at provider status `live` with `commit.id` equal to the PR2 SHA. Require Vercel evidence to show `READY`, production, matching deployment/canonical-alias IDs, and provider `githubCommitSha` equal to the PR2 SHA.
 8. Allow `.github/workflows/production-smoke.yml` to consume the frontend deploy run's token-free evidence artifact. Require exact backend protocol smoke and strict hosted browser smoke to pass before declaring rollout complete.
 
 Rollback boundary: before contract, the pre-PR1 backend can be restored. After contract, the retained privacy-aware PR1 Render deployment is the only approved backend rollback target; never redeploy a backend that writes unsanitized terminal deletion rows. The frontend can be rolled back independently to its previous known-good Vercel deployment.

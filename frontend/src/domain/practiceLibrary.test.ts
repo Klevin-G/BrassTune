@@ -10,6 +10,7 @@ import {
   ownerWorkspaceKey,
   parseExerciseNotes,
   parsePracticeLibrary,
+  recordPracticeActivity,
   resolvePracticeOwner,
   removeCustomExercise,
   removeMetronomePreset,
@@ -50,6 +51,28 @@ describe('practice library storage', () => {
     expect(parsed.customExercises[0].notes).toEqual(['A', 'G']);
     expect(parsed.recents).toHaveLength(10);
     expect(parsed.weeklyGoal).toMatchObject({ targetMinutes: 60, targetSessions: 3, completedMinutes: 0, completedSessions: 0 });
+  });
+
+  it('reconciles a stale open-provider week before recording its first new-week activity', () => {
+    // This is the in-memory provider path, rather than a fresh storage read:
+    // a tab that remained open through Monday must not add to last week.
+    const library = emptyPracticeLibrary(new Date('2026-07-19T23:59:00'));
+    library.weeklyGoal = {
+      week: '2026-07-13',
+      targetMinutes: 180,
+      completedMinutes: 75,
+      targetSessions: 5,
+      completedSessions: 3,
+    };
+
+    const recorded = recordPracticeActivity(library, 12, new Date('2026-07-20T00:01:00'));
+    expect(recorded.weeklyGoal).toEqual({
+      week: '2026-07-20',
+      targetMinutes: 180,
+      completedMinutes: 12,
+      targetSessions: 5,
+      completedSessions: 1,
+    });
   });
 
   it('ships routable built-in packs for the focused workspace', () => {

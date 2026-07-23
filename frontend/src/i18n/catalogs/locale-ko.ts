@@ -247,7 +247,7 @@ const messages = {
   "drone.eyebrow": "당신의 악기를 위해 작곡되었습니다",
   "drone.warning": "낮은 볼륨으로 시작하세요. 헤드폰을 사용하면 음높이 차이를 더 쉽게 듣고 주변 사람들을 보호할 수 있습니다.",
   "drone.writtenNote": "서면 메모",
-  "drone.interval": "간격",
+  "drone.interval": "음정 간격",
   "drone.hearPair": "{intervalNote}와 함께 {note}라고 쓰여진 것을 듣게 될 것입니다. 둘 다 올바른 콘서트 피치로 조옮김됩니다.",
   "drone.stop": "신호음 중지",
   "drone.start": "시작음",

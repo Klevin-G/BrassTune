@@ -201,6 +201,16 @@ def test_backend_deploy_and_ci_use_hash_pinned_lockfiles():
         assert "--upgrade pip" not in contents
 
 
+def test_postgresql_integration_workflow_supplies_test_only_tombstone_secret_to_readiness():
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github" / "workflows" / "backend.yml").read_text()
+    test_secret = "ci-test-only-deletion-tombstone-secret-20260723"
+
+    assert f"BRASSTUNE_DELETION_TOMBSTONE_SECRET: {test_secret}" in workflow
+    assert len(test_secret.encode("utf-8")) >= 32
+    assert "python -m app.db.scrub_deletion_privacy && python -m app.db.check_ready" in workflow
+
+
 def test_deploy_uses_an_audited_locked_local_vercel_cli_and_disallows_all_target():
     root = Path(__file__).resolve().parents[3]
     deploy = (root / ".github" / "workflows" / "deploy.yml").read_text()

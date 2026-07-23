@@ -126,6 +126,9 @@ describe('web localization', () => {
       zhHant['packs.daily.drone.label'],
       zhHant['onboarding.tunerBody'],
     ].join(' ')).not.toMatch(/無人機/);
+    expect(zhHans['tuning.concertNote']).toBe('音乐会音高 {note}');
+    expect(zhHant['tuning.concertNote']).toBe('音樂會音高 {note}');
+    expect(zhHant['progress.centsHelp']).toBe('音分表示音符偏高或偏低的程度。越接近零越好。');
 
     expect(ar['tuning.concertNote']).toBe('النغمة الكونشرتية {note}');
     expect(ar['practice.droneIntervals']).not.toMatch(/طائرة/);
@@ -137,12 +140,15 @@ describe('web localization', () => {
 
     expect(de['score.captureFailed']).toBe('Die Seite konnte nicht aufgenommen werden. Versuchen Sie es erneut.');
     expect(ja['score.captureFailed']).toBe('ページを取り込めませんでした。もう一度お試しください。');
+    expect(ja['drone.interval']).toBe('音程');
     expect(ko['score.captureFailed']).toBe('페이지를 촬영하지 못했습니다. 다시 시도하세요.');
+    expect(ko['drone.interval']).toBe('음정 간격');
 
     expect(ru['sessionReview.driftSharp']).toBe('Вы имели тенденцию играть выше.');
     expect(ru['sessionReview.driftFlat']).toBe('Вы имели тенденцию играть ниже.');
     expect(ptBr['metronome.timeSignature']).toBe('Compasso');
     expect(vi['practice.droneIntervals']).toBe('Âm nền và quãng');
+    expect(vi['drone.interval']).toBe('Quãng');
     expect(vi['score.captureFailed']).toBe('Không thể chụp trang. Hãy thử lại.');
   });
 

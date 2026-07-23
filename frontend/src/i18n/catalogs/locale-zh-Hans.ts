@@ -131,7 +131,7 @@ const messages = {
   "tuning.liftUp": "抬起",
   "tuning.holdIt": "握住它",
   "tuning.noteVerdict": "{note}、{verdict}",
-  "tuning.concertNote": "演唱会{note}",
+  "tuning.concertNote": "音乐会音高 {note}",
   "tuning.concert": "音乐会",
   "tuning.noNote": "无备注",
   "tuning.meter": "调音",

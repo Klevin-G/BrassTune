@@ -247,7 +247,7 @@ const messages = {
   "drone.eyebrow": "Viết cho nhạc cụ của bạn",
   "drone.warning": "Bắt đầu với âm lượng thấp. Tai nghe giúp dễ dàng nghe thấy sự khác biệt về cao độ và bảo vệ những người xung quanh bạn.",
   "drone.writtenNote": "ghi chú bằng văn bản",
-  "drone.interval": "Khoảng thời gian",
+  "drone.interval": "Quãng",
   "drone.hearPair": "Bạn sẽ nghe thấy {note} được viết với {intervalNote}. Cả hai đều được chuyển sang cao độ chính xác của buổi hòa nhạc.",
   "drone.stop": "Dừng âm",
   "drone.start": "Giai điệu bắt đầu",

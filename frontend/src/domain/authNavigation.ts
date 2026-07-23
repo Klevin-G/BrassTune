@@ -36,7 +36,15 @@ export function safeReturnPath(
     if ((!explicitlyRelative && !explicitlySameOrigin) || parsed.origin !== base.origin || parsed.username || parsed.password) {
       return DEFAULT_AUTH_RETURN_PATH;
     }
-    if (parsed.pathname === '/' || parsed.pathname === '/auth' || parsed.pathname.startsWith('/auth/')) {
+    // URL normalization can turn an apparently single-slash relative target
+    // such as `/..//host` into a protocol-relative-looking pathname. Never
+    // hand that shape to a router or a later redirect boundary.
+    if (
+      parsed.pathname.startsWith('//')
+      || parsed.pathname === '/'
+      || parsed.pathname === '/auth'
+      || parsed.pathname.startsWith('/auth/')
+    ) {
       return DEFAULT_AUTH_RETURN_PATH;
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;

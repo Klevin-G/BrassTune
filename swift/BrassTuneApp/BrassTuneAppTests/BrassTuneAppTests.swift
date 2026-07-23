@@ -46,6 +46,59 @@ final class BrassTuneAppTests: XCTestCase {
     // MARK: - Shipping defaults and local model behavior
 
     @MainActor
+    func testLeavingActiveSceneCancelsPendingTunerStartBeforeReleasingPracticeAudio() {
+        var events: [String] = []
+
+        AppSceneAudioLifecycle.handleTransition(
+            from: .active,
+            to: .inactive,
+            cancelTunerStart: { events.append("cancel tuner start") },
+            isTunerRecording: { false },
+            stopTunerRecording: { events.append("stop tuner recording") },
+            releasePracticeAudio: { events.append("release practice audio") }
+        )
+
+        XCTAssertEqual(events, ["cancel tuner start", "release practice audio"])
+    }
+
+    @MainActor
+    func testLeavingActiveSceneStopsActiveTunerBeforeReleasingPracticeAudio() {
+        var events: [String] = []
+        var tunerIsRecording = true
+
+        AppSceneAudioLifecycle.handleTransition(
+            from: .active,
+            to: .background,
+            cancelTunerStart: { events.append("cancel tuner start") },
+            isTunerRecording: { tunerIsRecording },
+            stopTunerRecording: {
+                events.append("stop tuner recording")
+                tunerIsRecording = false
+            },
+            releasePracticeAudio: { events.append("release practice audio") }
+        )
+
+        XCTAssertFalse(tunerIsRecording)
+        XCTAssertEqual(events, ["cancel tuner start", "stop tuner recording", "release practice audio"])
+    }
+
+    @MainActor
+    func testNonactiveSceneTransitionsDoNotRepeatAudioCleanup() {
+        var cleanupCount = 0
+
+        AppSceneAudioLifecycle.handleTransition(
+            from: .inactive,
+            to: .background,
+            cancelTunerStart: { cleanupCount += 1 },
+            isTunerRecording: { true },
+            stopTunerRecording: { cleanupCount += 1 },
+            releasePracticeAudio: { cleanupCount += 1 }
+        )
+
+        XCTAssertEqual(cleanupCount, 0)
+    }
+
+    @MainActor
     func testShippingDefaultsUseLiveMicrophoneAndAudibleMetronome() {
         XCTAssertFalse(NativeTestFixtures.areEnabled)
         XCTAssertEqual(NativeAudioEngine.defaultRecordingSource, .live)

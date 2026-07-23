@@ -288,7 +288,7 @@ jobs:
   deploy-backend:
     if: ${{ github.ref == 'refs/heads/main' && github.event.inputs.target == 'backend' }}
     runs-on: ${{ fromJSON(vars.BRASSTUNE_DEPLOY_RUNNER || '"ubuntu-latest"') }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     environment: production
     env:
       BRASSTUNE_API_BASE_URL: ${{ vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
@@ -387,6 +387,9 @@ jobs:
 
           delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX
           delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
       - name: Trigger exact Render deploy
         id: trigger_backend
         shell: bash
@@ -412,16 +415,167 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_id=${id}\n`);
           console.log(`Captured Render deployment ${id} for exact revision verification.`);
           NODE
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "24"
+      - name: Wait for exact Render deployment
+        id: verify_backend_deployment
+        shell: bash
+        env:
+          RENDER_API_BASE_URL: https://api.render.com
+          RENDER_DEPLOYMENT_ID: ${{ steps.trigger_backend.outputs.deployment_id }}
+          RENDER_DEPLOYMENT_WAIT_TIMEOUT_MS: "900000"
+          RENDER_DEPLOYMENT_POLL_INTERVAL_MS: "10000"
+          RENDER_DEPLOYMENT_REQUEST_TIMEOUT_MS: "20000"
+        run: |
+          set -euo pipefail
+          provider_evidence="${RUNNER_TEMP}/render-provider-deployment.json"
+          RENDER_PROVIDER_EVIDENCE="$provider_evidence" node <<'NODE'
+          const fs = require('node:fs');
+
+          class FatalDeployError extends Error {}
+
+          const positiveInt = (value, fallback) => {
+            const parsed = Number.parseInt(String(value ?? ''), 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+          };
+          const fail = (message) => {
+            throw new FatalDeployError(message);
+          };
+          const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+          const apiBase = String(process.env.RENDER_API_BASE_URL ?? '').replace(/\/+$/, '');
+          const apiKey = String(process.env.RENDER_API_KEY ?? '');
+          const serviceId = String(process.env.RENDER_SERVICE_ID ?? '');
+          const deploymentId = String(process.env.RENDER_DEPLOYMENT_ID ?? '');
+          const expectedSha = String(process.env.GITHUB_SHA ?? '').toLowerCase();
+          const evidencePath = String(process.env.RENDER_PROVIDER_EVIDENCE ?? '');
+          const timeoutMs = positiveInt(process.env.RENDER_DEPLOYMENT_WAIT_TIMEOUT_MS, 15 * 60 * 1000);
+          const intervalMs = positiveInt(process.env.RENDER_DEPLOYMENT_POLL_INTERVAL_MS, 10 * 1000);
+          const requestTimeoutMs = positiveInt(process.env.RENDER_DEPLOYMENT_REQUEST_TIMEOUT_MS, 20 * 1000);
+          const inProgressStatuses = new Set([
+            'created',
+            'queued',
+            'build_in_progress',
+            'pre_deploy_in_progress',
+            'update_in_progress',
+          ]);
+          const failedStatuses = new Set([
+            'build_failed',
+            'pre_deploy_failed',
+            'update_failed',
+            'canceled',
+            'deactivated',
+          ]);
+          const retryableHttpStatuses = new Set([404, 408, 409, 425, 429, 500, 502, 503, 504]);
+
+          async function main() {
+            if (!apiBase.startsWith('https://') && !apiBase.startsWith('http://127.0.0.1:')) {
+              fail('Render API base URL is invalid.');
+            }
+            if (!apiKey) fail('Render API key is missing.');
+            if (!/^srv-[A-Za-z0-9]+$/.test(serviceId)) fail('Render service ID is invalid.');
+            if (!/^dep-[A-Za-z0-9]+$/.test(deploymentId)) fail('Render deployment ID is invalid.');
+            if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(expectedSha)) fail('Workflow revision is invalid.');
+            if (!evidencePath) fail('Render provider evidence path is missing.');
+
+            const endpoint =
+              `${apiBase}/v1/services/${encodeURIComponent(serviceId)}/deploys/${encodeURIComponent(deploymentId)}`;
+            const deadline = Date.now() + timeoutMs;
+            let lastSafeError = 'no provider response';
+
+            while (Date.now() < deadline) {
+              try {
+                const response = await fetch(endpoint, {
+                  headers: {
+                    Accept: 'application/json',
+                    Authorization: `Bearer ${apiKey}`,
+                  },
+                  signal: AbortSignal.timeout(requestTimeoutMs),
+                });
+                if (!response.ok) {
+                  await response.body?.cancel();
+                  if (response.status === 401 || response.status === 403) {
+                    fail(`Render rejected deployment verification credentials (HTTP ${response.status}).`);
+                  }
+                  if (!retryableHttpStatuses.has(response.status)) {
+                    fail(`Render deployment verification failed with HTTP ${response.status}.`);
+                  }
+                  lastSafeError = `retryable HTTP ${response.status}`;
+                } else {
+                  let deployment;
+                  try {
+                    deployment = await response.json();
+                  } catch {
+                    fail('Render deployment verification returned invalid JSON.');
+                  }
+
+                  const providerId = String(deployment.id ?? '');
+                  const providerStatus = String(deployment.status ?? '');
+                  const providerCommitSha = String(deployment.commit?.id ?? '').toLowerCase();
+                  if (providerId !== deploymentId) {
+                    fail('Render deployment verification returned a different deployment ID.');
+                  }
+                  if (providerCommitSha && providerCommitSha !== expectedSha) {
+                    fail(
+                      `Render deployment ${deploymentId} identifies revision ${providerCommitSha}, ` +
+                        `not workflow revision ${expectedSha}.`,
+                    );
+                  }
+                  if (failedStatuses.has(providerStatus)) {
+                    fail(`Render deployment ${deploymentId} entered terminal status ${providerStatus}.`);
+                  }
+                  if (providerStatus === 'live') {
+                    if (providerCommitSha !== expectedSha) {
+                      fail(`Live Render deployment ${deploymentId} is missing the exact provider commit.`);
+                    }
+                    const evidence = {
+                      deployment_id: deploymentId,
+                      provider_status: providerStatus,
+                      provider_commit_sha: providerCommitSha,
+                      verified_at: new Date().toISOString(),
+                    };
+                    fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+                    fs.appendFileSync(process.env.GITHUB_OUTPUT, `provider_evidence_path=${evidencePath}\n`);
+                    console.log(
+                      `Verified exact Render deployment ${deploymentId} reached live at revision ${providerCommitSha}.`,
+                    );
+                    return;
+                  }
+                  if (!inProgressStatuses.has(providerStatus)) {
+                    fail(
+                      `Render deployment ${deploymentId} returned unknown status ${providerStatus || '<missing>'}.`,
+                    );
+                  }
+                  lastSafeError = `provider status ${providerStatus}`;
+                }
+              } catch (error) {
+                if (error instanceof FatalDeployError) throw error;
+                lastSafeError = error?.name === 'TimeoutError' ? 'request timeout' : 'provider request error';
+              }
+
+              console.log(`Waiting for exact Render deployment ${deploymentId}: ${lastSafeError}.`);
+              const remainingMs = deadline - Date.now();
+              if (remainingMs > 0) await sleep(Math.min(intervalMs, remainingMs));
+            }
+
+            fail(`Timed out waiting for exact Render deployment ${deploymentId}: ${lastSafeError}.`);
+          }
+
+          main().catch((error) => {
+            const message =
+              error instanceof FatalDeployError ? error.message : 'Unexpected Render deployment verification error.';
+            console.error(`::error::${message}`);
+            process.exit(1);
+          });
+          NODE
       - name: Wait for Render backend release
+        env:
+          BRASSTUNE_RELEASE_WAIT_TIMEOUT_MS: "300000"
         run: npm run wait:backend-release
       - name: Record backend deployment evidence
         id: record_backend
         shell: bash
         env:
           RENDER_DEPLOYMENT_ID: ${{ steps.trigger_backend.outputs.deployment_id }}
+          RENDER_PROVIDER_EVIDENCE: ${{ steps.verify_backend_deployment.outputs.provider_evidence_path }}
         run: |
           set -euo pipefail
           version_response="${RUNNER_TEMP}/render-version.json"
@@ -434,13 +588,23 @@ jobs:
           const fs = require('node:fs');
 
           const version = JSON.parse(fs.readFileSync(process.env.VERSION_RESPONSE, 'utf8'));
+          const provider = JSON.parse(fs.readFileSync(process.env.RENDER_PROVIDER_EVIDENCE, 'utf8'));
           const expectedSha = process.env.GITHUB_SHA.toLowerCase();
           const reportedSha = String(version.commit_sha ?? '').toLowerCase();
+          const providerCommitSha = String(provider.provider_commit_sha ?? '').toLowerCase();
           if (reportedSha !== expectedSha) {
             console.error(
               `::error::Render /api/version revision ${reportedSha || '<missing>'} ` +
                 `does not match workflow revision ${expectedSha}.`,
             );
+            process.exit(1);
+          }
+          if (
+            provider.deployment_id !== process.env.RENDER_DEPLOYMENT_ID ||
+            provider.provider_status !== 'live' ||
+            providerCommitSha !== expectedSha
+          ) {
+            console.error('::error::Exact Render provider deployment evidence is invalid.');
             process.exit(1);
           }
           const evidence = {
@@ -449,8 +613,11 @@ jobs:
             commit_sha: expectedSha,
             reported_backend_sha: reportedSha,
             render_deployment_id: process.env.RENDER_DEPLOYMENT_ID,
+            render_deployment_status: provider.provider_status,
+            render_deployment_commit_sha: providerCommitSha,
             api_base_url: process.env.BRASSTUNE_API_BASE_URL,
-            verification: 'Render readiness passed and /api/version matched the exact workflow revision',
+            verification:
+              'Exact Render deployment reached live and public readiness plus /api/version matched the workflow revision',
             verified_at: new Date().toISOString(),
           };
           fs.writeFileSync(process.env.EVIDENCE_PATH, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });

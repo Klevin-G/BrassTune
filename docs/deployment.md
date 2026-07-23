@@ -238,8 +238,10 @@ blocks deployment.
 The frontend deploy stores a token-free `production-deployment-evidence`
 artifact containing the immutable Vercel deployment ID/URL, canonical alias,
 provider revision metadata, and readiness state. The backend deploy stores the
-same artifact name with its Render deployment ID and a freshly captured
-`/api/version` revision after the backend readiness wait passes. Provider tokens
+same artifact name only after the captured Render deployment ID itself reaches
+provider status `live` with `commit.id` equal to the workflow SHA and the public
+readiness plus `/api/version` checks pass. It records the Render deployment ID,
+provider status/commit, and freshly captured public revision. Provider tokens
 are never written to either artifact.
 
 The hosted production smoke workflow lives at

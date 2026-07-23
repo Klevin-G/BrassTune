@@ -128,6 +128,16 @@ jobs:
               }
               const reportedSha = normalizeSha(evidence.reported_backend_sha, 'Render reported backend revision');
               if (reportedSha !== releaseSha) fail('Render reported revision does not match deployment evidence.');
+              const providerSha = normalizeSha(
+                evidence.render_deployment_commit_sha,
+                'Render deployment provider revision',
+              );
+              if (providerSha !== releaseSha) {
+                fail('Render deployment provider revision does not match deployment evidence.');
+              }
+              if (evidence.render_deployment_status !== 'live') {
+                fail('Backend evidence does not identify a live Render deployment.');
+              }
               backendSha = releaseSha;
             } else {
               fail('Deployment evidence target must be frontend or backend.');

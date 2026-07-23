@@ -241,6 +241,21 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     }
   }
 
+  async function continueAsGuest() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      clearPendingAuthReturn();
+      await auth.continueAsGuest();
+      navigate(next, { replace: true });
+    } catch (error) {
+      setMessage({ type: 'error', text: localizedAuthError(error, t) });
+      if (mode === 'callback') setCallbackErrored(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (mode === 'callback') {
     const showError = callbackErrored || Boolean(auth.profileError);
     return (
@@ -252,10 +267,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 <p className="muted-copy" role="status">
                   {t('auth.accountsOffBody')}
                 </p>
-                <Link className="primary-button au-block" to={next} onClick={auth.continueAsGuest}>
+                <button className="primary-button au-block" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                   {t('auth.start')}
                   <ArrowRight size={18} />
-                </Link>
+                </button>
               </>
             ) : showError ? (
               <>
@@ -270,9 +285,9 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                     <LogIn size={18} />
                     {t('auth.tryAgain')}
                   </Link>
-                  <Link className="ghost-button au-block" to={next} onClick={auth.continueAsGuest}>
+                  <button className="ghost-button au-block" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                     {t('auth.keepGuest')}
-                  </Link>
+                  </button>
                 </div>
               </>
             ) : (
@@ -324,10 +339,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                     body={t('auth.accountsOffBody')}
                     icon={Mail}
                   />
-                  <Link className="primary-button au-block" to={next} onClick={auth.continueAsGuest}>
+                  <button className="primary-button au-block" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                     {t('auth.continueGuest')}
                     <ArrowRight size={18} />
-                  </Link>
+                  </button>
                 </>
               )}
 
@@ -486,17 +501,15 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                     {mode !== 'reset' && <Link to={authPathWithNext('/auth/reset-password', next)}>{t('auth.forgot')}?</Link>}
                   </div>
                   {!isPasswordRecovery && (
-                    <Link
+                    <button
                       className="ghost-button au-block"
-                      to={next}
-                      onClick={() => {
-                        clearPendingAuthReturn();
-                        auth.continueAsGuest();
-                      }}
+                      disabled={busy}
+                      type="button"
+                      onClick={() => void continueAsGuest()}
                     >
                       {t('auth.keepGuest')}
                       <ArrowRight size={18} />
-                    </Link>
+                    </button>
                   )}
                 </>
               )}

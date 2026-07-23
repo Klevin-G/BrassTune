@@ -38,7 +38,7 @@ interface AuthState {
   guestMode: boolean;
   guestEntrySequence: number;
   providers: typeof authProviders;
-  continueAsGuest: () => void;
+  continueAsGuest: () => Promise<void>;
   exitGuest: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
@@ -55,6 +55,15 @@ const AuthContext = createContext<AuthState | null>(null);
 const accountsDisabledMessage = 'Accounts are not enabled in this build yet. You can still use guest practice.';
 const guestAccessKey = 'brasstune.guestAccess';
 
+interface GuestSessionTransition {
+  hasAuthSession: boolean;
+  clearInMemoryAccount: () => void;
+  signOutLocal: () => Promise<{ error: unknown }>;
+  clearPersistedSession: () => void;
+  activateGuest: () => void;
+  reportError: (message: string) => void;
+}
+
 export function friendlyAuthError(error: unknown) {
   const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
   const message = raw.trim();
@@ -68,6 +77,9 @@ export function friendlyAuthError(error: unknown) {
   }
   if (lower.includes('weak password') || lower.includes('password should')) {
     return 'Choose a stronger password and try again.';
+  }
+  if (lower.includes('storage') || lower.includes('could not be cleared')) {
+    return 'This browser could not clear the saved account session. Try again or clear BrassTune site data.';
   }
   if (lower.includes('email not confirmed') || lower.includes('confirmation')) {
     return 'Confirm your email before signing in, then try again.';
@@ -107,6 +119,42 @@ export function friendlyAuthError(error: unknown) {
 
 function throwFriendlyAuthError(error: unknown): never {
   throw new Error(friendlyAuthError(error));
+}
+
+/**
+ * Clears an unresolved account session before guest-only state becomes
+ * reachable. The explicit storage fallback matters because Supabase's local
+ * sign-out can return before removing its persisted session when its logout
+ * request fails.
+ */
+export async function transitionToGuest({
+  hasAuthSession,
+  clearInMemoryAccount,
+  signOutLocal,
+  clearPersistedSession,
+  activateGuest,
+  reportError,
+}: GuestSessionTransition) {
+  if (!hasAuthSession) {
+    activateGuest();
+    return;
+  }
+
+  clearInMemoryAccount();
+  try {
+    const { error } = await signOutLocal();
+    if (error) throw error;
+  } catch (error) {
+    try {
+      clearPersistedSession();
+    } catch (storageError) {
+      const message = friendlyAuthError(storageError);
+      reportError(message);
+      throw new Error(message);
+    }
+    reportError(friendlyAuthError(error));
+  }
+  activateGuest();
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -366,11 +414,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { deletionStatus: result.deletion_status };
   }, [resetAccountState]);
 
-  const continueAsGuest = useCallback(() => {
-    localStorage.setItem(guestAccessKey, 'true');
-    setGuestMode(true);
-    setGuestEntrySequence((value) => value + 1);
-  }, []);
+  const continueAsGuest = useCallback(async () => {
+    const activateGuest = () => {
+      localStorage.setItem(guestAccessKey, 'true');
+      setGuestMode(true);
+      setGuestEntrySequence((value) => value + 1);
+    };
+    await transitionToGuest({
+      hasAuthSession: Boolean(session),
+      clearInMemoryAccount: resetAccountState,
+      signOutLocal: async () => {
+        if (!supabase) return { error: null };
+        return supabase.auth.signOut({ scope: 'local' });
+      },
+      clearPersistedSession: () => {
+        const storageKey = (supabase?.auth as unknown as { storageKey?: string } | undefined)?.storageKey;
+        if (!storageKey) {
+          throw new Error('Local account session could not be cleared.');
+        }
+        localStorage.removeItem(storageKey);
+        localStorage.removeItem(`${storageKey}-code-verifier`);
+        localStorage.removeItem(`${storageKey}-user`);
+      },
+      activateGuest,
+      reportError: setProfileError,
+    });
+  }, [resetAccountState, session]);
 
   const exitGuest = useCallback(() => {
     localStorage.removeItem(guestAccessKey);

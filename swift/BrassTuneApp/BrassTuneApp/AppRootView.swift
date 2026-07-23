@@ -35,6 +35,26 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
+@MainActor
+enum AppSceneAudioLifecycle {
+    static func handleTransition(
+        from previousPhase: ScenePhase,
+        to currentPhase: ScenePhase,
+        cancelTunerStart: () -> Void,
+        isTunerRecording: () -> Bool,
+        stopTunerRecording: () -> Void,
+        releasePracticeAudio: () -> Void
+    ) {
+        guard previousPhase == .active, currentPhase != .active else { return }
+
+        cancelTunerStart()
+        if isTunerRecording() {
+            stopTunerRecording()
+        }
+        releasePracticeAudio()
+    }
+}
+
 struct AppRootView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
@@ -151,10 +171,15 @@ struct AppRootView: View {
                 onboardingPresented = true
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active {
-                model.handlePracticeBackground()
-            }
+        .onChange(of: scenePhase) { previousPhase, currentPhase in
+            AppSceneAudioLifecycle.handleTransition(
+                from: previousPhase,
+                to: currentPhase,
+                cancelTunerStart: model.cancelRecordingStart,
+                isTunerRecording: { model.audioEngine.recording },
+                stopTunerRecording: model.stopRecording,
+                releasePracticeAudio: { model.handlePracticeBackground() }
+            )
         }
         .task {
             if resetUITestState {
