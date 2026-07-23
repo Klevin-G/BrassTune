@@ -231,7 +231,17 @@ final class BrassTuneAppTests: XCTestCase {
     @MainActor
     func testMetronomeUsesCountInAndRespectsAccentToggle() {
         let model = makeModel()
-        model.metronome = MetronomeSettings(bpm: 20, beatsPerMeasure: 3, beatUnit: 8, subdivision: .quarter, accentFirstBeat: false, countInBeats: 2)
+        model.metronome = MetronomeSettings(
+            bpm: 20,
+            beatsPerMeasure: 3,
+            beatUnit: 8,
+            subdivision: .quarter,
+            muted: true,
+            visualOnly: true,
+            volume: 0,
+            accentFirstBeat: false,
+            countInBeats: 2
+        )
         model.startMetronome()
         XCTAssertEqual(model.metronomeCountInRemaining, 1)
         XCTAssertEqual(model.metronomeTick, 0)
@@ -613,6 +623,10 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(try value("Drone and intervals", "zh-Hans"), "持续音与音程")
         XCTAssertEqual(try value("%@ cents", "pt-BR"), "%@ cents")
         XCTAssertEqual(try value("Score Practice", "pt-BR"), "Prática de partituras")
+        XCTAssertEqual(try value("Advanced rhythm", "ar"), "إيقاع متقدم")
+        XCTAssertEqual(try value("Beat unit", "de"), "Notenwert")
+        XCTAssertEqual(try value("Accent first beat", "es"), "Acentuar el primer pulso")
+        XCTAssertEqual(try value("Count-in", "zh-Hant"), "預備拍")
 
         let infoData = try Data(contentsOf: resourceDirectory.appendingPathComponent("InfoPlist.xcstrings"))
         let info = try XCTUnwrap(JSONSerialization.jsonObject(with: infoData) as? [String: Any])

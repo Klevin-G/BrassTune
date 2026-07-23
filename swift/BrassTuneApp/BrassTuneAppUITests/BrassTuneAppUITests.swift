@@ -348,6 +348,13 @@ final class BrassTuneAppUITests: XCTestCase {
         tapWhenSafelyVisible(metronomeLink, in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.metronome"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["metronome.savePreset"].exists)
+
+        let advancedRhythm = app.buttons["metronome.advancedRhythm"]
+        tapWhenSafelyVisible(advancedRhythm, in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.beatUnitPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.switches["metronome.accentFirstBeat"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.countIn"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.stepper"].exists)
     }
 
     @MainActor

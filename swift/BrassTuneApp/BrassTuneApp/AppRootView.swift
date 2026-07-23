@@ -1502,6 +1502,7 @@ private func practiceTimeLabel(_ seconds: TimeInterval) -> String {
 struct MetronomeView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var advancedRhythmExpanded = false
 
     var body: some View {
         BTScreen {
@@ -1573,7 +1574,7 @@ struct MetronomeView: View {
                     .buttonStyle(BTSecondaryButtonStyle())
                     .accessibilityIdentifier("metronome.tempoUp")
                 }
-                Stepper(value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 30...240, step: 1) {
+                Stepper(value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 20...300, step: 1) {
                     Text(verbatim: NativeLocalization.format("BPM %@", String(model.metronome.bpm)))
                 }
                     .accessibilityIdentifier("metronome.stepper")
@@ -1581,12 +1582,15 @@ struct MetronomeView: View {
 
             BTCard {
                 BTSectionHeader(title: "Sound and feel", subtitle: "The click is on by default. Use visual-only mode whenever you want silence.")
-                Picker("Meter", selection: Binding(get: { model.metronome.beatsPerMeasure }, set: { model.setMeter(beats: $0) })) {
+                Picker("Meter", selection: Binding(
+                    get: { model.metronome.beatsPerMeasure },
+                    set: { model.setMeter(beats: $0, unit: model.metronome.beatUnit) }
+                )) {
                     ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
-                        Text(verbatim: NativeLocalization.isolate("\(beats)/4")).tag(beats)
+                        Text(verbatim: NativeLocalization.isolate("\(beats)/\(model.metronome.beatUnit)")).tag(beats)
                     }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
                 .accessibilityIdentifier("metronome.meterPicker")
 
                 Picker("Subdivision", selection: Binding(get: { model.metronome.subdivision }, set: { model.metronome.subdivision = $0 })) {
@@ -1608,6 +1612,43 @@ struct MetronomeView: View {
                     .accessibilityLabel("Metronome volume")
                     .accessibilityIdentifier("metronome.volume")
 
+                Divider()
+
+                DisclosureGroup(isExpanded: $advancedRhythmExpanded) {
+                    VStack(alignment: .leading, spacing: BTSpacing.md) {
+                        Picker("Beat unit", selection: Binding(
+                            get: { model.metronome.beatUnit },
+                            set: { model.setMeter(beats: model.metronome.beatsPerMeasure, unit: $0) }
+                        )) {
+                            ForEach([2, 4, 8, 16], id: \.self) { unit in
+                                Text(verbatim: NativeLocalization.isolate("1/\(unit)")).tag(unit)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("metronome.beatUnitPicker")
+
+                        Toggle("Accent first beat", isOn: $model.metronome.accentFirstBeat)
+                            .accessibilityIdentifier("metronome.accentFirstBeat")
+
+                        Stepper(value: $model.metronome.countInBeats, in: 0...16, step: 1) {
+                            HStack {
+                                Text("Count-in")
+                                Spacer()
+                                Text(verbatim: NativeLocalization.isolate(String(model.metronome.countInBeats)))
+                                    .foregroundStyle(BTTheme.muted)
+                                    .monospacedDigit()
+                            }
+                        }
+                        .accessibilityValue(NativeLocalization.isolate(String(model.metronome.countInBeats)))
+                        .accessibilityIdentifier("metronome.countIn")
+                    }
+                    .padding(.top, BTSpacing.sm)
+                } label: {
+                    Label("Advanced rhythm", systemImage: "slider.horizontal.3")
+                        .font(.headline)
+                        .accessibilityIdentifier("metronome.advancedRhythm")
+                }
+                .tint(BTTheme.accent)
             }
 
             MetronomePresetsCard()

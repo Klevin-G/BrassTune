@@ -3997,6 +3997,416 @@
         }
       }
     },
+    "Accent first beat" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "إبراز النبضة الأولى"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ersten Schlag betonen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accent first beat"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acentuar el primer pulso"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accentuer le premier temps"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1拍目を強調"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "첫 박 강조"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acentuar o primeiro tempo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Акцентировать первую долю"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nhấn phách đầu"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重音第一拍"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重音第一拍"
+          }
+        }
+      }
+    },
+    "Advanced rhythm" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "إيقاع متقدم"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erweiterter Rhythmus"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Advanced rhythm"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ritmo avanzado"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rythme avancé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高度なリズム"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고급 리듬"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ritmo avançado"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Расширенные настройки ритма"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nhịp điệu nâng cao"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高级节奏"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "進階節奏"
+          }
+        }
+      }
+    },
+    "Beat unit" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "وحدة النبضة"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notenwert"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beat unit"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unidad de pulso"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unité de temps"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍の単位"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "박 단위"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unidade de tempo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Длительность доли"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đơn vị phách"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍值"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍值"
+          }
+        }
+      }
+    },
+    "Count-in" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "عدّ تمهيدي"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einzählen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Count-in"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cuenta de entrada"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Décompte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カウントイン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "카운트인"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contagem"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Предварительный отсчёт"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đếm vào"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预备拍"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預備拍"
+          }
+        }
+      }
+    },
+    "A practice pack needs between 1 and 12 blocks." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "تحتاج حزمة التدريب إلى ما بين مقطع واحد و12 مقطعًا." } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Ein Übungspaket benötigt zwischen 1 und 12 Blöcke." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A practice pack needs between 1 and 12 blocks." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Un paquete de práctica debe tener entre 1 y 12 bloques." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Un pack d’entraînement doit comporter entre 1 et 12 blocs." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "練習パックには1〜12個のブロックが必要です。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "연습 팩에는 1~12개의 블록이 필요합니다." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Um pacote de prática precisa ter entre 1 e 12 blocos." } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Набор для занятий должен содержать от 1 до 12 блоков." } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Gói luyện tập cần có từ 1 đến 12 khối." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "练习包需要包含 1 到 12 个练习块。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "練習包需要包含 1 到 12 個練習區塊。" } }
+      }
+    },
+    "Edit exercise" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "تحرير التمرين" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Übung bearbeiten" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit exercise" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Editar ejercicio" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Modifier l’exercice" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "練習を編集" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "연습 편집" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Editar exercício" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Редактировать упражнение" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Chỉnh sửa bài tập" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑练习" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "編輯練習" } }
+      }
+    },
+    "Edit or remove saved exercises here. Removing one also clears its shortcuts." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "حرّر التمارين المحفوظة أو احذفها هنا. يؤدي حذف تمرين أيضًا إلى إزالة اختصاراته." } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Bearbeite oder entferne hier gespeicherte Übungen. Beim Entfernen werden auch die zugehörigen Kurzbefehle gelöscht." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit or remove saved exercises here. Removing one also clears its shortcuts." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Edita o elimina aquí los ejercicios guardados. Al eliminar uno, también se borran sus accesos directos." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Modifiez ou supprimez ici les exercices enregistrés. La suppression d’un exercice efface aussi ses raccourcis." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存した練習の編集や削除ができます。削除すると、そのショートカットも消去されます。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "저장한 연습을 여기에서 편집하거나 삭제하세요. 삭제하면 해당 바로가기도 함께 지워집니다." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Edite ou remova exercícios salvos aqui. Ao remover um exercício, os atalhos dele também são apagados." } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Здесь можно изменить или удалить сохранённые упражнения. При удалении также будут удалены их ярлыки." } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Chỉnh sửa hoặc xóa các bài tập đã lưu tại đây. Khi xóa một bài tập, các lối tắt của bài tập đó cũng bị xóa." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在此编辑或移除已保存的练习。移除练习时，也会清除它的快捷方式。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "在此編輯或移除已儲存的練習。移除練習時，也會清除它的捷徑。" } }
+      }
+    },
+    "Every practice block needs a positive duration." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "يجب أن تكون مدة كل مقطع تدريب أكبر من صفر." } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Jeder Übungsblock benötigt eine Dauer größer als null." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Every practice block needs a positive duration." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Cada bloque de práctica debe tener una duración mayor que cero." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Chaque bloc d’entraînement doit avoir une durée supérieure à zéro." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "各練習ブロックの長さは0より大きくする必要があります。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "각 연습 블록의 길이는 0보다 커야 합니다." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Cada bloco de prática precisa ter uma duração maior que zero." } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Длительность каждого блока должна быть больше нуля." } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Mỗi khối luyện tập phải có thời lượng lớn hơn 0." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每个练习块的时长必须大于 0。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "每個練習區塊的時長必須大於 0。" } }
+      }
+    },
+    "Every practice block needs a title." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "يجب أن يكون لكل مقطع تدريب عنوان." } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Jeder Übungsblock benötigt einen Titel." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Every practice block needs a title." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Cada bloque de práctica debe tener un título." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Chaque bloc d’entraînement doit avoir un titre." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "各練習ブロックにはタイトルが必要です。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "각 연습 블록에는 제목이 필요합니다." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Cada bloco de prática precisa de um título." } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "У каждого блока занятий должно быть название." } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Mỗi khối luyện tập cần có tiêu đề." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每个练习块都需要标题。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "每個練習區塊都需要標題。" } }
+      }
+    },
+    "Your exercises" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "تمارينك" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Deine Übungen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your exercises" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Tus ejercicios" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Vos exercices" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "マイ練習" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "내 연습" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Seus exercícios" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Ваши упражнения" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Bài tập của bạn" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你的练习" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "你的練習" } }
+      }
+    },
     "Advanced tuner settings" : {
       "extractionState" : "stale",
       "localizations" : {
