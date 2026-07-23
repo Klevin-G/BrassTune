@@ -123,6 +123,8 @@ test('tiny-phone onboarding keeps its close control clear in English and Arabic'
     await page.evaluate((nextLocale) => {
       localStorage.setItem('brasstune.locale', nextLocale);
       localStorage.setItem('brasstune.guestAccess', 'true');
+      // A completed legacy account/tour must not suppress a fresh guest setup.
+      localStorage.setItem('brasstune.onboardingComplete', 'true');
       localStorage.removeItem('brasstune.guestOnboardingComplete');
     }, locale);
     await page.goto('/practice');

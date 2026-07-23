@@ -26,6 +26,17 @@ export function accountOnboardingDecision(input: AccountOnboardingInput) {
   return { completed, open: !completed };
 }
 
+/**
+ * Guest completion belongs to the guest audience only. The legacy shared flag
+ * is still written when completion succeeds so older releases can understand
+ * it, but it must never silently complete a new (or explicitly reset) guest
+ * setup.
+ */
+export function guestOnboardingDecision(guestCompletion: string | null) {
+  const completed = guestCompletion === 'true';
+  return { completed, open: !completed };
+}
+
 interface AppSettings {
   instrumentId: string;
   setInstrumentId: (value: string) => void;
@@ -160,12 +171,9 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
       return;
     }
 
-    const guestCompletion = localStorage.getItem(guestOnboardingCompleteKey);
-    const completed = guestCompletion === null
-      ? localStorage.getItem(legacyOnboardingCompleteKey) === 'true'
-      : guestCompletion === 'true';
-    setOnboardingComplete(completed);
-    setOnboardingOpen(!completed);
+    const guestDecision = guestOnboardingDecision(localStorage.getItem(guestOnboardingCompleteKey));
+    setOnboardingComplete(guestDecision.completed);
+    setOnboardingOpen(guestDecision.open);
   }, [
     auth.guestEntrySequence,
     auth.guestMode,

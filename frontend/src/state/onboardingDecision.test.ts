@@ -4,6 +4,7 @@ import {
   MIN_REFERENCE_PITCH,
   accountOnboardingDecision,
   clampReferencePitch,
+  guestOnboardingDecision,
 } from './AppSettingsContext';
 
 describe('account onboarding decisions', () => {
@@ -38,6 +39,19 @@ describe('account onboarding decisions', () => {
       isSignedIn: true,
       onboardingCompletedAt: '2026-07-16T12:00:00Z',
     })).toEqual({ completed: true, open: false });
+  });
+});
+
+describe('guest onboarding decisions', () => {
+  it('does not let a stale legacy completion suppress an unset guest setup', () => {
+    // A missing guest key is the explicit first-use/reset state. The legacy
+    // key remains available for older app releases, but is not guest state.
+    expect(guestOnboardingDecision(null)).toEqual({ completed: false, open: true });
+  });
+
+  it('only treats a completed guest setup as complete', () => {
+    expect(guestOnboardingDecision('false')).toEqual({ completed: false, open: true });
+    expect(guestOnboardingDecision('true')).toEqual({ completed: true, open: false });
   });
 });
 
