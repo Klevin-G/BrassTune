@@ -1,12 +1,11 @@
 # Device Simulation Report
 
-Generated: 2026-07-23T04:58:54.580Z
+Generated: 2026-07-23T06:46:47.253Z
+Checkout: f83108422d7ca8c76267a337297e627762ab028a (clean worktree)
 
 The committed Playwright harness was used for repeatable multi-viewport browser automation.
 
 ## Summary
-
-Result: `12/12` configured viewport profiles passed with `Issues` reported as `None`. This is local Chromium viewport automation, not physical Safari/iPad or native-device evidence.
 
 | Viewport | Size | Routes Visited | Result | Issues |
 | --- | ---: | --- | --- | --- |
