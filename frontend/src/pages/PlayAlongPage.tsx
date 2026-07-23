@@ -1,10 +1,14 @@
 import { AlertCircle, Mic, Music4, Play, RotateCcw, SkipForward, Square, Star, Trophy, Volume2 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import './PlayAlongPage.css';
+import { CustomExerciseBuilder } from '../components/practice/CustomExerciseBuilder';
+import { PracticeReflectionCard } from '../components/practice/PracticeReflectionCard';
 import { PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
 import { usePitchStream } from '../hooks/usePitchStream';
 import {
   EXERCISES,
+  DEFAULT_PLAY_ALONG_HOLD_MS,
   MAJOR_SCALES,
   MINOR_SCALES,
   OTHER_EXERCISES,
@@ -18,8 +22,9 @@ import {
 } from '../domain/playAlong';
 import { describeCents, describeInTunePercent, starsForPercent } from '../domain/tuningLanguage';
 import { instrumentDisplayName } from '../domain/instrumentNames';
-import { midiToFrequency, noteLabelToMidi } from '../domain/music';
+import { writtenNoteFrequency } from '../domain/referenceTone';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 
 type Phase = 'idle' | 'running' | 'done';
 
@@ -61,21 +66,6 @@ function exerciseMeta(exercise: Exercise): { difficulty: Difficulty; help: strin
   return { difficulty: { tag: 'Minor', variant: 'plain' }, help: `Play the ${exercise.label} scale going up (natural minor).` };
 }
 
-// Written -> concert transposition (semitones down) for the reference tone, so
-// "Hear it" sounds the pitch the player should actually produce on their horn.
-const WRITTEN_TRANSPOSE: Record<string, number> = {
-  trumpet: 2,
-  cornet: 2,
-  flugelhorn: 2,
-  baritone: 2,
-  horn: 7,
-  'french-horn': 7,
-  trombone: 0,
-  'bass-trombone': 0,
-  euphonium: 0,
-  tuba: 0,
-};
-
 function HoldRing({ fraction }: { fraction: number }) {
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
@@ -102,13 +92,14 @@ function verdictHeadline(stars: number): string {
   return 'Good try — keep at it!';
 }
 
-function bestKey(exerciseId: string): string {
-  return `brasstune.playalong.best.${exerciseId}`;
+function bestKey(ownerId: string, exerciseId: string): string {
+  return `brasstune.playalong.best.${encodeURIComponent(ownerId)}.${exerciseId}`;
 }
 
-function readBest(exerciseId: string): number | null {
+function readBest(ownerId: string | null, exerciseId: string): number | null {
+  if (!ownerId) return null;
   try {
-    const raw = localStorage.getItem(bestKey(exerciseId));
+    const raw = localStorage.getItem(bestKey(ownerId, exerciseId));
     if (raw == null) return null;
     const value = Number(raw);
     return Number.isFinite(value) ? value : null;
@@ -117,9 +108,10 @@ function readBest(exerciseId: string): number | null {
   }
 }
 
-function writeBest(exerciseId: string, percent: number): void {
+function writeBest(ownerId: string | null, exerciseId: string, percent: number): void {
+  if (!ownerId) return;
   try {
-    localStorage.setItem(bestKey(exerciseId), String(percent));
+    localStorage.setItem(bestKey(ownerId, exerciseId), String(percent));
   } catch {
     /* storage unavailable — best is a nicety, safe to skip */
   }
@@ -127,7 +119,14 @@ function writeBest(exerciseId: string, percent: number): void {
 
 export function PlayAlongPage() {
   const { instrumentId, referencePitch } = useAppSettings();
-  const [exerciseId, setExerciseId] = useState(EXERCISES[0].id);
+  const practiceLibrary = usePracticeLibrary();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const allExercises = useMemo<Exercise[]>(() => [
+    ...EXERCISES,
+    ...practiceLibrary.library.customExercises.map((item) => ({ id: item.id, label: item.name, detail: item.source === 'generated' ? 'Suggested from a saved take' : 'Your custom exercise', notes: item.notes, group: 'other' as const })),
+  ], [practiceLibrary.library.customExercises]);
+  const requestedExerciseId = searchParams.get('exercise');
+  const [exerciseId, setExerciseId] = useState(() => requestedExerciseId && allExercises.some((item) => item.id === requestedExerciseId) ? requestedExerciseId : EXERCISES[0].id);
   const [phase, setPhase] = useState<Phase>('idle');
   const [snapshot, setSnapshot] = useState<GraderSnapshot | null>(null);
   const [error, setError] = useState('');
@@ -138,12 +137,15 @@ export function PlayAlongPage() {
   const phaseRef = useRef<Phase>('idle');
   const finishRef = useRef<() => void>(() => {});
   const mountedRef = useRef(true);
+  const startInProgressRef = useRef(false);
+  const startGenerationRef = useRef(0);
   const exerciseIdRef = useRef(exerciseId);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const completionRecordedRef = useRef(false);
   phaseRef.current = phase;
   exerciseIdRef.current = exerciseId;
 
-  const exercise = EXERCISES.find((item) => item.id === exerciseId) ?? EXERCISES[0];
+  const exercise = allExercises.find((item) => item.id === exerciseId) ?? EXERCISES[0];
   const meta = exerciseMeta(exercise);
 
   const onFrame = useCallback((frame: any) => {
@@ -165,23 +167,33 @@ export function PlayAlongPage() {
 
   const recordBest = useCallback((finalResults: NoteGrade[]) => {
     const summary = summarizeGrades(finalResults);
-    const previous = readBest(exerciseIdRef.current);
+    const previous = readBest(practiceLibrary.ownerId, exerciseIdRef.current);
     setPrevBest(previous);
     const beat = previous == null || summary.inTunePercent > previous;
     setIsNewBest(beat);
-    if (beat) writeBest(exerciseIdRef.current, summary.inTunePercent);
-  }, []);
+    if (beat) writeBest(practiceLibrary.ownerId, exerciseIdRef.current, summary.inTunePercent);
+  }, [practiceLibrary.ownerId]);
 
   finishRef.current = () => {
     setPhase('done');
     stream.stopMicrophone();
     recordBest(graderRef.current?.results ?? []);
+    if (!completionRecordedRef.current) {
+      completionRecordedRef.current = true;
+      practiceLibrary.recordActivity(1);
+    }
   };
+
+  useEffect(() => {
+    if (requestedExerciseId && allExercises.some((item) => item.id === requestedExerciseId)) setExerciseId(requestedExerciseId);
+  }, [allExercises, requestedExerciseId]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      startGenerationRef.current += 1;
+      startInProgressRef.current = false;
       stream.stopMicrophone();
     };
   }, []); // stop mic on unmount
@@ -202,9 +214,8 @@ export function PlayAlongPage() {
       }
       if (ctx.state === 'suspended') void ctx.resume();
 
-      const writtenMidi = noteLabelToMidi(`${writtenNote}4`);
-      const semitones = WRITTEN_TRANSPOSE[instrumentId] ?? 0;
-      const frequency = midiToFrequency(writtenMidi - semitones, referencePitch);
+      const frequency = writtenNoteFrequency(writtenNote, instrumentId, referencePitch);
+      if (frequency == null) return;
 
       const now = ctx.currentTime;
       const osc = ctx.createOscillator();
@@ -223,23 +234,35 @@ export function PlayAlongPage() {
   );
 
   const start = async () => {
+    if (startInProgressRef.current || phaseRef.current === 'running') return;
+    startInProgressRef.current = true;
+    const generation = ++startGenerationRef.current;
     setError('');
+    completionRecordedRef.current = false;
     graderRef.current = new PlayAlongGrader(exercise.notes);
     setSnapshot(graderRef.current.snapshot());
     setPhase('running');
-    const mic = await stream.startMicrophone();
-    if (!mountedRef.current) {
-      // Unmounted (or navigated away) while the permission dialog was open.
-      stream.stopMicrophone();
-      return;
-    }
-    if (!mic) {
-      setPhase('idle');
-      setError('We couldn’t turn on your microphone. Allow mic access in your browser (look for the mic icon in the address bar), then tap Start again.');
+    try {
+      const mic = await stream.startMicrophone();
+      if (!mountedRef.current || generation !== startGenerationRef.current) {
+        // Unmounted, stopped, or superseded while the permission dialog was open.
+        stream.stopMicrophone();
+        return;
+      }
+      if (!mic) {
+        setPhase('idle');
+        setError('We couldn’t turn on your microphone. Allow mic access in your browser (look for the mic icon in the address bar), then tap Start again.');
+      } else {
+        practiceLibrary.recordRecent({ kind: 'play-along', id: exercise.id, label: exercise.label, href: `/practice/play-along?exercise=${encodeURIComponent(exercise.id)}` });
+      }
+    } finally {
+      if (generation === startGenerationRef.current) startInProgressRef.current = false;
     }
   };
 
   const stop = () => {
+    startGenerationRef.current += 1;
+    startInProgressRef.current = false;
     setPhase('idle');
     setSnapshot(null);
     graderRef.current = null;
@@ -277,6 +300,12 @@ export function PlayAlongPage() {
     return null;
   })();
 
+  const selectedTarget = { kind: 'play-along' as const, id: exercise.id, label: exercise.label, href: `/practice/play-along?exercise=${encodeURIComponent(exercise.id)}` };
+  const selectExercise = (id: string) => {
+    setExerciseId(id);
+    setSearchParams({ exercise: id }, { replace: true });
+  };
+
   return (
     <ScreenContainer>
       <PageHeader
@@ -301,7 +330,7 @@ export function PlayAlongPage() {
                       <SelectionChip
                         key={item.id}
                         active={item.id === exerciseId}
-                        onClick={() => setExerciseId(item.id)}
+                        onClick={() => selectExercise(item.id)}
                         tone="gold"
                       >
                         <span className="pa-chip-body">
@@ -314,6 +343,16 @@ export function PlayAlongPage() {
                 </div>
               </section>
             ))}
+            {practiceLibrary.library.customExercises.length > 0 && (
+              <section className="pa-exercise-group" aria-labelledby="pa-saved-exercises">
+                <h3 id="pa-saved-exercises">Saved exercises</h3>
+                <div className="chip-row pa-chips">
+                  {practiceLibrary.library.customExercises.map((item) => (
+                    <SelectionChip key={item.id} active={item.id === exerciseId} onClick={() => selectExercise(item.id)} tone="gold">{item.name}</SelectionChip>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
 
           <div className="pa-selected">
@@ -326,6 +365,10 @@ export function PlayAlongPage() {
             <button className="ghost-button pa-hear" type="button" onClick={() => hearNote(exercise.notes[0])}>
               <Volume2 size={17} />
               Hear it
+            </button>
+            <button className="ghost-button" type="button" aria-pressed={practiceLibrary.isFavorite(selectedTarget)} onClick={() => practiceLibrary.toggleFavorite(selectedTarget)}>
+              <Star size={17} fill={practiceLibrary.isFavorite(selectedTarget) ? 'currentColor' : 'none'} />
+              {practiceLibrary.isFavorite(selectedTarget) ? 'Favorited' : 'Favorite'}
             </button>
           </div>
 
@@ -343,6 +386,7 @@ export function PlayAlongPage() {
               {error}
             </p>
           )}
+          <CustomExerciseBuilder onSaved={selectExercise} />
         </SectionCard>
       )}
 
@@ -382,7 +426,7 @@ export function PlayAlongPage() {
           </div>
           <p className="pa-hold-caption">
             <Mic size={15} />
-            Hold each note steady until it locks in.
+            Hold each note steady for {DEFAULT_PLAY_ALONG_HOLD_MS / 1_000} seconds. The ring pauses if we lose the sound, and the next note appears when the ring is full.
           </p>
           <div className="playalong-sequence">
             {exercise.notes.map((note, index) => {
@@ -413,6 +457,7 @@ export function PlayAlongPage() {
       )}
 
       {phase === 'done' && summary && percentVerdict && (
+        <>
         <SectionCard title="Your score">
           <div className="pa-verdict">
             <div className="pa-stars" role="img" aria-label={`${stars} out of 3 stars`}>
@@ -458,6 +503,8 @@ export function PlayAlongPage() {
             </div>
           </details>
         </SectionCard>
+        <PracticeReflectionCard />
+        </>
       )}
     </ScreenContainer>
   );

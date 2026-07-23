@@ -90,6 +90,9 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const monitorGainRef = useRef<GainNode | null>(null);
   const microphoneStartingRef = useRef(false);
+  const microphoneStartPromiseRef = useRef<Promise<MediaStream | null> | null>(null);
+  const microphoneGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
   const analyzedMsRef = useRef(0);
   const indexRef = useRef(0);
   const recordingRef = useRef(recording);
@@ -104,6 +107,14 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const pendingPersistQueueRef = useRef<PendingPersistFrameQueue>({ sessionId: null, frames: [] });
   const flushTimerRef = useRef<number | null>(null);
   const flushPromiseRef = useRef<Promise<PitchFrameFlushResult> | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      microphoneGenerationRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     recordingRef.current = recording;
@@ -248,6 +259,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   }, [demoMode]);
 
   const cleanupMicrophone = useCallback((message?: string) => {
+    microphoneGenerationRef.current += 1;
     processorRef.current?.disconnect();
     sourceRef.current?.disconnect();
     monitorGainRef.current?.disconnect();
@@ -259,11 +271,14 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     mediaStreamRef.current = null;
     audioContextRef.current = null;
     microphoneStartingRef.current = false;
+    microphoneStartPromiseRef.current = null;
     analyzedMsRef.current = 0;
-    setMediaStream(null);
-    setMicActive(false);
-    if (message) setStatusMessage(message);
-    setStreamInfo((old) => ({ ...old, sampleRate: null, detectorSource: demoModeRef.current ? 'guest demo' : 'browser local pitch' }));
+    if (mountedRef.current) {
+      setMediaStream(null);
+      setMicActive(false);
+      if (message) setStatusMessage(message);
+      setStreamInfo((old) => ({ ...old, sampleRate: null, detectorSource: demoModeRef.current ? 'guest demo' : 'browser local pitch' }));
+    }
   }, []);
 
   const stopMicrophone = useCallback(() => {
@@ -271,64 +286,126 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   }, [cleanupMicrophone]);
 
   const startMicrophone = useCallback(async () => {
-    if (demoMode) return null;
-    if (mediaStreamRef.current && micActive) return mediaStreamRef.current;
-    if (microphoneStartingRef.current) return mediaStreamRef.current;
+    if (demoModeRef.current || !mountedRef.current) return null;
+    if (microphoneStartPromiseRef.current) return microphoneStartPromiseRef.current;
+
+    const existingStream = mediaStreamRef.current;
+    const existingContext = audioContextRef.current;
+    if (existingStream && existingContext && existingContext.state !== 'closed') {
+      if (existingContext.state !== 'running') {
+        await existingContext.resume().catch(() => undefined);
+      }
+      if (existingContext.state === 'running') {
+        setMicActive(true);
+        setStatusMessage('Listening. Play a steady note.');
+        return existingStream;
+      }
+      setMicActive(false);
+      setStatusMessage('Tap Turn on mic to start listening. Your browser paused audio until you interact with the page.');
+      return null;
+    }
+    if (existingStream || existingContext) cleanupMicrophone();
+
     const AudioContextClass = audioContextConstructor();
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextClass) {
       setStatusMessage('Microphone input is unavailable in this browser. Guest demo practice still works on this device.');
       return null;
     }
+    const generation = ++microphoneGenerationRef.current;
     microphoneStartingRef.current = true;
     setStatusMessage('Asking for microphone access.');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-      mediaStreamRef.current = stream;
-      setMediaStream(stream);
-      const audioContext = new AudioContextClass();
-      audioContextRef.current = audioContext;
-      if (audioContext.state === 'suspended') await audioContext.resume().catch(() => undefined);
-      setStreamInfo((old) => ({ ...old, sampleRate: audioContext.sampleRate, detectorSource: 'browser local pitch', sentFrames: 0, droppedFrames: 0 }));
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(AUDIO_FRAME_SIZE, 1, 1);
-      const monitorGain = audioContext.createGain();
-      monitorGain.gain.value = 0;
-      source.connect(processor);
-      processor.connect(monitorGain);
-      monitorGain.connect(audioContext.destination);
-      sourceRef.current = source;
-      processorRef.current = processor;
-      monitorGainRef.current = monitorGain;
-      processor.onaudioprocess = (event) => {
-        const input = event.inputBuffer.getChannelData(0);
-        const pcm = new Float32Array(input);
-        analyzedMsRef.current += (pcm.length / audioContext.sampleRate) * 1000;
-        const frame = pitchFrameFromPcm(
-          pcm,
-          audioContext.sampleRate,
-          instrumentIdRef.current,
-          referencePitchRef.current,
-          Math.round(analyzedMsRef.current),
-        );
-        setStreamInfo((old) => ({ ...old, sentFrames: old.sentFrames + 1 }));
-        handleFrame(frame);
-        if (frame.is_valid_for_recording) {
-          setStatusMessage('Sound detected. Tracking pitch now.');
-        } else if (frame.tuning_status === 'silence') {
-          setStatusMessage('Listening. No stable pitch yet.');
-        } else {
-          setStatusMessage('Sound detected. No stable pitch yet.');
+    const promise = (async (): Promise<MediaStream | null> => {
+      let stream: MediaStream | null = null;
+      let audioContext: AudioContext | null = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+        if (!mountedRef.current || demoModeRef.current || generation !== microphoneGenerationRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return null;
         }
-      };
-      microphoneStartingRef.current = false;
-      setMicActive(true);
-      setStatusMessage('Listening. Play a steady note.');
-      return stream;
-    } catch (error) {
-      cleanupMicrophone('Microphone blocked or unavailable. Guest demo practice still works on this device.');
-      return null;
-    }
-  }, [cleanupMicrophone, demoMode, handleFrame, micActive]);
+
+        audioContext = new AudioContextClass();
+        const source = audioContext.createMediaStreamSource(stream);
+        const processor = audioContext.createScriptProcessor(AUDIO_FRAME_SIZE, 1, 1);
+        const monitorGain = audioContext.createGain();
+        monitorGain.gain.value = 0;
+        source.connect(processor);
+        processor.connect(monitorGain);
+        monitorGain.connect(audioContext.destination);
+
+        if (!mountedRef.current || demoModeRef.current || generation !== microphoneGenerationRef.current) {
+          processor.disconnect();
+          source.disconnect();
+          monitorGain.disconnect();
+          stream.getTracks().forEach((track) => track.stop());
+          await audioContext.close().catch(() => undefined);
+          return null;
+        }
+
+        mediaStreamRef.current = stream;
+        audioContextRef.current = audioContext;
+        sourceRef.current = source;
+        processorRef.current = processor;
+        monitorGainRef.current = monitorGain;
+        setMediaStream(stream);
+        setStreamInfo((old) => ({ ...old, sampleRate: audioContext?.sampleRate ?? null, detectorSource: 'browser local pitch', sentFrames: 0, droppedFrames: 0 }));
+
+        processor.onaudioprocess = (event) => {
+          if (!mountedRef.current || generation !== microphoneGenerationRef.current) return;
+          const input = event.inputBuffer.getChannelData(0);
+          const pcm = new Float32Array(input);
+          analyzedMsRef.current += (pcm.length / audioContext!.sampleRate) * 1000;
+          const frame = pitchFrameFromPcm(
+            pcm,
+            audioContext!.sampleRate,
+            instrumentIdRef.current,
+            referencePitchRef.current,
+            Math.round(analyzedMsRef.current),
+          );
+          setStreamInfo((old) => ({ ...old, sentFrames: old.sentFrames + 1 }));
+          handleFrame(frame);
+          if (frame.is_valid_for_recording) {
+            setStatusMessage('Sound detected. Tracking pitch now.');
+          } else if (frame.tuning_status === 'silence') {
+            setStatusMessage('Listening. No stable pitch yet.');
+          } else {
+            setStatusMessage('Sound detected. No stable pitch yet.');
+          }
+        };
+
+        if (audioContext.state !== 'running') {
+          await audioContext.resume().catch(() => undefined);
+        }
+        if (!mountedRef.current || demoModeRef.current || generation !== microphoneGenerationRef.current) {
+          cleanupMicrophone();
+          return null;
+        }
+        if (audioContext.state !== 'running') {
+          setMicActive(false);
+          setStatusMessage('Tap Turn on mic to start listening. Your browser paused audio until you interact with the page.');
+          return null;
+        }
+        setMicActive(true);
+        setStatusMessage('Listening. Play a steady note.');
+        return stream;
+      } catch {
+        if (generation === microphoneGenerationRef.current) {
+          cleanupMicrophone('Microphone blocked or unavailable. Guest demo practice still works on this device.');
+        } else {
+          stream?.getTracks().forEach((track) => track.stop());
+          await audioContext?.close().catch(() => undefined);
+        }
+        return null;
+      } finally {
+        if (generation === microphoneGenerationRef.current) {
+          microphoneStartingRef.current = false;
+          microphoneStartPromiseRef.current = null;
+        }
+      }
+    })();
+    microphoneStartPromiseRef.current = promise;
+    return promise;
+  }, [cleanupMicrophone, handleFrame]);
 
   useEffect(() => {
     if (demoMode) {

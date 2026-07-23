@@ -9,7 +9,8 @@ import { NoteStatsTable } from '../components/NoteStatsTable';
 import { PracticePlanCard } from '../components/PracticePlanCard';
 import { AccuracyLineChart, PracticeBarChart } from '../components/ProgressChart';
 import { RecommendationCard } from '../components/RecommendationCard';
-import { EmptyActionState, InsightCard, MetricTile, PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge } from '../components/ui/AppPrimitives';
+import { EmptyActionState, InsightCard, LoadingSkeleton, MetricTile, PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge } from '../components/ui/AppPrimitives';
+import { WeeklyGoalCard } from '../components/practice/WeeklyGoalCard';
 import {
   buildGuestHeatmap,
   buildGuestNoteStats,
@@ -27,6 +28,8 @@ import './ProgressPage.css';
 
 type Period = '7d' | '30d' | 'all' | 'custom';
 type Tab = 'overview' | 'notes' | 'plan';
+type ProgressRange = { date_from: string; date_to: string };
+type ProgressLoadState = 'loading' | 'ready' | 'error';
 
 function dateOffset(days: number) {
   const date = new Date();
@@ -38,6 +41,67 @@ function rangeForPeriod(period: Period) {
   if (period === '7d') return { date_from: dateOffset(7), date_to: '' };
   if (period === '30d') return { date_from: dateOffset(30), date_to: '' };
   return { date_from: '', date_to: '' };
+}
+
+export function validateProgressRange(range: ProgressRange) {
+  if (range.date_from && range.date_to && range.date_from > range.date_to) {
+    return 'The start date must be on or before the end date.';
+  }
+  return null;
+}
+
+export function progressDataOwnerKey(isSignedIn: boolean, profileId: number | null | undefined, identityPending = false) {
+  if (identityPending) return null;
+  if (isSignedIn) return profileId == null ? null : `account:${profileId}`;
+  return 'guest';
+}
+
+export function progressDataBelongsToOwner(dataOwnerKey: string | null, currentOwnerKey: string | null) {
+  return currentOwnerKey !== null && dataOwnerKey === currentOwnerKey;
+}
+
+export function invalidRangeOwnerTransition(dataOwnerKey: string | null, currentOwnerKey: string | null, hasRangeError: boolean) {
+  if (!hasRangeError || currentOwnerKey === null) return { dataOwnerKey, clearData: false };
+  return { dataOwnerKey: currentOwnerKey, clearData: true };
+}
+
+export function ProgressRangeControls({
+  period,
+  range,
+  rangeError,
+  showHeading = true,
+  onPeriodChange,
+  onRangeChange,
+}: {
+  period: Period;
+  range: ProgressRange;
+  rangeError: string | null;
+  showHeading?: boolean;
+  onPeriodChange: (period: Period) => void;
+  onRangeChange: (range: ProgressRange) => void;
+}) {
+  return (
+    <div className="pg-advanced-block">
+      {showHeading && <h3>Time period</h3>}
+      <SegmentedControl
+        ariaLabel="Time period"
+        value={period}
+        options={[
+          { value: '7d', label: '7 days' },
+          { value: '30d', label: '30 days' },
+          { value: 'all', label: 'All' },
+          { value: 'custom', label: 'Custom' },
+        ]}
+        onChange={onPeriodChange}
+      />
+      {period === 'custom' && (
+        <div>
+          <DateRangeFilter value={range} onChange={onRangeChange} />
+          {rangeError && <p className="pg-range-error" role="alert">{rangeError}</p>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ProgressPage() {
@@ -52,18 +116,50 @@ export function ProgressPage() {
   const [range, setRange] = useState(rangeForPeriod('30d'));
   const [selectedNote, setSelectedNote] = useState<string | undefined>();
   const [tab, setTab] = useState<Tab>('overview');
-  const [loadError, setLoadError] = useState(false);
+  const [loadState, setLoadState] = useState<ProgressLoadState>('loading');
+  const [dataOwnerKey, setDataOwnerKey] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const rangeError = validateProgressRange(range);
+  const identityPending = auth.loading || (auth.hasAuthSession && !auth.isSignedIn);
+  const currentOwnerKey = progressDataOwnerKey(auth.isSignedIn, auth.profile?.id, identityPending);
 
   useEffect(() => {
+    let active = true;
+    if (currentOwnerKey === null) {
+      setLoadState('loading');
+      return () => {
+        active = false;
+      };
+    }
+    if (rangeError) {
+      setStats([]);
+      setHeatmap([]);
+      setProgress(null);
+      setPlan(null);
+      setRecommendations([]);
+      setDataOwnerKey((previous) => invalidRangeOwnerTransition(previous, currentOwnerKey, true).dataOwnerKey);
+      setLoadState('ready');
+      return () => {
+        active = false;
+      };
+    }
+    setLoadState('loading');
     if (!auth.isSignedIn) {
-      const guestStats = buildGuestNoteStats(instrumentId, range);
-      setStats(guestStats);
-      setHeatmap(buildGuestHeatmap(instrumentId, guestStats));
-      setProgress(buildGuestProgress(instrumentId, guestStats, range));
-      setPlan(buildGuestPracticePlan(guestStats, instrumentId));
-      setRecommendations(buildGuestRecommendations(guestStats));
-      setLoadError(false);
-      return;
+      try {
+        const guestStats = buildGuestNoteStats(instrumentId, range);
+        setStats(guestStats);
+        setHeatmap(buildGuestHeatmap(instrumentId, guestStats));
+        setProgress(buildGuestProgress(instrumentId, guestStats, range));
+        setPlan(buildGuestPracticePlan(guestStats, instrumentId));
+        setRecommendations(buildGuestRecommendations(guestStats));
+        setDataOwnerKey(currentOwnerKey);
+        setLoadState('ready');
+      } catch {
+        setLoadState('error');
+      }
+      return () => {
+        active = false;
+      };
     }
     Promise.all([
       getNoteStats(instrumentId, range),
@@ -73,22 +169,23 @@ export function ProgressPage() {
       getRecommendations(instrumentId),
     ])
       .then(([noteData, heatmapData, progressData, planData, recommendationData]) => {
+        if (!active) return;
         setStats(noteData);
         setHeatmap(heatmapData);
         setProgress(progressData);
         setPlan(planData);
         setRecommendations(recommendationData);
-        setLoadError(false);
+        setDataOwnerKey(currentOwnerKey);
+        setLoadState('ready');
       })
       .catch(() => {
-        setStats([]);
-        setHeatmap([]);
-        setProgress(null);
-        setPlan(null);
-        setRecommendations([]);
-        setLoadError(true);
+        if (!active) return;
+        setLoadState('error');
       });
-  }, [auth.isSignedIn, instrumentId, range]);
+    return () => {
+      active = false;
+    };
+  }, [auth.isSignedIn, currentOwnerKey, instrumentId, range, rangeError, retryKey]);
 
   useEffect(() => {
     const nextSelection = selectDefaultNoteLabel(heatmap, selectedNote);
@@ -128,30 +225,86 @@ export function ProgressPage() {
   const practiceMinutes = Math.round((progress?.total_practice_time_seconds ?? 0) / 60);
   const streakDays = progress?.consistency?.practice_streak_days ?? 0;
 
-  const hasData = measuredStats.length > 0 || sessionCount > 0;
+  const dataBelongsToCurrentOwner = progressDataBelongsToOwner(dataOwnerKey, currentOwnerKey);
+  const hasData = dataBelongsToCurrentOwner && (measuredStats.length > 0 || sessionCount > 0);
+  const visibleLoadState = currentOwnerKey === null || (!dataBelongsToCurrentOwner && loadState === 'ready') ? 'loading' : loadState;
 
   const instrumentBadge = <StatusBadge tone="muted">{instrumentDisplayName(instrumentId)}</StatusBadge>;
+  const rangeControls = (
+    <ProgressRangeControls
+      period={period}
+      range={range}
+      rangeError={rangeError}
+      showHeading={false}
+      onPeriodChange={(next) => {
+        setPeriod(next);
+        if (next !== 'custom') setRange(rangeForPeriod(next));
+      }}
+      onRangeChange={(next) => {
+        setRange(next);
+        setPeriod('custom');
+      }}
+    />
+  );
+
+  if (visibleLoadState === 'loading' && !hasData) {
+    return (
+      <ScreenContainer>
+        <PageHeader title="Your progress" description="See how your tuning is getting better over time." meta={instrumentBadge} />
+        <SectionCard title="Time period" eyebrow="Filter results">
+          {rangeControls}
+        </SectionCard>
+        <SectionCard title="Loading your progress">
+          <LoadingSkeleton rows={5} />
+        </SectionCard>
+      </ScreenContainer>
+    );
+  }
+
+  if (visibleLoadState === 'error' && !hasData) {
+    return (
+      <ScreenContainer>
+        <PageHeader title="Your progress" description="See how your tuning is getting better over time." meta={instrumentBadge} />
+        <SectionCard title="Time period" eyebrow="Filter results">
+          {rangeControls}
+        </SectionCard>
+        <SectionCard title="Couldn’t load your progress" eyebrow="Connection problem">
+          <p className="pg-load-copy">Check your connection, then try again. Your practice history has not been removed.</p>
+          <button className="primary-button" type="button" onClick={() => setRetryKey((current) => current + 1)}>Try again</button>
+        </SectionCard>
+      </ScreenContainer>
+    );
+  }
 
   if (!hasData) {
     return (
       <ScreenContainer>
         <PageHeader title="Your progress" description="See how your tuning is getting better over time." meta={instrumentBadge} />
-        {loadError && (
-          <p className="pg-note" role="status" aria-live="polite">
-            We couldn&apos;t load your results just now. Play a note and they&apos;ll start filling in.
-          </p>
+        {rangeError ? (
+          <>
+            <SectionCard title="Time period" eyebrow="Filter results">
+              {rangeControls}
+            </SectionCard>
+            <p className="pg-note" role="status">Choose a valid time period to load progress for this account.</p>
+          </>
+        ) : (
+          <>
+            <EmptyActionState
+              icon={LineChart}
+              title="No practice yet"
+              body="Play a few notes on the Tuner and your results show up here — how in-tune you are, and which notes to work on."
+              action={
+                <Link to="/practice" className="primary-button">
+                  Record your first note
+                  <ArrowRight size={18} />
+                </Link>
+              }
+            />
+            <SectionCard title="Time period" eyebrow="Filter results">
+              {rangeControls}
+            </SectionCard>
+          </>
         )}
-        <EmptyActionState
-          icon={LineChart}
-          title="No practice yet"
-          body="Play a few notes on the Tuner and your results show up here — how in-tune you are, and which notes to work on."
-          action={
-            <Link to="/practice" className="primary-button">
-              Record your first note
-              <ArrowRight size={18} />
-            </Link>
-          }
-        />
       </ScreenContainer>
     );
   }
@@ -170,6 +323,16 @@ export function ProgressPage() {
         }
       />
 
+      {visibleLoadState === 'loading' && (
+        <p className="pg-load-status" role="status" aria-live="polite">Updating your progress…</p>
+      )}
+      {visibleLoadState === 'error' && (
+        <div className="pg-load-warning" role="status" aria-live="polite">
+          <p>We couldn’t refresh your progress. The most recent results already loaded are still shown.</p>
+          <button className="ghost-button" type="button" onClick={() => setRetryKey((current) => current + 1)}>Try again</button>
+        </div>
+      )}
+
       <div className="stats-grid">
         <MetricTile label="In tune" value={`${Math.round(inTunePct)}%`} detail="across notes you played" icon={Target} tone={inTuneTone} />
         <MetricTile label="Average off by" value={offBy.label} detail={offBy.detail || 'right on'} icon={Gauge} tone={offBy.tone} />
@@ -185,6 +348,8 @@ export function ProgressPage() {
       <p className="pg-cents-hint">
         “Cents” measure how sharp or flat a note is — about 100 cents is one key on a piano. Under about 5 cents counts as in tune.
       </p>
+
+      <WeeklyGoalCard />
 
       <SegmentedControl
         ariaLabel="Progress sections"
@@ -340,32 +505,19 @@ export function ProgressPage() {
       <details className="pg-advanced">
         <summary>Advanced (for teachers)</summary>
         <div className="pg-advanced-body">
-          <div className="pg-advanced-block">
-            <h3>Time period</h3>
-            <SegmentedControl
-              ariaLabel="Time period"
-              value={period}
-              options={[
-                { value: '7d', label: '7 days' },
-                { value: '30d', label: '30 days' },
-                { value: 'all', label: 'All' },
-                { value: 'custom', label: 'Custom' },
-              ]}
-              onChange={(next) => {
-                setPeriod(next);
-                if (next !== 'custom') setRange(rangeForPeriod(next));
-              }}
-            />
-            {period === 'custom' && (
-              <DateRangeFilter
-                value={range}
-                onChange={(next) => {
-                  setRange(next);
-                  setPeriod('custom');
-                }}
-              />
-            )}
-          </div>
+          <ProgressRangeControls
+            period={period}
+            range={range}
+            rangeError={rangeError}
+            onPeriodChange={(next) => {
+              setPeriod(next);
+              if (next !== 'custom') setRange(rangeForPeriod(next));
+            }}
+            onRangeChange={(next) => {
+              setRange(next);
+              setPeriod('custom');
+            }}
+          />
 
           {worst.length > 0 && (
             <div className="pg-advanced-block">

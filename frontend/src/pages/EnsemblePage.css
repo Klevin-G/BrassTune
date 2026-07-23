@@ -109,7 +109,7 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  min-height: 34px;
+  min-height: var(--tap, 44px);
   padding: 0 10px;
   font-size: 0.82rem;
   font-weight: 700;
@@ -232,6 +232,11 @@
 .ec-accept-select {
   margin-left: auto;
   min-width: 190px;
+}
+.ec-instrument-required {
+  color: var(--red);
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 .ec-invite-actions {
   display: flex;
@@ -390,7 +395,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 36px;
+  min-height: var(--tap, 44px);
   padding: 0 12px;
   font-size: 0.85rem;
   font-weight: 700;

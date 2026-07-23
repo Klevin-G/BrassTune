@@ -125,6 +125,7 @@ async function ensureServers() {
         VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
         VITE_SUPABASE_URL: '',
         VITE_SUPABASE_PUBLISHABLE_KEY: '',
+        VITE_E2E_DISABLE_SUPABASE: 'true',
         VITE_ENABLE_INTERNAL_TOOLS: 'false',
       }));
     }

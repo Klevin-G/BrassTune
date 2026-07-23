@@ -1,0 +1,9 @@
+{
+  "name": "BrassTune",
+  "short_name": "BrassTune",
+  "description": "Brass tuner and focused practice tools",
+  "start_url": "/practice",
+  "display": "standalone",
+  "background_color": "#0a0d12",
+  "theme_color": "#d8a53f"
+}

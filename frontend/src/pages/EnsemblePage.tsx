@@ -45,6 +45,12 @@ function relativeWhen(value: string | null): string {
 
 type Tone = 'green' | 'amber' | 'red' | 'muted';
 
+type ClassMutationToken = {
+  accountKey: string;
+  loadGeneration: number;
+  mutationEpoch: number;
+};
+
 // Plain-language read of an average absolute cents deviation (how far off, on average).
 function describeAverageOff(absCents: number | null | undefined): { label: string; detail: string; tone: Tone } {
   if (absCents == null || Number.isNaN(absCents)) return { label: 'No plays yet', detail: '', tone: 'muted' };
@@ -93,24 +99,37 @@ export function EnsemblePage() {
   const [showJoin, setShowJoin] = useState(false);
   const [joining, setJoining] = useState(false);
   const [leavingGroup, setLeavingGroup] = useState(false);
+  const [removingMember, setRemovingMember] = useState(false);
   const [rotatingCode, setRotatingCode] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [invitingMember, setInvitingMember] = useState(false);
   const [respondingInvitations, setRespondingInvitations] = useState<Record<number, 'accept' | 'decline'>>({});
   const [loading, setLoading] = useState(true);
+  const [classDataAccountKey, setClassDataAccountKey] = useState<string | null>(null);
   const joinInFlightRef = useRef(false);
   const leaveInFlightRef = useRef(false);
+  const removeInFlightRef = useRef(false);
   const createInFlightRef = useRef(false);
   const inviteInFlightRef = useRef(false);
   const invitationResponsesInFlightRef = useRef(new Set<number>());
   const classLoadGenerationRef = useRef(0);
+  const mutationEpochRef = useRef(0);
   const mountedRef = useRef(true);
   const leaveDialogRef = useRef<HTMLDivElement | null>(null);
   const leaveCancelRef = useRef<HTMLButtonElement | null>(null);
   const leaveReturnFocusRef = useRef<HTMLElement | null>(null);
+  const removeDialogRef = useRef<HTMLDivElement | null>(null);
+  const removeCancelRef = useRef<HTMLButtonElement | null>(null);
+  const removeReturnFocusRef = useRef<HTMLElement | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const auth = useAuth();
   const myId = auth.profile?.id;
+  const verifiedAccountKey = auth.user && auth.profile
+    && (!auth.profile.supabase_user_id || auth.profile.supabase_user_id === auth.user.id)
+    ? `${auth.user.id}:${auth.profile.id}`
+    : null;
+  const verifiedAccountKeyRef = useRef<string | null>(verifiedAccountKey);
+  verifiedAccountKeyRef.current = verifiedAccountKey;
 
   const managesGroup = (group: any): boolean => {
     if (typeof group?.viewer_can_manage === 'boolean') return group.viewer_can_manage;
@@ -134,6 +153,27 @@ export function EnsemblePage() {
 
   const isCurrentClassLoad = (generation: number) => (
     mountedRef.current && classLoadGenerationRef.current === generation
+  );
+
+  const captureMutationToken = (): ClassMutationToken | null => {
+    const accountKey = verifiedAccountKeyRef.current;
+    if (!accountKey) return null;
+    return {
+      accountKey,
+      loadGeneration: classLoadGenerationRef.current,
+      mutationEpoch: mutationEpochRef.current,
+    };
+  };
+
+  const isCurrentMutationOwner = (token: ClassMutationToken) => (
+    mountedRef.current
+    && verifiedAccountKeyRef.current === token.accountKey
+    && mutationEpochRef.current === token.mutationEpoch
+  );
+
+  const isCurrentMutation = (token: ClassMutationToken) => (
+    isCurrentMutationOwner(token)
+    && classLoadGenerationRef.current === token.loadGeneration
   );
 
   const selectGroup = async (groupId: number, requestedGeneration?: number) => {
@@ -166,7 +206,7 @@ export function EnsemblePage() {
     }
   };
 
-  const loadEverything = async (preferredGroupId?: number) => {
+  const loadEverything = async (preferredGroupId?: number, requestedAccountKey = verifiedAccountKey) => {
     const generation = ++classLoadGenerationRef.current;
     if (isCurrentClassLoad(generation)) setLoading(true);
     try {
@@ -193,8 +233,27 @@ export function EnsemblePage() {
         setEnsembleStatus(friendlyUserFacingError(error, 'Could not load your class.'));
       }
     } finally {
-      if (isCurrentClassLoad(generation)) setLoading(false);
+      if (isCurrentClassLoad(generation)) {
+        setClassDataAccountKey(requestedAccountKey);
+        setLoading(false);
+      }
     }
+  };
+
+  const reloadForMutation = async (token: ClassMutationToken, preferredGroupId?: number) => {
+    if (!isCurrentMutation(token)) return false;
+    const reload = loadEverything(preferredGroupId, token.accountKey);
+    const reloadGeneration = classLoadGenerationRef.current;
+    await reload;
+    return isCurrentMutationOwner(token) && classLoadGenerationRef.current === reloadGeneration;
+  };
+
+  const reloadGroupForMutation = async (token: ClassMutationToken, groupId: number) => {
+    if (!isCurrentMutation(token)) return false;
+    const reload = selectGroup(groupId);
+    const reloadGeneration = classLoadGenerationRef.current;
+    await reload;
+    return isCurrentMutationOwner(token) && classLoadGenerationRef.current === reloadGeneration;
   };
 
   useEffect(() => {
@@ -206,21 +265,48 @@ export function EnsemblePage() {
   }, []);
 
   useEffect(() => {
-    if (!auth.isSignedIn) {
-      classLoadGenerationRef.current += 1;
-      setGroups([]);
-      setSelectedGroup(null);
-      setSummary(null);
-      setReport(null);
-      setRoster(null);
-      setInvitations([]);
-      setEnsembleStatus('');
+    classLoadGenerationRef.current += 1;
+    mutationEpochRef.current += 1;
+    joinInFlightRef.current = false;
+    leaveInFlightRef.current = false;
+    removeInFlightRef.current = false;
+    createInFlightRef.current = false;
+    inviteInFlightRef.current = false;
+    invitationResponsesInFlightRef.current.clear();
+    setClassDataAccountKey(null);
+    setGroups([]);
+    setSelectedGroup(null);
+    setSummary(null);
+    setReport(null);
+    setRoster(null);
+    setInvitations([]);
+    setAcceptInstruments({});
+    setPendingRemove(null);
+    setPendingLeave(null);
+    const sharedCode = searchParams.get('join')?.trim().toUpperCase() ?? '';
+    setJoinCodeInput(sharedCode);
+    setJoinInstrument('');
+    setNewGroupName('');
+    setMemberUsername('');
+    setInviteInstrument('');
+    setShowJoin(Boolean(sharedCode));
+    setShowCreate(false);
+    setJoining(false);
+    setLeavingGroup(false);
+    setRemovingMember(false);
+    setRotatingCode(false);
+    setCreatingGroup(false);
+    setInvitingMember(false);
+    setRespondingInvitations({});
+    setEnsembleStatus('');
+    if (!verifiedAccountKey) {
       setLoading(false);
       return;
     }
-    void loadEverything();
+    setLoading(true);
+    void loadEverything(undefined, verifiedAccountKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.isSignedIn]);
+  }, [verifiedAccountKey]);
 
   useEffect(() => {
     const sharedCode = searchParams.get('join')?.trim().toUpperCase();
@@ -265,8 +351,52 @@ export function EnsemblePage() {
       if (returnFocus?.isConnected) returnFocus.focus();
     };
   }, [pendingLeave]);
+
+  useEffect(() => {
+    if (!pendingRemove) return undefined;
+    removeCancelRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (removeInFlightRef.current) return;
+        setPendingRemove(null);
+        return;
+      }
+      if (event.key !== 'Tab' || !removeDialogRef.current) return;
+      const focusable = Array.from(
+        removeDialogRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const returnFocus = removeReturnFocusRef.current;
+      removeReturnFocusRef.current = null;
+      if (returnFocus?.isConnected) returnFocus.focus();
+    };
+  }, [pendingRemove]);
   const respondToInvitation = async (invitation: EnsembleInvitation, accept: boolean) => {
+    const chosenInstrument = acceptInstruments[invitation.member_id]
+      ?? (isKnownInstrument(invitation.instrument_id) ? invitation.instrument_id : '');
+    if (accept && !chosenInstrument) {
+      setEnsembleStatus('Choose your instrument before accepting the invitation.');
+      return;
+    }
     if (invitationResponsesInFlightRef.current.has(invitation.member_id)) return;
+    const token = captureMutationToken();
+    if (!token) return;
     invitationResponsesInFlightRef.current.add(invitation.member_id);
     setRespondingInvitations((current) => ({
       ...current,
@@ -275,18 +405,23 @@ export function EnsemblePage() {
     try {
       if (accept) {
         // The student's own instrument choice is set as part of accepting.
-        const chosen = acceptInstruments[invitation.member_id];
-        await acceptEnsembleInvitation(invitation.member_id, chosen && chosen !== invitation.instrument_id ? chosen : undefined);
+        await acceptEnsembleInvitation(
+          invitation.member_id,
+          chosenInstrument !== invitation.instrument_id ? chosenInstrument : undefined,
+        );
       } else {
         await declineEnsembleInvitation(invitation.member_id);
       }
-      await loadEverything(accept ? invitation.group_id : undefined);
+      if (!isCurrentMutation(token)) return;
+      if (!await reloadForMutation(token, accept ? invitation.group_id : undefined)) return;
       setEnsembleStatus(accept ? `You joined “${invitation.group_name}”.` : `You declined “${invitation.group_name}”.`);
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not update the invitation.'));
+      if (isCurrentMutation(token)) {
+        setEnsembleStatus(friendlyUserFacingError(error, 'Could not update the invitation.'));
+      }
     } finally {
-      invitationResponsesInFlightRef.current.delete(invitation.member_id);
-      if (mountedRef.current) {
+      if (isCurrentMutationOwner(token)) {
+        invitationResponsesInFlightRef.current.delete(invitation.member_id);
         setRespondingInvitations((current) => {
           const next = { ...current };
           delete next[invitation.member_id];
@@ -303,15 +438,18 @@ export function EnsemblePage() {
       setEnsembleStatus('Enter the class code your teacher gave you.');
       return;
     }
+    const token = captureMutationToken();
+    if (!token) return;
     joinInFlightRef.current = true;
     setJoining(true);
     setEnsembleStatus('Joining class…');
     try {
       const result = await joinEnsembleByCode(code, joinInstrument || undefined);
+      if (!isCurrentMutation(token)) return;
       setJoinCodeInput('');
       setJoinInstrument('');
       setShowJoin(false);
-      await loadEverything(result.group_id);
+      if (!await reloadForMutation(token, result.group_id)) return;
       setEnsembleStatus(`You joined “${result.group_name}”.`);
       if (searchParams.has('join')) {
         const next = new URLSearchParams(searchParams);
@@ -319,15 +457,18 @@ export function EnsemblePage() {
         setSearchParams(next, { replace: true });
       }
     } catch (error) {
+      if (!isCurrentMutation(token)) return;
       if (error instanceof Error && /conflicts with existing account or ensemble data/i.test(error.message)) {
-        await loadEverything();
+        if (!await reloadForMutation(token)) return;
         setEnsembleStatus('You’re already in that class. Your class list is up to date.');
       } else {
         setEnsembleStatus(friendlyUserFacingError(error, 'That code didn’t work. Double-check it with your teacher.'));
       }
     } finally {
-      joinInFlightRef.current = false;
-      setJoining(false);
+      if (isCurrentMutationOwner(token)) {
+        joinInFlightRef.current = false;
+        setJoining(false);
+      }
     }
   };
 
@@ -338,20 +479,28 @@ export function EnsemblePage() {
       setEnsembleStatus('Give your class a name first.');
       return;
     }
+    const token = captureMutationToken();
+    if (!token) return;
     createInFlightRef.current = true;
     setCreatingGroup(true);
     try {
       const group = await createEnsembleGroup(groupName);
+      if (!isCurrentMutation(token)) return;
       setNewGroupName('');
       setShowCreate(false);
       await auth.refreshProfile().catch(() => undefined);
-      await loadEverything(group.id);
+      if (!isCurrentMutation(token)) return;
+      if (!await reloadForMutation(token, group.id)) return;
       setEnsembleStatus(`“${group.name}” is ready. Add students below.`);
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not create the class.'));
+      if (isCurrentMutation(token)) {
+        setEnsembleStatus(friendlyUserFacingError(error, 'Could not create the class.'));
+      }
     } finally {
-      createInFlightRef.current = false;
-      if (mountedRef.current) setCreatingGroup(false);
+      if (isCurrentMutationOwner(token)) {
+        createInFlightRef.current = false;
+        setCreatingGroup(false);
+      }
     }
   };
 
@@ -368,6 +517,8 @@ export function EnsemblePage() {
     const groupId = selectedGroup.id;
     const username = memberUsername.trim();
     const instrumentId = inviteInstrument;
+    const token = captureMutationToken();
+    if (!token) return;
     inviteInFlightRef.current = true;
     setInvitingMember(true);
     try {
@@ -379,47 +530,68 @@ export function EnsemblePage() {
         instrument_id: instrumentId || undefined,
         role_in_group: 'student',
       });
+      if (!isCurrentMutation(token)) return;
       setMemberUsername('');
       setInviteInstrument('');
-      await selectGroup(groupId);
+      if (!await reloadGroupForMutation(token, groupId)) return;
       setEnsembleStatus('Invite sent — they’ll see it when they sign in.');
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not send the invite. Check the username is exact.'));
+      if (isCurrentMutation(token)) {
+        setEnsembleStatus(friendlyUserFacingError(error, 'Could not send the invite. Check the username is exact.'));
+      }
     } finally {
-      inviteInFlightRef.current = false;
-      if (mountedRef.current) setInvitingMember(false);
+      if (isCurrentMutationOwner(token)) {
+        inviteInFlightRef.current = false;
+        setInvitingMember(false);
+      }
     }
   };
 
   const doRemove = async () => {
-    if (!selectedGroup?.id || !pendingRemove) return;
+    if (!selectedGroup?.id || !pendingRemove || removeInFlightRef.current) return;
     const { memberId, label } = pendingRemove;
-    setPendingRemove(null);
+    const groupId = selectedGroup.id;
+    const token = captureMutationToken();
+    if (!token) return;
+    removeInFlightRef.current = true;
+    setRemovingMember(true);
     try {
-      await removeEnsembleMember(selectedGroup.id, memberId);
-      await selectGroup(selectedGroup.id);
+      await removeEnsembleMember(groupId, memberId);
+      if (!isCurrentMutation(token)) return;
+      if (!await reloadGroupForMutation(token, groupId)) return;
       setEnsembleStatus(`${label} removed.`);
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not remove the student.'));
+      if (isCurrentMutation(token)) {
+        setEnsembleStatus(friendlyUserFacingError(error, 'Could not remove the student.'));
+      }
+    } finally {
+      if (isCurrentMutationOwner(token)) {
+        removeInFlightRef.current = false;
+        setRemovingMember(false);
+        setPendingRemove(null);
+      }
     }
   };
 
   const doLeave = async () => {
     if (!pendingLeave || leaveInFlightRef.current) return;
     const leaving = pendingLeave;
+    const token = captureMutationToken();
+    if (!token) return;
     leaveInFlightRef.current = true;
     setLeavingGroup(true);
     try {
       await leaveEnsembleGroup(leaving.groupId);
-      await loadEverything();
-      if (mountedRef.current) setEnsembleStatus(`You left “${leaving.label}”.`);
+      if (!isCurrentMutation(token)) return;
+      if (!await reloadForMutation(token)) return;
+      setEnsembleStatus(`You left “${leaving.label}”.`);
     } catch (error) {
-      if (mountedRef.current) {
+      if (isCurrentMutation(token)) {
         setEnsembleStatus(friendlyUserFacingError(error, 'Could not leave the class.'));
       }
     } finally {
-      leaveInFlightRef.current = false;
-      if (mountedRef.current) {
+      if (isCurrentMutationOwner(token)) {
+        leaveInFlightRef.current = false;
         setLeavingGroup(false);
         setPendingLeave(null);
       }
@@ -428,17 +600,22 @@ export function EnsemblePage() {
 
   const rotateJoinCode = async () => {
     if (!selectedGroup?.id || !managesSelected || rotatingCode) return;
+    const token = captureMutationToken();
+    if (!token) return;
     setRotatingCode(true);
     try {
       const result = await rotateEnsembleJoinCode(selectedGroup.id);
+      if (!isCurrentMutation(token)) return;
       setSelectedGroup((current: any) => current?.id === result.group_id ? { ...current, join_code: result.join_code } : current);
       setGroups((current) => current.map((group) => group.id === result.group_id ? { ...group, join_code: result.join_code } : group));
       setCopied('');
       setEnsembleStatus('Class code rotated. The previous code no longer works.');
     } catch (error) {
-      setEnsembleStatus(friendlyUserFacingError(error, 'Could not rotate the class code.'));
+      if (isCurrentMutation(token)) {
+        setEnsembleStatus(friendlyUserFacingError(error, 'Could not rotate the class code.'));
+      }
     } finally {
-      setRotatingCode(false);
+      if (isCurrentMutationOwner(token)) setRotatingCode(false);
     }
   };
   const copyText = async (text: string, key: string) => {
@@ -463,7 +640,7 @@ export function EnsemblePage() {
   };
 
   // ---- Signed out ---------------------------------------------------------
-  if (!auth.isSignedIn) {
+  if (!verifiedAccountKey) {
     return (
       <ScreenContainer>
         <PageHeader title="Class" description="See who’s practicing and how they’re doing." />
@@ -495,6 +672,15 @@ export function EnsemblePage() {
             </div>
           </div>
         </SectionCard>
+      </ScreenContainer>
+    );
+  }
+
+  if (classDataAccountKey !== verifiedAccountKey) {
+    return (
+      <ScreenContainer>
+        <PageHeader title="Class" description="See who’s practicing and how they’re doing." />
+        <p className="settings-status" role="status">Loading this account’s classes…</p>
       </ScreenContainer>
     );
   }
@@ -532,7 +718,10 @@ export function EnsemblePage() {
           <button
             className="ec-remove ec-no-print"
             type="button"
-            onClick={() => setPendingRemove({ memberId: student.member_id, label: name })}
+            onClick={(event) => {
+              removeReturnFocusRef.current = event.currentTarget;
+              setPendingRemove({ memberId: student.member_id, label: name });
+            }}
           >
             <Trash2 size={15} />
             <span>Remove</span>
@@ -603,15 +792,17 @@ export function EnsemblePage() {
                       value={chosen}
                       onChange={(event) => setAcceptInstruments((prev) => ({ ...prev, [invitation.member_id]: event.target.value }))}
                       disabled={Boolean(pendingAction)}
+                      aria-describedby={!chosen ? `ec-instrument-required-${invitation.member_id}` : undefined}
                     >
                       <option value="">Pick your instrument</option>
                       {INSTRUMENT_OPTIONS.map((id) => (
                         <option value={id} key={id}>{instrumentDisplayName(id)}</option>
                       ))}
                     </select>
+                    {!chosen && <small className="ec-instrument-required" id={`ec-instrument-required-${invitation.member_id}`}>Choose your instrument before accepting.</small>}
                   </label>
                   <div className="ec-invite-actions">
-                    <button className="primary-button" type="button" onClick={() => respondToInvitation(invitation, true)} disabled={Boolean(pendingAction)}>
+                    <button className="primary-button" type="button" onClick={() => respondToInvitation(invitation, true)} disabled={Boolean(pendingAction) || !chosen}>
                       <Check size={16} />
                       {pendingAction === 'accept' ? 'Joining…' : 'Accept'}
                     </button>
@@ -918,13 +1109,23 @@ export function EnsemblePage() {
       )}
 
       {pendingRemove && (
-        <div className="ec-modal-overlay ec-no-print" role="presentation" onClick={() => setPendingRemove(null)}>
-          <div className="ec-modal" role="dialog" aria-modal="true" aria-labelledby="ec-remove-title" onClick={(event) => event.stopPropagation()}>
+        <div className="ec-modal-overlay ec-no-print" role="presentation" onClick={() => { if (!removingMember) setPendingRemove(null); }}>
+          <div
+            className="ec-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-busy={removingMember}
+            aria-labelledby="ec-remove-title"
+            ref={removeDialogRef}
+            onClick={(event) => event.stopPropagation()}
+          >
             <h3 id="ec-remove-title">Remove {pendingRemove.label}?</h3>
             <p className="muted-copy">They’ll come off this class roster. Their own practice history stays on their account.</p>
             <div className="ec-modal-actions">
-              <button className="ghost-button" type="button" onClick={() => setPendingRemove(null)}>Cancel</button>
-              <button className="ec-danger-btn" type="button" onClick={doRemove}>Remove</button>
+              <button className="ghost-button" type="button" ref={removeCancelRef} onClick={() => setPendingRemove(null)} disabled={removingMember}>Cancel</button>
+              <button className="ec-danger-btn" type="button" onClick={doRemove} disabled={removingMember}>
+                {removingMember ? 'Removing…' : 'Remove'}
+              </button>
             </div>
           </div>
         </div>

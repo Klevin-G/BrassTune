@@ -90,6 +90,18 @@
 
   .topbar-controls {
     justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+
+  .topbar .icon-button.labeled {
+    width: var(--tap);
+    min-width: var(--tap);
+    min-height: var(--tap);
+    padding: 0;
+  }
+
+  .topbar .icon-button.labeled span {
+    display: none;
   }
 
   .topbar .select-wrap.compact span,
@@ -574,8 +586,13 @@
     grid-template-columns: 1fr;
   }
 
-  .topbar-controls .select-wrap {
-    max-width: 124px;
+  .topbar > .select-wrap {
+    min-width: 0;
+    max-width: 148px;
+  }
+
+  .topbar > .select-wrap select {
+    width: 100%;
   }
 
   select {
@@ -606,7 +623,7 @@
     gap: 5px;
   }
 
-  .topbar-controls .select-wrap {
+  .topbar > .select-wrap {
     max-width: 108px;
   }
 

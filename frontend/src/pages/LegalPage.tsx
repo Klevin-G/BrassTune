@@ -146,10 +146,10 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
       />
       <SectionCard title="Data BrassTune uses">
         <p>Your profile, settings, practice sessions, and any recordings you choose to keep.</p>
-        <p>Media you import is analyzed in your browser. The file you pick is never uploaded or stored by BrassTune.</p>
+        <p>Media you import is analyzed in your browser and is never uploaded by BrassTune. Imported score pages may stay in this browser on this device until you clear them in Settings.</p>
       </SectionCard>
       <SectionCard title="Your control">
-        <p>Settings lets you export your data, clear sessions, sign out, and delete your account. Recordings only happen when you tap record, and they're deleted along with their session.</p>
+        <p>Settings lets you export data, clear device preferences and saved score pages, sign out, and delete an account. Guest recordings can be managed individually from Recordings. Recording only starts when you choose to start a take.</p>
         <Link className="primary-button" to="/settings">Manage data</Link>
       </SectionCard>
     </ScreenContainer>

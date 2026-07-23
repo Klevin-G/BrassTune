@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EXERCISES,
+  DEFAULT_PLAY_ALONG_HOLD_MS,
   MAJOR_SCALES,
   MINOR_SCALES,
   OTHER_EXERCISES,
@@ -113,8 +114,30 @@ describe('exercise catalog', () => {
 });
 
 describe('PlayAlongGrader', () => {
-  it('advances after sustaining the correct note and records average cents', () => {
+  it('uses a 2-second default and does not advance before the full hold', () => {
+    const grader = new PlayAlongGrader(['C']);
+    expect(grader.holdMs).toBe(DEFAULT_PLAY_ALONG_HOLD_MS);
+
+    for (let t = 0; t <= 1_750; t += 250) grader.feed(frame('C', 5), t);
+    const justBefore = grader.feed(frame('C', 5), 1_999);
+
+    expect(justBefore.heldFraction).toBeCloseTo(1_999 / 2_000, 5);
+    expect(grader.results).toEqual([]);
+    expect(grader.currentName).toBe('C');
+  });
+
+  it('advances once the default 2-second hold is reached', () => {
+    const grader = new PlayAlongGrader(['C', 'D']);
+    for (let t = 0; t <= 2_000; t += 250) grader.feed(frame('C', 5), t);
+
+    expect(grader.results).toHaveLength(1);
+    expect(grader.results[0].name).toBe('C');
+    expect(grader.currentName).toBe('D');
+  });
+
+  it('honors an explicit hold override and records average cents', () => {
     const grader = new PlayAlongGrader(['C', 'D'], { holdMs: 400, minSamples: 3 });
+    expect(grader.holdMs).toBe(400);
     // Sustain C at +10c for 500ms (frames every 100ms).
     for (let t = 0; t <= 500; t += 100) {
       grader.feed(frame('C', 10), t);
@@ -142,6 +165,7 @@ describe('PlayAlongGrader', () => {
     grader.feed(frame('C', 5), 300);
     grader.feed(frame('C', 5), 400); // only 100ms since reset
     expect(grader.results.length).toBe(0);
+    expect(grader.snapshot().heldFraction).toBeCloseTo(0.25, 5);
   });
 
   it('grades detector canonical names against enharmonic written spellings', () => {
@@ -157,9 +181,23 @@ describe('PlayAlongGrader', () => {
     grader.feed(frame('C', 8), 0);
     grader.feed(frame(null, null, 0.1), 100); // silence blip
     grader.feed(frame('C', 8), 200);
-    grader.feed(frame('C', 8), 440); // total window >= 400ms, latest gap <= 250ms
+    grader.feed(frame('C', 8), 400);
+    grader.feed(frame('C', 8), 600); // 400ms of confirmed matching time
     expect(grader.results.length).toBe(1);
     expect(grader.results[0].grade).toBe('good');
+  });
+
+  it('pauses visible held progress during a tolerated detector dropout', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 400, minSamples: 3, maximumDropoutMs: 250 });
+    grader.feed(frame('C', 4), 0);
+    const beforeDropout = grader.feed(frame('C', 4), 100);
+    const duringDropout = grader.feed(frame(null, null, 0.1), 200);
+    const afterResume = grader.feed(frame('C', 4), 250);
+
+    expect(beforeDropout.heldFraction).toBeCloseTo(0.25, 5);
+    expect(duringDropout.heldFraction).toBeCloseTo(0.25, 5);
+    expect(afterResume.heldFraction).toBeCloseTo(0.25, 5);
+    expect(grader.results).toEqual([]);
   });
 
   it('resets a stale hold after the native 250ms dropout grace', () => {

@@ -11,6 +11,43 @@
   font-size: 0.92rem;
 }
 
+.pg-load-copy {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.pg-load-status,
+.pg-load-warning {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.pg-load-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: var(--amber);
+  color: var(--text);
+}
+
+.pg-load-warning p,
+.pg-range-error {
+  margin: 0;
+}
+
+.pg-range-error {
+  padding-top: 8px;
+  color: var(--red);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
 .pg-cents-hint {
   margin: 4px 2px 0;
   color: var(--muted);
@@ -212,6 +249,10 @@
 }
 
 @media (max-width: 640px) {
+  .pg-load-warning {
+    align-items: stretch;
+    flex-direction: column;
+  }
   .pg-note-row {
     grid-template-columns: auto 1fr;
     row-gap: 2px;

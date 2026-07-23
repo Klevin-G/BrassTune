@@ -1,0 +1,48 @@
+.practice-feature-stack { display: grid; gap: 0.85rem; }
+.practice-feature-stack p { margin: 0; }
+.practice-lead { font-size: 1.02rem; }
+.practice-time { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--gold); }
+.practice-feature-stack progress { width: 100%; height: 0.7rem; accent-color: var(--gold); }
+.practice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem; }
+.practice-inline-form { display: flex; align-items: end; flex-wrap: wrap; gap: 0.75rem; }
+.practice-inline-form .field { min-width: min(100%, 10rem); flex: 1; }
+.practice-success { color: var(--green); font-weight: 700; }
+.practice-warning { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.75rem; border-radius: 0.8rem; background: color-mix(in srgb, var(--gold) 12%, transparent); }
+.practice-warning svg { flex: 0 0 auto; }
+.practice-shortcut-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.practice-shortcut-columns h3 { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.6rem; font-size: 0.92rem; }
+.practice-shortcut { display: block; padding: 0.65rem 0; border-top: 1px solid var(--line); color: inherit; text-decoration: none; font-weight: 700; }
+.practice-pack-grid { display: grid; gap: 0.75rem; margin-top: 1rem; }
+.practice-builder { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+.practice-builder summary { cursor: pointer; font-weight: 800; }
+.practice-builder[open] summary { margin-bottom: 0.8rem; }
+.practice-saved-list { display: grid; gap: 0.4rem; }
+.practice-saved-list > div { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 0.4rem; }
+.practice-preset-list { display: grid; gap: 0.4rem; }
+.practice-preset-list > div { display: flex; align-items: center; gap: 0.35rem; border-top: 1px solid var(--line); padding-top: 0.45rem; }
+.practice-preset-list .link-button { flex: 1; text-align: left; }
+.practice-pack { display: grid; grid-template-columns: auto 1fr auto; gap: 0.8rem; align-items: center; padding: 0.85rem; border: 1px solid var(--line); border-radius: 1rem; }
+.practice-pack h3, .practice-pack p { margin: 0; }
+.practice-pack p, .practice-pack small { color: var(--muted); }
+.focus-workspace { position: fixed; z-index: 70; inset: auto 1rem 1rem calc(var(--sidebar-width, 0px) + 1rem); display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.85rem 1rem; border: 1px solid var(--gold); border-radius: 1rem; background: var(--surface); box-shadow: 0 10px 40px rgb(0 0 0 / 0.25); }
+.focus-workspace > div:first-child { min-width: 0; display: grid; }
+.focus-workspace small, .focus-workspace span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-workspace-actions { display: flex; flex: 0 0 auto; gap: 0.5rem; }
+.app-shell.focus-mode .content { padding-bottom: 9rem; }
+@media (max-width: 860px) {
+  .focus-workspace { inset: auto 0.5rem 0.5rem; flex-direction: column; align-items: stretch; }
+  .focus-workspace-actions { justify-content: stretch; }
+  .focus-workspace-actions button { flex: 1; }
+  .app-shell.focus-mode .floating-tab-bar { display: none; }
+  .app-shell.focus-mode .content { padding-bottom: 12rem; }
+}
+@media (max-width: 480px) {
+  .practice-shortcut-columns { grid-template-columns: 1fr; }
+  .practice-pack { grid-template-columns: auto 1fr; }
+  .practice-pack button { grid-column: 1 / -1; width: 100%; }
+  .focus-workspace-actions { display: grid; grid-template-columns: 2.75rem 1fr 1fr; }
+  .focus-workspace-actions button { min-width: 0; padding-inline: 0.45rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-workspace, .practice-feature-stack progress { scroll-behavior: auto; transition: none !important; }
+}

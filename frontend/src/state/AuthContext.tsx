@@ -34,6 +34,7 @@ interface AuthState {
   isSignedIn: boolean;
   cloudReady: boolean;
   guestMode: boolean;
+  guestEntrySequence: number;
   providers: typeof authProviders;
   continueAsGuest: () => void;
   exitGuest: () => void;
@@ -113,31 +114,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [guestMode, setGuestMode] = useState(() => localStorage.getItem(guestAccessKey) === 'true');
+  const [guestEntrySequence, setGuestEntrySequence] = useState(0);
   const profileRequestId = useRef(0);
   const profileRef = useRef(profile);
+  const profileUserIdRef = useRef<string | null>(null);
+  const sessionUserIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    profileRef.current = profile;
-  }, [profile]);
+  const clearProfileState = useCallback((clearError = true) => {
+    profileRef.current = null;
+    profileUserIdRef.current = null;
+    setProfile(null);
+    if (clearError) setProfileError(null);
+  }, []);
 
   const resetAccountState = useCallback(() => {
     profileRequestId.current += 1;
+    sessionUserIdRef.current = null;
     setSession(null);
     setUser(null);
-    setProfile(null);
-    setProfileError(null);
-  }, []);
+    clearProfileState();
+  }, [clearProfileState]);
+
+  const adoptSession = useCallback((nextSession: Session | null) => {
+    const nextUserId = nextSession?.user.id ?? null;
+    if (sessionUserIdRef.current !== nextUserId) {
+      profileRequestId.current += 1;
+      clearProfileState();
+      sessionUserIdRef.current = nextUserId;
+    }
+    setSession(nextSession);
+    setUser(nextSession?.user ?? null);
+    if (nextSession) {
+      localStorage.removeItem(guestAccessKey);
+      setGuestMode(false);
+    }
+  }, [clearProfileState]);
 
   const loadProfile = useCallback(async (activeSession: Session | null, options: { required?: boolean } = {}) => {
     const requestId = ++profileRequestId.current;
     if (supabase && !activeSession) {
-      setProfile(null);
-      setProfileError(null);
+      clearProfileState();
       return null;
     }
     if (!supabase && apiBase()) {
-      setProfile(null);
-      setProfileError(null);
+      clearProfileState();
       return null;
     }
     try {
@@ -153,6 +173,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else if (requestId !== profileRequestId.current) {
         return null;
       }
+      profileRef.current = current;
+      profileUserIdRef.current = activeSession?.user.id ?? null;
       setProfile(current);
       setProfileError(null);
       return current;
@@ -162,15 +184,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const message = friendlyAuthError(error);
       setProfileError(message);
-      if (options.required || !profileRef.current) {
-        setProfile(null);
+      const requestedUserId = activeSession?.user.id ?? null;
+      if (options.required || !profileRef.current || profileUserIdRef.current !== requestedUserId) {
+        clearProfileState(false);
       }
       if (options.required) {
         throw new Error(message);
       }
       return null;
     }
-  }, []);
+  }, [clearProfileState]);
 
   const refreshProfile = useCallback(async () => {
     await loadProfile(session);
@@ -189,40 +212,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth
       .getSession()
       .then(({ data }) => {
-        setSession(data.session ?? null);
-        setUser(data.session?.user ?? null);
+        adoptSession(data.session ?? null);
         loadProfile(data.session ?? null).finally(() => setLoading(false));
       })
       .catch(() => {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
+        resetAccountState();
         setLoading(false);
       });
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
+      adoptSession(nextSession);
       loadProfile(nextSession);
     });
     return () => {
       subscription.subscription.unsubscribe();
       setAuthTokenProvider(null);
     };
-  }, [loadProfile]);
+  }, [adoptSession, loadProfile, resetAccountState]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      setProfile(null);
-      setProfileError(null);
+      adoptSession(data.session ?? null);
       const loadedProfile = await loadProfile(data.session ?? null, { required: Boolean(data.session) });
       if (data.session && !loadedProfile) {
         throw new Error('Account profile is not ready yet. Try again in a moment.');
       }
-      setSession(data.session ?? null);
-      setUser(data.session?.user ?? null);
       localStorage.removeItem(guestAccessKey);
       setGuestMode(false);
     } catch (error) {
@@ -230,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetAccountState();
       throwFriendlyAuthError(error);
     }
-  }, [loadProfile, resetAccountState]);
+  }, [adoptSession, loadProfile, resetAccountState]);
 
   const signUp = useCallback(async (payload: SignUpPayload) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
@@ -247,14 +263,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       });
       if (error) throw error;
-      setProfile(null);
-      setProfileError(null);
+      adoptSession(data.session ?? null);
       const loadedProfile = await loadProfile(data.session ?? null, { required: Boolean(data.session) });
       if (data.session && !loadedProfile) {
         throw new Error('Account profile is not ready yet. Try again in a moment.');
       }
-      setSession(data.session ?? null);
-      setUser(data.session?.user ?? null);
       localStorage.removeItem(guestAccessKey);
       setGuestMode(false);
     } catch (error) {
@@ -262,7 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetAccountState();
       throwFriendlyAuthError(error);
     }
-  }, [loadProfile, resetAccountState]);
+  }, [adoptSession, loadProfile, resetAccountState]);
 
   const signInWithApple = useCallback(async (redirectTo = `${window.location.origin}/auth/callback`) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
@@ -352,6 +365,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const continueAsGuest = useCallback(() => {
     localStorage.setItem(guestAccessKey, 'true');
     setGuestMode(true);
+    setGuestEntrySequence((value) => value + 1);
   }, []);
 
   const exitGuest = useCallback(() => {
@@ -371,6 +385,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSignedIn: Boolean(session && profile),
       cloudReady: Boolean(session && profile),
       guestMode,
+      guestEntrySequence,
       providers: authProviders,
       continueAsGuest,
       exitGuest,
@@ -384,7 +399,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       refreshProfile,
     }),
-    [continueAsGuest, deleteAccount, exitGuest, guestMode, loading, profile, profileError, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
+    [continueAsGuest, deleteAccount, exitGuest, guestEntrySequence, guestMode, loading, profile, profileError, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

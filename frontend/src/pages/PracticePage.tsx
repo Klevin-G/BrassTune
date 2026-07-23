@@ -1,11 +1,16 @@
 import { FileText, Timer } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { friendlyUserFacingError } from '../api/client';
 import { NoteDisplay } from '../components/NoteDisplay';
 import { SessionControls } from '../components/SessionControls';
 import { TuningMeter } from '../components/TuningMeter';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
+import { DroneIntervalPanel } from '../components/practice/DroneIntervalPanel';
+import { GuidedWarmupPanel } from '../components/practice/GuidedWarmupPanel';
+import { PracticePackPanel } from '../components/practice/PracticePackPanel';
+import { PracticeShortcuts } from '../components/practice/PracticeShortcuts';
+import { WeeklyGoalCard } from '../components/practice/WeeklyGoalCard';
 import { ScreenContainer, SegmentedControl } from '../components/ui/AppPrimitives';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { usePitchStream } from '../hooks/usePitchStream';
@@ -13,6 +18,7 @@ import { useSessionRecorder } from '../hooks/useSessionRecorder';
 import { recordPracticeActivity } from '../domain/practiceStreak';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import './PracticePage.css';
 
 // How many consecutive centered frames count as a full "held in tune" reward.
@@ -21,6 +27,9 @@ const HOLD_TARGET_FRAMES = 16;
 export function PracticePage() {
   const { instrumentId, referencePitch, demoMode, setDemoMode } = useAppSettings();
   const auth = useAuth();
+  const { recordActivity, storageError } = usePracticeLibrary();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const practiceTool = searchParams.get('tool') === 'drone' ? 'drone' : 'tuner';
   const cloudSessionEnabled = auth.isSignedIn;
   const recorder = useSessionRecorder(instrumentId, referencePitch, { cloudEnabled: cloudSessionEnabled });
   const audioRecorder = useAudioRecorder();
@@ -31,7 +40,7 @@ export function PracticePage() {
   const micRequestedRef = useRef(false);
 
   const stream = usePitchStream({
-    enabled: true,
+    enabled: practiceTool === 'tuner',
     demoMode,
     instrumentId,
     referencePitch,
@@ -44,14 +53,15 @@ export function PracticePage() {
   // Live-on-open: request the microphone as soon as the tuner mounts in mic mode
   // (and whenever the user switches back to mic), so the tuner just works.
   useEffect(() => {
-    if (demoMode) {
+    if (practiceTool !== 'tuner' || demoMode) {
+      if (practiceTool !== 'tuner' && stream.micActive) stream.stopMicrophone();
       micRequestedRef.current = false;
       return;
     }
     if (micRequestedRef.current || stream.micActive) return;
     micRequestedRef.current = true;
     stream.startMicrophone().catch(() => undefined);
-  }, [demoMode, stream]);
+  }, [demoMode, practiceTool, stream]);
 
   // Count a completed take toward the practice streak.
   const lastSavedIdRef = useRef<string | number | null>(null);
@@ -59,9 +69,11 @@ export function PracticePage() {
     const summary = recorder.lastSummary;
     if (summary && summary.id !== lastSavedIdRef.current) {
       lastSavedIdRef.current = summary.id;
-      recordPracticeActivity(Math.max(1, Math.round((summary.duration_seconds ?? 0) / 60)));
+      const minutes = Math.max(1, Math.round((summary.duration_seconds ?? 0) / 60));
+      recordPracticeActivity(minutes);
+      recordActivity(minutes);
     }
-  }, [recorder.lastSummary]);
+  }, [recordActivity, recorder.lastSummary]);
 
   // Grow the in-tune reward the longer the player holds a centered pitch.
   useEffect(() => {
@@ -166,6 +178,17 @@ export function PracticePage() {
   return (
     <ScreenContainer>
       <div className="tuner-page">
+        <SegmentedControl
+          ariaLabel="Practice tool"
+          value={practiceTool}
+          onChange={(value) => setSearchParams(value === 'drone' ? { tool: 'drone' } : {}, { replace: true })}
+          options={[
+            { value: 'tuner', label: 'Tuner' },
+            { value: 'drone', label: 'Drone / intervals' },
+          ]}
+        />
+        {practiceTool === 'tuner' ? (
+          <>
         <div className="tuner-topline">
           <SegmentedControl
             ariaLabel="Sound source"
@@ -200,6 +223,9 @@ export function PracticePage() {
             onMicStop={stream.stopMicrophone}
           />
           {recorder.error && <div className="alert" role="alert">{recorder.error}</div>}
+          {audioRecorder.error && audioRecorder.error !== recorder.error && (
+            <div className="alert" role="alert">{audioRecorder.error}</div>
+          )}
         </section>
 
         <div className="tuner-tools" aria-label="Practice tools">
@@ -231,6 +257,14 @@ export function PracticePage() {
             </Link>
           </div>
         )}
+          </>
+        ) : <DroneIntervalPanel />}
+
+        {storageError && <div className="alert" role="alert">{storageError}</div>}
+        <GuidedWarmupPanel />
+        <PracticeShortcuts />
+        <WeeklyGoalCard />
+        <PracticePackPanel />
       </div>
     </ScreenContainer>
   );

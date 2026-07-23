@@ -8,28 +8,52 @@ import { HeatMapGrid } from '../components/HeatMapGrid';
 import { NoteStatsTable } from '../components/NoteStatsTable';
 import { RecommendationCard } from '../components/RecommendationCard';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
+import { PracticeReflectionCard } from '../components/practice/PracticeReflectionCard';
+import { WeakTransitionCard } from '../components/practice/WeakTransitionCard';
 import { LoadingSkeleton, MetricTile, PageHeader, ScreenContainer, SectionCard, StatusBadge } from '../components/ui/AppPrimitives';
 import { instrumentDisplayName } from '../domain/instrumentNames';
 import { describeCents, describeInTunePercent } from '../domain/tuningLanguage';
 import { getGuestSession, isGuestSessionId, type GuestSessionDetail } from '../domain/guestSessions';
 import type { NoteEvent, NoteStats, PracticeSession, Recommendation } from '../domain/types';
+import { useAuth } from '../state/AuthContext';
 import './SessionReviewPage.css';
 
 type SessionDetail = PracticeSession & { samples_count: number; note_events: NoteEvent[] };
+type ReviewLoadError = 'not-found' | 'auth' | 'network' | null;
+
+export function classifySessionReviewError(error: unknown): Exclude<ReviewLoadError, null> {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (/sign in|authentication required|unauthorized|session expired/i.test(message)) return 'auth';
+  if (/not available for this account|not found|do not have access/i.test(message)) return 'not-found';
+  return 'network';
+}
 
 export function SessionReviewPage() {
   const { id } = useParams();
+  const auth = useAuth();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [stats, setStats] = useState<NoteStats[]>([]);
   const [heatmap, setHeatmap] = useState<NoteStats[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState<ReviewLoadError>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (!id) return;
+    let active = true;
     setLoading(true);
-    setNotFound(false);
+    setLoadError(null);
+    setSession(null);
+    setStats([]);
+    setHeatmap([]);
+    setRecommendations([]);
+    if (!id) {
+      setLoadError('not-found');
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
     if (isGuestSessionId(id)) {
       const guestSession = getGuestSession(id);
       if (guestSession) {
@@ -39,35 +63,45 @@ export function SessionReviewPage() {
         setRecommendations(guestSession.recommendations);
         setLoading(false);
       } else {
-        setNotFound(true);
+        setLoadError('not-found');
         setLoading(false);
       }
-      return;
+      return () => {
+        active = false;
+      };
+    }
+    if (auth.loading) {
+      return () => {
+        active = false;
+      };
+    }
+    if (!auth.isSignedIn) {
+      setLoadError('auth');
+      setLoading(false);
+      return () => {
+        active = false;
+      };
     }
     Promise.all([getSession(id), getSessionAnalytics(id)])
       .then(([sessionData, analytics]) => {
+        if (!active) return;
         setSession(sessionData);
         setStats(analytics.note_stats);
         setHeatmap(analytics.heatmap);
         setRecommendations(analytics.recommendations);
         setLoading(false);
       })
-      .catch(() => {
-        const guestSession = getGuestSession(id);
-        if (!guestSession) {
-          setNotFound(true);
-          setLoading(false);
-          return;
-        }
-        setSession(guestSession);
-        setStats(guestSession.note_stats);
-        setHeatmap(guestSession.heatmap);
-        setRecommendations(guestSession.recommendations);
+      .catch((error) => {
+        if (!active) return;
+        setLoadError(classifySessionReviewError(error));
         setLoading(false);
       });
-  }, [id]);
+    return () => {
+      active = false;
+    };
+  }, [auth.isSignedIn, auth.loading, auth.profile?.id, id, retryKey]);
 
-  if (!session && loading) {
+  if (loading) {
     return (
       <ScreenContainer>
         <SectionCard title="Loading recording">
@@ -77,7 +111,36 @@ export function SessionReviewPage() {
     );
   }
 
-  if (!session || notFound) {
+  if (loadError === 'network') {
+    return (
+      <ScreenContainer>
+        <SectionCard title="Couldn’t load this recording" eyebrow="Connection problem">
+          <p className="muted-copy">Check your connection, then try again. The recording has not been removed.</p>
+          <div className="settings-actions">
+            <button className="primary-button" type="button" onClick={() => setRetryKey((current) => current + 1)}>Try again</button>
+            <Link className="ghost-button" to="/sessions">All recordings</Link>
+          </div>
+        </SectionCard>
+      </ScreenContainer>
+    );
+  }
+
+  if (loadError === 'auth') {
+    const next = id ? `/sessions/${id}` : '/sessions';
+    return (
+      <ScreenContainer>
+        <SectionCard title="Sign in to review this recording" eyebrow="Account required">
+          <p className="muted-copy">This recording belongs to a BrassTune account. Sign in with that account to open it.</p>
+          <div className="settings-actions">
+            <Link className="primary-button" to={`/auth/sign-in?next=${encodeURIComponent(next)}`}>Sign in</Link>
+            <Link className="ghost-button" to="/sessions">All recordings</Link>
+          </div>
+        </SectionCard>
+      </ScreenContainer>
+    );
+  }
+
+  if (!session || loadError === 'not-found') {
     return (
       <ScreenContainer>
         <SectionCard title="Recording not found" eyebrow="Review">
@@ -195,6 +258,9 @@ export function SessionReviewPage() {
         </SectionCard>
       )}
 
+      <WeakTransitionCard events={session.note_events} />
+      <PracticeReflectionCard sessionId={String(session.id)} />
+
       <details className="sr-advanced">
         <summary>
           <SlidersHorizontal size={16} />
@@ -207,7 +273,11 @@ export function SessionReviewPage() {
           </div>
           <div>
             <h3 className="sr-advanced-heading">Download data</h3>
-            <ExportButtons sessionId={session.id} guestSession={session.guest_session ? (session as GuestSessionDetail) : null} />
+            <ExportButtons
+              sessionId={session.id}
+              guestSession={session.guest_session ? (session as GuestSessionDetail) : null}
+              audioAvailable={Boolean(session.audio_available)}
+            />
           </div>
         </div>
       </details>

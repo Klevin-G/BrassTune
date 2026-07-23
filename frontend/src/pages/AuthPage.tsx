@@ -8,6 +8,40 @@ import { useAuth } from '../state/AuthContext';
 import './AuthPage.css';
 
 const PASSWORD_MIN = 8;
+const pendingAuthNextKey = 'brasstune.pendingAuthNext';
+
+export function safeAuthNext(value: string | null | undefined) {
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value === '/' || value.startsWith('/auth/')) return '/home';
+  return value;
+}
+
+export function authPathWithNext(path: '/auth/sign-in' | '/auth/sign-up' | '/auth/reset-password', next: string) {
+  return `${path}?next=${encodeURIComponent(safeAuthNext(next))}`;
+}
+
+function rememberPendingAuthNext(next: string) {
+  try {
+    sessionStorage.setItem(pendingAuthNextKey, safeAuthNext(next));
+  } catch {
+    // The URL still carries next during the current auth flow.
+  }
+}
+
+function clearPendingAuthNext() {
+  try {
+    sessionStorage.removeItem(pendingAuthNextKey);
+  } catch {
+    // Storage can be unavailable in privacy-restricted browsers.
+  }
+}
+
+function readPendingAuthNext() {
+  try {
+    return sessionStorage.getItem(pendingAuthNextKey);
+  } catch {
+    return null;
+  }
+}
 
 type Message = { type: 'success' | 'error'; text: string };
 
@@ -100,11 +134,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const auth = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const next = (() => {
-    const value = params.get('next');
-    if (!value || !value.startsWith('/') || value.startsWith('//') || value === '/' || value.startsWith('/auth/')) return '/home';
-    return value;
-  })();
+  const storedRecoveryNext = mode === 'reset' && auth.hasAuthSession
+    ? readPendingAuthNext()
+    : null;
+  const next = safeAuthNext(params.get('next') ?? storedRecoveryNext);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -116,6 +149,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const [pendingSignup, setPendingSignup] = useState(false);
   const [callbackStalled, setCallbackStalled] = useState(false);
   const [callbackErrored, setCallbackErrored] = useState(false);
+  const [passwordUpdated, setPasswordUpdated] = useState(false);
 
   const isSignup = mode === 'sign-up';
   const isPasswordRecovery = mode === 'reset' && auth.hasAuthSession;
@@ -125,6 +159,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     if (mode === 'callback') return;
     setMessage(null);
     setPendingSignup(false);
+    setPasswordUpdated(false);
   }, [mode]);
 
   // Callback: detect an OAuth error once on entry.
@@ -137,7 +172,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   // Callback: auto-redirect the moment the session is ready.
   useEffect(() => {
     if (mode !== 'callback') return;
-    if (auth.isSignedIn) navigate(next, { replace: true });
+    if (auth.isSignedIn) {
+      clearPendingAuthNext();
+      navigate(next, { replace: true });
+    }
   }, [mode, auth.isSignedIn, navigate, next]);
 
   // Callback: if it hasn't resolved after a while, reveal a manual escape hatch.
@@ -152,7 +190,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     if (!pendingSignup) return;
     if (auth.hasAuthSession) {
       setMessage({ type: 'success', text: "You're all set — taking you to practice…" });
-      const timer = setTimeout(() => navigate(next, { replace: true }), 1100);
+      const timer = setTimeout(() => {
+        clearPendingAuthNext();
+        navigate(next, { replace: true });
+      }, 1100);
       return () => clearTimeout(timer);
     }
     setMessage({
@@ -168,8 +209,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     try {
       if (mode === 'sign-in') {
         await auth.signIn(email, password);
+        clearPendingAuthNext();
         navigate(next);
       } else if (mode === 'sign-up') {
+        rememberPendingAuthNext(next);
         await auth.signUp({ email, password, username, displayName, primaryInstrumentId: instrumentId });
         setPendingSignup(true);
       } else if (isPasswordRecovery) {
@@ -178,9 +221,11 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
           return;
         }
         await auth.updatePassword(newPassword);
-        setMessage({ type: 'success', text: 'Password updated. You can now sign in with it.' });
+        setMessage({ type: 'success', text: "Password updated. You're signed in and ready to continue." });
+        setPasswordUpdated(true);
         setNewPassword('');
       } else {
+        rememberPendingAuthNext(next);
         await auth.requestPasswordReset(email);
         setMessage({ type: 'success', text: 'Check your email — we sent you a link to set a new password.' });
       }
@@ -254,8 +299,10 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     : mode === 'reset'
       ? 'Reset your password.'
       : 'Welcome back.';
-  const heroBody = mode === 'reset'
-    ? "Enter your email and we'll send you a link to choose a new password."
+  const heroBody = isPasswordRecovery
+    ? 'Choose a new password, then continue where you left off.'
+    : mode === 'reset'
+      ? "Enter your email and we'll send you a link to choose a new password."
     : 'Save your practice history and progress, and join your band’s ensemble. You can also keep practicing as a guest.';
   const cardTitle = isSignup ? 'Create account' : isPasswordRecovery ? 'Set a new password' : mode === 'reset' ? 'Reset password' : 'Sign in';
 
@@ -298,7 +345,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 </>
               )}
 
-              {auth.configured && (
+              {auth.configured && !passwordUpdated && (
                 <form className="auth-form" onSubmit={onSubmit}>
                   {!isPasswordRecovery && (
                     <label>
@@ -386,6 +433,20 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 </form>
               )}
 
+              {passwordUpdated && (
+                <button
+                  className="primary-button au-block"
+                  type="button"
+                  onClick={() => {
+                    clearPendingAuthNext();
+                    navigate(next, { replace: true });
+                  }}
+                >
+                  Continue to BrassTune
+                  <ArrowRight size={18} />
+                </button>
+              )}
+
               {mode !== 'reset' && auth.configured && auth.providers.apple && (
                 <div className="provider-button-stack">
                   <button
@@ -406,14 +467,14 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
 
               {message && <MessageBanner message={message} />}
 
-              {auth.configured && (
+              {auth.configured && !passwordUpdated && (
                 <div className="auth-switcher">
                   {isSignup ? (
-                    <Link to="/auth/sign-in">Already have an account?</Link>
+                    <Link to={authPathWithNext('/auth/sign-in', next)}>Already have an account?</Link>
                   ) : (
-                    <Link to="/auth/sign-up">Create account</Link>
+                    <Link to={authPathWithNext('/auth/sign-up', next)}>Create account</Link>
                   )}
-                  {mode !== 'reset' && <Link to="/auth/reset-password">Forgot password?</Link>}
+                  {mode !== 'reset' && <Link to={authPathWithNext('/auth/reset-password', next)}>Forgot password?</Link>}
                 </div>
               )}
             </SectionCard>

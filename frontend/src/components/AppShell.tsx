@@ -1,10 +1,13 @@
 import type { ReactNode } from 'react';
-import { BarChart3, Gauge, LogIn, Music2, Settings, Target, UserRound, Users } from 'lucide-react';
+import { BarChart3, FolderOpen, Gauge, LogIn, Music2, Settings, Target, UserRound, Users } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import { InstrumentSelector } from './InstrumentSelector';
 import { OnboardingFlow } from './OnboardingFlow';
+import { FocusedWorkspaceBar } from './practice/FocusedWorkspaceBar';
+import './practice/PracticeFeatures.css';
 import { FloatingTabBar } from './ui/AppPrimitives';
 
 // One flat set of destinations, identical on the desktop sidebar and the mobile
@@ -21,12 +24,13 @@ const primaryNav = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { instrumentId, setInstrumentId } = useAppSettings();
   const auth = useAuth();
+  const { workspace } = usePracticeLibrary();
   const location = useLocation();
   const authRoute = location.pathname === '/' || location.pathname.startsWith('/auth/');
 
   return (
-    <div className={`app-shell ${authRoute ? 'auth-shell' : ''}`}>
-      {!authRoute && (
+    <div className={`app-shell ${authRoute ? 'auth-shell' : ''} ${workspace ? 'focus-mode' : ''}`}>
+      {!authRoute && !workspace && (
         <aside className="sidebar">
           <NavLink to="/practice" className="brand" aria-label="BrassTune home">
             <span className="brand-mark">
@@ -54,10 +58,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         </aside>
       )}
       <div className="app-main">
-        {!authRoute && (
+        {!authRoute && !workspace && (
           <header className="topbar">
             <InstrumentSelector value={instrumentId} onChange={setInstrumentId} compact />
             <div className="topbar-controls">
+              <Link to="/sessions" className="icon-button labeled" aria-label="Open recordings">
+                <FolderOpen size={18} />
+                <span>Recordings</span>
+              </Link>
               {auth.isSignedIn ? (
                 <Link to="/settings" className="icon-button labeled" aria-label="Open profile settings">
                   <UserRound size={18} />
@@ -78,8 +86,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </header>
         )}
         <main className="content">{children}</main>
-        {!authRoute && <OnboardingFlow />}
-        {!authRoute && (
+        {!authRoute && <FocusedWorkspaceBar />}
+        {!authRoute && !auth.loading && (auth.isSignedIn || auth.guestMode) && <OnboardingFlow />}
+        {!authRoute && !workspace && (
           <FloatingTabBar>
             {primaryNav.map((item) => (
               <NavLink

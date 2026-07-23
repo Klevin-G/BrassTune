@@ -322,13 +322,20 @@ export function ScorePracticePage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraRequestGenerationRef = useRef(0);
+  const cameraStartingRef = useRef(false);
   const pagesRef = useRef<ImportedScorePage[]>([]);
   const mountedRef = useRef(true);
+  const deleteDialogRef = useRef<HTMLDivElement | null>(null);
+  const deleteCancelRef = useRef<HTMLButtonElement | null>(null);
+  const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
+  const moreOptionsRef = useRef<HTMLButtonElement | null>(null);
   const [pages, setPages] = useState<ImportedScorePage[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [fitWidth, setFitWidth] = useState(true);
   const [rotation, setRotation] = useState(0);
@@ -387,9 +394,14 @@ export function ScorePracticePage() {
   }, [pages]);
 
   const stopCamera = () => {
+    cameraRequestGenerationRef.current += 1;
+    cameraStartingRef.current = false;
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
-    setCameraActive(false);
+    if (mountedRef.current) {
+      setCameraActive(false);
+      setCameraStarting(false);
+    }
   };
 
   useEffect(() => {
@@ -403,6 +415,36 @@ export function ScorePracticePage() {
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    deleteCancelRef.current?.focus();
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPendingDelete(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(deleteDialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      deleteReturnFocusRef.current?.focus();
+      deleteReturnFocusRef.current = null;
+    };
+  }, [pendingDelete]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -523,15 +565,37 @@ export function ScorePracticePage() {
       setStatus('This browser can’t use the camera. Choose Photos or Files instead.');
       return;
     }
+    if (cameraStartingRef.current) return;
+    const generation = ++cameraRequestGenerationRef.current;
+    cameraStartingRef.current = true;
+    setCameraStarting(true);
+    setStatus('Opening your camera…');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      if (!mountedRef.current || generation !== cameraRequestGenerationRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       cameraStreamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       setCameraActive(true);
       setStatus('Point at your music, then Capture page.');
     } catch {
-      setStatus('Camera permission was blocked. Choose Photos or Files instead.');
+      if (mountedRef.current && generation === cameraRequestGenerationRef.current) {
+        setStatus('Camera permission was blocked. Choose Photos or Files instead.');
+      }
+    } finally {
+      if (generation === cameraRequestGenerationRef.current) {
+        cameraStartingRef.current = false;
+        if (mountedRef.current) setCameraStarting(false);
+      }
     }
+  };
+
+  const openDeleteDialog = () => {
+    deleteReturnFocusRef.current = moreOptionsRef.current;
+    setMenuOpen(false);
+    setPendingDelete(true);
   };
 
   const captureCameraPage = async () => {
@@ -611,9 +675,9 @@ export function ScorePracticePage() {
       )}
       <div className="sm-import-actions">
         {canUseCamera && (
-          <button className="primary-button" type="button" onClick={cameraActive ? captureCameraPage : startCamera}>
+          <button className="primary-button" type="button" disabled={cameraStarting} onClick={cameraActive ? captureCameraPage : startCamera}>
             <Camera size={18} />
-            {cameraActive ? 'Capture page' : 'Scan with camera'}
+            {cameraStarting ? 'Opening camera…' : cameraActive ? 'Capture page' : 'Scan with camera'}
           </button>
         )}
         <button className={canUseCamera ? 'ghost-button' : 'primary-button'} type="button" onClick={() => photosInputRef.current?.click()}>
@@ -677,12 +741,12 @@ export function ScorePracticePage() {
                 {focusMode ? 'Exit full screen' : 'Full screen'}
               </button>
               <div className="sm-menu-wrap">
-                <button className="icon-button" type="button" onClick={() => setMenuOpen((value) => !value)} aria-label="More options" aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertical size={18} /></button>
+                <button className="icon-button" ref={moreOptionsRef} type="button" onClick={() => setMenuOpen((value) => !value)} aria-label="More options" aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertical size={18} /></button>
                 {menuOpen && (
                   <>
                     <button className="sm-menu-scrim" type="button" aria-label="Close menu" onClick={() => setMenuOpen(false)} />
                     <div className="sm-menu" role="menu">
-                      <button className="sm-menu-item sm-menu-danger" type="button" role="menuitem" onClick={() => { setMenuOpen(false); setPendingDelete(true); }}>
+                      <button className="sm-menu-item sm-menu-danger" type="button" role="menuitem" onClick={openDeleteDialog}>
                         <Trash2 size={17} />Delete this page
                       </button>
                     </div>
@@ -777,12 +841,12 @@ export function ScorePracticePage() {
       />
 
       {pendingDelete && (
-        <div className="sm-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Remove page">
-          <div className="sm-confirm">
-            <h3>Remove this page?</h3>
-            <p>You can add it again anytime.</p>
+        <div className="sm-confirm-backdrop" role="dialog" aria-modal="true" aria-labelledby="sm-delete-title" aria-describedby="sm-delete-description">
+          <div className="sm-confirm" ref={deleteDialogRef}>
+            <h3 id="sm-delete-title">Remove this page?</h3>
+            <p id="sm-delete-description">You can add it again anytime.</p>
             <div className="sm-confirm-actions">
-              <button className="ghost-button" type="button" onClick={() => setPendingDelete(false)}>Cancel</button>
+              <button className="ghost-button" ref={deleteCancelRef} type="button" onClick={() => setPendingDelete(false)}>Cancel</button>
               <button className="sm-danger-button" type="button" onClick={() => void performDelete()}>
                 <Trash2 size={17} />Remove
               </button>

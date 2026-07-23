@@ -1,14 +1,17 @@
 import { AlertTriangle, BarChart3, Bug, Check, DatabaseBackup, Download, LogIn, LogOut, Mic, MicOff, RefreshCcw, RotateCcw, Trash2, UserRound } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clearLocalSessions, downloadExport, friendlyUserFacingError, repairDemoData, resetDemoData } from '../api/client';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { ThemeSelector } from '../components/ThemeSelector';
 import { PageHeader, ScreenContainer, SectionCard, SegmentedControl } from '../components/ui/AppPrimitives';
 import { guestSessionsExport } from '../domain/guestSessions';
+import { PRACTICE_LIBRARY_PREFIX } from '../domain/practiceLibrary';
 import { clearLocalScoreDocuments } from '../domain/scoreDocuments';
-import { useAppSettings } from '../state/AppSettingsContext';
+import { MAX_REFERENCE_PITCH, MIN_REFERENCE_PITCH, useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
+import { useTheme } from '../state/ThemeContext';
 import './SettingsPage.css';
 
 function downloadTextFile(content: string, filename: string, type = 'application/json') {
@@ -28,11 +31,24 @@ type MicCheck = 'idle' | 'listening' | 'pass' | 'fail' | 'blocked';
 export function SettingsPage() {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
   const auth = useAuth();
+  const practiceLibrary = usePracticeLibrary();
+  const { setTheme } = useTheme();
   const internalToolsEnabled = import.meta.env.VITE_ENABLE_INTERNAL_TOOLS === 'true';
   const [maintenanceStatus, setMaintenanceStatus] = useState('');
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [micCheck, setMicCheck] = useState<MicCheck>('idle');
+  const [referencePitchInput, setReferencePitchInput] = useState(() => String(referencePitch));
+
+  useEffect(() => {
+    setReferencePitchInput(String(referencePitch));
+  }, [referencePitch]);
+
+  const commitReferencePitch = () => {
+    const next = Number(referencePitchInput);
+    if (Number.isFinite(next)) setReferencePitch(next);
+    setReferencePitchInput(String(Math.min(MAX_REFERENCE_PITCH, Math.max(MIN_REFERENCE_PITCH, Number.isFinite(next) ? next : referencePitch))));
+  };
 
   const runMaintenance = async (label: string, action: () => Promise<unknown>, confirmation?: string) => {
     if (confirmation && !window.confirm(confirmation)) return;
@@ -76,10 +92,20 @@ export function SettingsPage() {
 
   const clearPreferences = () => {
     if (!window.confirm('Clear BrassTune preferences on this device? Your practice history stays.')) return;
+    const preservedKeys = new Set([
+      'brasstune.guestAccess',
+      'brasstune.guestSessions.v1',
+      'brasstune.guestOnboardingComplete',
+      'brasstune.onboardingComplete',
+    ]);
     Object.keys(localStorage)
       .filter((key) => key.startsWith('brasstune.'))
-      .filter((key) => key !== 'brasstune.guestSessions.v1')
+      .filter((key) => !preservedKeys.has(key) && !key.startsWith(PRACTICE_LIBRARY_PREFIX) && !key.startsWith('brasstune.playalong.best.'))
       .forEach((key) => localStorage.removeItem(key));
+    setInstrumentId('trumpet');
+    setReferencePitch(440);
+    setDemoMode(false);
+    setTheme('system');
     setMaintenanceStatus('Preferences cleared on this device. Your practice history was kept.');
   };
 
@@ -141,9 +167,22 @@ export function SettingsPage() {
           <div className="set-choice">
             <label className="field">
               <span>Tuning reference (A4)</span>
-              <input type="number" min={430} max={450} step={0.5} value={referencePitch} onChange={(event) => { const next = Number(event.target.value); if (Number.isFinite(next) && next > 0) setReferencePitch(next); }} />
+              <input
+                type="number"
+                min={MIN_REFERENCE_PITCH}
+                max={MAX_REFERENCE_PITCH}
+                step={0.5}
+                value={referencePitchInput}
+                inputMode="decimal"
+                aria-describedby="a4-reference-help"
+                onChange={(event) => setReferencePitchInput(event.target.value)}
+                onBlur={commitReferencePitch}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+              />
             </label>
-            <p className="set-hint">Most bands tune to 440 Hz. Leave this at 440 unless your director asks for a different number.</p>
+            <p className="set-hint" id="a4-reference-help">Choose 430–450 Hz. Most bands tune to 440 Hz; change it only when your director asks.</p>
             {referencePitch !== 440 && (
               <button className="ghost-button set-reset" type="button" onClick={() => setReferencePitch(440)}>
                 <RotateCcw size={15} />
@@ -175,19 +214,19 @@ export function SettingsPage() {
               {micCheck === 'listening' ? 'Listening...' : 'Test my microphone'}
             </button>
             {micCheck === 'pass' && (
-              <div className="set-miccheck-result is-pass">
+              <div className="set-miccheck-result is-pass" role="status" aria-live="polite" aria-atomic="true">
                 <Check size={22} />
                 <div>We can hear you!<span>Your microphone is working.</span></div>
               </div>
             )}
             {micCheck === 'fail' && (
-              <div className="set-miccheck-result is-fail">
+              <div className="set-miccheck-result is-fail" role="status" aria-live="polite" aria-atomic="true">
                 <MicOff size={22} />
                 <div>We didn't hear a note<span>Play or sing louder, then test again.</span></div>
               </div>
             )}
             {micCheck === 'blocked' && (
-              <div className="set-miccheck-result is-fail">
+              <div className="set-miccheck-result is-fail" role="status" aria-live="polite" aria-atomic="true">
                 <MicOff size={22} />
                 <div>We can't reach your microphone<span>Allow microphone access in your browser, then test again.</span></div>
               </div>
@@ -215,7 +254,7 @@ export function SettingsPage() {
           </div>
         </div>
         {!auth.isSignedIn && (
-          <p className="set-hint">Your practice stays in this browser. Sign in to save it to your account and join a class.</p>
+          <p className="set-hint">Guest recordings you already made stay in this browser. Sign in to save future practice to your account and join a class.</p>
         )}
         <div className="settings-actions">
           {auth.isSignedIn ? (
@@ -231,7 +270,14 @@ export function SettingsPage() {
           )}
           <button className="ghost-button" type="button" onClick={exportAllData}>
             <Download size={18} />
-            Export my data
+            {auth.isSignedIn ? 'Export my data' : 'Export guest practice'}
+          </button>
+          <button className="ghost-button" type="button" onClick={() => {
+            downloadTextFile(JSON.stringify({ exportedAt: new Date().toISOString(), practiceLibrary: practiceLibrary.library }, null, 2), 'brasstune-practice-library.json');
+            setMaintenanceStatus('Your local exercises, presets, goals, and reflections were downloaded.');
+          }}>
+            <DatabaseBackup size={18} />
+            Export practice setup
           </button>
           <button className="ghost-button" type="button" onClick={openOnboarding}>
             <RotateCcw size={18} />
@@ -272,20 +318,30 @@ export function SettingsPage() {
             </button>
           </div>
         </div>
-        <div className="set-danger-row">
-          <strong>Delete account</strong>
-          <p>This permanently deletes your account, your practice history, and any classes you own. It can't be undone. Export your data first if you want a copy. Score pages saved on this device are cleared separately.</p>
-          <label className="field set-confirm-field">
-            <span>Type "delete my account" to confirm</span>
-            <input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} placeholder="delete my account" />
-          </label>
-          <div className="settings-actions">
-            <button className="ghost-button danger-action" type="button" disabled={!deleteReady} onClick={deleteAccount}>
-              <AlertTriangle size={18} />
-              Delete my account
-            </button>
+        {auth.isSignedIn ? (
+          <div className="set-danger-row">
+            <strong>Delete account</strong>
+            <p>This permanently deletes your account, your practice history, and any classes you own. It can't be undone. Export your data first if you want a copy. Score pages saved on this device are cleared separately.</p>
+            <label className="field set-confirm-field">
+              <span>Type "delete my account" to confirm</span>
+              <input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} placeholder="delete my account" />
+            </label>
+            <div className="settings-actions">
+              <button className="ghost-button danger-action" type="button" disabled={!deleteReady} onClick={deleteAccount}>
+                <AlertTriangle size={18} />
+                Delete my account
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="set-danger-row">
+            <strong>Guest recordings</strong>
+            <p>Guest takes are not an account. Manage or delete each one from Recordings, or export them first if you want a copy.</p>
+            <div className="settings-actions">
+              <Link className="ghost-button" to="/sessions">Open Recordings</Link>
+            </div>
+          </div>
+        )}
       </SectionCard>
 
       {internalToolsEnabled && (

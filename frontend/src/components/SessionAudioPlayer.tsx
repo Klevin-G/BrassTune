@@ -1,5 +1,5 @@
 import { Play, Volume2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { objectUrlFor } from '../api/client';
 import type { PracticeSession } from '../domain/types';
 
@@ -13,33 +13,68 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const audioUrlRef = useRef<string | null>(null);
+  const loadingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const sessionIdRef = useRef(session.id);
+  const requestGenerationRef = useRef(0);
+
+  const replaceAudioUrl = useCallback((nextUrl: string | null) => {
+    const previous = audioUrlRef.current;
+    if (previous && previous !== nextUrl && previous.startsWith('blob:')) URL.revokeObjectURL(previous);
+    audioUrlRef.current = nextUrl;
+    setAudioUrl(nextUrl);
+  }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      if (audioUrl?.startsWith('blob:')) URL.revokeObjectURL(audioUrl);
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
+      loadingRef.current = false;
+      if (audioUrlRef.current?.startsWith('blob:')) URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
     };
-  }, [audioUrl]);
+  }, []);
 
-  const loadAudio = async () => {
-    if (audioUrl || loading) return;
+  const loadAudio = useCallback(async () => {
+    if (!session.audio_available || audioUrlRef.current || loadingRef.current) return;
+    const sessionId = session.id;
+    const generation = ++requestGenerationRef.current;
+    loadingRef.current = true;
     setAudioError(null);
     setLoading(true);
     try {
-      setAudioUrl(session.guest_audio_data_url ?? await objectUrlFor(`/api/sessions/${session.id}/audio`));
+      const nextUrl = session.guest_audio_data_url ?? await objectUrlFor(`/api/sessions/${sessionId}/audio`);
+      if (!mountedRef.current || generation !== requestGenerationRef.current || sessionIdRef.current !== sessionId) {
+        if (nextUrl.startsWith('blob:')) URL.revokeObjectURL(nextUrl);
+        return;
+      }
+      replaceAudioUrl(nextUrl);
     } catch {
-      setAudioError('Audio could not be loaded.');
+      if (mountedRef.current && generation === requestGenerationRef.current && sessionIdRef.current === sessionId) {
+        setAudioError('Audio could not be loaded.');
+      }
     } finally {
-      setLoading(false);
+      if (generation === requestGenerationRef.current) {
+        loadingRef.current = false;
+        if (mountedRef.current) setLoading(false);
+      }
     }
-  };
+  }, [replaceAudioUrl, session.audio_available, session.guest_audio_data_url, session.id]);
 
   // Load as soon as the player is shown — it is only mounted when the user has
   // asked to listen, so the click on "Listen back" should surface a ready
   // player rather than a second "Load playback" button.
   useEffect(() => {
+    requestGenerationRef.current += 1;
+    sessionIdRef.current = session.id;
+    loadingRef.current = false;
+    replaceAudioUrl(null);
+    setAudioError(null);
+    setLoading(false);
     if (session.audio_available) void loadAudio();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id]);
+  }, [loadAudio, replaceAudioUrl, session.audio_available, session.id]);
 
   if (!session.audio_available) {
     return (

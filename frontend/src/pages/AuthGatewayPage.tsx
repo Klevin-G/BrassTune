@@ -6,6 +6,18 @@ import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui
 import { useAuth } from '../state/AuthContext';
 import './AuthGatewayPage.css';
 
+const pendingAuthNextKey = 'brasstune.pendingAuthNext';
+
+function consumePendingAuthNext() {
+  try {
+    const value = sessionStorage.getItem(pendingAuthNextKey);
+    sessionStorage.removeItem(pendingAuthNextKey);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 function safeNext(value: string | null) {
   if (!value || !value.startsWith('/') || value.startsWith('//')) return '/home';
   if (value === '/' || value.startsWith('/auth/')) return '/home';
@@ -25,9 +37,11 @@ export function AuthGatewayPage() {
 
   useEffect(() => {
     if (!auth.loading && auth.isSignedIn) {
-      navigate(next, { replace: true });
+      const storedNext = consumePendingAuthNext();
+      const destination = params.has('next') ? next : safeNext(storedNext);
+      navigate(destination, { replace: true });
     }
-  }, [auth.isSignedIn, auth.loading, navigate, next]);
+  }, [auth.isSignedIn, auth.loading, navigate, next, params]);
 
   async function signIn(event: FormEvent) {
     event.preventDefault();
@@ -35,6 +49,7 @@ export function AuthGatewayPage() {
     setMessage(null);
     try {
       await auth.signIn(email, password);
+      consumePendingAuthNext();
       navigate(next, { replace: true });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Couldn’t sign in right now. You can start as a guest instead.');
@@ -150,11 +165,11 @@ export function AuthGatewayPage() {
                       </button>
                     </form>
                     <div className="auth-switcher">
-                      <Link to="/auth/sign-up">
+                      <Link to={`/auth/sign-up?next=${encodeURIComponent(next)}`}>
                         <UserPlus size={16} />
                         Create account
                       </Link>
-                      <Link to="/auth/reset-password">
+                      <Link to={`/auth/reset-password?next=${encodeURIComponent(next)}`}>
                         <KeyRound size={16} />
                         Forgot password
                       </Link>

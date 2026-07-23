@@ -56,7 +56,19 @@ function audioExtension(mimeType?: string | null) {
   return 'audio';
 }
 
-export function ExportButtons({ sessionId, guestSession }: { sessionId: number; guestSession?: GuestSessionDetail | null }) {
+export function shouldShowCloudAudioExport(audioAvailable?: boolean) {
+  return audioAvailable === true;
+}
+
+export function ExportButtons({
+  sessionId,
+  guestSession,
+  audioAvailable,
+}: {
+  sessionId: number;
+  guestSession?: GuestSessionDetail | null;
+  audioAvailable?: boolean;
+}) {
   const [status, setStatus] = useState<string | null>(null);
   const download = (path: string, filename: string) => {
     setStatus(null);
@@ -109,10 +121,12 @@ export function ExportButtons({ sessionId, guestSession }: { sessionId: number; 
         <Download size={17} />
         Everything (ZIP)
       </button>
-      <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}/audio`, `session-${sessionId}-audio`)}>
-        <Download size={17} />
-        Audio file
-      </button>
+      {shouldShowCloudAudioExport(audioAvailable) && (
+        <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}/audio`, `session-${sessionId}-audio`)}>
+          <Download size={17} />
+          Audio file
+        </button>
+      )}
       {status && <p className="settings-status" aria-live="polite">{status}</p>}
     </div>
   );

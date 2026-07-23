@@ -106,6 +106,9 @@ export interface GradeSummary {
   averageAbsCents: number | null;
 }
 
+/** Default time a player must sustain each Play-Along target before advancing. */
+export const DEFAULT_PLAY_ALONG_HOLD_MS = 2_000;
+
 export function summarizeGrades(results: NoteGrade[]): GradeSummary {
   const total = results.length;
   const played = results.filter((r) => r.avgCents != null);
@@ -147,13 +150,15 @@ export class PlayAlongGrader {
   private idx = 0;
   private firstMatchTs: number | null = null;
   private lastMatchTs: number | null = null;
-  private lastNow = 0;
+  private previousFrameTs: number | null = null;
+  private previousFrameMatched = false;
+  private heldMs = 0;
   private centsBuf: { ts: number; cents: number }[] = [];
   results: NoteGrade[] = [];
 
   constructor(notes: string[], options: { holdMs?: number; minConfidence?: number; minSamples?: number; attackTrimMs?: number; maximumDropoutMs?: number } = {}) {
     this.notes = notes;
-    this.holdMs = options.holdMs ?? 450;
+    this.holdMs = options.holdMs ?? DEFAULT_PLAY_ALONG_HOLD_MS;
     this.minConfidence = options.minConfidence ?? 0.65;
     this.minSamples = options.minSamples ?? 5;
     this.attackTrimMs = options.attackTrimMs ?? 120;
@@ -187,6 +192,9 @@ export class PlayAlongGrader {
   private resetHold(): void {
     this.firstMatchTs = null;
     this.lastMatchTs = null;
+    this.previousFrameTs = null;
+    this.previousFrameMatched = false;
+    this.heldMs = 0;
     this.centsBuf = [];
   }
 
@@ -196,7 +204,6 @@ export class PlayAlongGrader {
   }
 
   feed(frame: PitchFrame, nowMs: number): GraderSnapshot {
-    this.lastNow = nowMs;
     if (!this.done) {
       const target = this.notes[this.idx];
       const confident = frame.confidence >= this.minConfidence && frame.frequency_hz != null;
@@ -206,25 +213,37 @@ export class PlayAlongGrader {
           this.resetHold();
         }
         if (this.firstMatchTs == null) this.firstMatchTs = nowMs;
+        if (this.previousFrameMatched && this.previousFrameTs != null) {
+          this.heldMs += Math.max(0, nowMs - this.previousFrameTs);
+        }
         this.lastMatchTs = nowMs;
+        this.previousFrameTs = nowMs;
+        this.previousFrameMatched = true;
         this.centsBuf.push({ ts: nowMs, cents: frame.cents_deviation as number });
-        if (nowMs - this.firstMatchTs >= this.holdMs && this.centsBuf.length >= this.minSamples) {
+        if (this.heldMs >= this.holdMs && this.centsBuf.length >= this.minSamples) {
           this.finalize(true);
         }
       } else if (confident && frame.written_note_name && !samePitchClass(frame.written_note_name, target)) {
         // Player is sustaining a different note — reset the current hold.
         this.resetHold();
-      } else if (!confident && this.lastMatchTs != null && nowMs - this.lastMatchTs > this.maximumDropoutMs) {
-        // Match native behavior: tolerate a short detector dropout, but never
-        // let a stale hold bridge more than 250 ms of silence/low confidence.
-        this.resetHold();
+      } else {
+        // A brief detector dropout pauses confirmed hold time. It does not fill
+        // the ring, but it also does not erase progress unless the grace period
+        // is exceeded.
+        this.previousFrameTs = nowMs;
+        this.previousFrameMatched = false;
+        if (this.lastMatchTs != null && nowMs - this.lastMatchTs > this.maximumDropoutMs) {
+          // Match native behavior: never let a stale hold bridge more than the
+          // configured grace period of silence, low confidence, or missing cents.
+          this.resetHold();
+        }
       }
     }
     return this.snapshot(frame);
   }
 
   snapshot(frame?: PitchFrame): GraderSnapshot {
-    const heldFraction = this.firstMatchTs == null ? 0 : Math.min(1, (this.lastNow - this.firstMatchTs) / this.holdMs);
+    const heldFraction = this.firstMatchTs == null ? 0 : Math.min(1, this.heldMs / this.holdMs);
     return {
       index: this.idx,
       currentName: this.currentName,

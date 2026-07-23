@@ -8,11 +8,15 @@ test.beforeEach(async ({ page, request }) => {
     await request.post(`${apiBaseURL}/api/admin/demo-data/repair`).catch(() => undefined);
   }
   await page.addInitScript(() => {
-    Object.keys(localStorage)
-      .filter((key) => key.startsWith('brasstune.'))
-      .filter((key) => key !== 'brasstune.theme')
-      .forEach((key) => localStorage.removeItem(key));
-    localStorage.setItem('brasstune.onboardingComplete', 'true');
+    const preserveOnboardingState = sessionStorage.getItem('e2e.preserveOnboardingState') === 'true';
+    sessionStorage.removeItem('e2e.preserveOnboardingState');
+    if (!preserveOnboardingState) {
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith('brasstune.'))
+        .filter((key) => key !== 'brasstune.theme')
+        .forEach((key) => localStorage.removeItem(key));
+      localStorage.setItem('brasstune.onboardingComplete', 'true');
+    }
     localStorage.setItem('brasstune.demoMode', 'true');
     localStorage.setItem('brasstune.guestAccess', 'true');
   });
@@ -79,6 +83,77 @@ test('root gateway starts a guest practice session on the tuner', async ({ page 
   await page.getByRole('button', { name: /start practicing/i }).first().click();
   await expect(page).toHaveURL(/\/practice$/);
   await expect(page.getByText(/Live mic/i)).toBeVisible();
+});
+
+test('explicit guest entry opens the complete feature tour even after a legacy completion', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /start practicing/i }).first().click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Welcome to BrassTune' })).toBeVisible();
+  await expect(dialog).toContainText(/Practicing as a guest/);
+  await expect(dialog).toContainText(/This build is guest-only/);
+  await expect(dialog).toContainText(/Account sync and Class/);
+
+  await dialog.getByRole('button', { name: /show me around/i }).click();
+  await expect(dialog.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Tuner: hear and save' })).toBeVisible();
+  await expect(dialog).toContainText(/Live mic or Demo/);
+  await expect(dialog).toContainText(/A4 reference/);
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Play-Along: practice steadily' })).toBeVisible();
+  await expect(dialog).toContainText(/Hold the correct note steadily for 2 seconds/);
+  await expect(dialog).toContainText(/Skip note/);
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Metronome and sheet music' })).toBeVisible();
+  await expect(dialog).toContainText(/tap the BPM/);
+  await expect(dialog).toContainText(/Import a PDF or photo/);
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Recordings', exact: true })).toBeVisible();
+  await expect(dialog).toContainText(/Listen and review/);
+  await expect(dialog).toContainText(/Export/);
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Progress and practice plan' })).toBeVisible();
+  await expect(dialog).toContainText(/Heatmap/);
+  await expect(dialog).toContainText(/Streak/);
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Class', exact: true })).toBeVisible();
+  await expect(dialog).toContainText(/unavailable in this guest-only build/);
+  await expect(dialog).toContainText(/Students/);
+  await expect(dialog).toContainText(/Teachers/);
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Settings and your next step' })).toBeVisible();
+  await expect(dialog).toContainText(/Account and data/);
+  await expect(dialog).toContainText(/Replay tour/);
+  await dialog.getByRole('button', { name: /open the tuner/i }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestOnboardingComplete'))).toBe('true');
+  await page.reload();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('closing a guest tour is temporary until the tour is completed', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /start practicing/i }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: /close for now/i }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestOnboardingComplete'))).toBe('false');
+
+  await page.evaluate(() => sessionStorage.setItem('e2e.preserveOnboardingState', 'true'));
+  await page.reload();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome to BrassTune' })).toBeVisible();
 });
 
 test('settings replays the tour with a keyboard-trapped dialog', async ({ page }) => {

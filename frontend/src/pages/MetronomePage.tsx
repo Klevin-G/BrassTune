@@ -1,6 +1,10 @@
 import { Minus, Play, Plus, Square, Timer, Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { MetronomePresetPanel } from '../components/practice/MetronomePresetPanel';
 import { PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge } from '../components/ui/AppPrimitives';
+import type { MetronomePreset } from '../domain/practiceLibrary';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import { buildScheduledTicks, clampBpm, nextRampBpm, normalizeTimeSignature, secondsPerTick, subdivisionFactor, tapTempoBpm, type Subdivision } from '../domain/metronome';
 import './MetronomePage.css';
 
@@ -35,6 +39,8 @@ function tempoName(bpm: number): string {
 }
 
 export function MetronomePage() {
+  const practiceLibrary = usePracticeLibrary();
+  const [searchParams] = useSearchParams();
   const [bpm, setBpm] = useState(() => Number(localStorage.getItem('brasstune.metronome.bpm') ?? 96));
   const [running, setRunning] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -75,8 +81,46 @@ export function MetronomePage() {
   const holdRef = useRef<{ timeout?: number; interval?: number }>({});
   const scrubRef = useRef({ active: false, startX: 0, startBpm: 0, moved: false });
   const runningRef = useRef(false);
+  const startInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  const scheduledClicksRef = useRef(new Set<{ oscillator: OscillatorNode; gain: GainNode }>());
+  const visualTimersRef = useRef(new Set<number>());
+  const appliedPresetRef = useRef<string | null>(null);
 
   const signature = signaturePreset === 'custom' ? normalizeTimeSignature(customNumerator, customDenominator) : signaturePresets[signaturePreset];
+
+  const applyPreset = (preset: MetronomePreset) => {
+    stop();
+    setBpm(preset.bpm);
+    setSubdivision(preset.subdivision);
+    setAccentDownbeat(preset.accentDownbeat);
+    setCountIn(preset.countIn);
+    const match = Object.entries(signaturePresets).find(([, value]) => value.numerator === preset.numerator && value.denominator === preset.denominator)?.[0] as Exclude<TimeSignaturePreset, 'custom'> | undefined;
+    if (match) setSignaturePreset(match);
+    else {
+      setCustomNumerator(preset.numerator);
+      setCustomDenominator(preset.denominator);
+      setSignaturePreset('custom');
+    }
+    setStatus(`Loaded “${preset.name}”. Press Start when you are ready.`);
+  };
+
+  useEffect(() => {
+    const presetId = searchParams.get('preset');
+    if (presetId) {
+      if (appliedPresetRef.current === `preset:${presetId}`) return;
+      const preset = practiceLibrary.library.metronomePresets.find((item) => item.id === presetId);
+      if (!preset) return;
+      appliedPresetRef.current = `preset:${presetId}`;
+      applyPreset(preset);
+      return;
+    }
+    if (!searchParams.has('bpm')) return;
+    const queryBpm = Number(searchParams.get('bpm'));
+    if (!Number.isFinite(queryBpm) || appliedPresetRef.current === `bpm:${queryBpm}`) return;
+    appliedPresetRef.current = `bpm:${queryBpm}`;
+    setBpm(clampBpm(queryBpm));
+  }, [practiceLibrary.library.metronomePresets, searchParams]);
 
   useEffect(() => {
     bpmRef.current = clampBpm(bpm);
@@ -104,8 +148,32 @@ export function MetronomePage() {
     gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volumeRef.current * (accented ? 0.9 : 0.55)), time + 0.004);
     gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.055);
     oscillator.connect(gain).connect(context.destination);
+    const scheduled = { oscillator, gain };
+    scheduledClicksRef.current.add(scheduled);
+    oscillator.onended = () => {
+      scheduledClicksRef.current.delete(scheduled);
+      oscillator.disconnect();
+      gain.disconnect();
+    };
     oscillator.start(time);
     oscillator.stop(time + 0.065);
+  };
+
+  const cancelScheduledOutput = () => {
+    visualTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    visualTimersRef.current.clear();
+    const stopTime = audioRef.current?.currentTime ?? 0;
+    scheduledClicksRef.current.forEach(({ oscillator, gain }) => {
+      oscillator.onended = null;
+      try {
+        oscillator.stop(stopTime);
+      } catch {
+        // The click may already have ended between the set iteration and stop.
+      }
+      oscillator.disconnect();
+      gain.disconnect();
+    });
+    scheduledClicksRef.current.clear();
   };
 
   const scheduleLoop = () => {
@@ -119,12 +187,14 @@ export function MetronomePage() {
       scheduleClick(context, nextTickTimeRef.current, accented, subdivisionIndex > 0);
       const visualDelayMs = Math.max(0, (nextTickTimeRef.current - context.currentTime) * 1000);
       if (subdivisionIndex === 0) {
-        window.setTimeout(() => {
+        const timer = window.setTimeout(() => {
+          visualTimersRef.current.delete(timer);
           if (!runningRef.current) return;
           setBeat(beatIndex);
           setBeatOn(true);
           setStatus('Playing');
         }, visualDelayMs);
+        visualTimersRef.current.add(timer);
       }
       nextTickTimeRef.current += secondsPerTick(bpmRef.current, signatureRef.current, subdivisionRef.current);
       subdivisionIndexRef.current += 1;
@@ -143,43 +213,72 @@ export function MetronomePage() {
   };
 
   const start = async () => {
-    const context = audioRef.current ?? audioContextFactory();
-    if (!context) {
-      setStatus("Sorry — the metronome isn't supported in this browser. Try Chrome or Safari.");
-      return;
+    if (runningRef.current || startInFlightRef.current) return;
+    startInFlightRef.current = true;
+    try {
+      const context = audioRef.current ?? audioContextFactory();
+      if (!context) {
+        setStatus("Sorry — the metronome isn't supported in this browser. Try Chrome or Safari.");
+        return;
+      }
+      audioRef.current = context;
+      if (context.state !== 'running') {
+        await context.resume().catch(() => undefined);
+      }
+      if (!mountedRef.current || audioRef.current !== context) return;
+      if (context.state !== 'running') {
+        setStatus('Tap Start again to allow metronome audio in this browser.');
+        return;
+      }
+      cancelScheduledOutput();
+      const startTime = context.currentTime + 0.08;
+      const countInTicks = countIn ? buildScheduledTicks({ startTime, bpm, signature, subdivision, bars: 1 }) : [];
+      nextTickTimeRef.current = countInTicks.length ? countInTicks[countInTicks.length - 1].time + secondsPerTick(bpm, signature, subdivision) : startTime;
+      beatIndexRef.current = 0;
+      subdivisionIndexRef.current = 0;
+      barCountRef.current = 0;
+      setBeat(0);
+      setBeatOn(false);
+      runningRef.current = true;
+      for (const tick of countInTicks) {
+        scheduleClick(context, tick.time, tick.accented, tick.subdivisionIndex > 0);
+      }
+      setRunning(true);
+      setStatus(countIn ? 'Counting you in…' : 'Playing');
+      const preset = practiceLibrary.library.metronomePresets.find((item) => item.id === searchParams.get('preset'));
+      practiceLibrary.recordRecent(preset
+        ? { kind: 'metronome', id: preset.id, label: `${preset.name} · ${preset.bpm} BPM`, href: `/metronome?preset=${encodeURIComponent(preset.id)}` }
+        : { kind: 'metronome', id: `${bpm}-${signature.numerator}-${signature.denominator}`, label: `${bpm} BPM · ${signature.numerator}/${signature.denominator}`, href: `/metronome?bpm=${bpm}` });
+      timerRef.current = window.setInterval(scheduleLoop, 25);
+    } finally {
+      startInFlightRef.current = false;
     }
-    audioRef.current = context;
-    if (context.state === 'suspended') await context.resume();
-    const startTime = context.currentTime + 0.08;
-    const countInTicks = countIn ? buildScheduledTicks({ startTime, bpm, signature, subdivision, bars: 1 }) : [];
-    nextTickTimeRef.current = countInTicks.length ? countInTicks[countInTicks.length - 1].time + secondsPerTick(bpm, signature, subdivision) : startTime;
-    beatIndexRef.current = 0;
-    subdivisionIndexRef.current = 0;
-    barCountRef.current = 0;
-    setBeat(0);
-    setBeatOn(false);
-    runningRef.current = true;
-    for (const tick of countInTicks) {
-      scheduleClick(context, tick.time, tick.accented, tick.subdivisionIndex > 0);
-    }
-    setRunning(true);
-    setStatus(countIn ? 'Counting you in…' : 'Playing');
-    timerRef.current = window.setInterval(scheduleLoop, 25);
   };
 
   const stop = () => {
     runningRef.current = false;
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = null;
+    cancelScheduledOutput();
     setRunning(false);
     setBeatOn(false);
     setStatus('Stopped');
   };
 
-  useEffect(() => () => {
-    if (timerRef.current) window.clearInterval(timerRef.current);
-    if (holdRef.current.timeout) window.clearTimeout(holdRef.current.timeout);
-    if (holdRef.current.interval) window.clearInterval(holdRef.current.interval);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      startInFlightRef.current = false;
+      runningRef.current = false;
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      if (holdRef.current.timeout) window.clearTimeout(holdRef.current.timeout);
+      if (holdRef.current.interval) window.clearInterval(holdRef.current.interval);
+      cancelScheduledOutput();
+      const context = audioRef.current;
+      audioRef.current = null;
+      void context?.close().catch(() => undefined);
+    };
   }, []);
 
   const tap = () => {
@@ -201,6 +300,15 @@ export function MetronomePage() {
     if (holdRef.current.timeout) window.clearTimeout(holdRef.current.timeout);
     if (holdRef.current.interval) window.clearInterval(holdRef.current.interval);
     holdRef.current = {};
+  };
+
+  const toggleMuted = () => {
+    setMuted((value) => {
+      const next = !value;
+      mutedRef.current = next;
+      if (next) cancelScheduledOutput();
+      return next;
+    });
   };
 
   // Tap-to-edit / drag-to-scrub on the big BPM number.
@@ -351,7 +459,7 @@ export function MetronomePage() {
           <button
             type="button"
             className="ghost-button mt-mute"
-            onClick={() => setMuted((value) => !value)}
+            onClick={toggleMuted}
           >
             {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
             {muted ? 'Unmute' : 'Mute'}
@@ -389,6 +497,11 @@ export function MetronomePage() {
           </div>
         </div>
       </SectionCard>
+
+      <MetronomePresetPanel
+        current={{ bpm, numerator: signature.numerator, denominator: signature.denominator, subdivision, accentDownbeat, countIn }}
+        onApply={applyPreset}
+      />
 
       <details className="mt-advanced">
         <summary>Advanced</summary>

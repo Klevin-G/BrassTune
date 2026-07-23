@@ -59,6 +59,7 @@ export default defineConfig({
         VITE_WS_BASE_URL: wsBaseURL,
         VITE_SUPABASE_URL: '',
         VITE_SUPABASE_PUBLISHABLE_KEY: '',
+        VITE_E2E_DISABLE_SUPABASE: 'true',
         VITE_ENABLE_INTERNAL_TOOLS: 'false',
       },
     },
