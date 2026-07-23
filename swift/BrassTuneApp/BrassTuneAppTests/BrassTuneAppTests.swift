@@ -229,6 +229,50 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testMetronomeUsesCountInAndRespectsAccentToggle() {
+        let model = makeModel()
+        model.metronome = MetronomeSettings(bpm: 20, beatsPerMeasure: 3, beatUnit: 8, subdivision: .quarter, accentFirstBeat: false, countInBeats: 2)
+        model.startMetronome()
+        XCTAssertEqual(model.metronomeCountInRemaining, 1)
+        XCTAssertEqual(model.metronomeTick, 0)
+        XCTAssertFalse(model.metronomeLastPulseWasAccented)
+
+        model.advanceMetronomeClock()
+        XCTAssertEqual(model.metronomeCountInRemaining, 0)
+        XCTAssertEqual(model.metronomeTick, 0)
+        model.advanceMetronomeClock()
+        XCTAssertEqual(model.metronomeTick, 1)
+        XCTAssertFalse(model.metronomeLastPulseWasAccented)
+        model.stopMetronome()
+
+        model.metronome.accentFirstBeat = true
+        model.metronome.countInBeats = 0
+        model.startMetronome()
+        XCTAssertTrue(model.metronomeLastPulseWasAccented)
+        model.stopMetronome()
+    }
+
+    func testFeatureStateMigrationPreservesFavoriteOrderAndSortsRecentFirstOccurrences() throws {
+        let json = #"""
+        {
+          "favorites": [
+            {"kind":"drone","referenceID":"one","title":"First"},
+            {"kind":"drone","referenceID":"one","title":"Duplicate"},
+            {"kind":"drone","referenceID":"two","title":"Second"}
+          ],
+          "recents": [
+            {"kind":"drone","referenceID":"old","title":"First old","lastStartedAt":100},
+            {"kind":"drone","referenceID":"old","title":"Duplicate newer","lastStartedAt":900},
+            {"kind":"drone","referenceID":"new","title":"New","lastStartedAt":500}
+          ]
+        }
+        """#
+        let state = try JSONDecoder().decode(PracticeFeatureState.self, from: Data(json.utf8))
+        XCTAssertEqual(state.favorites.map(\.title), ["First", "Second"])
+        XCTAssertEqual(state.recents.map(\.title), ["New", "First old"])
+    }
+
+    @MainActor
     func testFeatureContractsBoundShortcutsGoalsAndCascadeCustomExercise() throws {
         let model = makeModel()
         model.updateWeeklyGoal(minutes: 9_999, sessions: 99)
@@ -270,6 +314,20 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(insight?.evidenceCount, 3)
         XCTAssertEqual(try XCTUnwrap(insight?.weaknessScore), 24, accuracy: 0.0001)
         XCTAssertEqual(insight?.exercise.writtenNotes, ["C", "C#", "C", "C#", "C", "C#"])
+    }
+
+    func testWeakTransitionNumericTieBreakDoesNotSortTenBeforeTwo() {
+        func attempt(_ from: String, _ to: String) -> PlayAlongAttemptSummary {
+            let exercise = PlayAlongExercise(id: UUID().uuidString, title: "Tie", detail: "", difficulty: "", category: .practicePattern, writtenNotes: [from, to])
+            return PlayAlongAttemptSummary(exercise: exercise, noteGrades: [
+                PlayAlongNoteGrade(writtenNoteName: from, medianCents: 0, sampleCount: 5, rating: .excellent),
+                PlayAlongNoteGrade(writtenNoteName: to, medianCents: 20, sampleCount: 5, rating: .off),
+            ])
+        }
+        let attempts = Array(repeating: attempt("D", "Bb"), count: 3) + Array(repeating: attempt("Bb", "D"), count: 3)
+        let insight = WeakTransitionAnalyzer.insight(from: attempts)
+        XCTAssertEqual(insight?.fromNote, "D")
+        XCTAssertEqual(insight?.toNote, "Bb")
     }
 
     @MainActor

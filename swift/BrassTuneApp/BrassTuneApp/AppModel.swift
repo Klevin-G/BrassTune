@@ -42,6 +42,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var gatewayCompleted = false { didSet { persistLocalData() } }
     @Published private(set) var metronomeRunning = false
     @Published private(set) var metronomeTick = 0
+    @Published private(set) var metronomeCountInRemaining = 0
+    @Published private(set) var metronomeLastPulseWasAccented = false
     @Published private(set) var recordingStartInProgress = false
     @Published var selectedPlayAlongExerciseID = PlayAlongExercise.defaultExercise.id
     @Published private(set) var playAlongPhase: PlayAlongPhase = .idle
@@ -1080,7 +1082,8 @@ final class AppModel: ObservableObject {
         guard !metronomeRunning else { return }
         metronomeRunning = true
         metronomeTick = 0
-        metronomeOutput.playTick(settings: effectiveMetronomeSettings, accent: true)
+        metronomeCountInRemaining = metronome.countInBeats
+        advanceMetronomeClock()
         scheduleMetronomeTimer()
     }
 
@@ -1088,6 +1091,8 @@ final class AppModel: ObservableObject {
         metronomeRunning = false
         metronomeTimer?.invalidate()
         metronomeTimer = nil
+        metronomeCountInRemaining = 0
+        metronomeLastPulseWasAccented = false
         metronomeOutput.stop()
     }
 
@@ -1117,7 +1122,7 @@ final class AppModel: ObservableObject {
 
     func setMeter(beats: Int, unit: Int = 4) {
         metronome.beatsPerMeasure = min(12, max(1, beats))
-        metronome.beatUnit = [2, 4, 8].contains(unit) ? unit : 4
+        metronome.beatUnit = [2, 4, 8, 16].contains(unit) ? unit : 4
     }
 
     func toggleMetronomeMute() {
@@ -1321,12 +1326,28 @@ final class AppModel: ObservableObject {
         let timer = Timer(timeInterval: metronome.intervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.metronomeRunning else { return }
-                self.metronomeTick = (self.metronomeTick + 1) % max(1, self.metronome.beatsPerMeasure * self.metronome.subdivision.ticksPerBeat)
-                self.metronomeOutput.playTick(settings: self.effectiveMetronomeSettings, accent: self.metronomeTick == 0)
+                self.advanceMetronomeClock()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         metronomeTimer = timer
+    }
+
+    /// One scheduled pulse. Kept separate from Timer plumbing so the
+    /// count-in state is deterministic and can be exercised without waiting
+    /// on the run loop. Count-in clicks never masquerade as measure accents.
+    func advanceMetronomeClock() {
+        guard metronomeRunning else { return }
+        if metronomeCountInRemaining > 0 {
+            metronomeCountInRemaining -= 1
+            metronomeLastPulseWasAccented = false
+            metronomeOutput.playTick(settings: effectiveMetronomeSettings, accent: false)
+            return
+        }
+        let accent = metronome.accentFirstBeat && metronomeTick == 0
+        metronomeLastPulseWasAccented = accent
+        metronomeOutput.playTick(settings: effectiveMetronomeSettings, accent: accent)
+        metronomeTick = (metronomeTick + 1) % max(1, metronome.beatsPerMeasure * metronome.subdivision.ticksPerBeat)
     }
 
     private func restartMetronomeIfNeeded() {

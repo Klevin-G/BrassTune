@@ -319,24 +319,25 @@ enum WeakTransitionAnalyzer {
             }
         }
 
-        return values
-            .filter { $0.value.absoluteDestinationCents.count >= max(3, minimumEvidence) }
-            .map { key, value in
-                WeakTransitionInsight(
-                    fromNote: value.fromNote,
-                    toNote: value.toNote,
-                    evidenceCount: value.absoluteDestinationCents.count,
-                    weaknessScore: value.absoluteDestinationCents.reduce(0, +) / Double(value.absoluteDestinationCents.count)
-                )
-            }
-            .sorted {
-                if $0.weaknessScore != $1.weaknessScore { return $0.weaknessScore > $1.weaknessScore }
-                if $0.evidenceCount != $1.evidenceCount { return $0.evidenceCount > $1.evidenceCount }
-                let left = "\(PracticePitchMath.pitchClass(for: $0.fromNote) ?? 0)>\(PracticePitchMath.pitchClass(for: $0.toNote) ?? 0)"
-                let right = "\(PracticePitchMath.pitchClass(for: $1.fromNote) ?? 0)>\(PracticePitchMath.pitchClass(for: $1.toNote) ?? 0)"
-                return left < right
-            }
-            .first
+        let candidates = values.values
+            .filter { $0.absoluteDestinationCents.count >= max(3, minimumEvidence) }
+            .sorted(by: { left, right in
+                let leftMean = left.absoluteDestinationCents.reduce(0, +) / Double(left.absoluteDestinationCents.count)
+                let rightMean = right.absoluteDestinationCents.reduce(0, +) / Double(right.absoluteDestinationCents.count)
+                if leftMean != rightMean { return leftMean > rightMean }
+                if left.absoluteDestinationCents.count != right.absoluteDestinationCents.count {
+                    return left.absoluteDestinationCents.count > right.absoluteDestinationCents.count
+                }
+                if left.fromPitch != right.fromPitch { return left.fromPitch < right.fromPitch }
+                return left.toPitch < right.toPitch
+            })
+        guard let weakest = candidates.first else { return nil }
+        return WeakTransitionInsight(
+            fromNote: weakest.fromNote,
+            toNote: weakest.toNote,
+            evidenceCount: weakest.absoluteDestinationCents.count,
+            weaknessScore: weakest.absoluteDestinationCents.reduce(0, +) / Double(weakest.absoluteDestinationCents.count)
+        )
     }
 }
 
@@ -651,8 +652,24 @@ struct PracticeFeatureState: Codable, Equatable {
             migrated.settings.validate()
             return migrated
         }
-        favorites = Array(Dictionary(grouping: favorites, by: \.id).compactMap { $0.value.first }.prefix(16))
-        recents = Array(Dictionary(grouping: recents, by: \.id).compactMap { $0.value.first }.sorted { ($0.lastStartedAt ?? .distantPast) > ($1.lastStartedAt ?? .distantPast) }.prefix(10))
+        favorites = Array(firstUniqueShortcuts(favorites).prefix(16))
+        // Preserve the first stored occurrence for duplicate IDs, then sort
+        // the surviving values by their actual last-started time. A stable
+        // original-index tiebreak makes old snapshots reproducible.
+        recents = firstUniqueShortcuts(recents)
+            .enumerated()
+            .sorted { left, right in
+                let leftDate = left.element.lastStartedAt ?? .distantPast
+                let rightDate = right.element.lastStartedAt ?? .distantPast
+                return leftDate == rightDate ? left.offset < right.offset : leftDate > rightDate
+            }
+            .prefix(10)
+            .map(\.element)
+    }
+
+    private func firstUniqueShortcuts(_ shortcuts: [PracticeShortcut]) -> [PracticeShortcut] {
+        var ids = Set<String>()
+        return shortcuts.filter { ids.insert($0.id).inserted }
     }
 }
 
