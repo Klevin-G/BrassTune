@@ -523,26 +523,14 @@ test('a failed Drone finalization keeps the Tuner stop control available for a s
   await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
 });
 
-test('Audio Lab accounts a successfully saved calibration take exactly once', async ({ page }) => {
+test('Tuner accounts a successfully saved take exactly once after a focus refresh', async ({ page }) => {
   const fixture = await installTunerRecordingFixture(page);
-  await page.route('**/src/pages/AudioLabPage.tsx*', async (route) => {
-    const response = await route.fetch();
-    const source = await response.text();
-    const enabledSource = source.replace(
-      /const internalToolsEnabled = (?:false|import\.meta\.env\.VITE_ENABLE_INTERNAL_TOOLS === ['"]true['"])/,
-      'const internalToolsEnabled = true',
-    );
-    if (enabledSource === source) throw new Error('Audio Lab internal-tools test seam did not match the served module.');
-    await route.fulfill({ response, body: enabledSource });
-  });
-  await page.goto('/settings/audio-lab');
-  await expect(page.getByRole('heading', { name: 'Audio Calibration Lab' })).toBeVisible();
+  await page.goto('/practice');
 
   await page.getByRole('button', { name: 'Save this take' }).click();
   await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
   await page.getByRole('button', { name: 'Stop and save' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Calibration take saved' })).toBeVisible();
   await expect.poll(() => fixture.calls.stops).toBe(1);
   await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -676,18 +664,33 @@ test('the real pitch Worker accepts a transferred PCM frame and returns its matc
     const module = await import('/src/workers/pitchDetection.worker.ts?worker');
     const worker = new module.default();
     const pcm = new Float32Array(4096);
-    pcm[0] = 0.5;
-    return await new Promise<{ timestampMs: number; valid: boolean }>((resolve, reject) => {
+    for (let index = 0; index < pcm.length; index += 1) {
+      pcm[index] = 0.5 * Math.sin((2 * Math.PI * 440 * index) / 48_000);
+    }
+    return await new Promise<{ timestampMs: number; valid: boolean; frequencyHz: number | null; concertNote: string | null; writtenNote: string | null; cents: number | null }>((resolve, reject) => {
       const timeout = window.setTimeout(() => reject(new Error('pitch Worker did not respond')), 5_000);
-      worker.onmessage = (event: MessageEvent<{ timestampMs: number; frame: { is_valid_for_recording: boolean } }>) => {
+      worker.onmessage = (event: MessageEvent<{ timestampMs: number; frame: { is_valid_for_recording: boolean; frequency_hz: number | null; concert_note_name: string | null; concert_octave: number | null; written_note_name: string | null; written_octave: number | null; cents_deviation: number | null } }>) => {
         window.clearTimeout(timeout);
         worker.terminate();
-        resolve({ timestampMs: event.data.timestampMs, valid: event.data.frame.is_valid_for_recording });
+        const result = event.data.frame;
+        resolve({
+          timestampMs: event.data.timestampMs,
+          valid: result.is_valid_for_recording,
+          frequencyHz: result.frequency_hz,
+          concertNote: `${result.concert_note_name}${result.concert_octave}`,
+          writtenNote: `${result.written_note_name}${result.written_octave}`,
+          cents: result.cents_deviation,
+        });
       };
       worker.postMessage({ type: 'detect', pcm: pcm.buffer, sampleRate: 48_000, instrumentId: 'trumpet', referencePitch: 440, timestampMs: 42 }, [pcm.buffer]);
     });
   });
   expect(frame.timestampMs).toBe(42);
+  expect(frame.valid).toBe(true);
+  expect(frame.frequencyHz).toBeCloseTo(440, 0);
+  expect(frame.concertNote).toBe('A4');
+  expect(frame.writtenNote).toBe('B4');
+  expect(frame.cents).toBeCloseTo(0, 0);
 });
 
 test('a silent runtime Worker falls back after its bounded backlog watchdog', async ({ page }) => {
