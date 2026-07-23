@@ -29,6 +29,10 @@ export const localeOptions = [
   { value: 'en-XA', label: 'Pseudo (QA)' },
 ] as const;
 
+// Pseudo-localization remains a supported programmatic QA locale, but should
+// never be offered as a production user setting.
+export const productionLocaleOptions = localeOptions.filter((option) => option.value !== 'en-XA');
+
 export type ProductionLocale = (typeof productionLocales)[number];
 export type AppLocale = (typeof localeOptions)[number]['value'];
 

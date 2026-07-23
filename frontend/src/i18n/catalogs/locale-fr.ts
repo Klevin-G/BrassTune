@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "Dos",
   "onboarding.dismiss": "Ignorer la visite pour le moment",
   "onboarding.saving": "Sauvegarde de la visite…",
+  "onboarding.saveFailed": "Nous n’avons pas pu enregistrer la fin de votre visite. Vos choix sont toujours là ; essayez à nouveau.",
   "onboarding.retry": "Essayez à nouveau d'enregistrer",
   "legal.back": "Dos",
   "legal.termsTitle": "Conditions d'utilisation",

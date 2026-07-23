@@ -310,6 +310,43 @@ test('Tuner finalizes one active MediaRecorder and cloud session before repeated
   await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
 });
 
+test('leaving the Tuner route finalizes one active recorder and cloud session', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page);
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Metronome' }).click();
+
+  await expect(page).toHaveURL(/\/metronome$/);
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __tunerRecorderTest: { stops: number } }
+  ).__tunerRecorderTest.stops)).toBe(1);
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
+});
+
+test('leaving the Tuner route waits for a pending start and then finalizes it', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { pendingStart: true });
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect.poll(() => fixture.calls.starts).toBe(1);
+
+  await page.getByRole('link', { name: 'Metronome' }).click();
+  await expect(page).toHaveURL(/\/metronome$/);
+  expect(fixture.calls.stops).toBe(0);
+
+  fixture.releaseStart();
+
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __tunerRecorderTest: { starts: number; stops: number } }
+  ).__tunerRecorderTest)).toEqual({ starts: 1, stops: 1 });
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
+});
+
 test('Drone waits for a pending Tuner start and serializes rapid switch attempts through one finalization', async ({ page }) => {
   const fixture = await installTunerRecordingFixture(page, { pendingStart: true });
   await page.goto('/practice');

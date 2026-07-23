@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "Назад",
   "onboarding.dismiss": "Отменить тур на данный момент",
   "onboarding.saving": "Сохранение тура…",
+  "onboarding.saveFailed": "Не удалось сохранить завершение тура. Ваш выбор сохранён — попробуйте ещё раз.",
   "onboarding.retry": "Попробуйте сохранить еще раз",
   "legal.back": "Назад",
   "legal.termsTitle": "Условия использования",

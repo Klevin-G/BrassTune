@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "뒤쪽에",
   "onboarding.dismiss": "지금은 투어 닫기",
   "onboarding.saving": "투어 저장 중…",
+  "onboarding.saveFailed": "투어 완료를 저장하지 못했습니다. 선택한 내용은 그대로 있습니다. 다시 저장해 보세요.",
   "onboarding.retry": "다시 저장해 보세요",
   "legal.back": "뒤쪽에",
   "legal.termsTitle": "서비스 약관",

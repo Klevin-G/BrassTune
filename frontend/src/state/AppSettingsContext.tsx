@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { updateCurrentUser } from '../api/client';
 import { useAuth } from './AuthContext';
+import type { MessageId } from '../i18n/messages.base';
 
 const legacyOnboardingCompleteKey = 'brasstune.onboardingComplete';
 const guestOnboardingCompleteKey = 'brasstune.guestOnboardingComplete';
@@ -35,7 +36,7 @@ interface AppSettings {
   onboardingOpen: boolean;
   onboardingComplete: boolean;
   onboardingSaving: boolean;
-  onboardingSaveError: string | null;
+  onboardingSaveError: MessageId | null;
   openOnboarding: () => void;
   closeOnboarding: () => void;
   completeOnboarding: () => Promise<boolean>;
@@ -58,7 +59,7 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingSaving, setOnboardingSaving] = useState(false);
-  const [onboardingSaveError, setOnboardingSaveError] = useState<string | null>(null);
+  const [onboardingSaveError, setOnboardingSaveError] = useState<MessageId | null>(null);
   const handledGuestEntrySequence = useRef(0);
   const onboardingSaveInFlight = useRef(false);
 
@@ -107,7 +108,7 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
     } catch {
       setOnboardingComplete(false);
       setOnboardingOpen(true);
-      setOnboardingSaveError('We couldn’t save that you finished the tour. Your choices are still here—try saving again.');
+      setOnboardingSaveError('onboarding.saveFailed');
       return false;
     } finally {
       onboardingSaveInFlight.current = false;

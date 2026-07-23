@@ -621,6 +621,7 @@ export const englishMessages = {
   'onboarding.back': 'Back',
   'onboarding.dismiss': 'Dismiss tour for now',
   'onboarding.saving': 'Saving tour…',
+  'onboarding.saveFailed': 'We couldn’t save that you finished the tour. Your choices are still here—try saving again.',
   'onboarding.retry': 'Try saving again',
   'legal.back': 'Back',
   'legal.termsTitle': 'Terms of Service',

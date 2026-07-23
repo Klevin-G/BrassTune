@@ -51,6 +51,7 @@ export function PracticePage() {
   const holdCountRef = useRef(0);
   const lastFrameTsRef = useRef<number | null>(null);
   const micRequestedRef = useRef(false);
+  const lastSavedIdRef = useRef<string | number | null>(null);
   const recorderRef = useRef(recorder);
   const audioRecorderRef = useRef(audioRecorder);
   const streamRef = useRef<ReturnType<typeof usePitchStream> | null>(null);
@@ -61,6 +62,8 @@ export function PracticePage() {
   const takeTransitionRef = useRef<Promise<PracticeSession | null> | null>(null);
   const takeTransitionKindRef = useRef<'start' | 'stop' | null>(null);
   const toolSwitchPromiseRef = useRef<Promise<void> | null>(null);
+  const stopRef = useRef(async (): Promise<PracticeSession | null> => null);
+  const recordSavedSessionRef = useRef(recordSavedSession);
 
   const stream = usePitchStream({
     enabled: practiceTool === 'tuner',
@@ -74,6 +77,7 @@ export function PracticePage() {
   });
   recorderRef.current = recorder;
   audioRecorderRef.current = audioRecorder;
+  recordSavedSessionRef.current = recordSavedSession;
   streamRef.current = stream;
   demoModeRef.current = demoMode;
   if (recorder.activeSession) {
@@ -97,14 +101,16 @@ export function PracticePage() {
   }, [demoMode, practiceTool, stream]);
 
   // Count a completed take toward the practice streak.
-  const lastSavedIdRef = useRef<string | number | null>(null);
   useEffect(() => {
     const summary = recorder.lastSummary;
     if (summary && summary.id !== lastSavedIdRef.current) {
-      lastSavedIdRef.current = summary.id;
-      recordSavedSession(summary);
+      if (recordSavedSession(summary)) lastSavedIdRef.current = summary.id;
     }
   }, [recordSavedSession, recorder.lastSummary]);
+
+  const recordCompletedSession = (summary: PracticeSession) => {
+    if (recordSavedSessionRef.current(summary)) lastSavedIdRef.current = summary.id;
+  };
 
   // Grow the in-tune reward the longer the player holds a centered pitch.
   useEffect(() => {
@@ -189,6 +195,7 @@ export function PracticePage() {
             const summary = await recorderRef.current.stop(guestAudio);
             activeSessionIdRef.current = null;
             if (guestAudio) audioRecorderRef.current.markLocalSaved();
+            if (summary) recordCompletedSession(summary);
             return summary;
           } catch (saveError) {
             audioRecorderRef.current.markLocalSaveFailed(t('practice.errorLocalSave'));
@@ -207,6 +214,7 @@ export function PracticePage() {
           }
           const summary = await recorderRef.current.stop();
           activeSessionIdRef.current = null;
+          if (summary) recordCompletedSession(summary);
           if (flush.failed > 0) recorderRef.current.setError(t('practice.errorFrameSync'));
           if (demoUploadFailed) recorderRef.current.setError(t('practice.errorAudioUpload'));
           return summary;
@@ -222,6 +230,7 @@ export function PracticePage() {
         }
         const summary = await recorderRef.current.stop();
         activeSessionIdRef.current = null;
+        if (summary) recordCompletedSession(summary);
         if (flush.failed > 0) recorderRef.current.setError(t('practice.errorFrameSync'));
         if (uploadFailed) recorderRef.current.setError(t('practice.errorAudioUpload'));
         return summary;
@@ -231,6 +240,14 @@ export function PracticePage() {
       }
     });
   };
+  stopRef.current = stop;
+
+  // Navigation must use the same serialized stop path as the Stop control so
+  // an active cloud or guest take is finalized exactly once before this route
+  // releases its tuner/audio ownership.
+  useEffect(() => () => {
+    void stopRef.current();
+  }, []);
 
   const setPracticeTool = (value: 'tuner' | 'drone') => {
     if (value === practiceTool) return;

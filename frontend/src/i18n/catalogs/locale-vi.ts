@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "Mặt sau",
   "onboarding.dismiss": "Tạm dừng chuyến tham quan ngay bây giờ",
   "onboarding.saving": "Đang lưu chuyến tham quan…",
+  "onboarding.saveFailed": "Không thể lưu việc bạn đã hoàn thành chuyến tham quan. Các lựa chọn của bạn vẫn ở đây — hãy thử lưu lại.",
   "onboarding.retry": "Hãy thử lưu lại",
   "legal.back": "Mặt sau",
   "legal.termsTitle": "Điều khoản dịch vụ",

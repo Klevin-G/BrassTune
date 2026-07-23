@@ -32,6 +32,14 @@ function downloadTextFile(content: string, filename: string, type = 'application
 
 type MicCheck = 'idle' | 'listening' | 'pass' | 'fail' | 'blocked';
 
+// The server deliberately accepts one stable confirmation phrase. The UI can
+// still require the translated phrase before enabling this irreversible action.
+export const ACCOUNT_DELETION_BACKEND_CONFIRMATION = 'delete my account';
+
+export function matchesLocalizedDeletionConfirmation(value: string, phrase: string, locale: string) {
+  return value.trim().toLocaleLowerCase(locale) === phrase.toLocaleLowerCase(locale);
+}
+
 export function SettingsPage() {
   const { instrumentId, setInstrumentId, referencePitch, setReferencePitch, demoMode, setDemoMode, openOnboarding } = useAppSettings();
   const auth = useAuth();
@@ -76,7 +84,7 @@ export function SettingsPage() {
     setBusyAction(t('settings.deleteAccount'));
     setMaintenanceStatus(t('settings.deletingAccount'));
     try {
-      const result = await auth.deleteAccount(deleteConfirmation);
+      const result = await auth.deleteAccount(ACCOUNT_DELETION_BACKEND_CONFIRMATION);
       setMaintenanceStatus(t(result.deletionStatus && result.deletionStatus !== 'completed' ? 'settings.accountRemoved' : 'settings.accountDeleted'));
       setDeleteConfirmation('');
     } catch (error) {
@@ -158,7 +166,7 @@ export function SettingsPage() {
   };
 
   const statusMessage = (auth.profileError ? t('error.authUnavailable') : null) ?? (maintenanceStatus || null);
-  const deleteReady = auth.isSignedIn && busyAction === null && deleteConfirmation.trim().toLocaleLowerCase(locale) === t('settings.deletePhrase').toLocaleLowerCase(locale);
+  const deleteReady = auth.isSignedIn && busyAction === null && matchesLocalizedDeletionConfirmation(deleteConfirmation, t('settings.deletePhrase'), locale);
 
   return (
     <ScreenContainer className="settings-screen">

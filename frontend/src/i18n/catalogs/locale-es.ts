@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "Atrás",
   "onboarding.dismiss": "Descartar recorrido por ahora",
   "onboarding.saving": "Guardando recorrido…",
+  "onboarding.saveFailed": "No pudimos guardar que terminaste el recorrido. Tus opciones siguen aquí; intenta guardar de nuevo.",
   "onboarding.retry": "Intenta guardar de nuevo",
   "legal.back": "Atrás",
   "legal.termsTitle": "Términos de servicio",

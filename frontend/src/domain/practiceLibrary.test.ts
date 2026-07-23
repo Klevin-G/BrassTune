@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   PRACTICE_LIBRARY_VERSION,
   BUILT_IN_PRACTICE_PACKS,
-  claimSavedPracticeSessionMinutes,
   clearAccountPracticeState,
   currentWeekKey,
   emptyPracticeLibrary,
@@ -102,14 +101,6 @@ describe('practice library storage', () => {
       completedSessions: 0,
     });
     expect(millisecondsUntilNextPracticeWeek(monday)).toBe(7 * 24 * 60 * 60 * 1000);
-  });
-
-  it('claims each saved session once per owner and derives a minimum one-minute activity', () => {
-    const claimed = new Set<string>();
-    expect(claimSavedPracticeSessionMinutes(claimed, 'guest', { id: 'take-1', duration_seconds: 0 })).toBe(1);
-    expect(claimSavedPracticeSessionMinutes(claimed, 'guest', { id: 'take-1', duration_seconds: 125 })).toBeNull();
-    expect(claimSavedPracticeSessionMinutes(claimed, 'account:42', { id: 'take-1', duration_seconds: 125 })).toBe(2);
-    expect(claimSavedPracticeSessionMinutes(claimed, 'account:42', { id: 'take-2', duration_seconds: Number.NaN })).toBe(1);
   });
 
   it('ships routable built-in packs for the focused workspace', () => {

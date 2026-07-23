@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   PRACTICE_LIBRARY_VERSION,
-  claimSavedPracticeSessionMinutes,
   emptyPracticeLibrary,
   normalizeMetronomePreset,
   ownerWorkspaceKey,
+  persistSavedPracticeSessionActivity,
   practiceLibraryLimits,
   readPracticeLibrary,
   reconcilePracticeLibraryWeek,
@@ -201,43 +201,48 @@ export function PracticeLibraryProvider({
   }));
   const [guestRecoveryState, setGuestRecoveryState] = useState<'idle' | 'pending' | 'failed'>('idle');
   const claimedSavedSessionKeysRef = useRef(new Set<string>());
+  const loadedStateRef = useRef(loadedState);
+  loadedStateRef.current = loadedState;
   const ownerReady = ownerId != null && loadedState.ownerId === ownerId;
   const library = loadedState.library;
   const workspace = loadedState.workspace;
   const storageError = loadedState.storageError;
 
   useEffect(() => {
-    setLoadedState({
+    const next = {
       ownerId,
       library: ownerId ? readPracticeLibrary(localStorage, ownerId, now()) : emptyPracticeLibrary(now()),
       workspace: ownerId ? readWorkspace(ownerId) : null,
       storageError: null,
-    });
+    };
+    loadedStateRef.current = next;
+    setLoadedState(next);
   }, [now, ownerId]);
 
   const updateLibrary = useCallback((update: (current: PracticeLibrary) => PracticeLibrary) => {
-    setLoadedState((current) => {
-      if (!ownerId || current.ownerId !== ownerId) return current;
-      const next = update(current.library);
-      if (next === current.library) return current;
-      const saved = writePracticeLibrary(localStorage, ownerId, next);
-      return saved
-        ? { ...current, library: next, storageError: null }
-        : { ...current, storageError: 'This device is out of browser storage. Your latest practice-library change could not be saved.' };
-    });
+    const current = loadedStateRef.current;
+    if (!ownerId || current.ownerId !== ownerId) return false;
+    const nextLibrary = update(current.library);
+    if (nextLibrary === current.library) return true;
+    const next = writePracticeLibrary(localStorage, ownerId, nextLibrary)
+      ? { ...current, library: nextLibrary, storageError: null }
+      : { ...current, storageError: 'This device is out of browser storage. Your latest practice-library change could not be saved.' };
+    loadedStateRef.current = next;
+    setLoadedState(next);
+    return next.storageError == null;
   }, [ownerId]);
 
   const reconcileDisplayedWeek = useCallback(() => {
     const currentDate = now();
-    setLoadedState((current) => {
-      if (!ownerId || current.ownerId !== ownerId) return current;
-      const next = reconcilePracticeLibraryWeek(current.library, currentDate);
-      if (next === current.library) return current;
-      const saved = writePracticeLibrary(localStorage, ownerId, next);
-      return saved
-        ? { ...current, library: next, storageError: null }
-        : { ...current, storageError: 'This device is out of browser storage. Your weekly practice progress could not be updated.' };
-    });
+    const current = loadedStateRef.current;
+    if (!ownerId || current.ownerId !== ownerId) return;
+    const nextLibrary = reconcilePracticeLibraryWeek(current.library, currentDate);
+    if (nextLibrary === current.library) return;
+    const next = writePracticeLibrary(localStorage, ownerId, nextLibrary)
+      ? { ...current, library: nextLibrary, storageError: null }
+      : { ...current, storageError: 'This device is out of browser storage. Your weekly practice progress could not be updated.' };
+    loadedStateRef.current = next;
+    setLoadedState(next);
   }, [now, ownerId]);
 
   useEffect(() => {
@@ -340,12 +345,33 @@ export function PracticeLibraryProvider({
 
   const recordSavedSession = useCallback((session: SavedPracticeSessionActivity) => {
     if (!ownerId) return false;
-    const minutes = claimSavedPracticeSessionMinutes(claimedSavedSessionKeysRef.current, ownerId, session);
-    if (minutes == null) return false;
-    recordPracticeStreakActivity(ownerId, minutes);
-    updateLibrary((current) => recordPracticeActivity(current, minutes, now()));
+    const current = loadedStateRef.current;
+    if (current.ownerId !== ownerId) return false;
+    const result = persistSavedPracticeSessionActivity({
+      claimedSessionKeys: claimedSavedSessionKeysRef.current,
+      storage: localStorage,
+      ownerId,
+      library: current.library,
+      session,
+      now: now(),
+    });
+    if (!result.saved || result.minutes == null) {
+      if (result.failure === 'storage') {
+        const next = {
+          ...current,
+          storageError: 'This device is out of browser storage. Your saved practice could not be added to weekly progress.',
+        };
+        loadedStateRef.current = next;
+        setLoadedState(next);
+      }
+      return false;
+    }
+    const next = { ...current, library: result.library, storageError: null };
+    loadedStateRef.current = next;
+    setLoadedState(next);
+    recordPracticeStreakActivity(ownerId, result.minutes);
     return true;
-  }, [now, ownerId, updateLibrary]);
+  }, [now, ownerId]);
 
   const saveReflection = useCallback((text: string, sessionId?: string) => {
     const trimmed = text.trim().slice(0, 280);
@@ -386,20 +412,22 @@ export function PracticeLibraryProvider({
   }, [updateLibrary]);
 
   const persistWorkspace = useCallback((next: PracticeWorkspace | null) => {
-    setLoadedState((current) => {
-      if (!ownerId || current.ownerId !== ownerId) return current;
-      try {
-        if (next) sessionStorage.setItem(ownerWorkspaceKey(ownerId), JSON.stringify(next));
-        else sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
-        return { ...current, workspace: next, storageError: null };
-      } catch {
-        return {
-          ...current,
-          workspace: next,
-          storageError: 'Focused mode will work for this page, but this browser could not remember it between pages.',
-        };
-      }
-    });
+    const current = loadedStateRef.current;
+    if (!ownerId || current.ownerId !== ownerId) return;
+    let updated: LoadedPracticeState;
+    try {
+      if (next) sessionStorage.setItem(ownerWorkspaceKey(ownerId), JSON.stringify(next));
+      else sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
+      updated = { ...current, workspace: next, storageError: null };
+    } catch {
+      updated = {
+        ...current,
+        workspace: next,
+        storageError: 'Focused mode will work for this page, but this browser could not remember it between pages.',
+      };
+    }
+    loadedStateRef.current = updated;
+    setLoadedState(updated);
   }, [ownerId]);
 
   const startWorkspace = useCallback((pack: PracticePack) => {

@@ -74,4 +74,19 @@ describe('weak transition labels', () => {
     ]);
     expect(result).toMatchObject({ ready: true, from: 'C', to: 'D', notes: ['C', 'D', 'C', 'D'], evidenceCount: 3 });
   });
+
+  it('treats enharmonic spellings as pitch classes', () => {
+    expect(generateWeakTransitionDrill([
+      { note_label: 'C#4', avg_signed_cents: 0 }, { note_label: 'D♭5', avg_signed_cents: 20 },
+      { note_label: 'D4', avg_signed_cents: 0 }, { note_label: 'C♯5', avg_signed_cents: 11 },
+      { note_label: 'D3', avg_signed_cents: 0 }, { note_label: 'D♭6', avg_signed_cents: 13 },
+      { note_label: 'D5', avg_signed_cents: 0 }, { note_label: 'C#4', avg_signed_cents: 15 },
+    ])).toMatchObject({
+      ready: true,
+      from: 'D',
+      to: 'C#',
+      notes: ['D', 'C#', 'D', 'C#'],
+      evidenceCount: 3,
+    });
+  });
 });

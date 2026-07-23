@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "Zurück",
   "onboarding.dismiss": "Tour vorerst ablehnen",
   "onboarding.saving": "Tour wird gespeichert…",
+  "onboarding.saveFailed": "Wir konnten den Abschluss der Tour nicht speichern. Deine Auswahl ist noch da – versuche es erneut.",
   "onboarding.retry": "Versuchen Sie erneut zu speichern",
   "legal.back": "Zurück",
   "legal.termsTitle": "Nutzungsbedingungen",

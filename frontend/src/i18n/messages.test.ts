@@ -4,6 +4,7 @@ import {
   loadMessagesForLocale,
   localeOptions,
   normalizeLocale,
+  productionLocaleOptions,
   productionLocales,
 } from './LocaleContext';
 import { englishMessages, pseudoLocalizeMessage } from './messages.base';
@@ -163,6 +164,9 @@ describe('web localization', () => {
     expect(ar['tuning.concertNote']).toBe('النغمة الكونشرتية {note}');
     expect(ar['practice.droneIntervals']).not.toMatch(/طائرة/);
     expect(ar['localMedia.noteEvents']).not.toMatch(/حدث/);
+    expect([ar['instrument.trumpet'], ar['instrument.cornet']]).toEqual(['ترومبيت في سي بيمول', 'كورنيت في سي بيمول']);
+    expect([ar['tuning.sharp'], ar['tuning.flat']]).toEqual(['أعلى من الطبقة المطلوبة', 'أخفض من الطبقة المطلوبة']);
+    expect(ar['practice.percentInTune']).toBe('{percent}% في الضبط');
 
     expect(fr['sessionReview.driftSharp']).toContain('trop haut');
     expect(fr['sessionReview.driftFlat']).toContain('trop bas');
@@ -402,5 +406,18 @@ describe('web localization', () => {
     expect(normalizeLocale('zh-SG')).toBe('zh-Hans');
     expect(normalizeLocale('ar-SA')).toBe('ar');
     expect(normalizeLocale('unknown')).toBeNull();
+  });
+
+  it('keeps the QA pseudo-locale programmatically available but out of the production picker', () => {
+    expect(localeOptions.map((option) => option.value)).toContain('en-XA');
+    expect(productionLocaleOptions.map((option) => option.value)).toEqual(productionLocales);
+  });
+
+  it('renders an onboarding save failure from each locale catalog', async () => {
+    for (const locale of productionLocales) {
+      const messages = await loadMessagesForLocale(locale);
+      expect(messages['onboarding.saveFailed']).not.toHaveLength(0);
+      if (locale !== 'en') expect(messages['onboarding.saveFailed']).not.toBe(englishMessages['onboarding.saveFailed']);
+    }
   });
 });

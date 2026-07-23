@@ -16,13 +16,33 @@ export function normalizeWeakDrillNoteLabel(value: string | null | undefined): s
   return `${match[1].toUpperCase()}${match[2] ?? ''}`;
 }
 
+function transitionPitchClass(note: string): number | null {
+  const match = /^([A-G])([#b]?)$/.exec(note);
+  if (!match) return null;
+  const naturalPitchClasses: Record<string, number> = {
+    C: 0,
+    D: 2,
+    E: 4,
+    F: 5,
+    G: 7,
+    A: 9,
+    B: 11,
+  };
+  const natural = naturalPitchClasses[match[1]];
+  const accidental = match[2] === '#' ? 1 : match[2] === 'b' ? -1 : 0;
+  return (natural + accidental + 12) % 12;
+}
+
 export function generateWeakTransitionDrill(events: TransitionEvent[]): TransitionDrillResult {
   const pairs = new Map<string, { from: string; to: string; count: number; totalError: number }>();
   for (let index = 1; index < events.length; index += 1) {
     const from = normalizeWeakDrillNoteLabel(events[index - 1]?.note_label);
     const to = normalizeWeakDrillNoteLabel(events[index]?.note_label);
-    if (!from || !to || from === to) continue;
-    const key = `${from}>${to}`;
+    if (!from || !to) continue;
+    const fromPitchClass = transitionPitchClass(from);
+    const toPitchClass = transitionPitchClass(to);
+    if (fromPitchClass == null || toPitchClass == null || fromPitchClass === toPitchClass) continue;
+    const key = `${fromPitchClass}>${toPitchClass}`;
     const entry = pairs.get(key) ?? { from, to, count: 0, totalError: 0 };
     entry.count += 1;
     entry.totalError += Math.abs(Number(events[index].avg_signed_cents) || 0);

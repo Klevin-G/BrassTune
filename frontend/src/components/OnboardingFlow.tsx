@@ -215,7 +215,7 @@ export function OnboardingFlow() {
 
         {onboardingSaveError && (
           <div className="ob-save-error" role="alert">
-            <span>{onboardingSaveError}</span>
+            <span>{t(onboardingSaveError)}</span>
             <button className="ghost-button" type="button" onClick={() => void finish(true)} disabled={onboardingSaving}>
               {onboardingSaving ? t('onboarding.saving') : t('onboarding.retry')}
             </button>

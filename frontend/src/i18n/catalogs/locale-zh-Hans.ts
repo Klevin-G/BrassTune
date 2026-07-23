@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "后退",
   "onboarding.dismiss": "暂时取消游览",
   "onboarding.saving": "保存游览…",
+  "onboarding.saveFailed": "无法保存你已完成导览。你的选择仍保留在这里；请再试一次。",
   "onboarding.retry": "再次尝试保存",
   "legal.back": "后退",
   "legal.termsTitle": "服务条款",

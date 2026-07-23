@@ -142,18 +142,44 @@ export interface SavedPracticeSessionActivity {
   duration_seconds?: number | null;
 }
 
-export function claimSavedPracticeSessionMinutes(
-  claimedSessionKeys: Set<string>,
-  ownerId: string,
-  session: SavedPracticeSessionActivity,
-): number | null {
+/**
+ * Records saved-session progress only after the updated library has made it to
+ * storage. That ordering leaves a failed save eligible for a later retry.
+ */
+export function persistSavedPracticeSessionActivity({
+  claimedSessionKeys,
+  storage,
+  ownerId,
+  library,
+  session,
+  now = new Date(),
+}: {
+  claimedSessionKeys: Set<string>;
+  storage: Pick<Storage, 'setItem'>;
+  ownerId: string;
+  library: PracticeLibrary;
+  session: SavedPracticeSessionActivity;
+  now?: Date;
+}): {
+  saved: boolean;
+  minutes: number | null;
+  library: PracticeLibrary;
+  failure: 'duplicate' | 'storage' | null;
+} {
   const sessionKey = `${ownerId}:${String(session.id)}`;
-  if (claimedSessionKeys.has(sessionKey)) return null;
-  claimedSessionKeys.add(sessionKey);
+  if (claimedSessionKeys.has(sessionKey)) {
+    return { saved: false, minutes: null, library, failure: 'duplicate' };
+  }
   const durationSeconds = typeof session.duration_seconds === 'number' && Number.isFinite(session.duration_seconds)
     ? Math.max(0, session.duration_seconds)
     : 0;
-  return Math.max(1, Math.round(durationSeconds / 60));
+  const minutes = Math.max(1, Math.round(durationSeconds / 60));
+  const next = recordPracticeActivity(library, minutes, now);
+  if (!writePracticeLibrary(storage, ownerId, next)) {
+    return { saved: false, minutes: null, library, failure: 'storage' };
+  }
+  claimedSessionKeys.add(sessionKey);
+  return { saved: true, minutes, library: next, failure: null };
 }
 
 export function reconcilePracticeLibraryWeek(library: PracticeLibrary, now = new Date()): PracticeLibrary {

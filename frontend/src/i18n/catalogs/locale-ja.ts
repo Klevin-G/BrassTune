@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "戻る",
   "onboarding.dismiss": "ツアーを一旦中止",
   "onboarding.saving": "ツアーを保存中…",
+  "onboarding.saveFailed": "ツアーの完了を保存できませんでした。選択内容はここに残っています。もう一度保存してください。",
   "onboarding.retry": "もう一度保存してみてください",
   "legal.back": "戻る",
   "legal.termsTitle": "利用規約",

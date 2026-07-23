@@ -615,6 +615,7 @@ const messages = {
   "onboarding.back": "Voltar",
   "onboarding.dismiss": "Dispensar tour por enquanto",
   "onboarding.saving": "Salvando passeio…",
+  "onboarding.saveFailed": "Não foi possível salvar que você concluiu o passeio. Suas escolhas continuam aqui — tente salvar novamente.",
   "onboarding.retry": "Tente salvar novamente",
   "legal.back": "Voltar",
   "legal.termsTitle": "Termos de Serviço",
