@@ -79,7 +79,7 @@ test('guest class route invites sign-in without exposing director controls', asy
 test('accounts-unavailable routes still offer guest practice', async ({ page }) => {
   await page.goto('/auth/reset-password');
   await expect(page.getByText(/accounts aren't turned on yet/i)).toBeVisible();
-  await expect(page.getByRole('link', { name: /continue as guest|start practicing|keep practicing/i }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /continue as guest|start practicing|keep practicing/i }).first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/Supabase|VITE_SUPABASE|env vars/i);
 });
 
