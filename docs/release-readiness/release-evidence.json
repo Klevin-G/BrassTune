@@ -3,8 +3,9 @@
   "generated_at": "2026-07-23",
   "phase": "pr1_candidate_test_only_successor_not_deployed",
   "candidate_sha": "e1b3f61351d62e1438ac457c31b1a8d40691a1d5",
+  "billing_attempt_and_exact_local_gate_basis_sha": "99e5a7f",
   "full_gate_predecessor_sha": "2106768f177c64a1475c6168eed6d9a172633435",
-  "candidate_delta": "Playwright seed-once persistence coverage only; production application code is identical to the full-gate predecessor",
+  "candidate_delta": "Playwright seed-once persistence coverage and release documentation only; production application code is identical to the full-gate predecessor",
   "heavy_gate_base_sha": "8ee07d63ddf201efc59f4b8c0b8d661cfd491082",
   "artifact_bundle": "/Users/aryasalem/Downloads/BrassTune-safety-bundles/20260723T094812Z-gates-8ee07d6",
   "branch": "arya/ux-parity-localization-20260722",
@@ -46,6 +47,38 @@
       "status": "success"
     }
   },
+  "exact_head_ci_attempts": {
+    "basis_sha": "99e5a7f",
+    "status": "blocked_before_checkout",
+    "reason": "GitHub billing/spending enforcement",
+    "workflow_step_execution": "none",
+    "self_hosted_runners_available": 0,
+    "paid_or_new_runner_workaround_authorized": false,
+    "merge_gate": "blocked until all exact-head checks execute green",
+    "frontend": {
+      "run_id": 30004831887,
+      "status": "blocked_before_checkout"
+    },
+    "security": {
+      "run_id": 30004831904,
+      "status": "blocked_before_checkout"
+    },
+    "backend": {
+      "run_id": 30004831929,
+      "status": "blocked_before_checkout"
+    },
+    "swift": {
+      "run_id": 30004831943,
+      "status": "blocked_before_checkout"
+    }
+  },
+  "exact_local_gates": {
+    "basis_sha": "99e5a7f",
+    "backend": "223 passed, 4 skipped; Bandit clean; installed-environment dependency audit clean",
+    "frontend": "199 unit tests passed; production build and 11 locale chunks passed; production dependency audit reported 0 vulnerabilities; full browser matrix 398 passed and 7 intended skips in 5.0 minutes",
+    "native": "BrassTuneCore 3 passed; app unit tests 113 passed; Debug build passed on a dynamically discovered iPhone 17 Pro simulator",
+    "boundary": "local and simulator evidence only; no physical-device, signing, or hosted-production claim"
+  },
   "independent_reviews": {
     "security": "approved; no P0-P2",
     "audio_scorer": "approved after explicit denominator-beat contract",
@@ -57,7 +90,7 @@
   "vercel_preview": {
     "deployment_id": "dpl_7xmSMfo1bX3dX9WQEXGxPhfpa2VJ",
     "source_sha": "2106768f177c64a1475c6168eed6d9a172633435",
-    "status": "production-identical predecessor preview; not production"
+    "status": "predecessor-source production-identical predecessor preview; not an exact 99e5a7f preview; not production"
   },
   "supabase": {
     "linked_project_ref": "yznziwewxrlwnwiynlvl",
@@ -81,7 +114,7 @@
   },
   "release_status": "not_merged_not_migrated_not_deployed",
   "pending": [
-    "merge PR #11 after exact-head checks and review remain valid",
+    "restore authorized Actions capacity or an authorized eligible runner, then execute all exact-head checks green before merging PR #11",
     "apply and validate the two PR1 Supabase migrations",
     "deploy Render then separate PR2 terminal-privacy contract, Render, and Vercel from exact SHAs",
     "strict hosted smoke",

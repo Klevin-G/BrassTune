@@ -1,6 +1,6 @@
 # Apple App Store Checklist
 
-Updated: 2026-07-23. Candidate code head: `e1b3f61351d62e1438ac457c31b1a8d40691a1d5`. This is an implementation and simulator checklist, not an App Store readiness decision.
+Updated: 2026-07-23. Candidate code head: `e1b3f61351d62e1438ac457c31b1a8d40691a1d5`; billing-attempt and exact local-gate basis: `99e5a7f`. This is an implementation and simulator checklist, not an App Store readiness decision.
 
 ## Implemented local artifacts
 
@@ -13,8 +13,8 @@ Updated: 2026-07-23. Candidate code head: `e1b3f61351d62e1438ac457c31b1a8d40691a
 
 ## Current evidence
 
-- Local: BrassTuneCore `3/3`, app units `113/113`, UI smoke `9/9`, four simulator builds, launch screenshots, plist checks, localization, and black-band checks.
-- GitHub Actions [Swift run 30002610369](https://github.com/Klevin-G/BrassTune/actions/runs/30002610369) succeeded on production-identical predecessor `2106768f177c64a1475c6168eed6d9a172633435`; the successor changes only Playwright coverage.
+- Exact local gate at `99e5a7f`: BrassTuneCore `3/3`, app units `113/113`, and a Debug build on a dynamically discovered iPhone 17 Pro simulator. Earlier recorded local evidence also includes UI smoke `9/9`, four simulator builds, launch screenshots, plist checks, localization, and black-band checks.
+- GitHub Actions [Swift run 30002610369](https://github.com/Klevin-G/BrassTune/actions/runs/30002610369) succeeded on production-identical predecessor `2106768f177c64a1475c6168eed6d9a172633435`; the successor changes only Playwright coverage and release documentation, not production application code. Exact-head Swift attempt [30004831943](https://github.com/Klevin-G/BrassTune/actions/runs/30004831943) was blocked by GitHub billing/spending enforcement before checkout or any step, not by a Swift test failure. Zero self-hosted runners were available; no paid/new-runner workaround was authorized, so exact-head Swift evidence remains required before merge.
 
 This is unsigned simulator/CI evidence. It does not establish physical-device microphone quality, configured native production auth/API settings, signing, archive/export validity, TestFlight, or App Store acceptance.
 
