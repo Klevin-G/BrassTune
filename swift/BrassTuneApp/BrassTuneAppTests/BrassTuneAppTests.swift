@@ -1402,6 +1402,33 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(PlayAlongNoteRating(cents: .nan), .missed)
     }
 
+    func testWeakTransitionAnalyzerSkipsRepeatedAndEnharmonicUnisons() {
+        for notes in [
+            ["C", "C", "C", "C"],
+            ["F", "E#", "F", "E#"],
+            ["C#", "Db", "C#", "Db"],
+            ["F♯", "Gb", "F♯", "Gb"],
+        ] {
+            let attempt = makePlayAlongAttempt(notes: notes, rating: .missed)
+            XCTAssertNil(
+                WeakTransitionAnalyzer.insight(from: [attempt], minimumEvidence: 1),
+                "Repeated or enharmonic-equivalent pitch classes must not become transition candidates: \(notes)"
+            )
+        }
+    }
+
+    func testWeakTransitionAnalyzerStillBuildsRealTransitionDrill() throws {
+        let attempts = (0..<3).map { _ in
+            makePlayAlongAttempt(notes: ["C", "D"], rating: .off)
+        }
+
+        let insight = try XCTUnwrap(WeakTransitionAnalyzer.insight(from: attempts))
+        XCTAssertEqual(insight.fromNote, "C")
+        XCTAssertEqual(insight.toNote, "D")
+        XCTAssertEqual(insight.evidenceCount, 3)
+        XCTAssertEqual(insight.exercise.writtenNotes, ["C", "D", "C", "D", "C", "D"])
+    }
+
     func testSharedPlayAlongContractFixtureMatchesNativeScorer() throws {
         let data = try Data(contentsOf: try sharedFixtureURL(named: "play_along_contract.json"))
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -2844,6 +2871,23 @@ final class BrassTuneAppTests: XCTestCase {
             writtenNoteName: note,
             writtenOctave: note == nil ? nil : writtenOctave,
             isValidForRecording: isValidForRecording ?? (note != nil && cents != nil && confidence >= 0.95)
+        )
+    }
+
+    private func makePlayAlongAttempt(
+        notes: [String],
+        rating: PlayAlongNoteRating
+    ) -> PlayAlongAttemptSummary {
+        PlayAlongAttemptSummary(
+            exercise: .defaultExercise,
+            noteGrades: notes.map {
+                PlayAlongNoteGrade(
+                    writtenNoteName: $0,
+                    medianCents: rating == .missed ? nil : 30,
+                    sampleCount: rating == .missed ? 0 : 5,
+                    rating: rating
+                )
+            }
         )
     }
 

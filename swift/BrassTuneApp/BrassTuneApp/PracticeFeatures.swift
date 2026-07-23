@@ -301,7 +301,8 @@ enum WeakTransitionAnalyzer {
                 let from = attempt.noteGrades[index - 1]
                 let to = attempt.noteGrades[index]
                 guard let fromClass = PracticePitchMath.pitchClass(for: from.writtenNoteName),
-                      let toClass = PracticePitchMath.pitchClass(for: to.writtenNoteName) else { continue }
+                      let toClass = PracticePitchMath.pitchClass(for: to.writtenNoteName),
+                      fromClass != toClass else { continue }
                 let key = "\(fromClass)>\(toClass)"
                 let ratingWeight: Double
                 switch to.rating {
