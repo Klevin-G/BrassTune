@@ -241,8 +241,8 @@ jobs:
             esac
           }
 
-          delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX
           delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX
+          delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX
       - name: Trigger exact Render deploy
         run: |
           curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \

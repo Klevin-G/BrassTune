@@ -217,6 +217,9 @@ def test_render_deploy_removes_legacy_cors_regex_and_uses_authoritative_runtime_
     assert "/env-vars/${key}" in deploy
     assert "delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX" in deploy
     assert "delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX" in deploy
+    assert deploy.index("delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX") < deploy.index(
+        "delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX"
+    )
     assert "204)" in deploy
     assert "404)" in deploy
     assert deploy.index("Disable Render auto-deploy") < deploy.index("Remove legacy Render CORS regex variables")
