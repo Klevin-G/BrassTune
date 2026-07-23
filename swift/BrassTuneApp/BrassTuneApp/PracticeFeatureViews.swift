@@ -265,8 +265,14 @@ struct CustomExerciseBuilderView: View {
                     errorMessage = error.localizedDescription
                 }
             } label: {
-                Label(exerciseToEdit == nil ? "Save exercise" : "Save changes", systemImage: "checkmark")
-                    .frame(maxWidth: .infinity)
+                Label {
+                    Text(verbatim: NativeLocalization.string(
+                        exerciseToEdit == nil ? "Save exercise" : "Save changes"
+                    ))
+                } icon: {
+                    Image(systemName: "checkmark")
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
             .accessibilityIdentifier("exerciseBuilder.save")
@@ -277,19 +283,33 @@ struct CustomExerciseBuilderView: View {
                     ForEach(model.practiceFeatures.customExercises) { saved in
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(saved.title).font(.headline)
-                                Text(saved.writtenNotes.joined(separator: " · "))
+                                Text(verbatim: saved.title).font(.headline)
+                                Text(verbatim: saved.writtenNotes.joined(separator: " · "))
                                     .font(.caption)
                                     .foregroundStyle(BTTheme.muted)
                                     .lineLimit(1)
                             }
                             Spacer()
-                            NavigationLink("Edit") { CustomExerciseBuilderView(exerciseToEdit: saved) }
-                                .buttonStyle(.bordered)
-                            Button("Delete", role: .destructive) { model.deleteCustomExercise(id: saved.id) }
-                                .buttonStyle(.bordered)
+                            NavigationLink {
+                                CustomExerciseBuilderView(exerciseToEdit: saved)
+                            } label: {
+                                Text("Edit")
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel(NativeLocalization.format("Edit %@", saved.title))
+                            .accessibilityIdentifier("exerciseManager.edit.\(saved.title)")
+                            Button(role: .destructive) {
+                                model.deleteCustomExercise(id: saved.id)
+                            } label: {
+                                Text("Delete")
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel(NativeLocalization.format("Delete %@", saved.title))
+                            .accessibilityIdentifier("exerciseManager.delete.\(saved.title)")
                         }
-                        .accessibilityIdentifier("exerciseManager.\(saved.id.uuidString)")
+                        .accessibilityElement(children: .contain)
                     }
                 }
             }
@@ -446,14 +466,33 @@ struct MetronomePresetsCard: View {
                         .font(.subheadline)
                         .foregroundStyle(BTTheme.muted)
                     HStack {
-                        Button("Apply") { model.applyMetronomePreset(id: preset.id) }
-                            .buttonStyle(.bordered)
-                        Button("Rename") {
-                            presetToRename = preset
+                        Button {
+                            model.applyMetronomePreset(id: preset.id)
+                        } label: {
+                            Text("Apply")
+                                .frame(minWidth: 44, minHeight: 44)
                         }
                         .buttonStyle(.bordered)
-                        Button("Delete", role: .destructive) { model.deleteMetronomePreset(id: preset.id) }
-                            .buttonStyle(.bordered)
+                        .accessibilityLabel(NativeLocalization.format("Apply %@", preset.name))
+                        .accessibilityIdentifier("metronome.preset.apply.\(preset.name)")
+                        Button {
+                            presetToRename = preset
+                        } label: {
+                            Text("Rename")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel(NativeLocalization.format("Rename %@", preset.name))
+                        .accessibilityIdentifier("metronome.preset.rename.\(preset.name)")
+                        Button(role: .destructive) {
+                            model.deleteMetronomePreset(id: preset.id)
+                        } label: {
+                            Text("Delete")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel(NativeLocalization.format("Delete %@", preset.name))
+                        .accessibilityIdentifier("metronome.preset.delete.\(preset.name)")
                     }
                 }
                 .padding(.vertical, BTSpacing.xs)

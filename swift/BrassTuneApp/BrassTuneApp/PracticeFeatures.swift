@@ -476,7 +476,18 @@ enum PracticePackBlockKind: String, Codable, CaseIterable {
     case metronome
     case drone
 
-    var title: String { NativeLocalization.string(rawValue.capitalized) }
+    var title: String {
+        switch self {
+        case .instruction:
+            return NativeLocalization.string("Instruction")
+        case .playAlong:
+            return NativeLocalization.string("Play-Along")
+        case .metronome:
+            return NativeLocalization.string("Metronome")
+        case .drone:
+            return NativeLocalization.string("Drone")
+        }
+    }
 }
 
 enum PracticePackValidationError: LocalizedError, Equatable {
@@ -490,7 +501,11 @@ enum PracticePackValidationError: LocalizedError, Equatable {
         case .invalidBlockCount: return "A practice pack needs between 1 and 12 blocks."
         case .emptyTitle: return "Every practice block needs a title."
         case .invalidDuration: return "Every practice block needs a positive duration."
-        case .missingExecutableContent(let kind): return "The \(kind.rawValue) block is missing its practice content."
+        case .missingExecutableContent(let kind):
+            return NativeLocalization.format(
+                "The %@ block is missing its practice content.",
+                kind.title
+            )
         }
     }
 }

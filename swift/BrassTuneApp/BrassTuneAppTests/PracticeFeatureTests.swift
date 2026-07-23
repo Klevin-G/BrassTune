@@ -50,6 +50,23 @@ final class PracticeFeatureTests: XCTestCase {
         XCTAssertEqual(try SavedPlayAlongExercise(title: longTitle, writtenNotes: ["C"]).title.count, 60)
     }
 
+    func testPracticePackMissingContentErrorLocalizesTheBlockKind() {
+        let originalLanguage = NativeLocalization.language
+        defer { NativeLocalization.language = originalLanguage }
+
+        NativeLocalization.language = .english
+        XCTAssertEqual(
+            PracticePackValidationError.missingExecutableContent(.drone).errorDescription,
+            "The Drone block is missing its practice content."
+        )
+
+        NativeLocalization.language = .spanish
+        XCTAssertEqual(
+            PracticePackValidationError.missingExecutableContent(.drone).errorDescription,
+            "Al bloque Nota pedal le falta su contenido de práctica."
+        )
+    }
+
     func testFeatureStateDecodesWhenEveryNewFieldIsAbsent() throws {
         let state = try JSONDecoder().decode(PracticeFeatureState.self, from: Data("{}".utf8))
         XCTAssertEqual(state, PracticeFeatureState())

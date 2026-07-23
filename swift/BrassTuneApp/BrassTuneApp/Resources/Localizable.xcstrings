@@ -36350,6 +36350,159 @@
         }
       }
     },
+    "Apply %@" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "تطبيق %@" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "%@ anwenden" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Apply %@" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Aplicar %@" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Appliquer %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@を適用" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "%@ 적용" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Aplicar %@" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Применить %@" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Áp dụng %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用 %@" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "套用 %@" } }
+      }
+    },
+    "Delete %@" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "حذف %@" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "%@ löschen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete %@" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Eliminar %@" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Supprimer %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@を削除" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "%@ 삭제" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Excluir %@" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Удалить %@" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Xóa %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除 %@" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "刪除 %@" } }
+      }
+    },
+    "Drone" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "النغمة المستمرة" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Halteton" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Drone" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Nota pedal" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Bourdon" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "持続音" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "지속음" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Nota sustentada" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Бурдон" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Âm ngân" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "持续音" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "持續音" } }
+      }
+    },
+    "Edit" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "تعديل" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Bearbeiten" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Editar" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Modifier" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "編集" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "편집" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Editar" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Изменить" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Chỉnh sửa" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "編輯" } }
+      }
+    },
+    "Edit %@" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "تعديل %@" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "%@ bearbeiten" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit %@" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Editar %@" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Modifier %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@を編集" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "%@ 편집" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Editar %@" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Изменить %@" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Chỉnh sửa %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "编辑 %@" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "編輯 %@" } }
+      }
+    },
+    "Instruction" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "تعليمات" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Anleitung" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Instruction" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Instrucciones" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Consigne" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "説明" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "안내" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Instruções" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Инструкция" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Hướng dẫn" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "说明" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "說明" } }
+      }
+    },
+    "Rename %@" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "إعادة تسمية %@" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "%@ umbenennen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Rename %@" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Cambiar el nombre de %@" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Renommer %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@の名前を変更" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "%@ 이름 바꾸기" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Renomear %@" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Переименовать %@" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Đổi tên %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重命名 %@" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "重新命名 %@" } }
+      }
+    },
+    "The %@ block is missing its practice content." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "تفتقد كتلة %@ محتوى التدريب الخاص بها." } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Im Block „%@“ fehlen die Übungsinhalte." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The %@ block is missing its practice content." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Al bloque %@ le falta su contenido de práctica." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Le bloc %@ ne contient pas son contenu d’entraînement." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ブロックに練習内容がありません。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "%@ 블록에 연습 내용이 없습니다." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "O bloco %@ não tem o conteúdo de prática." } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "В блоке «%@» отсутствует содержимое упражнения." } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Khối %@ đang thiếu nội dung luyện tập." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 模块缺少练习内容。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "%@ 區塊缺少練習內容。" } }
+      }
+    },
+    "Save changes" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "حفظ التغييرات" } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Änderungen speichern" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save changes" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Guardar cambios" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Enregistrer les modifications" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "変更を保存" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "변경 사항 저장" } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Salvar alterações" } },
+        "ru" : { "stringUnit" : { "state" : "translated", "value" : "Сохранить изменения" } },
+        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Lưu thay đổi" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存更改" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "儲存變更" } }
+      }
+    },
     "The account service couldn't refresh your sign-in right now. Your saved session will be retried later." : {
       "extractionState" : "stale",
       "localizations" : {

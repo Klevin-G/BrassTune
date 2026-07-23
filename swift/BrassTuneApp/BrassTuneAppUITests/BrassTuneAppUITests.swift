@@ -358,6 +358,62 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
+    func testNamedPracticeControlsExposeContextAndMinimumTargets() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
+        app.launch()
+
+        openTab("Play-Along", in: app)
+        let quickStart = app.buttons["Quick start"]
+        XCTAssertTrue(quickStart.waitForExistence(timeout: 8))
+        quickStart.tap()
+
+        let builder = app.descendants(matching: .any)["practice.quickStart.builder"]
+        tapWhenSafelyVisible(builder, in: app)
+        let exerciseName = app.descendants(matching: .any)["exerciseBuilder.title"]
+        XCTAssertTrue(exerciseName.waitForExistence(timeout: 5))
+        exerciseName.tap()
+        exerciseName.typeText("Marching exercise")
+        app.keyboards.buttons["Return"].tap()
+        tapWhenSafelyVisible(app.descendants(matching: .any)["exerciseBuilder.save"], in: app)
+
+        tapWhenSafelyVisible(app.descendants(matching: .any)["practice.quickStart.builder"], in: app)
+        let exerciseControls = [
+            ("exerciseManager.edit.Marching exercise", "Edit Marching exercise"),
+            ("exerciseManager.delete.Marching exercise", "Delete Marching exercise"),
+        ]
+        for (identifier, label) in exerciseControls {
+            let control = app.descendants(matching: .any)[identifier]
+            bringSafelyIntoView(control, in: app)
+            XCTAssertEqual(control.label, label)
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+
+        openTab("Settings", in: app)
+        tapWhenSafelyVisible(app.descendants(matching: .any)["settings.metronomeLink"], in: app)
+        let presetName = app.descendants(matching: .any)["metronome.presetName"]
+        XCTAssertTrue(presetName.waitForExistence(timeout: 5))
+        presetName.tap()
+        presetName.typeText("Marching tempo")
+        app.keyboards.buttons["Return"].tap()
+        app.descendants(matching: .any)["metronome.savePreset"].tap()
+
+        let presetControls = [
+            ("metronome.preset.apply.Marching tempo", "Apply Marching tempo"),
+            ("metronome.preset.rename.Marching tempo", "Rename Marching tempo"),
+            ("metronome.preset.delete.Marching tempo", "Delete Marching tempo"),
+        ]
+        for (identifier, label) in presetControls {
+            let control = app.descendants(matching: .any)[identifier]
+            bringSafelyIntoView(control, in: app)
+            XCTAssertEqual(control.label, label)
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+    }
+
+    @MainActor
     func testSmallPhoneMaximumDynamicTypeKeepsPrimaryTunerAndRecoveryActionsAboveTabs() throws {
         let app = XCUIApplication()
         app.launchArguments = [
