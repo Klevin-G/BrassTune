@@ -115,6 +115,60 @@ test('Play-Along serializes repeated Start activation while permission is pendin
   await expect(page.getByRole('button', { name: /Stop/ })).toBeVisible();
 });
 
+test('Play-Along serializes Hear it and disables speaker output while grading', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { oscillators: [] as Array<{ stopCalls: number; disconnected: number }> };
+    class FakeAudioContext {
+      state: AudioContextState = 'running';
+      currentTime = 0;
+      destination = {};
+      resume() { return Promise.resolve(); }
+      close() { this.state = 'closed'; return Promise.resolve(); }
+      createOscillator() {
+        const record = { stopCalls: 0, disconnected: 0 };
+        state.oscillators.push(record);
+        return {
+          type: 'sine',
+          frequency: { value: 0 },
+          onended: null as (() => void) | null,
+          connect() { return this; },
+          disconnect: () => { record.disconnected += 1; },
+          start: () => undefined,
+          stop: () => { record.stopCalls += 1; },
+        };
+      }
+      createGain() {
+        return {
+          gain: {
+            setValueAtTime: () => undefined,
+            exponentialRampToValueAtTime: () => undefined,
+          },
+          connect() { return this; },
+        };
+      }
+    }
+    Object.defineProperty(window, 'AudioContext', { configurable: true, value: FakeAudioContext });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => new Promise(() => undefined) },
+    });
+    (window as unknown as { __referenceToneTest: unknown }).__referenceToneTest = state;
+  });
+
+  await page.goto('/practice/play-along');
+  const hear = page.getByRole('button', { name: 'Hear it', exact: true }).first();
+  await hear.evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __referenceToneTest: { oscillators: unknown[] } }).__referenceToneTest.oscillators.length)).toBe(1);
+  await expect(hear).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Hear it', exact: true })).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __referenceToneTest: { oscillators: Array<{ stopCalls: number }> } }).__referenceToneTest.oscillators[0].stopCalls)).toBeGreaterThanOrEqual(2);
+});
+
 test('Stop cancels scheduled count-in clicks and unmount closes the metronome context', async ({ page }) => {
   await page.addInitScript(() => {
     const state = { closeCalls: 0, oscillators: [] as Array<{ stops: number[] }> };

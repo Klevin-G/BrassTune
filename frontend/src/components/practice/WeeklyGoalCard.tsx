@@ -1,14 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePracticeLibrary } from '../../state/PracticeLibraryContext';
 import { SectionCard } from '../ui/AppPrimitives';
 import { useI18n } from '../../i18n/LocaleContext';
 
 export function WeeklyGoalCard() {
-  const { library, setWeeklyGoal } = usePracticeLibrary();
+  const { ownerId, library, setWeeklyGoal } = usePracticeLibrary();
   const { t, formatDate, formatNumber } = useI18n();
   const goal = library.weeklyGoal;
   const [minutesDraft, setMinutesDraft] = useState(goal.targetMinutes);
   const [sessionsDraft, setSessionsDraft] = useState(goal.targetSessions);
+  useEffect(() => {
+    // The practice library hydrates after auth resolves. Keep these local form
+    // drafts aligned with the hydrated owner without persisting anything until
+    // the user explicitly submits the form.
+    setMinutesDraft(goal.targetMinutes);
+    setSessionsDraft(goal.targetSessions);
+  }, [goal.targetMinutes, goal.targetSessions, ownerId]);
   const percent = Math.min(100, Math.round((goal.completedMinutes / goal.targetMinutes) * 100));
   return (
     <SectionCard title={t('weekly.title')} eyebrow={t('weekly.weekOf', { date: formatDate(new Date(`${goal.week}T00:00:00`), { dateStyle: 'medium' }) })}>

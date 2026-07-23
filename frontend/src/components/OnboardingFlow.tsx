@@ -1,8 +1,8 @@
 import { ArrowRight, Clock3, FolderOpen, Gauge, Music2, Settings, Sparkles, Target, TrendingUp, Users, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { instrumentDisplayName } from '../domain/instrumentNames';
 import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
 import { InstrumentSelector } from './InstrumentSelector';
@@ -209,7 +209,7 @@ export function OnboardingFlow() {
           <div className="ob-step">
             <p className="ob-lead">{t('onboarding.settingsBody')}</p>
             <div className="ob-first-action"><span className="ob-rec-dot" aria-hidden="true" /><p>{t('onboarding.ready')}</p></div>
-            <p className="ob-setup-note">{t('onboarding.instrumentSummary', { instrument: instrumentDisplayName(instrumentId) })}</p>
+            <p className="ob-setup-note">{t('onboarding.instrumentSummary', { instrument: t(`instrument.${instrumentId}` as MessageId) })}</p>
           </div>
         )}
 

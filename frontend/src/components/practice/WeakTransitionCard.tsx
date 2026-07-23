@@ -3,21 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import { generateWeakTransitionDrill, type TransitionEvent } from '../../domain/transitionDrills';
 import { usePracticeLibrary } from '../../state/PracticeLibraryContext';
 import { SectionCard } from '../ui/AppPrimitives';
+import { useI18n } from '../../i18n/LocaleContext';
 
 export function WeakTransitionCard({ events }: { events: TransitionEvent[] }) {
+  const { t, formatNumber } = useI18n();
   const navigate = useNavigate();
   const { saveExercise } = usePracticeLibrary();
   const drill = generateWeakTransitionDrill(events);
   return (
-    <SectionCard title="Transition drill" eyebrow="Built only when there is enough evidence">
-      {!drill.ready ? <p className="muted-copy">{drill.reason}</p> : (
+    <SectionCard title={t('transition.title')} eyebrow={t('transition.eyebrow')}>
+      {!drill.ready ? <p className="muted-copy">{t('transition.noEvidence')}</p> : (
         <div className="practice-feature-stack">
-          <p><strong>{drill.from} → {drill.to}</strong> averaged {drill.averageError}¢ off across {drill.evidenceCount} examples.</p>
-          <p className="muted-copy">Suggested pattern: {drill.notes.join(' · ')}</p>
+          <p>{t('transition.body', { from: drill.from, to: drill.to, cents: formatNumber(drill.averageError), count: formatNumber(drill.evidenceCount) })}</p>
+          <p className="muted-copy">{t('transition.pattern', { notes: drill.notes.join(' · ') })}</p>
           <button className="ghost-button" type="button" onClick={() => {
-            const exercise = saveExercise({ name: `${drill.from} to ${drill.to} transition`, notes: drill.notes, source: 'generated' });
+            const exercise = saveExercise({ name: t('transition.name', { from: drill.from, to: drill.to }), notes: drill.notes, source: 'generated' });
             navigate(`/practice/play-along?exercise=${encodeURIComponent(exercise.id)}`);
-          }}><Target size={17} />Save and practice this drill</button>
+          }}><Target size={17} />{t('transition.save')}</button>
         </div>
       )}
     </SectionCard>

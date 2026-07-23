@@ -1259,10 +1259,17 @@ meter {
 /* Musical pitch increases left-to-right even when surrounding copy is RTL. */
 .tuning-meter-track,
 .tuning-meter-labels,
-.note-display,
-.playalong-ring,
-.pa-live-cents {
+.playalong-ring {
   direction: ltr;
+}
+
+.note-display-note,
+.playalong-target-note strong,
+.playalong-detected strong,
+.playalong-result-note,
+.playalong-note {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 .heatmap {

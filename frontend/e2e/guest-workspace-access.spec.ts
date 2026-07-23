@@ -193,3 +193,14 @@ test('configured auth preserves the current route and always offers a guest esca
   await expect(page).toHaveURL(/\/practice\/play-along\?exercise=cmaj$/);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBe('true');
 });
+
+test('auth guest escape rejects an external next target in the browser', async ({ page }) => {
+  await seedGuestWorkspace(page);
+  await installSignedOutFixture(page);
+
+  await page.goto('/auth/sign-in?next=https%3A%2F%2Fevil.example%2Fsteal');
+  const guestEscape = page.getByRole('link', { name: 'Keep practicing as a guest' });
+  await expect(guestEscape).toHaveAttribute('href', '/home');
+  await guestEscape.click();
+  await expect(page).toHaveURL(/\/home$/);
+});

@@ -1,4 +1,4 @@
-import { expect, test } from 'playwright/test';
+import { expect, test, type Route } from 'playwright/test';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -40,6 +40,70 @@ test('mobile practice home exposes resumable warm-up, drone, goals, packs, and v
   const dimensions = await page.evaluate(() => ({ clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
   expect(consoleErrors).toEqual([]);
+});
+
+test('weekly goal drafts resync after guest hydration and an account owner switch', async ({ page }) => {
+  await page.addInitScript(() => {
+    const library = (targetMinutes: number, targetSessions: number) => JSON.stringify({
+      version: 1,
+      customExercises: [],
+      metronomePresets: [],
+      favorites: [],
+      recents: [],
+      reflections: [],
+      warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-22T12:00:00.000Z' },
+      weeklyGoal: { week: '2026-07-20', targetMinutes, completedMinutes: 0, targetSessions, completedSessions: 0 },
+    });
+    localStorage.setItem('brasstune.practiceLibrary.v1.account%3A99', library(77, 4));
+    localStorage.setItem('brasstune.practiceLibrary.v1.account%3A100', library(123, 6));
+  });
+
+  const authModule = `
+let session = { access_token: 'owner-99', user: { id: 'auth-99' } };
+const listeners = [];
+window.__switchPracticeOwner = () => {
+  session = { access_token: 'owner-100', user: { id: 'auth-100' } };
+  listeners.forEach((listener) => listener('SIGNED_IN', session));
+};
+export const supabaseConfigured = true;
+export const authProviders = { google: false, apple: false };
+export const supabase = { auth: {
+  getSession: async () => ({ data: { session } }),
+  onAuthStateChange: (listener) => { listeners.push(listener); return { data: { subscription: { unsubscribe() {} } } }; },
+  signOut: async () => ({ error: null }),
+} };
+`;
+  await page.route('**/src/lib/supabase.ts*', (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: authModule }));
+  await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/users/current') {
+      const secondOwner = route.request().headers().authorization?.includes('owner-100');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: secondOwner ? 100 : 99,
+          supabase_user_id: secondOwner ? 'auth-100' : 'auth-99',
+          username: secondOwner ? 'second-owner' : 'first-owner',
+          display_name: secondOwner ? 'Second Owner' : 'First Owner',
+          email: secondOwner ? 'second@example.test' : 'first@example.test',
+          role: 'student',
+          primary_instrument_id: 'trumpet',
+          onboarding_completed_at: '2026-07-22T12:00:00.000Z',
+        }),
+      });
+    }
+    if (path === '/api/instruments') return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    return route.fulfill({ status: 404, contentType: 'application/json', body: '{"detail":"Not found"}' });
+  });
+
+  await page.goto('/practice');
+  await expect(page.getByLabel('Goal in minutes')).toHaveValue('77');
+  await expect(page.getByLabel('Goal in sessions')).toHaveValue('4');
+  await page.evaluate(() => (window as unknown as { __switchPracticeOwner: () => void }).__switchPracticeOwner());
+  await expect(page.getByLabel('Goal in minutes')).toHaveValue('123');
+  await expect(page.getByLabel('Goal in sessions')).toHaveValue('6');
+  expect(await page.evaluate(() => localStorage.getItem('brasstune.practiceLibrary.v1.account%3A100'))).toContain('"targetMinutes":123');
 });
 
 test('custom play-along exercises validate, persist, and can be favorited', async ({ page }) => {
@@ -96,6 +160,30 @@ test('locale selection updates language, direction, manifest, Intl output, and p
   await page.locator('.practice-builder button').filter({ has: page.locator('svg') }).first().click();
   await expect(page.getByText(/A-G Warmup/).first()).toBeVisible();
   expect(await page.getByText(/A-G Warmup/).first().textContent()).toContain('A-G Warmup');
+});
+
+test('a failed locale chunk atomically falls back to English and can retry', async ({ page }) => {
+  let failArabicChunk = true;
+  await page.route('**/src/i18n/catalogs/locale-ar.ts*', (route) => {
+    if (failArabicChunk) return route.abort('failed');
+    return route.continue();
+  });
+
+  await page.goto('/settings');
+  await page.getByLabel('App language').selectOption('ar');
+  await expect(page.getByRole('alert')).toContainText('switched back to English');
+  await expect(page.getByLabel('App language')).toHaveValue('en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.locale'))).toBe('en');
+
+  failArabicChunk = false;
+  await page.getByRole('button', { name: 'Retry language download' }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.getByLabel('لغة التطبيق')).toHaveValue('ar');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.locale'))).toBe('ar');
 });
 
 test('saved reflections are fully listed, editable, deletable, and persist user text verbatim', async ({ page }) => {

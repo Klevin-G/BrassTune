@@ -77,6 +77,7 @@ function PasswordField({
   hint?: string;
   placeholder?: string;
 }) {
+  const { t } = useI18n();
   const [show, setShow] = useState(false);
   return (
     <label>
@@ -86,6 +87,7 @@ function PasswordField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           type={show ? 'text' : 'password'}
+          dir="ltr"
           name={name}
           autoComplete={autoComplete}
           required
@@ -97,8 +99,8 @@ function PasswordField({
           className="au-pass-toggle"
           onClick={() => setShow((open) => !open)}
           aria-pressed={show}
-          aria-label={show ? 'Hide password' : 'Show password'}
-          title={show ? 'Hide password' : 'Show password'}
+          aria-label={t(show ? 'auth.hidePassword' : 'auth.showPassword')}
+          title={t(show ? 'auth.hidePassword' : 'auth.showPassword')}
         >
           {show ? <EyeOff size={18} /> : <Eye size={18} />}
         </button>
@@ -108,9 +110,22 @@ function PasswordField({
   );
 }
 
+function localizedAuthError(error: unknown, t: ReturnType<typeof useI18n>['t']): string {
+  const message = error instanceof Error ? error.message : '';
+  const lower = message.toLowerCase();
+  if (lower.includes('email or password') || lower.includes('credentials')) return t('auth.errorCredentials');
+  if (lower.includes('already exists') || lower.includes('already registered')) return t('auth.errorExists');
+  if (lower.includes('stronger password') || lower.includes('weak password')) return t('auth.errorWeakPassword');
+  if (lower.includes('confirm your email')) return t('auth.errorConfirmEmail');
+  if (lower.includes('expired')) return t('auth.errorExpired');
+  if (lower.includes('cancel')) return t('auth.errorCancelled');
+  if (lower.includes('network') || lower.includes('reach the server')) return t('auth.errorNetwork');
+  return t('auth.failure');
+}
+
 export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'callback' }) {
   const auth = useAuth();
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const storedRecoveryNext = mode === 'reset' && auth.hasAuthSession
@@ -168,7 +183,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   useEffect(() => {
     if (!pendingSignup) return;
     if (auth.hasAuthSession) {
-      setMessage({ type: 'success', text: "You're all set — taking you to practice…" });
+      setMessage({ type: 'success', text: t('auth.signupReady') });
       const timer = setTimeout(() => {
         clearPendingAuthReturn();
         navigate(next, { replace: true });
@@ -177,9 +192,9 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     }
     setMessage({
       type: 'success',
-      text: `Check your email — we sent a confirmation link to ${email}. Click it, then come back and sign in.`,
+      text: t('auth.confirmationSent', { email }),
     });
-  }, [pendingSignup, auth.hasAuthSession, navigate, next, email]);
+  }, [pendingSignup, auth.hasAuthSession, navigate, next, email, t]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -196,20 +211,20 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
         setPendingSignup(true);
       } else if (isPasswordRecovery) {
         if (newPassword.length < PASSWORD_MIN) {
-          setMessage({ type: 'error', text: `Enter a new password with at least ${PASSWORD_MIN} characters.` });
+          setMessage({ type: 'error', text: t('auth.passwordMinError', { count: PASSWORD_MIN }) });
           return;
         }
         await auth.updatePassword(newPassword);
-        setMessage({ type: 'success', text: "Password updated. You're signed in and ready to continue." });
+        setMessage({ type: 'success', text: t('auth.passwordUpdated') });
         setPasswordUpdated(true);
         setNewPassword('');
       } else {
         rememberPendingAuthReturn(next);
         await auth.requestPasswordReset(email);
-        setMessage({ type: 'success', text: 'Check your email — we sent you a link to set a new password.' });
+        setMessage({ type: 'success', text: t('auth.resetSent') });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Authentication failed.' });
+      setMessage({ type: 'error', text: localizedAuthError(error, t) });
     } finally {
       setBusy(false);
     }
@@ -236,7 +251,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 <MessageBanner
                   message={{
                     type: 'error',
-                    text: auth.profileError ?? t('auth.callbackFailed'),
+                    text: locale === 'en' ? auth.profileError ?? t('auth.callbackFailed') : t('auth.callbackFailed'),
                   }}
                 />
                 <div className="au-stack">
@@ -333,11 +348,12 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                         value={email}
                         onChange={(event) => setEmail(event.target.value)}
                         type="email"
+                        dir="ltr"
                         name="email"
                         autoComplete="email"
                         inputMode="email"
                         required
-                        placeholder="you@example.com"
+                        placeholder={t('auth.emailPlaceholder')}
                       />
                     </label>
                   )}
@@ -349,7 +365,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                       onChange={setPassword}
                       name="password"
                       autoComplete="current-password"
-                      placeholder="Your password"
+                      placeholder={t('auth.passwordPlaceholder')}
                     />
                   )}
 
@@ -362,32 +378,34 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                         name="new-password"
                         autoComplete="new-password"
                         minLength={PASSWORD_MIN}
-                        hint={`At least ${PASSWORD_MIN} characters.`}
+                        hint={t('auth.passwordMinHint', { count: PASSWORD_MIN })}
                       />
                       <label>
                         {t('auth.username')}
                         <input
                           value={username}
                           onChange={(event) => setUsername(event.target.value.toLowerCase())}
+                          dir="ltr"
                           name="username"
                           autoComplete="username"
                           required
                           minLength={3}
-                          placeholder="avery"
+                          placeholder={t('auth.usernamePlaceholder')}
                         />
-                        <span className="au-field-hint">Your unique handle. Lowercase letters and numbers, e.g. avery.</span>
+                        <span className="au-field-hint">{t('auth.usernameHint')}</span>
                       </label>
                       <label>
                         {t('auth.displayName')}
                         <input
                           value={displayName}
                           onChange={(event) => setDisplayName(event.target.value)}
+                          dir="auto"
                           name="name"
                           autoComplete="name"
                           required
-                          placeholder="Avery Brass"
+                          placeholder={t('auth.displayNamePlaceholder')}
                         />
-                        <span className="au-field-hint">The name your band director sees.</span>
+                        <span className="au-field-hint">{t('auth.displayNameHint')}</span>
                       </label>
                       <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
                     </>
@@ -401,7 +419,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                       name="new-password"
                       autoComplete="new-password"
                       minLength={PASSWORD_MIN}
-                      hint={`At least ${PASSWORD_MIN} characters.`}
+                      hint={t('auth.passwordMinHint', { count: PASSWORD_MIN })}
                     />
                   )}
 

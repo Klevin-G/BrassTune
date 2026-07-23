@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { IntlProvider, useIntl, type PrimitiveType } from 'react-intl';
 import {
   bootstrapMessagesForLocale,
@@ -95,33 +95,39 @@ function manifestPath(locale: AppLocale): string {
 }
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<AppLocale>(initialLocale);
-  const immediatelyAvailable = locale === 'en' || locale === 'en-XA';
+  const [requestedLocale, setRequestedLocale] = useState<AppLocale>(initialLocale);
+  const immediatelyAvailable = requestedLocale === 'en' || requestedLocale === 'en-XA';
   const [catalog, setCatalog] = useState<LoadedCatalog>(() => ({
-    locale: immediatelyAvailable ? locale : 'en',
-    messages: bootstrapMessagesForLocale(immediatelyAvailable ? locale : 'en'),
+    locale: immediatelyAvailable ? requestedLocale : 'en',
+    messages: bootstrapMessagesForLocale(immediatelyAvailable ? requestedLocale : 'en'),
   }));
   const [loading, setLoading] = useState(!immediatelyAvailable);
+  const [failedLocale, setFailedLocale] = useState<AppLocale | null>(null);
   const dir: LocaleState['dir'] = catalog.locale === 'ar' ? 'rtl' : 'ltr';
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    loadMessagesForLocale(locale)
+    loadMessagesForLocale(requestedLocale)
       .then((messages) => {
         if (!active) return;
-        setCatalog({ locale, messages });
+        setCatalog({ locale: requestedLocale, messages });
         setLoading(false);
       })
       .catch(() => {
         if (!active) return;
+        // Commit the active catalog, selector, document metadata, direction,
+        // and persisted choice to one known-good locale. Never leave a broken
+        // selection pointing at an English catalog.
         setCatalog({ locale: 'en', messages: englishMessages });
+        setRequestedLocale('en');
+        setFailedLocale(requestedLocale);
         setLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [locale]);
+  }, [requestedLocale]);
 
   useEffect(() => {
     document.documentElement.lang = catalog.locale;
@@ -129,22 +135,45 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     document.title = catalog.messages['meta.title'];
     document.querySelector('meta[name="description"]')?.setAttribute('content', catalog.messages['meta.description']);
     document.querySelector<HTMLLinkElement>('link[rel="manifest"]')?.setAttribute('href', manifestPath(catalog.locale));
+    try { window.localStorage.setItem(LOCALE_STORAGE_KEY, catalog.locale); } catch { /* device storage unavailable */ }
   }, [catalog, dir]);
 
-  useEffect(() => {
-    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
-  }, [locale]);
-
   const setLocale = (value: AppLocale) => {
-    if (localeValues.has(value)) setLocaleState(value);
+    if (!localeValues.has(value)) return;
+    setFailedLocale(null);
+    setRequestedLocale(value);
   };
-  const state = useMemo(() => ({ locale, dir, setLocale }), [dir, locale]);
+  const retryFailedLocale = useCallback(() => {
+    if (!failedLocale) return;
+    const retryLocale = failedLocale;
+    setFailedLocale(null);
+    try {
+      // Browsers cache failed module imports for the lifetime of the document.
+      // Persist the requested locale and reload so the retry gets a fresh
+      // module registry instead of immediately replaying the cached rejection.
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, retryLocale);
+      window.location.reload();
+    } catch {
+      setRequestedLocale(retryLocale);
+    }
+  }, [failedLocale]);
+  const state = useMemo(() => ({ locale: catalog.locale, dir, setLocale }), [catalog.locale, dir]);
   const intlLocale = catalog.locale === 'en-XA' ? 'en' : catalog.locale;
 
   return (
     <IntlProvider locale={intlLocale} defaultLocale="en" messages={catalog.messages}>
       <LocaleStateContext.Provider value={state}>
-        {loading ? <div className="app-loading" role="status">{englishMessages['loading.locale']}</div> : children}
+        {loading ? <div className="app-loading" role="status">{englishMessages['loading.locale']}</div> : (
+          <>
+            {failedLocale && (
+              <div className="locale-load-error" role="alert">
+                <span>{englishMessages['locale.loadError']}</span>
+                <button type="button" className="ghost-button" onClick={retryFailedLocale}>{englishMessages['locale.retry']}</button>
+              </div>
+            )}
+            {children}
+          </>
+        )}
       </LocaleStateContext.Provider>
     </IntlProvider>
   );
@@ -153,10 +182,14 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 export function useI18n() {
   const state = useContext(LocaleStateContext);
   const intl = useIntl();
+  const t = useCallback(
+    (id: MessageId, values?: Record<string, PrimitiveType>) => intl.formatMessage({ id, defaultMessage: englishMessages[id] }, values),
+    [intl],
+  );
   if (!state) throw new Error('useI18n must be used within LocaleProvider');
   return {
     ...state,
-    t: (id: MessageId, values?: Record<string, PrimitiveType>) => intl.formatMessage({ id, defaultMessage: englishMessages[id] }, values),
+    t,
     formatDate: (value: Date | number | string, options?: Intl.DateTimeFormatOptions) => intl.formatDate(value, options),
     formatNumber: (value: number, options?: Intl.NumberFormatOptions) => intl.formatNumber(value, options),
     formatList: (values: string[], options?: { type?: 'conjunction' | 'disjunction' | 'unit'; style?: 'long' | 'short' | 'narrow' }) => intl.formatList(values, options) as string,

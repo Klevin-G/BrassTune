@@ -21,15 +21,17 @@ import { useAuth } from '../state/AuthContext';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import './PracticePage.css';
 import { gatewayPathWithReturn } from '../domain/authNavigation';
+import { useI18n } from '../i18n/LocaleContext';
 
 // How many consecutive centered frames count as a full "held in tune" reward.
 const HOLD_TARGET_FRAMES = 16;
 
 export function PracticePage() {
+  const { locale, t, formatNumber } = useI18n();
   const { instrumentId, referencePitch, demoMode, setDemoMode } = useAppSettings();
   const auth = useAuth();
   const location = useLocation();
-  const { recordActivity, storageError } = usePracticeLibrary();
+  const { ownerId, recordActivity, storageError } = usePracticeLibrary();
   const [searchParams, setSearchParams] = useSearchParams();
   const practiceTool = searchParams.get('tool') === 'drone' ? 'drone' : 'tuner';
   const cloudSessionEnabled = auth.isSignedIn;
@@ -72,10 +74,10 @@ export function PracticePage() {
     if (summary && summary.id !== lastSavedIdRef.current) {
       lastSavedIdRef.current = summary.id;
       const minutes = Math.max(1, Math.round((summary.duration_seconds ?? 0) / 60));
-      recordPracticeActivity(minutes);
+      if (ownerId) recordPracticeActivity(ownerId, minutes);
       recordActivity(minutes);
     }
-  }, [recordActivity, recorder.lastSummary]);
+  }, [ownerId, recordActivity, recorder.lastSummary]);
 
   // Grow the in-tune reward the longer the player holds a centered pitch.
   useEffect(() => {
@@ -95,14 +97,14 @@ export function PracticePage() {
       const inputStream = demoMode ? null : stream.micActive ? stream.mediaStream : await stream.startMicrophone();
       openedMicrophone = !demoMode && !stream.micActive && Boolean(inputStream);
       if (!demoMode && !stream.micActive && !inputStream) {
-        recorder.setError('We need your microphone to record. Turn it on, or switch to Demo above.');
+        recorder.setError(t('practice.errorMicRecord'));
         return;
       }
       const session = await recorder.start(`Practice ${new Date().toLocaleDateString()}`);
       await audioRecorder.start(session.id, demoMode, inputStream);
     } catch (error) {
       if (openedMicrophone) stream.stopMicrophone();
-      recorder.setError(friendlyUserFacingError(error, 'Recording could not start. Guest practice still works on this device.'));
+      recorder.setError(locale === 'en' ? friendlyUserFacingError(error, t('practice.errorStart')) : t('practice.errorStart'));
     } finally {
       setTransitionBusy(false);
     }
@@ -120,7 +122,7 @@ export function PracticePage() {
           if (guestAudio) audioRecorder.markLocalSaved();
           return summary;
         } catch (saveError) {
-          audioRecorder.markLocalSaveFailed('Your take was recorded, but it could not be saved on this device.');
+          audioRecorder.markLocalSaveFailed(t('practice.errorLocalSave'));
           throw saveError;
         }
       }
@@ -135,8 +137,8 @@ export function PracticePage() {
           demoUploadFailed = true;
         }
         const summary = await recorder.stop();
-        if (flush.failed > 0) recorder.setError('Take saved, but the last few notes may not have synced. Record again if the summary looks short.');
-        if (demoUploadFailed) recorder.setError('Take saved, but the audio upload failed. Your results are still here.');
+        if (flush.failed > 0) recorder.setError(t('practice.errorFrameSync'));
+        if (demoUploadFailed) recorder.setError(t('practice.errorAudioUpload'));
         return summary;
       }
       let uploadFailed = false;
@@ -153,11 +155,11 @@ export function PracticePage() {
         frameSyncFailed = flush.failed > 0;
       }
       const summary = await recorder.stop();
-      if (frameSyncFailed) recorder.setError('Take saved, but the last few notes may not have synced. Record again if the summary looks short.');
-      if (uploadFailed) recorder.setError('Take saved, but the audio upload failed. Your results are still here.');
+      if (frameSyncFailed) recorder.setError(t('practice.errorFrameSync'));
+      if (uploadFailed) recorder.setError(t('practice.errorAudioUpload'));
       return summary;
     } catch (error) {
-      recorder.setError(friendlyUserFacingError(error, 'Your take could not be saved. Try again in a moment.'));
+      recorder.setError(locale === 'en' ? friendlyUserFacingError(error, t('practice.errorSave')) : t('practice.errorSave'));
       return null;
     } finally {
       setTransitionBusy(false);
@@ -181,24 +183,24 @@ export function PracticePage() {
     <ScreenContainer>
       <div className="tuner-page">
         <SegmentedControl
-          ariaLabel="Practice tool"
+          ariaLabel={t('practice.tool')}
           value={practiceTool}
           onChange={(value) => setSearchParams(value === 'drone' ? { tool: 'drone' } : {}, { replace: true })}
           options={[
-            { value: 'tuner', label: 'Tuner' },
-            { value: 'drone', label: 'Drone / intervals' },
+            { value: 'tuner', label: t('nav.tuner') },
+            { value: 'drone', label: t('practice.droneIntervals') },
           ]}
         />
         {practiceTool === 'tuner' ? (
           <>
         <div className="tuner-topline">
           <SegmentedControl
-            ariaLabel="Sound source"
+            ariaLabel={t('practice.soundSource')}
             value={demoMode ? 'demo' : 'mic'}
             onChange={(value) => setMode(value as 'mic' | 'demo')}
             options={[
-              { value: 'mic', label: 'Live mic' },
-              { value: 'demo', label: 'Demo' },
+              { value: 'mic', label: t('practice.liveMic') },
+              { value: 'demo', label: t('practice.demo') },
             ]}
           />
           <span className="tuner-ref">A = {referencePitch} Hz</span>
@@ -206,11 +208,11 @@ export function PracticePage() {
 
         {micDenied && (
           <div className="tuner-banner" role="status">
-            We can’t hear your microphone yet. Allow mic access in your browser, or switch to <button type="button" className="link-button" onClick={() => setMode('demo')}>Demo</button>.
+            {t('practice.micDeniedBefore')} <button type="button" className="link-button" onClick={() => setMode('demo')}>{t('practice.demo')}</button>{t('practice.micDeniedAfter')}
           </div>
         )}
 
-        <section className="tuner-stage" aria-label="Live tuner">
+        <section className="tuner-stage" aria-label={t('practice.liveTuner')}>
           <NoteDisplay frame={stream.currentFrame} />
           <TuningMeter frame={stream.currentFrame} holdFraction={holdFraction} />
           <SessionControls
@@ -230,39 +232,39 @@ export function PracticePage() {
           )}
         </section>
 
-        <div className="tuner-tools" aria-label="Practice tools">
+        <div className="tuner-tools" aria-label={t('practice.tools')}>
           <Link className="tuner-tool" to="/metronome">
             <Timer size={18} />
-            <span>Metronome</span>
+            <span>{t('practice.metronome')}</span>
           </Link>
           <Link className="tuner-tool" to="/practice/score">
             <FileText size={18} />
-            <span>Sheet music</span>
+            <span>{t('practice.sheetMusic')}</span>
           </Link>
         </div>
 
         {!cloudSessionEnabled && (
           <p className="tuner-signin-note">
-            <Link to={gatewayPathWithReturn(`${location.pathname}${location.search}${location.hash}`)} onClick={auth.exitGuest}>Sign in</Link> to save your practice history and join your class.
+            <Link to={gatewayPathWithReturn(`${location.pathname}${location.search}${location.hash}`)} onClick={auth.exitGuest}>{t('nav.signIn')}</Link> {t('practice.signInBenefit')}
           </p>
         )}
 
         {recorder.lastSummary && (
           <div className="tuner-saved">
             <div>
-              <strong>{Math.round(recorder.lastSummary.in_tune_percentage)}% in tune</strong>
-              <span>{recorder.lastSummary.notes_count} notes · saved</span>
+              <strong>{t('practice.percentInTune', { percent: formatNumber(Math.round(recorder.lastSummary.in_tune_percentage)) })}</strong>
+              <span>{t('practice.notesSaved', { count: recorder.lastSummary.notes_count })}</span>
             </div>
             {recorder.lastSummary.audio_available && <SessionAudioPlayer session={recorder.lastSummary} compact />}
             <Link to={`/sessions/${recorder.lastSummary.id}`} className="ghost-button">
-              See results
+              {t('practice.seeResults')}
             </Link>
           </div>
         )}
           </>
         ) : <DroneIntervalPanel />}
 
-        {storageError && <div className="alert" role="alert">{storageError}</div>}
+        {storageError && <div className="alert" role="alert">{t('error.storage')}</div>}
         <GuidedWarmupPanel />
         <PracticeShortcuts />
         <WeeklyGoalCard />

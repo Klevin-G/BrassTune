@@ -60,6 +60,48 @@ describe('web localization', () => {
     }
   });
 
+  it('contains no normal English fallback outside invariant names, tokens, and valid loanwords', async () => {
+    const invariantKeys = new Set([
+      'auth.emailPlaceholder', 'auth.usernamePlaceholder', 'auth.displayNamePlaceholder',
+      'common.start', 'common.pause', 'instrument.label', 'instrument.trombone',
+      'instrument.euphonium', 'instrument.tuba', 'tuning.noteVerdict',
+      'tuning.concertNote', 'practice.demo', 'practice.micDeniedAfter',
+      'sessionReview.secondsShort', 'settings.actionProgress', 'settings.admin',
+      'class.minutesShort', 'class.student', 'locale.pseudo', 'drone.interval.octave',
+      'playAlong.title', 'exercise.noteCount', 'playAlong.noteCount',
+    ]);
+    for (const locale of productionLocales.filter((value) => value !== 'en')) {
+      const messages = await loadMessagesForLocale(locale);
+      const identical = Object.keys(englishMessages).filter((key) => messages[key as keyof typeof messages] === englishMessages[key as keyof typeof englishMessages]);
+      expect(identical.filter((key) => !invariantKeys.has(key)), locale).toEqual([]);
+    }
+  });
+
+  it('uses musical rather than literal translations for slurs, pitch, drones, scores, and notes', async () => {
+    const expected = {
+      es: ['Ligaduras relajadas', 'Nota pedal e intervalos', 'Partituras'],
+      'zh-Hans': ['放松的连音练习', '持续音与音程', '乐谱'],
+      'zh-Hant': ['輕鬆的圓滑奏練習', '持續音與音程', '樂譜'],
+      ar: ['تمرين وصلات بالشفاه', 'النغمة المستمرة والمسافات الموسيقية', 'صفحات النوتة الموسيقية'],
+      fr: ['Liaisons détendues', 'Bourdon et intervalles', 'Partitions'],
+      de: ['Lockere Lippenbindungen', 'Bordun und Intervalle', 'Noten'],
+      ru: ['Расслабленное легато', 'Бурдон и интервалы', 'Партитуры'],
+      'pt-BR': ['Ligaduras relaxadas', 'Som contínuo e intervalos', 'Partituras'],
+      ja: ['やさしいバズィング', '持続音と音程', '音符'],
+      ko: ['편안한 슬러 연습', '지속음과 음정 간격', '악보'],
+      vi: ['Đúng cao độ', 'Âm nền và quãng', 'Bản nhạc'],
+    } as const;
+    for (const locale of productionLocales.filter((value) => value !== 'en')) {
+      const messages = await loadMessagesForLocale(locale);
+      const values = locale === 'ja'
+        ? [messages['warmup.buzz.title'], messages['drone.title'], messages['exercise.notes']]
+        : locale === 'vi'
+          ? [messages['tuning.inTune'], messages['drone.title'], messages['practice.sheetMusic']]
+          : [messages['warmup.slur.title'], messages['drone.title'], messages['practice.sheetMusic']];
+      expect(values).toEqual(expected[locale]);
+    }
+  });
+
   it('formats every production ICU message with the shared runtime values', async () => {
     const values = {
       elapsed: 30,
@@ -77,13 +119,38 @@ describe('web localization', () => {
       current: 2,
       value: '+3',
       instrument: 'Trumpet',
+      email: 'player@example.test',
+      error: 'Unavailable',
+      action: 'Export',
+      note: 'B-flat',
+      intervalNote: 'D',
+      verdict: 'In tune',
+      seconds: 2,
+      cents: 4,
+      inTune: 6,
+      gap: 5,
+      when: 'July 22',
+      from: 'C',
+      to: 'G',
+      notes: 'C · G',
+      role: 'Student',
+      sessions: 3,
+      minutes: 45,
+      exercise: 'C major',
     };
     for (const locale of productionLocales) {
       const messages = await loadMessagesForLocale(locale);
-      const intl = createIntl({ locale, messages }, createIntlCache());
+      const formattingErrors: unknown[] = [];
+      const intl = createIntl({
+        locale,
+        messages,
+        onError: (error) => formattingErrors.push(error),
+      }, createIntlCache());
       for (const id of Object.keys(messages)) {
-        expect(() => intl.formatMessage({ id }, values)).not.toThrow();
+        const formatted = intl.formatMessage({ id, defaultMessage: '__FORMAT_FALLBACK__' }, values);
+        expect(formatted, `${locale}:${id}`).not.toBe('__FORMAT_FALLBACK__');
       }
+      expect(formattingErrors, locale).toEqual([]);
     }
   });
 

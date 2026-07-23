@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { getInstruments } from '../api/client';
 import type { InstrumentProfile } from '../domain/types';
+import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 
-export function InstrumentSelector({ value, onChange, compact = false, label = 'Instrument' }: { value: string; onChange: (value: string) => void; compact?: boolean; label?: string }) {
+export function InstrumentSelector({ value, onChange, compact = false, label }: { value: string; onChange: (value: string) => void; compact?: boolean; label?: string }) {
+  const { t } = useI18n();
+  const fieldLabel = label ?? t('instrument.label');
   const [instruments, setInstruments] = useState<InstrumentProfile[]>([]);
   useEffect(() => {
     getInstruments()
@@ -19,11 +23,13 @@ export function InstrumentSelector({ value, onChange, compact = false, label = '
   }, []);
   return (
     <label className={`select-wrap ${compact ? 'compact' : ''}`}>
-      {!compact && <span>{label}</span>}
-      <select value={value} onChange={(event) => onChange(event.target.value)} aria-label={compact ? label : undefined}>
+      {!compact && <span>{fieldLabel}</span>}
+      <select value={value} onChange={(event) => onChange(event.target.value)} aria-label={compact ? fieldLabel : undefined}>
         {instruments.map((instrument) => (
           <option value={instrument.id} key={instrument.id}>
-            {instrument.display_name}
+            {(['trumpet', 'cornet', 'flugelhorn', 'horn', 'french-horn', 'trombone', 'bass-trombone', 'euphonium', 'baritone', 'tuba'].includes(instrument.id)
+              ? t(`instrument.${instrument.id}` as MessageId)
+              : instrument.display_name)}
           </option>
         ))}
       </select>

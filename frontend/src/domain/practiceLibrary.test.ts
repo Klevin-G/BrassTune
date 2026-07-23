@@ -25,18 +25,18 @@ describe('practice library storage', () => {
     expect(resolvePracticeOwner({ loading: false, hasAuthSession: false, isSignedIn: false })).toBe('guest');
   });
 
-  it('recovers from corrupt data, resets an old weekly goal, and bounds persisted labels', () => {
+  it('recovers from corrupt data, rolls weekly completion over, carries targets, and bounds persisted labels', () => {
     expect(parsePracticeLibrary('{broken')).toMatchObject({ version: PRACTICE_LIBRARY_VERSION, customExercises: [] });
     const raw = JSON.stringify({
       ...emptyPracticeLibrary(new Date('2026-07-13T12:00:00')),
       favorites: [{ kind: 'warmup', id: 'x'.repeat(200), label: 'y'.repeat(200), href: `/${'z'.repeat(400)}` }],
-      weeklyGoal: { week: '2020-01-01', targetMinutes: 500, completedMinutes: 499 },
+      weeklyGoal: { week: '2020-01-01', targetMinutes: 500, completedMinutes: 499, targetSessions: 12, completedSessions: 11 },
     });
     const parsed = parsePracticeLibrary(raw, new Date('2026-07-16T12:00:00'));
     expect(parsed.favorites[0].id).toHaveLength(80);
     expect(parsed.favorites[0].label).toHaveLength(80);
     expect(parsed.favorites[0].href.length).toBeLessThanOrEqual(240);
-    expect(parsed.weeklyGoal).toEqual({ week: currentWeekKey(new Date('2026-07-16T12:00:00')), targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 });
+    expect(parsed.weeklyGoal).toEqual({ week: currentWeekKey(new Date('2026-07-16T12:00:00')), targetMinutes: 500, completedMinutes: 0, targetSessions: 12, completedSessions: 0 });
   });
 
   it('uses canonical limits for 60-character exercise names and ten recents', () => {
@@ -95,6 +95,9 @@ describe('practice library storage', () => {
       [ownerPracticeKey('guest'), 'guest-library'],
       ['brasstune.playalong.best.account%3A42.cmaj', '90'],
       ['brasstune.playalong.best.guest.cmaj', '80'],
+      ['brasstune.practiceStreak.v2.account%3A42.days', '["2026-07-22"]'],
+      ['brasstune.practiceStreak.v2.guest.days', '["2026-07-21"]'],
+      ['brasstune.practice.days', '["2026-07-20"]'],
       ['brasstune.theme', 'brass-night'],
     ]);
     const local = {
@@ -104,11 +107,13 @@ describe('practice library storage', () => {
     };
     const removedSessionKeys: string[] = [];
     const removed = clearAccountPracticeState(local, { removeItem: (key: string) => removedSessionKeys.push(key) }, 'account:42');
-    expect(removed).toBe(3);
+    expect(removed).toBe(5);
     expect(values.has(ownerPracticeKey('account:42'))).toBe(false);
     expect(values.has('brasstune.playalong.best.account%3A42.cmaj')).toBe(false);
     expect(values.get(ownerPracticeKey('guest'))).toBe('guest-library');
     expect(values.get('brasstune.playalong.best.guest.cmaj')).toBe('80');
+    expect(values.get('brasstune.practiceStreak.v2.guest.days')).toBe('["2026-07-21"]');
+    expect(values.has('brasstune.practice.days')).toBe(false);
     expect(removedSessionKeys).toEqual([ownerWorkspaceKey('account:42')]);
   });
 });

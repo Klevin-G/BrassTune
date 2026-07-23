@@ -37,13 +37,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       {!authRoute && <a className="skip-link" href="#main-content">{t('a11y.skip')}</a>}
       {!authRoute && !workspace && (
         <aside className="sidebar">
-          <NavLink to="/practice" className="brand" aria-label="BrassTune home">
+          <NavLink to="/practice" className="brand" aria-label={t('app.home')}>
             <span className="brand-mark">
               <Music2 size={19} />
             </span>
             <span>
               <strong>BrassTune</strong>
-              <small>Brass tuner</small>
+              <small>{t('app.subtitle')}</small>
             </span>
           </NavLink>
           <nav className="nav-list" aria-label={t('nav.primary')}>

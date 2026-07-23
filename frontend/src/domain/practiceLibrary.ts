@@ -1,3 +1,5 @@
+import { clearPracticeStreakState } from './practiceStreak';
+
 export const PRACTICE_LIBRARY_VERSION = 1 as const;
 export const PRACTICE_LIBRARY_PREFIX = 'brasstune.practiceLibrary.v1.';
 export const PRACTICE_WORKSPACE_PREFIX = 'brasstune.practiceWorkspace.v1.';
@@ -136,7 +138,10 @@ export function clearAccountPracticeState(
   }
   keys.forEach((key) => local.removeItem(key));
   session.removeItem(ownerWorkspaceKey(ownerId));
-  return keys.length + 1;
+  // Legacy streak keys were global and therefore unsafe to attribute. Account
+  // deletion clears them along with this account's owner-scoped streak.
+  const streakKeys = clearPracticeStreakState(local, ownerId, true);
+  return keys.length + streakKeys + 1;
 }
 
 export function resolvePracticeOwner(auth: { loading: boolean; hasAuthSession: boolean; isSignedIn: boolean; profileId?: string | number | null }): string | null {
@@ -226,7 +231,15 @@ export function parsePracticeLibrary(raw: string | null, now = new Date()): Prac
     if (!value || value.version !== PRACTICE_LIBRARY_VERSION) return fallback;
     const exercises = Array.isArray(value.customExercises) ? value.customExercises.map(normalizeExercise).filter(Boolean) as CustomExercise[] : [];
     const presets = Array.isArray(value.metronomePresets) ? value.metronomePresets.map((item) => normalizeMetronomePreset(item)).filter(Boolean) as MetronomePreset[] : [];
-    const goalWeek = value.weeklyGoal?.week === currentWeekKey(now) ? value.weeklyGoal : fallback.weeklyGoal;
+    const persistedGoal = value.weeklyGoal;
+    const isCurrentWeek = persistedGoal?.week === currentWeekKey(now);
+    const goalWeek = isCurrentWeek ? persistedGoal : {
+      ...fallback.weeklyGoal,
+      // Targets are preferences, not weekly progress. Carry valid custom
+      // targets forward while resetting only the completion counters.
+      targetMinutes: finiteNumber(persistedGoal?.targetMinutes, fallback.weeklyGoal.targetMinutes),
+      targetSessions: finiteNumber(persistedGoal?.targetSessions, fallback.weeklyGoal.targetSessions),
+    };
     return {
       version: PRACTICE_LIBRARY_VERSION,
       customExercises: exercises.slice(0, LIMITS.customExercises),
