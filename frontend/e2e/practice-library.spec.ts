@@ -14,7 +14,11 @@ test.beforeEach(async ({ page }) => {
 
 test('mobile practice home exposes resumable warm-up, drone, goals, packs, and visible focus exit', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
-  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  const consoleWarningsAndErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+    if (message.type() === 'warning' || message.type() === 'error') consoleWarningsAndErrors.push(message.text());
+  });
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto('/practice');
   await expect(page.getByRole('heading', { name: 'Guided 5-minute warm-up' })).toBeVisible();
@@ -40,6 +44,7 @@ test('mobile practice home exposes resumable warm-up, drone, goals, packs, and v
   const dimensions = await page.evaluate(() => ({ clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
   expect(consoleErrors).toEqual([]);
+  expect(consoleWarningsAndErrors.join('\n')).not.toContain('Cannot update a component');
 });
 
 test('guided warm-up excludes hidden time, tolerates repeated visibility events, and completes once', async ({ page }) => {

@@ -60,6 +60,7 @@ interface LoadedPracticeState {
   ownerId: string | null;
   library: PracticeLibrary;
   workspace: PracticeWorkspace | null;
+  storageError: string | null;
 }
 
 export function practiceLibraryGateState({
@@ -196,21 +197,22 @@ export function PracticeLibraryProvider({
     ownerId,
     library: ownerId ? readPracticeLibrary(localStorage, ownerId, now()) : emptyPracticeLibrary(now()),
     workspace: ownerId ? readWorkspace(ownerId) : null,
+    storageError: null,
   }));
-  const [storageError, setStorageError] = useState<string | null>(null);
   const [guestRecoveryState, setGuestRecoveryState] = useState<'idle' | 'pending' | 'failed'>('idle');
   const claimedSavedSessionKeysRef = useRef(new Set<string>());
   const ownerReady = ownerId != null && loadedState.ownerId === ownerId;
   const library = loadedState.library;
   const workspace = loadedState.workspace;
+  const storageError = loadedState.storageError;
 
   useEffect(() => {
     setLoadedState({
       ownerId,
       library: ownerId ? readPracticeLibrary(localStorage, ownerId, now()) : emptyPracticeLibrary(now()),
       workspace: ownerId ? readWorkspace(ownerId) : null,
+      storageError: null,
     });
-    setStorageError(null);
   }, [now, ownerId]);
 
   const updateLibrary = useCallback((update: (current: PracticeLibrary) => PracticeLibrary) => {
@@ -218,8 +220,9 @@ export function PracticeLibraryProvider({
       if (!ownerId || current.ownerId !== ownerId) return current;
       const next = update(current.library);
       const saved = writePracticeLibrary(localStorage, ownerId, next);
-      setStorageError(saved ? null : 'This device is out of browser storage. Your latest practice-library change could not be saved.');
-      return saved ? { ...current, library: next } : current;
+      return saved
+        ? { ...current, library: next, storageError: null }
+        : { ...current, storageError: 'This device is out of browser storage. Your latest practice-library change could not be saved.' };
     });
   }, [ownerId]);
 
@@ -230,8 +233,9 @@ export function PracticeLibraryProvider({
       const next = reconcilePracticeLibraryWeek(current.library, currentDate);
       if (next === current.library) return current;
       const saved = writePracticeLibrary(localStorage, ownerId, next);
-      setStorageError(saved ? null : 'This device is out of browser storage. Your weekly practice progress could not be updated.');
-      return saved ? { ...current, library: next } : current;
+      return saved
+        ? { ...current, library: next, storageError: null }
+        : { ...current, storageError: 'This device is out of browser storage. Your weekly practice progress could not be updated.' };
     });
   }, [now, ownerId]);
 
@@ -381,10 +385,14 @@ export function PracticeLibraryProvider({
       try {
         if (next) sessionStorage.setItem(ownerWorkspaceKey(ownerId), JSON.stringify(next));
         else sessionStorage.removeItem(ownerWorkspaceKey(ownerId));
+        return { ...current, workspace: next, storageError: null };
       } catch {
-        setStorageError('Focused mode will work for this page, but this browser could not remember it between pages.');
+        return {
+          ...current,
+          workspace: next,
+          storageError: 'Focused mode will work for this page, but this browser could not remember it between pages.',
+        };
       }
-      return { ...current, workspace: next };
     });
   }, [ownerId]);
 
