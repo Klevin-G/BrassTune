@@ -237,6 +237,58 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
+    func testSmallPhoneMaximumDynamicTypeKeepsPrimaryTunerAndRecoveryActionsAboveTabs() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "UITEST_FIXTURES",
+            "UITEST_RESET_STATE",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+        ]
+        app.launch()
+
+        let start = app.descendants(matching: .any)["tuner.recordButton"]
+        XCTAssertTrue(start.waitForExistence(timeout: 8))
+        XCTAssertTrue(start.isHittable)
+        XCTAssertGreaterThanOrEqual(start.frame.height, 44)
+        XCTAssertLessThan(start.frame.maxY, app.tabBars.firstMatch.frame.minY)
+
+        openTab("Settings", in: app)
+        let advanced = app.descendants(matching: .any)["settings.advancedTunerSettings"]
+        XCTAssertTrue(advanced.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(advanced.frame.height, 44)
+        openTab("Class", in: app)
+        let leave = app.descendants(matching: .any)["classes.leave.1"]
+        XCTAssertTrue(leave.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(leave.frame.height, 44)
+
+        app.terminate()
+        app.launchArguments = [
+            "UITEST_FIXTURES",
+            "UITEST_RESET_STATE",
+            "UITEST_MIC_DENIED",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+        ]
+        app.launch()
+        let recovery = app.descendants(matching: .any)["microphone.openSettings"]
+        XCTAssertTrue(recovery.waitForExistence(timeout: 8))
+        XCTAssertTrue(recovery.isHittable)
+        XCTAssertGreaterThanOrEqual(recovery.frame.height, 44)
+        XCTAssertLessThan(recovery.frame.maxY, app.tabBars.firstMatch.frame.minY)
+    }
+
+    @MainActor
+    func testPersistenceFailureBannerHasLaunchCoverage() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE", "UITEST_PERSISTENCE_ERROR"]
+        app.launch()
+        let banner = app.descendants(matching: .any)["app.persistenceError"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 8))
+        XCTAssertTrue(banner.label.contains("couldn't save"))
+    }
+
+    @MainActor
     private func assertFiveTabInformationArchitecture(in app: XCUIApplication) {
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(tabBar.waitForExistence(timeout: 8))

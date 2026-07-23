@@ -56,7 +56,10 @@ struct AppRootView: View {
 
     var body: some View {
         Group {
-            if settingsOnlyLaunch {
+            if model.persistenceAccessState == .restoringIdentity {
+                ProgressView("Restoring secure practice data…")
+                    .accessibilityIdentifier("app.persistenceLocked")
+            } else if settingsOnlyLaunch {
                 NavigationStack {
                     SettingsView(onboardingPresented: $onboardingPresented)
                 }
@@ -115,6 +118,7 @@ struct AppRootView: View {
                             .padding(.vertical, BTSpacing.sm)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(BTTheme.surfaceWarm)
+                            .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("app.persistenceError")
                     }
                 }
@@ -333,7 +337,13 @@ let nativeTutorialSteps = [
 func nativeTutorialAccessibilityAnnouncement(stepIndex: Int) -> String {
     let index = min(max(0, stepIndex), nativeTutorialSteps.count - 1)
     let step = nativeTutorialSteps[index]
-    return "Step \(index + 1) of \(nativeTutorialSteps.count). \(step.title). \(step.subtitle)"
+    return NativeLocalization.format(
+        "Step %@ of %@. %@. %@",
+        String(index + 1),
+        String(nativeTutorialSteps.count),
+        step.title,
+        step.subtitle
+    )
 }
 
 struct OnboardingView: View {
@@ -355,7 +365,11 @@ struct OnboardingView: View {
         NavigationStack {
             BTScreen {
                 BTPageHeader(
-                    eyebrow: "Step \(stepIndex + 1) of \(nativeTutorialSteps.count)",
+                    eyebrow: NativeLocalization.format(
+                        "Step %@ of %@",
+                        String(stepIndex + 1),
+                        String(nativeTutorialSteps.count)
+                    ),
                     title: step.title,
                     subtitle: step.subtitle
                 )
@@ -394,7 +408,11 @@ struct OnboardingView: View {
                 ProgressView(value: Double(stepIndex + 1), total: Double(nativeTutorialSteps.count))
                     .tint(BTTheme.accent)
                     .accessibilityLabel("Tutorial progress")
-                    .accessibilityValue("Step \(stepIndex + 1) of \(nativeTutorialSteps.count)")
+                    .accessibilityValue(NativeLocalization.format(
+                        "Step %@ of %@",
+                        String(stepIndex + 1),
+                        String(nativeTutorialSteps.count)
+                    ))
                     .accessibilityIdentifier("onboarding.progress")
 
             }
@@ -567,9 +585,12 @@ struct PlayAlongView: View {
 func playAlongAdvanceAnnouncement(for session: PlayAlongSession?) -> String? {
     guard let session else { return nil }
     if let note = session.currentNoteName {
-        return "Next note is \(note). Hold it steady for two seconds."
+        return NativeLocalization.format(
+            "Next note is %@. Hold it steady for two seconds.",
+            note
+        )
     }
-    return "Exercise complete. Your results are ready."
+    return NativeLocalization.string("Exercise complete. Your results are ready.")
 }
 
 private struct PlayAlongLiveView: View {
@@ -577,11 +598,15 @@ private struct PlayAlongLiveView: View {
 
     var body: some View {
         BTCard(tint: BTTheme.surfaceWarm) {
-            Text("Note \(min(session.currentNoteIndex + 1, session.exercise.writtenNotes.count)) of \(session.exercise.writtenNotes.count)")
+            Text(NativeLocalization.format(
+                "Note %@ of %@",
+                String(min(session.currentNoteIndex + 1, session.exercise.writtenNotes.count)),
+                String(session.exercise.writtenNotes.count)
+            ))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(BTTheme.muted)
 
-            Text(session.currentNoteName ?? "—")
+            Text(verbatim: NativeLocalization.isolate(session.currentNoteName ?? "—"))
                 .font(.system(size: 64, weight: .bold, design: .rounded))
                 .foregroundStyle(BTTheme.accent)
                 .frame(maxWidth: .infinity)
@@ -595,11 +620,16 @@ private struct PlayAlongLiveView: View {
             ProgressView(value: session.heldFraction)
                 .tint(BTTheme.success)
                 .accessibilityLabel("Hold progress")
-                .accessibilityValue("\(Int((session.heldFraction * 100).rounded())) percent")
+                .accessibilityValue(NativeLocalization.format(
+                    "%@ percent",
+                    String(Int((session.heldFraction * 100).rounded()))
+                ))
                 .accessibilityIdentifier("playAlong.holdProgress")
 
             VStack(spacing: BTSpacing.xs) {
-                Text(session.detectedNoteName.map { "You're playing \($0)" } ?? "Listening…")
+                Text(session.detectedNoteName.map {
+                    NativeLocalization.format("You're playing %@", $0)
+                } ?? NativeLocalization.string("Listening…"))
                     .font(.title3.weight(.semibold))
                 Text(playAlongFeedback(session))
                     .font(.subheadline)
@@ -630,7 +660,7 @@ private struct PlayAlongSequenceView: View {
                         let tint = completed
                             ? playAlongRatingTint(session.noteGrades[index].rating)
                             : (active ? BTTheme.accent : BTTheme.muted)
-                        Text(note)
+                        Text(verbatim: NativeLocalization.isolate(note))
                             .font(.headline.monospaced())
                             .foregroundStyle(tint)
                             .frame(width: 44, height: 44)
@@ -638,7 +668,11 @@ private struct PlayAlongSequenceView: View {
                             .overlay {
                                 Circle().stroke(tint.opacity(active ? 0.75 : 0.25), lineWidth: active ? 2 : 1)
                             }
-                            .accessibilityLabel("\(note), \(completed ? session.noteGrades[index].rating.title : (active ? "current note" : "up next"))")
+                            .accessibilityLabel(NativeLocalization.format(
+                                "%@, %@",
+                                note,
+                                completed ? session.noteGrades[index].rating.title : (active ? NativeLocalization.string("current note") : NativeLocalization.string("up next"))
+                            ))
                     }
                 }
             }
@@ -656,7 +690,7 @@ private struct PlayAlongResultsView: View {
         BTCard(tint: BTTheme.surfaceWarm) {
             BTSectionHeader(title: "Your score", subtitle: exercise.title)
 
-            Text("\(grade.inTunePercentage)%")
+            Text(verbatim: NativeLocalization.isolate("\(grade.inTunePercentage)%"))
                 .font(.system(size: 64, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(playAlongScoreTint(grade.inTunePercentage))
                 .frame(maxWidth: .infinity)
@@ -670,7 +704,10 @@ private struct PlayAlongResultsView: View {
             }
             .font(.title2)
             .frame(maxWidth: .infinity)
-            .accessibilityLabel("\(grade.stars) out of 3 stars")
+            .accessibilityLabel(NativeLocalization.format(
+                "%@ out of 3 stars",
+                String(grade.stars)
+            ))
 
             Text(playAlongScoreMessage(grade))
                 .font(.headline)
@@ -696,10 +733,12 @@ private struct PlayAlongResultsView: View {
             BTSectionHeader(title: "Note by note", subtitle: "Cents show the small distance from the center of a note.")
             ForEach(grade.noteGrades) { noteGrade in
                 HStack {
-                    Text(noteGrade.writtenNoteName)
+                    Text(verbatim: NativeLocalization.isolate(noteGrade.writtenNoteName))
                         .font(.headline.monospaced())
                     Spacer()
-                    Text(noteGrade.medianCents.map { String(format: "%+.1f cents", $0) } ?? "Skipped")
+                    Text(noteGrade.medianCents.map {
+                        NativeLocalization.format("%@ cents", String(format: "%+.1f", $0))
+                    } ?? NativeLocalization.string("Skipped"))
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(playAlongRatingTint(noteGrade.rating))
                     Text(noteGrade.rating.title)
@@ -790,6 +829,10 @@ struct TunerView: View {
                 subtitle: language.localized("Play a note and BrassTune will show whether it is flat, in tune, or sharp.")
             )
 
+            if audioEngine.permissionDenied {
+                MicrophoneRecoveryView()
+            }
+
             TunerReadout(frame: activeFrame)
 
             NavigationLink {
@@ -801,23 +844,7 @@ struct TunerView: View {
             .buttonStyle(BTSecondaryButtonStyle())
             .accessibilityIdentifier("tuner.droneIntervalLink")
 
-            if !audioEngine.recording {
-                Button {
-                    Task {
-                        await model.startRecording()
-                    }
-                } label: {
-                    Label("Start listening", systemImage: "mic.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
-                .disabled(model.recordingStartInProgress)
-                .accessibilityIdentifier("tuner.recordButton")
-            }
-
-            if audioEngine.permissionDenied {
-                MicrophoneRecoveryView()
-            } else if let notice = audioEngine.audioNotice {
+            if !audioEngine.permissionDenied, let notice = audioEngine.audioNotice {
                 Text(notice)
                     .font(.footnote)
                     .foregroundStyle(BTTheme.warning)
@@ -825,15 +852,30 @@ struct TunerView: View {
                     .accessibilityIdentifier("tuner.audioNotice")
             }
         }
+        .accessibilityIdentifier("screen.tuner")
         .safeAreaInset(edge: .bottom) {
             if audioEngine.recording {
                 FloatingPracticeControlBar()
                     .padding(.horizontal, BTSpacing.lg)
                     .padding(.bottom, BTSpacing.md)
+            } else if audioEngine.permissionDenied {
+                OpenMicrophoneSettingsButton()
+                    .padding(.horizontal, BTSpacing.lg)
+                    .padding(.bottom, BTSpacing.md)
+            } else {
+                Button {
+                    Task { await model.startRecording() }
+                } label: {
+                    Label("Start listening", systemImage: "mic.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                .disabled(model.recordingStartInProgress)
+                .padding(.horizontal, BTSpacing.lg)
+                .padding(.bottom, BTSpacing.md)
+                .accessibilityIdentifier("tuner.recordButton")
             }
         }
-        .navigationTitle("Tuner")
-        .accessibilityIdentifier("screen.tuner")
     }
 }
 
@@ -847,7 +889,7 @@ private struct TunerReadout: View {
 
     private var noteLabel: String {
         guard let note = frame?.writtenNoteName else { return language.localized("Play a note") }
-        return "\(note)\(frame?.writtenOctave.map(String.init) ?? "")"
+        return NativeLocalization.isolate("\(note)\(frame?.writtenOctave.map(String.init) ?? "")")
     }
 
     private var verdict: String {
@@ -893,15 +935,16 @@ private struct TunerReadout: View {
 
 private struct TuningMeter: View {
     let cents: Double?
+    @Environment(\.layoutDirection) private var interfaceLayoutDirection
 
     private var clampedCents: Double {
         min(50, max(-50, cents ?? 0))
     }
 
     private var accessibilityVerdict: String {
-        guard let cents else { return String(localized: "Waiting for a note") }
-        if abs(cents) <= 5 { return String(localized: "In tune") }
-        return cents > 0 ? String(localized: "Sharp") : String(localized: "Flat")
+        guard let cents else { return NativeLocalization.string("Waiting for a note") }
+        if abs(cents) <= 5 { return NativeLocalization.string("In tune") }
+        return cents > 0 ? NativeLocalization.string("Sharp") : NativeLocalization.string("Flat")
     }
 
     var body: some View {
@@ -924,25 +967,28 @@ private struct TuningMeter: View {
                 .frame(maxHeight: .infinity)
             }
             .frame(height: 40)
+            .environment(\.layoutDirection, .leftToRight)
 
             HStack {
                 Label("Flat", systemImage: "arrow.down")
                     .foregroundStyle(BTTheme.flat)
+                    .environment(\.layoutDirection, interfaceLayoutDirection)
                 Spacer()
                 Text("In tune")
                     .foregroundStyle(BTTheme.success)
+                    .environment(\.layoutDirection, interfaceLayoutDirection)
                 Spacer()
                 Label("Sharp", systemImage: "arrow.up")
                     .foregroundStyle(BTTheme.sharp)
+                    .environment(\.layoutDirection, interfaceLayoutDirection)
             }
             .font(.caption.weight(.semibold))
+            .environment(\.layoutDirection, .leftToRight)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Tuning meter")
         .accessibilityValue(accessibilityVerdict)
         .accessibilityIdentifier("tuner.meter")
-        // Musical flat-to-sharp position is semantic data, not reading order.
-        .environment(\.layoutDirection, .leftToRight)
     }
 }
 
@@ -977,7 +1023,7 @@ private struct FloatingPracticeControlBar: View {
                 .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.warning))
 
                 VStack(spacing: 0) {
-                    Text("\(model.metronome.bpm)")
+                    Text(verbatim: NativeLocalization.isolate(String(model.metronome.bpm)))
                         .font(.headline.monospacedDigit())
                     Text("BPM")
                         .font(.caption2.weight(.semibold))
@@ -1038,16 +1084,22 @@ private struct MicrophoneRecoveryView: View {
                 title: "Microphone access is off",
                 subtitle: "Allow microphone access in iOS Settings, then come back and try again."
             )
-            Button {
-                if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(settingsURL)
-                }
-            } label: {
-                Label("Open iOS Settings", systemImage: "gearshape")
-            }
-            .buttonStyle(BTSecondaryButtonStyle())
-            .accessibilityIdentifier("microphone.openSettings")
         }
+    }
+}
+
+private struct OpenMicrophoneSettingsButton: View {
+    var body: some View {
+        Button {
+            if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(settingsURL)
+            }
+        } label: {
+            Label("Open iOS Settings", systemImage: "gearshape")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+        .accessibilityIdentifier("microphone.openSettings")
     }
 }
 
@@ -1096,12 +1148,19 @@ private struct SessionRow: View {
                         .font(.headline)
                         .foregroundStyle(BTTheme.text)
                         .accessibilityIdentifier("sessions.sessionName")
-                    Text("\(session.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(instrumentDisplayName(session.instrumentId))")
+                    Text(NativeLocalization.format(
+                        "%@ · %@",
+                        session.startedAt.formatted(date: .abbreviated, time: .shortened),
+                        instrumentDisplayName(session.instrumentId)
+                    ))
                         .font(.subheadline)
                         .foregroundStyle(BTTheme.muted)
                 }
                 Spacer()
-                Text("\(Int(session.inTunePercentage.rounded()))% in tune")
+                Text(NativeLocalization.format(
+                    "%@%% in tune",
+                    String(Int(session.inTunePercentage.rounded()))
+                ))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(session.inTunePercentage >= 70 ? BTTheme.success : BTTheme.warning)
                 Image(systemName: "chevron.right")
@@ -1130,7 +1189,7 @@ struct SessionDetailView: View {
                         title: session.name,
                         subtitle: session.startedAt.formatted(date: .complete, time: .shortened)
                     )
-                    Text("\(Int(session.inTunePercentage.rounded()))%")
+                    Text(verbatim: NativeLocalization.isolate("\(Int(session.inTunePercentage.rounded()))%"))
                         .font(.system(size: 58, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(session.inTunePercentage >= 70 ? BTTheme.success : BTTheme.warning)
                         .accessibilityIdentifier("session.score")
@@ -1153,12 +1212,12 @@ struct SessionDetailView: View {
                         )
                         BTMetricTile(
                             title: "In tune",
-                            value: "\(Int(session.inTunePercentage.rounded()))%",
+                            value: NativeLocalization.isolate("\(Int(session.inTunePercentage.rounded()))%"),
                             detail: "within 5 cents",
                             tint: BTTheme.success
                         )
                     }
-                    Text("Notes heard: \(session.pitchCoverageLabel)")
+                    Text(NativeLocalization.format("Notes heard: %@", session.pitchCoverageLabel))
                         .font(.subheadline)
                         .foregroundStyle(BTTheme.muted)
                 }
@@ -1228,7 +1287,7 @@ struct ProgressTabView: View {
                 ) {
                     BTMetricTile(
                         title: "In tune",
-                        value: "\(Int(snapshot.averageInTunePercentage.rounded()))%",
+                        value: NativeLocalization.isolate("\(Int(snapshot.averageInTunePercentage.rounded()))%"),
                         detail: "within 5 cents",
                         tint: BTTheme.success
                     )
@@ -1245,7 +1304,7 @@ struct ProgressTabView: View {
                     )
                     BTMetricTile(
                         title: "Recordings",
-                        value: "\(snapshot.sessionCount)",
+                        value: NativeLocalization.isolate(String(snapshot.sessionCount)),
                         detail: "total"
                     )
                 }
@@ -1286,7 +1345,7 @@ struct ProgressTabView: View {
                                         .foregroundStyle(BTTheme.muted)
                                 }
                                 Spacer()
-                                Text("\(Int(session.inTunePercentage.rounded()))%")
+                                Text(verbatim: NativeLocalization.isolate("\(Int(session.inTunePercentage.rounded()))%"))
                                     .font(.headline.monospacedDigit())
                                     .foregroundStyle(session.inTunePercentage >= 70 ? BTTheme.success : BTTheme.warning)
                                 Image(systemName: "chevron.right")
@@ -1328,17 +1387,19 @@ struct ProgressTabView: View {
 }
 
 private func playAlongFeedback(_ session: PlayAlongSession) -> String {
-    guard let target = session.currentNoteName else { return "Exercise complete" }
+    guard let target = session.currentNoteName else { return NativeLocalization.string("Exercise complete") }
     guard session.detectedNoteName == target, let cents = session.detectedCents else {
-        return session.detectedNoteName == nil ? "Play \(target)" : "Move to \(target)"
+        return session.detectedNoteName == nil
+            ? NativeLocalization.format("Play %@", target)
+            : NativeLocalization.format("Move to %@", target)
     }
     let rounded = Int(cents.rounded())
     if abs(rounded) <= 5 {
-        return "In tune — hold steady"
+        return NativeLocalization.string("In tune — hold steady")
     }
     return rounded > 0
-        ? "\(abs(rounded)) cents sharp — ease down"
-        : "\(abs(rounded)) cents flat — lift up"
+        ? NativeLocalization.format("%@ cents sharp — ease down", String(abs(rounded)))
+        : NativeLocalization.format("%@ cents flat — lift up", String(abs(rounded)))
 }
 
 private func playAlongFeedbackTint(_ session: PlayAlongSession) -> Color {
@@ -1368,18 +1429,18 @@ private func playAlongScoreTint(_ score: Int) -> Color {
 
 private func playAlongScoreMessage(_ grade: PlayAlongGrade) -> String {
     switch grade.stars {
-    case 3: return "Strong work — try to beat your best."
-    case 2: return "Nice start. One more round can make it steadier."
-    case 1: return "Keep going. Slow, even air will help."
-    default: return "Try again when you're ready."
+    case 3: return NativeLocalization.string("Strong work — try to beat your best.")
+    case 2: return NativeLocalization.string("Nice start. One more round can make it steadier.")
+    case 1: return NativeLocalization.string("Keep going. Slow, even air will help.")
+    default: return NativeLocalization.string("Try again when you're ready.")
     }
 }
 
 private func practiceTimeLabel(_ seconds: TimeInterval) -> String {
     if seconds < 60 {
-        return "\(Int(seconds.rounded()))s"
+        return NativeLocalization.isolate("\(Int(seconds.rounded()))s")
     }
-    return "\(Int((seconds / 60).rounded()))m"
+    return NativeLocalization.isolate("\(Int((seconds / 60).rounded()))m")
 }
 struct MetronomeView: View {
     @EnvironmentObject private var model: AppModel
@@ -1397,11 +1458,15 @@ struct MetronomeView: View {
             BTCard(tint: BTTheme.surfaceWarm) {
                 HStack(alignment: .center, spacing: BTSpacing.lg) {
                     VStack(alignment: .leading, spacing: BTSpacing.sm) {
-                        Text("\(model.metronome.bpm)")
+                        Text(verbatim: NativeLocalization.isolate(String(model.metronome.bpm)))
                             .font(.system(size: 58, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(BTTheme.accentSoft)
                             .accessibilityIdentifier("metronome.bpm")
-                        Text("\(model.metronome.meterLabel) • \(model.metronome.subdivision.title)")
+                        Text(NativeLocalization.format(
+                            "%@ • %@",
+                            model.metronome.meterLabel,
+                            model.metronome.subdivision.title
+                        ))
                             .font(.headline)
                             .foregroundStyle(BTTheme.muted)
                             .accessibilityIdentifier("metronome.meter")
@@ -1459,7 +1524,7 @@ struct MetronomeView: View {
                 BTSectionHeader(title: "Sound and feel", subtitle: "The click is on by default. Use visual-only mode whenever you want silence.")
                 Picker("Meter", selection: Binding(get: { model.metronome.beatsPerMeasure }, set: { model.setMeter(beats: $0) })) {
                     ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
-                        Text("\(beats)/4").tag(beats)
+                        Text(verbatim: NativeLocalization.isolate("\(beats)/4")).tag(beats)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -1607,7 +1672,11 @@ private struct ScoreDocumentCard: View {
                     Text(score.title)
                         .font(.title3.weight(.bold))
                         .foregroundStyle(BTTheme.text)
-                    Text("\(score.sourceKind.title) • \(score.pageCountLabel)")
+                    Text(NativeLocalization.format(
+                        "%@ • %@",
+                        score.sourceKind.title,
+                        score.pageCountLabel
+                    ))
                         .font(.subheadline)
                         .foregroundStyle(BTTheme.muted)
                     if let composer = score.composer {
@@ -1626,7 +1695,7 @@ private struct ScoreDocumentCard: View {
                         Button {
                             model.selectScorePage(scoreID: score.id, pageID: page.id)
                         } label: {
-                            Text("Page \(page.pageNumber)")
+                            Text(NativeLocalization.format("Page %@", String(page.pageNumber)))
                                 .font(.caption.weight(.bold))
                                 .padding(.horizontal, BTSpacing.sm)
                                 .padding(.vertical, BTSpacing.xs)
@@ -1839,7 +1908,13 @@ private struct ScorePageViewerView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Text(isPDF ? score.pageCountLabel : "Page \(currentPage?.pageNumber ?? pageIndex + 1) of \(score.pages.count)")
+                Text(isPDF
+                    ? NativeLocalization.isolate(score.pageCountLabel)
+                    : NativeLocalization.format(
+                        "Page %@ of %@",
+                        String(currentPage?.pageNumber ?? pageIndex + 1),
+                        String(score.pages.count)
+                    ))
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.76))
             }
@@ -1869,7 +1944,7 @@ private struct ScorePageViewerView: View {
             .disabled(pageIndex <= 0)
             .accessibilityIdentifier("score.viewer.previousPage")
 
-            Text("\(currentPage?.pageNumber ?? pageIndex + 1) / \(score.pages.count)")
+            Text(verbatim: NativeLocalization.isolate("\(currentPage?.pageNumber ?? pageIndex + 1) / \(score.pages.count)"))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
                 .monospacedDigit()

@@ -210,10 +210,12 @@ final class PracticeFeatureTests: XCTestCase {
     private func makeModel(at url: URL? = nil) -> AppModel {
         let fileURL = url ?? modelTestURL
         if url == nil { try? FileManager.default.removeItem(at: fileURL) }
-        return AppModel(
+        let model = AppModel(
             persistenceStore: .ephemeral(fileURL: fileURL),
             scoreStorageDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         )
+        model.enterGuestDemo(presentTutorial: false)
+        return model
     }
 
     private func makeSession(startedAt: Date, duration: TimeInterval) -> PracticeSession {

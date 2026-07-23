@@ -140,6 +140,11 @@ private struct BrassGlassModifier<GlassShape: Shape>: ViewModifier {
 }
 
 extension View {
+    func btMinimumInteractiveSize(alignment: Alignment = .center) -> some View {
+        frame(minWidth: 44, minHeight: 44, alignment: alignment)
+            .contentShape(Rectangle())
+    }
+
     func btContentSurface(
         cornerRadius: CGFloat = BTTheme.radius,
         tint: Color = BTTheme.surface,

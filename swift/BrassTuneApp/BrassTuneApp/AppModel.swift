@@ -9,7 +9,8 @@ import UniformTypeIdentifiers
 @MainActor
 final class AppModel: ObservableObject {
     @Published var config: AppConfig = .fromProcessEnvironment()
-    @Published var authState: AuthState = .guest
+    @Published var authState: AuthState = .signedOut
+    @Published private(set) var persistenceAccessState: PersistenceAccessState = .restoringIdentity
     @Published var selectedInstrumentId = "trumpet" { didSet { persistLocalData() } }
     @Published var referencePitchHz = 440.0 { didSet { persistLocalData() } }
     @Published var sessions: [PracticeSession] = [] { didSet { persistLocalData() } }
@@ -18,7 +19,12 @@ final class AppModel: ObservableObject {
     @Published var recordingSource: PracticeSessionSource = NativeAudioEngine.defaultRecordingSource
     @Published var metronome = MetronomeSettings() { didSet { persistLocalData(); restartMetronomeIfNeeded() } }
     @Published var practiceFeatures = PracticeFeatureState() { didSet { persistLocalData() } }
-    @Published var appLanguage: AppLanguage = .system { didSet { persistLocalData() } }
+    @Published var appLanguage: AppLanguage = .system {
+        didSet {
+            NativeLocalization.language = AppLanguage.launchOverride ?? appLanguage
+            persistLocalData()
+        }
+    }
     @Published private(set) var gatewayCompleted = false { didSet { persistLocalData() } }
     @Published private(set) var metronomeRunning = false
     @Published private(set) var metronomeTick = 0
@@ -72,6 +78,7 @@ final class AppModel: ObservableObject {
         authService: AuthService = AuthService(),
         classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)? = nil
     ) {
+        NativeLocalization.language = AppLanguage.launchOverride ?? .system
         let resolvedScoreStorageDirectory = scoreStorageDirectory ?? NativeScoreImportService.defaultStorageDirectory
         self.guestPersistenceStore = persistenceStore
         self.persistenceStore = persistenceStore
@@ -84,7 +91,6 @@ final class AppModel: ObservableObject {
         self.apiClient = apiClient
         self.authService = authService
         self.classAccessTokenProvider = classAccessTokenProvider
-        restoreLocalData()
         observeAudioFrames()
     }
 
@@ -156,11 +162,12 @@ final class AppModel: ObservableObject {
     var accountUnavailableMessage: String? {
         accountFeaturesEnabled
             ? nil
-            : String(localized: "Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device.")
+            : NativeLocalization.string("Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device.")
     }
 
     func resetForUITesting() {
         authService.deleteStoredAuth()
+        activateStorageNamespace(.guest)
         authState = .guest
         let exercisesEntryFlow = ProcessInfo.processInfo.arguments.contains("UITEST_ENTRY_FLOW")
         gatewayCompleted = !exercisesEntryFlow
@@ -183,9 +190,13 @@ final class AppModel: ObservableObject {
         if clearedLocalArtifacts {
             lastError = nil
         }
+        if ProcessInfo.processInfo.arguments.contains("UITEST_PERSISTENCE_ERROR") {
+            persistenceErrorMessage = NativeLocalization.string("BrassTune couldn't save your latest changes on this device. Keep the app open, export your data if needed, and try again.")
+        }
     }
 
     func enterGuestDemo(presentTutorial: Bool = true) {
+        activateStorageNamespace(.guest)
         authState = .guest
         ensembles.removeAll()
         selectedEnsembleID = nil
@@ -218,31 +229,26 @@ final class AppModel: ObservableObject {
         } catch {
             signOutError = error
         }
-        activateStorageNamespace(.guest)
-        authState = .signedOut
-        ensembles.removeAll()
-        selectedEnsembleID = nil
-        ensembleStatusMessage = nil
-        authNotice = nil
-        authNoticeIsError = false
+        transitionToUnauthenticated(.signedOut)
         if let signOutError {
             setAuthFailure(signOutError)
-            authNotice = String(localized: "Signed out on this device. BrassTune couldn't confirm server logout, so try again online before using a shared device.")
+            authNotice = NativeLocalization.string("Signed out on this device. BrassTune couldn't confirm server logout, so try again online before using a shared device.")
         } else {
             lastError = nil
-            setAuthNotice(String(localized: "Signed out."))
+            setAuthNotice(NativeLocalization.string("Signed out."))
         }
     }
 
     func restoreSession() async {
-        guard let storedSession = authService.restoreSession() else { return }
-        activateStorageNamespace(.account(userID: storedSession.userID))
+        guard let storedSession = authService.restoreSession() else {
+            activateStorageNamespace(.guest)
+            authState = .guest
+            return
+        }
+        prepareStorageNamespace(.account(userID: storedSession.userID))
         guard config.hasUsableAccountConfiguration else {
             authService.signOut()
-            activateStorageNamespace(.guest)
-            authState = .signedOut
-            ensembles.removeAll()
-            selectedEnsembleID = nil
+            transitionToUnauthenticated(.signedOut)
             setAuthFailure(UserVisibleError.missingAuthConfiguration)
             return
         }
@@ -256,25 +262,20 @@ final class AppModel: ObservableObject {
             return
         } catch {
             if Self.isOfflineAuthFailure(error), let session = authService.unexpiredStoredSession() {
+                activateStorageNamespace(.account(userID: session.userID))
                 authState = .signedIn(email: session.email)
                 lastError = (error as? UserVisibleError) ?? .networkUnavailable
-                authNotice = String(localized: "You're offline. BrassTune kept your unexpired sign-in for local practice; online account features may be unavailable.")
+                authNotice = NativeLocalization.string("You're offline. BrassTune kept your unexpired sign-in for local practice; online account features may be unavailable.")
                 authNoticeIsError = true
                 return
             }
             if Self.isRetryableAuthRefreshFailure(error) {
-                activateStorageNamespace(.guest)
-                authState = .signedOut
-                ensembles.removeAll()
-                selectedEnsembleID = nil
+                transitionToUnauthenticated(.signedOut)
                 setAuthFailure(error)
                 return
             }
             authService.signOut()
-            activateStorageNamespace(.guest)
-            authState = .signedOut
-            ensembles.removeAll()
-            selectedEnsembleID = nil
+            transitionToUnauthenticated(.signedOut)
             setAuthFailure(error)
         }
     }
@@ -400,7 +401,13 @@ final class AppModel: ObservableObject {
     func leaveEnsemble(id: EnsembleSummary.ID) async -> Bool {
         guard let target = ensembles.first(where: { $0.id == id }) else { return false }
         guard target.canLeave else {
-            lastError = .apiRequestFailed(statusCode: 409, message: "Your \(target.viewerRoleLabel.lowercased()) role cannot leave this class through self-service.")
+            lastError = .apiRequestFailed(
+                statusCode: 409,
+                message: NativeLocalization.format(
+                    "Your %@ role cannot leave this class through self-service.",
+                    target.viewerRoleLabel.lowercased()
+                )
+            )
             return false
         }
         let token: String
@@ -460,14 +467,10 @@ final class AppModel: ObservableObject {
         let visible = (error as? UserVisibleError) ?? .networkUnavailable
         if case .apiRequestFailed(let statusCode, _) = visible, statusCode == 401 {
             authService.signOut()
-            authState = .signedOut
-            ensembles = []
-            selectedEnsembleID = nil
+            transitionToUnauthenticated(.signedOut)
         } else if visible == .authenticationFailed {
             authService.signOut()
-            authState = .signedOut
-            ensembles = []
-            selectedEnsembleID = nil
+            transitionToUnauthenticated(.signedOut)
         }
         lastError = visible
     }
@@ -489,7 +492,7 @@ final class AppModel: ObservableObject {
             authState = .signedIn(email: session.email)
             gatewayCompleted = true
             lastError = nil
-            setAuthNotice(String(localized: "Signed in."))
+            setAuthNotice(NativeLocalization.string("Signed in."))
         } catch {
             setAuthFailure(error)
         }
@@ -507,8 +510,7 @@ final class AppModel: ObservableObject {
             setAuthNotice("Account created. Here's a quick tour of BrassTune.")
             requestTutorialPresentation()
         } catch UserVisibleError.emailConfirmationRequired {
-            authState = .emailConfirmationRequired(email: email)
-            gatewayCompleted = true
+            transitionToUnauthenticated(.emailConfirmationRequired(email: email))
             lastError = nil
             setAuthNotice("Account created. Check your email to confirm it, then use this tour to get started.")
             requestTutorialPresentation()
@@ -523,7 +525,7 @@ final class AppModel: ObservableObject {
         do {
             try await authService.requestPasswordReset(email: email, config: config)
             lastError = nil
-            setAuthNotice(String(localized: "Password reset email sent. Check your inbox."))
+            setAuthNotice(NativeLocalization.string("Password reset email sent. Check your inbox."))
         } catch {
             setAuthFailure(error)
         }
@@ -543,7 +545,7 @@ final class AppModel: ObservableObject {
                 setAuthNotice("Apple account created. Here's a quick tour of BrassTune.")
                 requestTutorialPresentation()
             case false:
-                setAuthNotice(String(localized: "Signed in with Apple."))
+                setAuthNotice(NativeLocalization.string("Signed in with Apple."))
             case nil:
                 // Some providers omit account-age timestamps. Touring the
                 // unknown case guarantees a newly created identity is not left
@@ -678,8 +680,7 @@ final class AppModel: ObservableObject {
         selectedEnsembleID = nil
         ensembleStatusMessage = nil
         authService.deleteStoredAuth()
-        activateStorageNamespace(.guest)
-        authState = .signedOut
+        transitionToUnauthenticated(.signedOut)
         if clearedLocalArtifacts {
             lastError = nil
             setAuthNotice(deletedRemoteAccount ? "Account and local practice data deleted." : "Local app data cleared.")
@@ -1218,7 +1219,10 @@ final class AppModel: ObservableObject {
                 frames: capturedFrames,
                 source: .live,
                 preferredName: session.exercise.title,
-                practiceNotes: "Play-Along: \(session.exercise.title)."
+                practiceNotes: NativeLocalization.format(
+                    "Play-Along: %@.",
+                    session.exercise.title
+                )
             )
         }
     }
@@ -1329,17 +1333,17 @@ final class AppModel: ObservableObject {
     }
 
     private func persistLocalData() {
-        guard !isRestoringLocalState else { return }
+        guard !isRestoringLocalState, persistenceAccessState.canPersist else { return }
         do {
             try persistenceStore.saveOrThrow(makeLocalSnapshot())
             persistenceErrorMessage = nil
         } catch {
-            persistenceErrorMessage = String(localized: "BrassTune couldn't save your latest changes on this device. Keep the app open, export your data if needed, and try again.")
+            persistenceErrorMessage = NativeLocalization.string("BrassTune couldn't save your latest changes on this device. Keep the app open, export your data if needed, and try again.")
         }
     }
 
-    private func activateStorageNamespace(_ namespace: NativeStorageNamespace) {
-        guard activeStorageNamespace != namespace else { return }
+    private func prepareStorageNamespace(_ namespace: NativeStorageNamespace) {
+        persistenceAccessState = .restoringIdentity
         stopFeatureAudio()
         isRestoringLocalState = true
         selectedInstrumentId = "trumpet"
@@ -1361,6 +1365,34 @@ final class AppModel: ObservableObject {
             removeItem: scoreFileRemover
         )
         restoreLocalData()
+    }
+
+    private func activateStorageNamespace(_ namespace: NativeStorageNamespace) {
+        if activeStorageNamespace != namespace || !persistenceAccessState.matches(namespace) {
+            prepareStorageNamespace(namespace)
+        }
+        persistenceAccessState = namespace.accessState
+    }
+
+    private func transitionToUnauthenticated(_ state: AuthState) {
+        persistenceAccessState = .lockedSignedOut
+        stopFeatureAudio()
+        isRestoringLocalState = true
+        selectedInstrumentId = "trumpet"
+        referencePitchHz = 440
+        sessions = []
+        scores = []
+        activeScoreID = nil
+        metronome = MetronomeSettings()
+        practiceFeatures = PracticeFeatureState()
+        gatewayCompleted = false
+        tutorialCompleted = false
+        appLanguage = .system
+        ensembles = []
+        selectedEnsembleID = nil
+        ensembleStatusMessage = nil
+        isRestoringLocalState = false
+        authState = state
     }
 }
 
@@ -1411,6 +1443,37 @@ enum NativeStorageNamespace: Equatable {
         let ext = guestFile.pathExtension
         let name = "\(base)-account-\(accountComponent)" + (ext.isEmpty ? "" : ".\(ext)")
         return guestFile.deletingLastPathComponent().appendingPathComponent(name)
+    }
+}
+
+enum PersistenceAccessState: Equatable {
+    case restoringIdentity
+    case lockedSignedOut
+    case guest
+    case account(userID: String)
+
+    var canPersist: Bool {
+        switch self {
+        case .guest, .account: return true
+        case .restoringIdentity, .lockedSignedOut: return false
+        }
+    }
+
+    func matches(_ namespace: NativeStorageNamespace) -> Bool {
+        switch (self, namespace) {
+        case (.guest, .guest): return true
+        case (.account(let lhs), .account(let rhs)): return lhs == rhs
+        default: return false
+        }
+    }
+}
+
+private extension NativeStorageNamespace {
+    var accessState: PersistenceAccessState {
+        switch self {
+        case .guest: return .guest
+        case .account(let userID): return .account(userID: userID)
+        }
     }
 }
 
@@ -1511,12 +1574,15 @@ struct NativeScoreImportService {
 
         var errorDescription: String? {
             switch self {
-            case .unsupportedType: return String(localized: "BrassTune can import PDF, JPEG, PNG, and HEIC score files.")
-            case .unreadableFile: return String(localized: "BrassTune could not read that score file.")
-            case .fileTooLarge: return String(localized: "This file is too large to import.")
-            case .noPages: return String(localized: "No score pages were found in that file.")
-            case .tooManyPages(let maximum): return String(localized: "This PDF has more than \(maximum) pages. Split it into smaller files before importing.")
-            case .cleanupFailed: return String(localized: "The score could not be imported, and BrassTune could not remove its copied file. The copied file remains on this device.")
+            case .unsupportedType: return NativeLocalization.string("BrassTune can import PDF, JPEG, PNG, and HEIC score files.")
+            case .unreadableFile: return NativeLocalization.string("BrassTune could not read that score file.")
+            case .fileTooLarge: return NativeLocalization.string("This file is too large to import.")
+            case .noPages: return NativeLocalization.string("No score pages were found in that file.")
+            case .tooManyPages(let maximum): return NativeLocalization.format(
+                "This PDF has more than %@ pages. Split it into smaller files before importing.",
+                String(maximum)
+            )
+            case .cleanupFailed: return NativeLocalization.string("The score could not be imported, and BrassTune could not remove its copied file. The copied file remains on this device.")
             }
         }
     }

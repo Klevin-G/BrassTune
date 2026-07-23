@@ -11,11 +11,14 @@ enum CustomExerciseValidationError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .missingTitle:
-            return "Give the exercise a short name."
+            return NativeLocalization.string("Give the exercise a short name.")
         case .invalidNote(let note):
-            return "\(note) isn't a supported note name. Use a note such as C, F sharp, or B flat."
+            return NativeLocalization.format(
+                "%@ isn't a supported note name. Use a note such as C, F sharp, or B flat.",
+                note
+            )
         case .invalidNoteCount:
-            return "An exercise needs between 1 and 32 notes."
+            return NativeLocalization.string("An exercise needs between 1 and 32 notes.")
         }
     }
 }
@@ -40,7 +43,10 @@ struct SavedPlayAlongExercise: Codable, Equatable, Identifiable {
         PlayAlongExercise(
             id: "custom:\(id.uuidString)",
             title: title,
-            detail: "Your custom \(writtenNotes.count)-note exercise",
+            detail: NativeLocalization.format(
+                "Your custom %@-note exercise",
+                String(writtenNotes.count)
+            ),
             difficulty: "Custom",
             category: .practicePattern,
             writtenNotes: writtenNotes
@@ -235,15 +241,20 @@ struct WeakTransitionInsight: Equatable {
     let weaknessScore: Double
 
     var explanation: String {
-        "\(fromNote) to \(toNote) was the least steady transition across \(evidenceCount) attempts."
+        NativeLocalization.format(
+            "%@ to %@ was the least steady transition across %@ attempts.",
+            fromNote,
+            toNote,
+            String(evidenceCount)
+        )
     }
 
     var exercise: PlayAlongExercise {
         PlayAlongExercise(
             id: "generated:\(PracticePitchMath.pitchClass(for: fromNote) ?? 0)-\(PracticePitchMath.pitchClass(for: toNote) ?? 0)",
-            title: "\(fromNote)–\(toNote) transition drill",
-            detail: "Generated from your saved Play-Along results",
-            difficulty: "Personal drill",
+            title: NativeLocalization.format("%@–%@ transition drill", fromNote, toNote),
+            detail: NativeLocalization.string("Generated from your saved Play-Along results"),
+            difficulty: NativeLocalization.string("Personal drill"),
             category: .practicePattern,
             writtenNotes: [fromNote, toNote, fromNote, toNote, fromNote, toNote]
         )
@@ -319,12 +330,12 @@ enum TuningInterval: Int, Codable, CaseIterable, Identifiable {
     var id: Int { rawValue }
     var title: String {
         switch self {
-        case .unison: return "Unison"
-        case .majorSecond: return "Major second"
-        case .majorThird: return "Major third"
-        case .perfectFourth: return "Perfect fourth"
-        case .perfectFifth: return "Perfect fifth"
-        case .octave: return "Octave"
+        case .unison: return NativeLocalization.string("Unison")
+        case .majorSecond: return NativeLocalization.string("Major second")
+        case .majorThird: return NativeLocalization.string("Major third")
+        case .perfectFourth: return NativeLocalization.string("Perfect fourth")
+        case .perfectFifth: return NativeLocalization.string("Perfect fifth")
+        case .octave: return NativeLocalization.string("Octave")
         }
     }
 }
@@ -767,14 +778,14 @@ extension AppModel {
             instrumentID: selectedInstrumentId,
             referencePitchHz: referencePitchHz
         ) else {
-            audioEngine.setExternalAudioNotice("This instrument doesn't have a verified written-to-concert transposition, so BrassTune did not play a tone.")
+            audioEngine.setExternalAudioNotice(NativeLocalization.string("This instrument doesn't have a verified written-to-concert transposition, so BrassTune did not play a tone."))
             return
         }
         do {
             try audioEngine.startTone(frequenciesHz: frequencies, volume: settings.volume)
             recordPracticeStart(PracticeShortcut(kind: .drone, referenceID: "drone", title: "Drone and interval tuning"))
         } catch {
-            audioEngine.setExternalAudioNotice("BrassTune couldn't start the reference tone. Check your audio output and try again.")
+            audioEngine.setExternalAudioNotice(NativeLocalization.string("BrassTune couldn't start the reference tone. Check your audio output and try again."))
         }
     }
 
@@ -866,7 +877,10 @@ extension AppModel {
                 endedAt: max(now, checkpoint.firstStartedAt.addingTimeInterval(1)),
                 frames: [],
                 retainedRecordingURL: nil,
-                practiceNotes: "Completed offline practice pack: \(checkpoint.pack.name).",
+                practiceNotes: NativeLocalization.format(
+                    "Completed offline practice pack: %@.",
+                    checkpoint.pack.name
+                ),
                 source: .live
             ),
             at: 0

@@ -68,11 +68,11 @@ struct APIClient {
 
     private static func fallbackMessage(for statusCode: Int) -> String {
         switch statusCode {
-        case 401: return "Your sign-in expired. Sign in again, then retry."
-        case 403: return "You don't have permission to do that."
-        case 404: return "That class could not be found."
-        case 409: return "That class action conflicts with your current membership."
-        default: return "The class service could not complete this request."
+        case 401: return NativeLocalization.string("Your sign-in expired. Sign in again, then retry.")
+        case 403: return NativeLocalization.string("You don't have permission to do that.")
+        case 404: return NativeLocalization.string("That class could not be found.")
+        case 409: return NativeLocalization.string("That class action conflicts with your current membership.")
+        default: return NativeLocalization.string("The class service could not complete this request.")
         }
     }
 }

@@ -259,10 +259,21 @@ final class BrassTuneAppTests: XCTestCase {
             let entry = try XCTUnwrap(rawEntry as? [String: Any], key)
             let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any], key)
             XCTAssertEqual(Set(localizations.keys), expectedLocales, "Missing production locale in \(key)")
+            let expectedObjectPlaceholders = key.components(separatedBy: "%@").count - 1
+            for (locale, rawLocalization) in localizations {
+                guard let localization = rawLocalization as? [String: Any],
+                      let unit = localization["stringUnit"] as? [String: Any],
+                      let value = unit["value"] as? String else { continue }
+                XCTAssertEqual(
+                    value.components(separatedBy: "%@").count - 1,
+                    expectedObjectPlaceholders,
+                    "Placeholder mismatch for \(locale): \(key)"
+                )
+            }
         }
         let appSourceDirectory = resourceDirectory.deletingLastPathComponent()
         let sourceEnumerator = FileManager.default.enumerator(at: appSourceDirectory, includingPropertiesForKeys: nil)
-        let expression = try NSRegularExpression(pattern: #"String\(localized: \"([^\"]+)\""#)
+        let expression = try NSRegularExpression(pattern: #"(?:String\(localized:|NativeLocalization\.(?:string|format)\()\s*\"([^\"]+)\""#)
         while let sourceURL = sourceEnumerator?.nextObject() as? URL {
             guard sourceURL.pathExtension == "swift", let source = try? String(contentsOf: sourceURL, encoding: .utf8) else { continue }
             let range = NSRange(source.startIndex..<source.endIndex, in: source)
@@ -270,21 +281,60 @@ final class BrassTuneAppTests: XCTestCase {
                 guard let keyRange = Range(match.range(at: 1), in: source) else { continue }
                 let rawKey = String(source[keyRange])
                 let key = rawKey.replacingOccurrences(of: #"\\\([^)]*\)"#, with: "%lld", options: .regularExpression)
-                XCTAssertNotNil(strings[key], "String(localized:) key missing from catalog: \(key)")
+                XCTAssertNotNil(strings[key], "Runtime-localized key missing from catalog: \(key)")
             }
         }
         let systemDefault = try XCTUnwrap(strings["System Default"] as? [String: Any])
         XCTAssertEqual(Set(try XCTUnwrap(systemDefault["localizations"] as? [String: Any]).keys), expectedLocales)
         let plural = try XCTUnwrap(strings["%lld practice sessions"] as? [String: Any])
-        XCTAssertEqual(Set(try XCTUnwrap(plural["localizations"] as? [String: Any]).keys), expectedLocales)
+        let pluralLocalizations = try XCTUnwrap(plural["localizations"] as? [String: Any])
+        XCTAssertEqual(Set(pluralLocalizations.keys), expectedLocales)
+        let arabicPlural = try XCTUnwrap(pluralLocalizations["ar"] as? [String: Any])
+        let arabicVariations = try XCTUnwrap(arabicPlural["variations"] as? [String: Any])
+        let arabicForms = try XCTUnwrap(arabicVariations["plural"] as? [String: Any])
+        XCTAssertEqual(Set(arabicForms.keys), Set(["zero", "one", "two", "few", "many", "other"]))
         XCTAssertEqual(AppLanguage.english.practiceSessionCountLabel(1), "1 practice session")
         XCTAssertEqual(AppLanguage.english.practiceSessionCountLabel(2), "2 practice sessions")
+
+        func value(_ key: String, _ locale: String) throws -> String {
+            let entry = try XCTUnwrap(strings[key] as? [String: Any], key)
+            let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any], key)
+            let localization = try XCTUnwrap(localizations[locale] as? [String: Any], "\(locale): \(key)")
+            let unit = try XCTUnwrap(localization["stringUnit"] as? [String: Any], "\(locale): \(key)")
+            return try XCTUnwrap(unit["value"] as? String, "\(locale): \(key)")
+        }
+        XCTAssertEqual(try value("Class", "zh-Hans"), "班级")
+        XCTAssertEqual(try value("Class", "zh-Hant"), "班級")
+        XCTAssertEqual(try value("Class", "ko"), "클래스")
+        XCTAssertEqual(try value("Start listening", "ja"), "測定を開始")
+        XCTAssertEqual(try value("Find the center", "zh-Hans"), "找准音高")
+        XCTAssertEqual(try value("Practice history", "fr"), "Historique des séances")
+        XCTAssertEqual(try value("Stop and save recording", "de"), "Stoppen und speichern")
+        XCTAssertEqual(try value("Relaxed slurs", "es"), "Ligaduras relajadas")
+        XCTAssertEqual(try value("Drone and intervals", "zh-Hans"), "持续音与音程")
+        XCTAssertEqual(try value("%@ cents", "pt-BR"), "%@ cents")
+        XCTAssertEqual(try value("Score Practice", "pt-BR"), "Prática de partituras")
 
         let infoData = try Data(contentsOf: resourceDirectory.appendingPathComponent("InfoPlist.xcstrings"))
         let info = try XCTUnwrap(JSONSerialization.jsonObject(with: infoData) as? [String: Any])
         let infoStrings = try XCTUnwrap(info["strings"] as? [String: Any])
         let mic = try XCTUnwrap(infoStrings["NSMicrophoneUsageDescription"] as? [String: Any])
         XCTAssertEqual(Set(try XCTUnwrap(mic["localizations"] as? [String: Any]).keys), expectedLocales)
+    }
+
+    func testRuntimeLocalizationFollowsExplicitArabicSelectionAfterEnglish() {
+        let originalLanguage = NativeLocalization.language
+        defer { NativeLocalization.language = originalLanguage }
+
+        NativeLocalization.language = .english
+        XCTAssertEqual(NativeLocalization.string("Flat"), "Flat")
+        NativeLocalization.language = .arabic
+        XCTAssertEqual(NativeLocalization.string("Flat"), AppLanguage.arabic.localized("Flat"))
+        XCTAssertNotEqual(NativeLocalization.string("Flat"), "Flat")
+        XCTAssertEqual(
+            UserVisibleError.microphoneDenied.errorDescription,
+            AppLanguage.arabic.localized("Microphone access is off. Allow it in Settings, then try again.")
+        )
     }
 
     func testKeychainSessionUsesThisDeviceOnlyAccessibility() {
@@ -311,11 +361,13 @@ final class BrassTuneAppTests: XCTestCase {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
         let model = AppModel(persistenceStore: store)
+        model.enterGuestDemo(presentTutorial: false)
 
         XCTAssertFalse(model.tutorialCompleted)
         model.completeTutorial()
 
         let restored = AppModel(persistenceStore: store)
+        restored.enterGuestDemo(presentTutorial: false)
         XCTAssertTrue(restored.tutorialCompleted)
         XCTAssertEqual(restored.tutorialPresentationRequest, 0)
 
@@ -512,6 +564,7 @@ final class BrassTuneAppTests: XCTestCase {
             apiClient: APIClient(session: makeStubSession()),
             authService: authService
         )
+        model.enterGuestDemo(presentTutorial: false)
         model.config = config
         let guestSession = makeSession(name: "Guest only", cents: [0])
         model.sessions = [guestSession]
@@ -525,6 +578,10 @@ final class BrassTuneAppTests: XCTestCase {
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Account A score")
 
         await model.signOut()
+        XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertTrue(model.scores.isEmpty)
+        model.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(model.sessions.map(\.id), [guestSession.id])
         XCTAssertEqual(model.scores.map(\.title), ["Guest score"])
 
@@ -534,6 +591,7 @@ final class BrassTuneAppTests: XCTestCase {
         model.sessions = [makeSession(name: "Account B only", cents: [2])]
 
         await model.signOut()
+        XCTAssertTrue(model.sessions.isEmpty)
         await model.signIn(email: "a@example.com", password: "password")
         XCTAssertEqual(model.sessions.map(\.id), [accountASession.id])
         XCTAssertEqual(model.scores.map(\.title), ["Account A score"])
@@ -553,6 +611,10 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: accountAFile.path))
         await relaunched.deleteAccount()
         XCTAssertFalse(FileManager.default.fileExists(atPath: accountAFile.path))
+        XCTAssertEqual(relaunched.persistenceAccessState, .lockedSignedOut)
+        XCTAssertTrue(relaunched.sessions.isEmpty)
+        XCTAssertTrue(relaunched.scores.isEmpty)
+        relaunched.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(relaunched.sessions.map(\.id), [guestSession.id])
         XCTAssertEqual(relaunched.scores.map(\.title), ["Guest score"])
 
@@ -563,6 +625,9 @@ final class BrassTuneAppTests: XCTestCase {
             authService: authService
         )
         afterDeletionRelaunch.config = config
+        XCTAssertEqual(afterDeletionRelaunch.persistenceAccessState, .restoringIdentity)
+        XCTAssertTrue(afterDeletionRelaunch.sessions.isEmpty)
+        await afterDeletionRelaunch.restoreSession()
         XCTAssertEqual(afterDeletionRelaunch.sessions.map(\.id), [guestSession.id])
         await afterDeletionRelaunch.signIn(email: "a@example.com", password: "password")
         XCTAssertTrue(afterDeletionRelaunch.sessions.isEmpty, "A deleted account namespace must stay deleted after relaunch.")
@@ -599,6 +664,10 @@ final class BrassTuneAppTests: XCTestCase {
         await model.restoreSession()
 
         XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+        XCTAssertFalse(model.gatewayCompleted)
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertTrue(model.scores.isEmpty)
         XCTAssertNil(authService.restoreSession())
         XCTAssertEqual(
             model.lastError,
@@ -661,6 +730,9 @@ final class BrassTuneAppTests: XCTestCase {
             await model.restoreSession()
 
             XCTAssertEqual(model.authState, .signedOut)
+            XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+            XCTAssertTrue(model.sessions.isEmpty)
+            XCTAssertTrue(model.scores.isEmpty)
             XCTAssertNotNil(authService.restoreSession(), "Retryable \(statusCode) failures must remain resumable.")
             XCTAssertEqual(
                 model.lastError,
@@ -732,6 +804,8 @@ final class BrassTuneAppTests: XCTestCase {
         await model.restoreSession()
 
         XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+        XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertNotNil(authService.restoreSession())
         XCTAssertEqual(model.lastError, .networkUnavailable)
         XCTAssertTrue(model.authNoticeIsError)
@@ -867,6 +941,7 @@ final class BrassTuneAppTests: XCTestCase {
                 throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
             }
         )
+        model.enterGuestDemo(presentTutorial: false)
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Protected score")
         let score = try XCTUnwrap(model.scores.first)
         let storedURL = try XCTUnwrap(model.storedScoreFileURL(for: score))
@@ -888,6 +963,7 @@ final class BrassTuneAppTests: XCTestCase {
         )
 
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        restored.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(restored.scores.first?.id, score.id, "Failed file removal must roll the persisted deletion back.")
         XCTAssertEqual(restored.sessions.first?.attachedScoreID, score.id)
     }
@@ -902,6 +978,7 @@ final class BrassTuneAppTests: XCTestCase {
         }
         let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
         let model = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Disposable score")
         let score = try XCTUnwrap(model.scores.first)
         let storedURL = try XCTUnwrap(model.storedScoreFileURL(for: score))
@@ -914,6 +991,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertNil(model.sessions.first?.attachedScoreID)
         XCTAssertFalse(FileManager.default.fileExists(atPath: storedURL.path))
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        restored.enterGuestDemo(presentTutorial: false)
         XCTAssertTrue(restored.scores.isEmpty)
         XCTAssertNil(restored.sessions.first?.attachedScoreID)
     }
@@ -928,6 +1006,7 @@ final class BrassTuneAppTests: XCTestCase {
         }
         let durableStore = NativePersistenceStore.ephemeral(fileURL: stateURL)
         let seedModel = AppModel(persistenceStore: durableStore, scoreStorageDirectory: scoreDirectory)
+        seedModel.enterGuestDemo(presentTutorial: false)
         try seedModel.importPhotoScore(data: makeTinyPNGData(), preferredName: "Durable score")
         let score = try XCTUnwrap(seedModel.scores.first)
         seedModel.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
@@ -940,6 +1019,7 @@ final class BrassTuneAppTests: XCTestCase {
             }
         )
         let model = AppModel(persistenceStore: failingStore, scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
         let storedURL = try XCTUnwrap(model.scores.first.flatMap { model.storedScoreFileURL(for: $0) })
 
         model.deleteScore(id: score.id)
@@ -955,6 +1035,7 @@ final class BrassTuneAppTests: XCTestCase {
             )
         )
         let restored = AppModel(persistenceStore: durableStore, scoreStorageDirectory: scoreDirectory)
+        restored.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(restored.scores.first?.id, score.id)
         XCTAssertEqual(restored.sessions.first?.attachedScoreID, score.id)
     }
@@ -969,6 +1050,7 @@ final class BrassTuneAppTests: XCTestCase {
         }
         let durableStore = NativePersistenceStore.ephemeral(fileURL: stateURL)
         let seedModel = AppModel(persistenceStore: durableStore, scoreStorageDirectory: scoreDirectory)
+        seedModel.enterGuestDemo(presentTutorial: false)
         try seedModel.importPhotoScore(data: makeTinyPNGData(), preferredName: "Rollback score")
         let score = try XCTUnwrap(seedModel.scores.first)
         seedModel.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
@@ -979,7 +1061,7 @@ final class BrassTuneAppTests: XCTestCase {
             fileURL: stateURL,
             writeData: { data, url in
                 writeCount += 1
-                if writeCount == 2 {
+                if writeCount == 3 {
                     throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
                 }
                 try data.write(to: url, options: [.atomic])
@@ -992,11 +1074,12 @@ final class BrassTuneAppTests: XCTestCase {
                 throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
             }
         )
+        model.enterGuestDemo(presentTutorial: false)
         let storedURL = try XCTUnwrap(model.scores.first.flatMap { model.storedScoreFileURL(for: $0) })
 
         model.deleteScore(id: score.id)
 
-        XCTAssertEqual(writeCount, 2)
+        XCTAssertEqual(writeCount, 3)
         XCTAssertEqual(model.scores.first?.id, score.id)
         XCTAssertEqual(model.sessions.first?.attachedScoreID, score.id)
         XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
@@ -1082,6 +1165,7 @@ final class BrassTuneAppTests: XCTestCase {
                 throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
             }
         )
+        model.enterGuestDemo(presentTutorial: false)
 
         XCTAssertThrowsError(try model.importScore(from: sourceURL)) { error in
             XCTAssertEqual(error as? NativeScoreImportService.ImportError, .cleanupFailed)
@@ -1109,6 +1193,7 @@ final class BrassTuneAppTests: XCTestCase {
                 throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
             }
         )
+        model.enterGuestDemo(presentTutorial: false)
         model.sessions = [makeSession(name: "Recording", cents: [-2, 0, 3])]
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Protected score")
         let storedURL = try XCTUnwrap(model.scores.first.flatMap { model.storedScoreFileURL(for: $0) })
@@ -1127,6 +1212,7 @@ final class BrassTuneAppTests: XCTestCase {
         )
 
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        restored.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(restored.scores.count, 1, "A score-cleanup failure must restore the snapshot cleared earlier in the transaction.")
         XCTAssertEqual(restored.sessions.count, 1)
     }
@@ -1146,6 +1232,7 @@ final class BrassTuneAppTests: XCTestCase {
             }
         )
         let model = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
         model.sessions = [makeSession(name: "Persistent recording", cents: [-2, 0, 3])]
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Persistent score")
         let score = try XCTUnwrap(model.scores.first)
@@ -1167,6 +1254,7 @@ final class BrassTuneAppTests: XCTestCase {
         )
 
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        restored.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(restored.scores.first?.id, score.id, "Failed clear must not claim success before stale state can reappear on launch.")
         XCTAssertEqual(restored.sessions.count, 1)
     }
@@ -1176,6 +1264,7 @@ final class BrassTuneAppTests: XCTestCase {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
         let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
 
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Disposable score")
         let fileName = try XCTUnwrap(model.scores.first?.localFileName)
@@ -1195,6 +1284,7 @@ final class BrassTuneAppTests: XCTestCase {
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
         let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
         let model = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
 
         model.selectedInstrumentId = "horn"
         model.referencePitchHz = 442.0
@@ -1204,6 +1294,7 @@ final class BrassTuneAppTests: XCTestCase {
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Saved score")
 
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        restored.enterGuestDemo(presentTutorial: false)
 
         XCTAssertEqual(restored.selectedInstrumentId, "horn")
         XCTAssertEqual(restored.referencePitchHz, 442.0)
@@ -1239,6 +1330,7 @@ final class BrassTuneAppTests: XCTestCase {
         )
 
         let restored = AppModel(persistenceStore: store)
+        restored.enterGuestDemo(presentTutorial: false)
 
         XCTAssertFalse(restored.metronome.muted)
         XCTAssertFalse(restored.metronome.visualOnly)
@@ -1264,6 +1356,7 @@ final class BrassTuneAppTests: XCTestCase {
         )
 
         let restored = AppModel(persistenceStore: store)
+        restored.enterGuestDemo(presentTutorial: false)
 
         XCTAssertTrue(restored.sessions.isEmpty)
         XCTAssertTrue(restored.scores.isEmpty)
@@ -1347,6 +1440,30 @@ final class BrassTuneAppTests: XCTestCase {
         }
     }
 
+    func testPlayAlongOnlyAdvancesWhenPostAttackMedianIsAccepted() {
+        var edge = PlayAlongGrader(writtenNotes: ["C", "D"], holdDurationMs: 300, minimumSamples: 3, attackTrimMs: 0)
+        for timestamp in stride(from: 0, through: 300, by: 100) {
+            edge.feed(makePlayAlongFrame(note: "C", cents: 15, timestampMs: timestamp))
+        }
+        XCTAssertEqual(edge.currentNoteName, "D")
+        XCTAssertEqual(edge.noteGrades.first?.rating, .close)
+
+        var outside = PlayAlongGrader(writtenNotes: ["C", "D"], holdDurationMs: 300, minimumSamples: 3, attackTrimMs: 0)
+        for timestamp in stride(from: 0, through: 300, by: 100) {
+            outside.feed(makePlayAlongFrame(note: "C", cents: 15.1, timestampMs: timestamp))
+        }
+        XCTAssertEqual(outside.currentNoteName, "C")
+        XCTAssertTrue(outside.noteGrades.isEmpty)
+        XCTAssertEqual(outside.heldFraction, 0)
+
+        for timestamp in stride(from: 1_000, through: 1_300, by: 100) {
+            outside.feed(makePlayAlongFrame(note: "C", cents: 0, timestampMs: timestamp))
+        }
+        XCTAssertEqual(outside.currentNoteName, "D")
+        XCTAssertEqual(outside.noteGrades.count, 1)
+        XCTAssertEqual(outside.noteGrades.first?.rating, .excellent)
+    }
+
     func testSharedReferenceToneDroneAndTranspositionFixturesMatchNativeMath() throws {
         let referenceData = try Data(contentsOf: try sharedFixtureURL(named: "reference_tone_cases.json"))
         let referenceCases = try XCTUnwrap(JSONSerialization.jsonObject(with: referenceData) as? [[String: Any]])
@@ -1388,6 +1505,150 @@ final class BrassTuneAppTests: XCTestCase {
                 PracticePitchMath.concertMIDI(forWrittenMIDI: expectedWritten, instrumentID: instrumentID),
                 item["concert_midi"] as? Int
             )
+            let range = InstrumentAcousticRange.forInstrument(instrumentID)
+            XCTAssertEqual(range.minimumHz, try XCTUnwrap(item["expected_min_frequency_hz"] as? Double))
+            XCTAssertEqual(range.maximumHz, try XCTUnwrap(item["expected_max_frequency_hz"] as? Double))
+        }
+    }
+
+    func testAllSelectedInstrumentRangesGatePitchBeforeNoteAndRecordingState() {
+        let expected: [String: InstrumentAcousticRange] = [
+            "trumpet": .init(minimumHz: 130, maximumHz: 1_500),
+            "horn": .init(minimumHz: 80, maximumHz: 1_200),
+            "trombone": .init(minimumHz: 50, maximumHz: 700),
+            "euphonium": .init(minimumHz: 55, maximumHz: 800),
+            "tuba": .init(minimumHz: 30, maximumHz: 500),
+        ]
+        for (instrument, range) in expected {
+            XCTAssertEqual(InstrumentAcousticRange.forInstrument(instrument), range)
+            XCTAssertEqual(NativePitchDetector.acousticRange(for: instrument), range)
+            for rejectedFrequency in [range.minimumHz.nextDown, range.maximumHz.nextUp] {
+                let frame = PitchFrame.detected(
+                    timestampMs: 0,
+                    frequencyHz: rejectedFrequency,
+                    confidence: 0.99,
+                    rms: 0.1,
+                    instrumentId: instrument,
+                    referencePitchHz: 440
+                )
+                XCTAssertNil(frame.writtenNoteName, "\(instrument) at \(rejectedFrequency)")
+                XCTAssertNil(frame.writtenOctave)
+                XCTAssertNil(frame.centsDeviation)
+                XCTAssertFalse(frame.isValidForRecording)
+            }
+            for acceptedFrequency in [range.minimumHz, range.maximumHz] {
+                let frame = PitchFrame.detected(
+                    timestampMs: 0,
+                    frequencyHz: acceptedFrequency,
+                    confidence: 0.99,
+                    rms: 0.1,
+                    instrumentId: instrument,
+                    referencePitchHz: 440
+                )
+                XCTAssertNotNil(frame.writtenNoteName, "\(instrument) at \(acceptedFrequency)")
+                XCTAssertNotNil(frame.centsDeviation)
+                XCTAssertTrue(frame.isValidForRecording)
+            }
+        }
+    }
+
+    func testSharedNoteSegmentationFixtureMatchesNativeEvents() throws {
+        let data = try Data(contentsOf: try sharedFixtureURL(named: "note_segmentation_cases.json"))
+        let cases = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        for item in cases {
+            let frames = try XCTUnwrap(item["frames"] as? [[String: Any]]).map(makePitchFrame(from:))
+            let events = NativePitchAnalytics.segmentNoteEvents(frames: frames)
+            let expected = try XCTUnwrap(item["expected_events"] as? [[String: Any]])
+            XCTAssertEqual(events.count, expected.count, item["name"] as? String ?? "segmentation")
+            for (actual, target) in zip(events, expected) {
+                XCTAssertEqual(actual.writtenNote, target["written_note"] as? String)
+                XCTAssertEqual(actual.writtenOctave, target["written_octave"] as? Int)
+                XCTAssertEqual(actual.durationMs, target["duration_ms"] as? Int)
+                XCTAssertEqual(actual.sampleCount, target["sample_count"] as? Int)
+                XCTAssertEqual(actual.averageSignedCents, try XCTUnwrap(target["avg_signed_cents"] as? Double), accuracy: 0.000_001)
+                XCTAssertEqual(actual.medianCents, try XCTUnwrap(target["median_cents"] as? Double), accuracy: 0.000_001)
+                XCTAssertEqual(actual.standardDeviationCents, try XCTUnwrap(target["stddev_cents"] as? Double), accuracy: 0.000_001)
+                XCTAssertEqual(actual.inTunePercentage, try XCTUnwrap(target["in_tune_percentage"] as? Double), accuracy: 0.000_001)
+                XCTAssertEqual(actual.stabilityScore, try XCTUnwrap(target["stability_score"] as? Double), accuracy: 0.000_001)
+            }
+        }
+    }
+
+    func testSharedDurationWeightedAnalyticsAndRecommendationsMatchNativeRules() throws {
+        let analyticsData = try Data(contentsOf: try sharedFixtureURL(named: "analytics_cases.json"))
+        let analyticsCases = try XCTUnwrap(JSONSerialization.jsonObject(with: analyticsData) as? [[String: Any]])
+        for item in analyticsCases {
+            let label = try XCTUnwrap(item["note_label"] as? String)
+            let (note, octave) = try noteAndOctave(from: label)
+            let events = try XCTUnwrap(item["events"] as? [[String: Any]]).map { event in
+                NativeNoteEvent(
+                    writtenNote: note,
+                    writtenOctave: octave,
+                    startedAtMs: 0,
+                    endedAtMs: event["duration_ms"] as? Int ?? 0,
+                    durationMs: event["duration_ms"] as? Int ?? 0,
+                    sampleCount: 10,
+                    averageSignedCents: event["avg_signed_cents"] as? Double ?? 0,
+                    averageAbsoluteCents: event["avg_abs_cents"] as? Double ?? 0,
+                    medianCents: event["avg_signed_cents"] as? Double ?? 0,
+                    standardDeviationCents: event["stddev_cents"] as? Double ?? 0,
+                    minimumCents: event["avg_signed_cents"] as? Double ?? 0,
+                    maximumCents: event["avg_signed_cents"] as? Double ?? 0,
+                    inTunePercentage: event["in_tune_percentage"] as? Double ?? 0,
+                    stabilityScore: event["stability_score"] as? Double ?? 90
+                )
+            }
+            let stats = try XCTUnwrap(NativePitchAnalytics.calculateNoteStatistics(events: events).first)
+            XCTAssertEqual(stats.trend, item["expected_trend"] as? String)
+            if let minimum = item["expected_problem_severity_min"] as? Double {
+                XCTAssertGreaterThanOrEqual(stats.problemSeverity, minimum)
+            }
+            if let maximum = item["expected_problem_severity_max"] as? Double {
+                XCTAssertLessThanOrEqual(stats.problemSeverity, maximum)
+            }
+        }
+
+        let recommendationData = try Data(contentsOf: try sharedFixtureURL(named: "recommendation_cases.json"))
+        let recommendationCases = try XCTUnwrap(JSONSerialization.jsonObject(with: recommendationData) as? [[String: Any]])
+        for item in recommendationCases {
+            let values = try XCTUnwrap(item["note_stats"] as? [String: Any])
+            let label = try XCTUnwrap(values["note_label"] as? String)
+            let (note, octave) = try noteAndOctave(from: label)
+            let signed = values["avg_signed_cents"] as? Double ?? 0
+            let absolute = values["avg_abs_cents"] as? Double ?? 0
+            let deviation = values["stddev_cents"] as? Double ?? 0
+            let inTune = values["in_tune_percentage"] as? Double ?? 0
+            let stability = values["stability_score"] as? Double ?? 100
+            let durationSeconds = values["duration_seconds"] as? Double ?? 0
+            let trend = NativePitchAnalytics.classifyTrend(
+                averageSignedCents: signed,
+                standardDeviationCents: deviation,
+                stabilityScore: stability
+            )
+            let severity = NativePitchAnalytics.classifyProblem(
+                averageAbsoluteCents: absolute,
+                inTunePercentage: inTune
+            )
+            let stats = NativeNoteStatistics(
+                writtenNote: note,
+                writtenOctave: octave,
+                noteLabel: label,
+                averageSignedCents: signed,
+                averageAbsoluteCents: absolute,
+                medianCents: signed,
+                standardDeviationCents: deviation,
+                inTunePercentage: inTune,
+                durationMs: durationSeconds * 1_000,
+                sampleCount: 10,
+                eventCount: 1,
+                stabilityScore: stability,
+                trend: trend,
+                severity: severity,
+                problemSeverity: 0
+            )
+            let recommendation = NativePitchAnalytics.recommendation(for: stats)
+            XCTAssertEqual(recommendation.category, item["expected_category"] as? String)
+            XCTAssertEqual(recommendation.relatedNote, item["expected_related_note"] as? String)
         }
     }
 
@@ -1535,6 +1796,56 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(delete.path, "/api/ensemble/groups/7/membership")
         XCTAssertEqual(delete.authorization, "Bearer fresh-token")
         StubURLProtocol.handler = nil
+    }
+
+    @MainActor
+    func testClass401LocksPriorAccountDataUntilExplicitGuestEntry() async throws {
+        let authService = makeIsolatedAuthService(session: makeStubSession())
+        let config = makeAuthConfig()
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-class-expiry-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-class-expiry-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            authService.signOut()
+            StubURLProtocol.handler = nil
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: NativeStorageNamespace.account(userID: "class-user").stateFile(basedAt: stateURL))
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        StubURLProtocol.handler = { request in
+            let data = Data(#"{"access_token":"class-token","refresh_token":"class-refresh","expires_in":3600,"user":{"id":"class-user","email":"class@example.com"}}"#.utf8)
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: data
+            )
+        }
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            authService: authService,
+            classAccessTokenProvider: { _ in
+                throw UserVisibleError.apiRequestFailed(statusCode: 401, message: "expired")
+            }
+        )
+        model.config = config
+        model.enterGuestDemo(presentTutorial: false)
+        let guestSession = makeSession(name: "Guest session", cents: [0])
+        model.sessions = [guestSession]
+
+        await model.signIn(email: "class@example.com", password: "password")
+        model.sessions = [makeSession(name: "Private account session", cents: [2])]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Private account score")
+
+        await model.loadEnsembles()
+
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
+        XCTAssertFalse(model.gatewayCompleted)
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertTrue(model.scores.isEmpty)
+        model.enterGuestDemo(presentTutorial: false)
+        XCTAssertEqual(model.persistenceAccessState, .guest)
+        XCTAssertEqual(model.sessions.map(\.id), [guestSession.id])
+        XCTAssertTrue(model.scores.isEmpty)
     }
 
     @MainActor
@@ -1904,7 +2215,9 @@ final class BrassTuneAppTests: XCTestCase {
     private func makeModel() -> AppModel {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
-        return AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
+        return model
     }
 
     @MainActor
@@ -1961,6 +2274,43 @@ final class BrassTuneAppTests: XCTestCase {
             "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11,
         ][note])
         return (octave + 1) * 12 + pitchClass
+    }
+
+    private func noteAndOctave(from label: String) throws -> (String, Int) {
+        let pattern = #"^([A-G](?:#|b)?)(-?\d+)$"#
+        let expression = try NSRegularExpression(pattern: pattern)
+        let range = NSRange(label.startIndex..<label.endIndex, in: label)
+        let match = try XCTUnwrap(expression.firstMatch(in: label, range: range))
+        let note = String(label[Range(match.range(at: 1), in: label)!])
+        let octave = try XCTUnwrap(Int(label[Range(match.range(at: 2), in: label)!]))
+        return (note, octave)
+    }
+
+    private func makePitchFrame(from item: [String: Any]) -> PitchFrame {
+        let note = item["written_note_name"] as? String
+        let octave = item["written_octave"] as? Int
+        let cents = item["cents_deviation"] as? Double
+        let status: TuningStatus
+        switch item["tuning_status"] as? String {
+        case "flat": status = .flat
+        case "in_tune": status = .inTune
+        case "sharp": status = .sharp
+        case "silence": status = .silence
+        case "unstable": status = .unstable
+        default: status = .noLock
+        }
+        let defaultValidity = note != nil && octave != nil && cents != nil && [.flat, .inTune, .sharp].contains(status)
+        return PitchFrame(
+            timestampMs: item["timestamp_ms"] as? Int ?? 0,
+            frequencyHz: defaultValidity ? 440 : nil,
+            confidence: defaultValidity ? 0.99 : 0,
+            rms: defaultValidity ? 0.08 : 0,
+            centsDeviation: cents,
+            tuningStatus: status,
+            writtenNoteName: note,
+            writtenOctave: octave,
+            isValidForRecording: item["is_valid_for_recording"] as? Bool ?? defaultValidity
+        )
     }
 
     private func makeSession(

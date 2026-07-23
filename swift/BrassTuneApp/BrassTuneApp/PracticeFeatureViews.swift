@@ -169,21 +169,24 @@ struct CustomExerciseBuilderView: View {
                         if value.count > 60 { title = String(value.prefix(60)) }
                     }
                     .accessibilityIdentifier("exerciseBuilder.title")
-                Text("\(title.count)/60")
+                Text(verbatim: NativeLocalization.isolate("\(title.count)/60"))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(BTTheme.muted)
             }
 
             BTCard {
-                BTSectionHeader(title: "Notes", subtitle: "\(notes.count) of 32")
+                BTSectionHeader(
+                    title: "Notes",
+                    subtitle: NativeLocalization.format("%@ of 32", String(notes.count))
+                )
                 ForEach(notes.indices, id: \.self) { index in
                     HStack(spacing: BTSpacing.sm) {
-                        Picker("Note \(index + 1)", selection: Binding(
+                        Picker(NativeLocalization.format("Note %@", String(index + 1)), selection: Binding(
                             get: { notes[index] },
                             set: { notes[index] = $0 }
                         )) {
                             ForEach(SavedPlayAlongExercise.noteChoices, id: \.self) { note in
-                                Text(note).tag(note)
+                                Text(verbatim: NativeLocalization.isolate(note)).tag(note)
                             }
                         }
                         .pickerStyle(.menu)
@@ -196,7 +199,7 @@ struct CustomExerciseBuilderView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .disabled(index == 0)
-                        .accessibilityLabel("Move note \(index + 1) up")
+                        .accessibilityLabel(NativeLocalization.format("Move note %@ up", String(index + 1)))
 
                         Button {
                             guard index < notes.count - 1 else { return }
@@ -206,7 +209,7 @@ struct CustomExerciseBuilderView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .disabled(index == notes.count - 1)
-                        .accessibilityLabel("Move note \(index + 1) down")
+                        .accessibilityLabel(NativeLocalization.format("Move note %@ down", String(index + 1)))
 
                         Button(role: .destructive) {
                             guard notes.count > 1 else { return }
@@ -216,7 +219,7 @@ struct CustomExerciseBuilderView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .disabled(notes.count == 1)
-                        .accessibilityLabel("Delete note \(index + 1)")
+                        .accessibilityLabel(NativeLocalization.format("Delete note %@", String(index + 1)))
                     }
                     .accessibilityElement(children: .contain)
                 }
@@ -281,7 +284,11 @@ struct GuidedWarmupView: View {
                 )
 
                 BTCard(tint: BTTheme.surfaceWarm) {
-                    Text("Step \(stepIndex + 1) of \(plan.steps.count)")
+                    Text(NativeLocalization.format(
+                        "Step %@ of %@",
+                        String(stepIndex + 1),
+                        String(plan.steps.count)
+                    ))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(BTTheme.muted)
                     Text(step.title)
@@ -293,7 +300,10 @@ struct GuidedWarmupView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     ProgressView(value: elapsed, total: plan.durationSeconds)
                         .accessibilityLabel("Warm-up progress")
-                        .accessibilityValue("\(Int(elapsed)) of 300 seconds")
+                        .accessibilityValue(NativeLocalization.format(
+                            "%@ of 300 seconds",
+                            String(Int(elapsed))
+                        ))
                 }
 
                 if checkpoint?.completed == true {
@@ -386,7 +396,12 @@ struct MetronomePresetsCard: View {
                 VStack(alignment: .leading, spacing: BTSpacing.sm) {
                     Text(preset.name)
                         .font(.headline)
-                    Text("\(preset.settings.bpm) BPM · \(preset.settings.meterLabel) · \(preset.settings.subdivision.title)")
+                    Text(NativeLocalization.format(
+                        "%@ BPM · %@ · %@",
+                        String(preset.settings.bpm),
+                        preset.settings.meterLabel,
+                        preset.settings.subdivision.title
+                    ))
                         .font(.subheadline)
                         .foregroundStyle(BTTheme.muted)
                     HStack {
@@ -402,7 +417,13 @@ struct MetronomePresetsCard: View {
                 }
                 .padding(.vertical, BTSpacing.xs)
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel("\(preset.name), \(preset.settings.bpm) beats per minute, \(preset.settings.meterLabel), \(preset.settings.subdivision.title)")
+                .accessibilityLabel(NativeLocalization.format(
+                    "%@, %@ beats per minute, %@, %@",
+                    preset.name,
+                    String(preset.settings.bpm),
+                    preset.settings.meterLabel,
+                    preset.settings.subdivision.title
+                ))
             }
 
             if let presetStatus {
@@ -461,8 +482,18 @@ struct WeeklyGoalCard: View {
             BTSectionHeader(title: "This week's goal", subtitle: "A new week starts using your device's calendar and time zone.")
             ProgressView(value: Double(progress.minutes), total: Double(goal.targetMinutes))
                 .accessibilityLabel("Weekly practice minutes")
-                .accessibilityValue("\(progress.minutes) of \(goal.targetMinutes) minutes")
-            Text("\(progress.minutes) of \(goal.targetMinutes) minutes · \(progress.sessionCount) of \(goal.targetSessions) sessions")
+                .accessibilityValue(NativeLocalization.format(
+                    "%@ of %@ minutes",
+                    String(progress.minutes),
+                    String(goal.targetMinutes)
+                ))
+            Text(NativeLocalization.format(
+                "%@ of %@ minutes · %@ of %@ sessions",
+                String(progress.minutes),
+                String(goal.targetMinutes),
+                String(progress.sessionCount),
+                String(goal.targetSessions)
+            ))
                 .font(.headline.monospacedDigit())
                 .fixedSize(horizontal: false, vertical: true)
             Stepper("Goal: \(goal.targetMinutes) minutes", value: Binding(
@@ -531,7 +562,7 @@ struct PracticeReflectionCard: View {
                 .lineLimit(2...5)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("reflection.note")
-            Text("\(note.count)/280")
+            Text(verbatim: NativeLocalization.isolate("\(note.count)/280"))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(note.count > 280 ? BTTheme.danger : BTTheme.muted)
             Button(saved ? "Saved" : "Save reflection") {
@@ -673,7 +704,11 @@ struct PracticePacksView: View {
             ForEach(model.practicePacks) { pack in
                 BTCard {
                     BTSectionHeader(title: pack.name, subtitle: pack.detail)
-                    Text("\(pack.blocks.count) blocks · \(Int(pack.blocks.reduce(0) { $0 + $1.durationSeconds } / 60)) minutes")
+                    Text(NativeLocalization.format(
+                        "%@ blocks · %@ minutes",
+                        String(pack.blocks.count),
+                        String(Int(pack.blocks.reduce(0) { $0 + $1.durationSeconds } / 60))
+                    ))
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(BTTheme.muted)
                     NavigationLink {
@@ -728,17 +763,28 @@ struct FocusedPracticeWorkspaceView: View {
                     }
                 } else if let block, let checkpoint {
                     BTCard(tint: BTTheme.surfaceWarm) {
-                        Text("Block \(checkpoint.blockIndex + 1) of \(pack.blocks.count)")
+                        Text(NativeLocalization.format(
+                            "Block %@ of %@",
+                            String(checkpoint.blockIndex + 1),
+                            String(pack.blocks.count)
+                        ))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(BTTheme.muted)
                         Label(block.kind.rawValue.capitalized, systemImage: icon(for: block.kind))
                             .font(.title2.weight(.bold))
                         ProgressView(value: elapsed, total: block.durationSeconds)
                             .accessibilityLabel("Block progress")
-                            .accessibilityValue("\(Int(elapsed)) of \(Int(block.durationSeconds)) seconds")
+                            .accessibilityValue(NativeLocalization.format(
+                                "%@ of %@ seconds",
+                                String(Int(elapsed)),
+                                String(Int(block.durationSeconds))
+                            ))
 
                         if block.kind == .playAlong, let session = model.playAlongSession, model.playAlongPhase == .running {
-                            Text("Play \(session.currentNoteName ?? "the next note")")
+                            Text(NativeLocalization.format(
+                                "Play %@",
+                                session.currentNoteName ?? NativeLocalization.string("the next note")
+                            ))
                                 .font(.title.weight(.bold))
                                 .frame(maxWidth: .infinity)
                             ProgressView(value: session.heldFraction)

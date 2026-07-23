@@ -10,12 +10,32 @@ enum NativeTestFixtures {
 
 func instrumentDisplayName(_ id: String) -> String {
     switch id {
-    case "trumpet": return "Trumpet in Bb"
-    case "horn": return "Horn in F"
-    case "trombone": return "Trombone"
-    case "euphonium": return "Euphonium"
-    case "tuba": return "Tuba"
+    case "trumpet": return NativeLocalization.string("Trumpet in Bb")
+    case "horn": return NativeLocalization.string("Horn in F")
+    case "trombone": return NativeLocalization.string("Trombone")
+    case "euphonium": return NativeLocalization.string("Euphonium")
+    case "tuba": return NativeLocalization.string("Tuba")
     default: return id.capitalized
+    }
+}
+
+struct InstrumentAcousticRange: Equatable {
+    let minimumHz: Double
+    let maximumHz: Double
+
+    func contains(_ frequencyHz: Double) -> Bool {
+        frequencyHz.isFinite && frequencyHz >= minimumHz && frequencyHz <= maximumHz
+    }
+
+    static func forInstrument(_ instrumentId: String) -> InstrumentAcousticRange {
+        switch instrumentId {
+        case "trumpet": return InstrumentAcousticRange(minimumHz: 130, maximumHz: 1_500)
+        case "horn": return InstrumentAcousticRange(minimumHz: 80, maximumHz: 1_200)
+        case "trombone": return InstrumentAcousticRange(minimumHz: 50, maximumHz: 700)
+        case "euphonium": return InstrumentAcousticRange(minimumHz: 55, maximumHz: 800)
+        case "tuba": return InstrumentAcousticRange(minimumHz: 30, maximumHz: 500)
+        default: return InstrumentAcousticRange(minimumHz: 55, maximumHz: 1_300)
+        }
     }
 }
 
@@ -184,9 +204,12 @@ struct PitchFrame: Codable, Equatable, Identifiable {
         instrumentId: String,
         referencePitchHz: Double
     ) -> PitchFrame {
-        let concertMidiFloat = frequencyHz.map { BrassTuneCore.frequencyToMidi($0, referencePitchHz: referencePitchHz) }
+        let acceptedFrequency = frequencyHz.flatMap {
+            InstrumentAcousticRange.forInstrument(instrumentId).contains($0) ? $0 : nil
+        }
+        let concertMidiFloat = acceptedFrequency.map { BrassTuneCore.frequencyToMidi($0, referencePitchHz: referencePitchHz) }
         let concertMidi = concertMidiFloat.map { Int($0.rounded()) }
-        let cents = frequencyHz.flatMap { frequency -> Double? in
+        let cents = acceptedFrequency.flatMap { frequency -> Double? in
             guard let concertMidi else { return nil }
             return BrassTuneCore.centsDeviation(frequencyHz: frequency, nearestMidi: concertMidi, referencePitchHz: referencePitchHz)
         }
@@ -240,10 +263,10 @@ enum MetronomeSubdivision: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .quarter: return "Quarter"
-        case .eighth: return "Eighth"
-        case .triplet: return "Triplet"
-        case .sixteenth: return "Sixteenth"
+        case .quarter: return NativeLocalization.string("Quarter")
+        case .eighth: return NativeLocalization.string("Eighth")
+        case .triplet: return NativeLocalization.string("Triplet")
+        case .sixteenth: return NativeLocalization.string("Sixteenth")
         }
     }
 
@@ -286,10 +309,10 @@ enum ScoreSourceKind: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .filesPDF: return "Files PDF"
-        case .filesImage: return "Files image"
-        case .photos: return "Photos"
-        case .sample: return "Sample"
+        case .filesPDF: return NativeLocalization.string("Files PDF")
+        case .filesImage: return NativeLocalization.string("Files image")
+        case .photos: return NativeLocalization.string("Photos")
+        case .sample: return NativeLocalization.string("Sample")
         }
     }
 
@@ -306,22 +329,22 @@ enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .live: return "Live mic"
-        case .sample: return "UI test fixture"
+        case .live: return NativeLocalization.string("Live mic")
+        case .sample: return NativeLocalization.string("UI test fixture")
         }
     }
 
     var sessionTitle: String {
         switch self {
-        case .live: return "Recording"
-        case .sample: return "Test recording"
+        case .live: return NativeLocalization.string("Recording")
+        case .sample: return NativeLocalization.string("Test recording")
         }
     }
 
     var exportLabel: String {
         switch self {
-        case .live: return "live microphone"
-        case .sample: return "UI test fixture"
+        case .live: return NativeLocalization.string("live microphone")
+        case .sample: return NativeLocalization.string("UI test fixture")
         }
     }
 
@@ -339,9 +362,9 @@ enum PlayAlongExerciseCategory: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .major: return "Major scales"
-        case .naturalMinor: return "Natural minor scales"
-        case .practicePattern: return "Other exercises"
+        case .major: return NativeLocalization.string("Major scales")
+        case .naturalMinor: return NativeLocalization.string("Natural minor scales")
+        case .practicePattern: return NativeLocalization.string("Other exercises")
         }
     }
 }
@@ -600,11 +623,11 @@ enum PlayAlongNoteRating: String, Codable, Equatable {
 
     var title: String {
         switch self {
-        case .excellent: return "Great"
-        case .good: return "Good"
-        case .close: return "Close"
-        case .off: return "Try again"
-        case .missed: return "Skipped"
+        case .excellent: return NativeLocalization.string("Great")
+        case .good: return NativeLocalization.string("Good")
+        case .close: return NativeLocalization.string("Close")
+        case .off: return NativeLocalization.string("Try again")
+        case .missed: return NativeLocalization.string("Skipped")
         }
     }
 }
@@ -753,7 +776,14 @@ struct PlayAlongGrader: Equatable {
             centsSamples.append(TimedCentsSample(timestampMs: frame.timestampMs, cents: cents))
             if confirmedHoldDurationMs >= holdDurationMs,
                centsSamples.count >= minimumSamples {
-                finalizeCurrentNote(wasPlayed: true)
+                let scoredCents = scoredMedianCents()
+                if PlayAlongNoteRating(cents: scoredCents).isAccepted {
+                    finalizeCurrentNote(wasPlayed: true, scoredCents: scoredCents)
+                } else {
+                    // Reaching the time gate is not enough: an out-of-tune
+                    // median must retry the same target instead of advancing.
+                    resetCurrentHold()
+                }
             }
         } else if confident,
                   let detected = frame.writtenNoteName,
@@ -775,21 +805,20 @@ struct PlayAlongGrader: Equatable {
 
     mutating func skipCurrentNote() {
         guard !isComplete else { return }
-        finalizeCurrentNote(wasPlayed: false)
+        finalizeCurrentNote(wasPlayed: false, scoredCents: nil)
     }
 
-    private mutating func finalizeCurrentNote(wasPlayed: Bool) {
+    private func scoredMedianCents() -> Double? {
+        guard let firstMatchTimestampMs, !centsSamples.isEmpty else { return nil }
+        let sustained = centsSamples.filter { $0.timestampMs - firstMatchTimestampMs >= attackTrimMs }
+        let minimumTrustedSustainSamples = min(minimumSamples, 3)
+        let source = sustained.count >= minimumTrustedSustainSamples ? sustained : centsSamples
+        return Self.median(source.map(\.cents))
+    }
+
+    private mutating func finalizeCurrentNote(wasPlayed: Bool, scoredCents: Double?) {
         guard let target = currentNoteName else { return }
-        let scoredCents: Double?
-        if wasPlayed, let firstMatchTimestampMs, !centsSamples.isEmpty {
-            let sustained = centsSamples.filter { $0.timestampMs - firstMatchTimestampMs >= attackTrimMs }
-            let minimumTrustedSustainSamples = min(minimumSamples, 3)
-            let source = sustained.count >= minimumTrustedSustainSamples ? sustained : centsSamples
-            scoredCents = Self.median(source.map(\.cents))
-        } else {
-            scoredCents = nil
-        }
-        let roundedCents = scoredCents.map { ($0 * 10).rounded() / 10 }
+        let roundedCents = wasPlayed ? scoredCents.map { ($0 * 10).rounded() / 10 } : nil
         noteGrades.append(
             PlayAlongNoteGrade(
                 writtenNoteName: target,
@@ -917,10 +946,10 @@ enum ScoreEnhancement: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .original: return "Original"
-        case .grayscale: return "Grayscale"
-        case .contrast: return "Contrast"
-        case .highContrast: return "High contrast"
+        case .original: return NativeLocalization.string("Original")
+        case .grayscale: return NativeLocalization.string("Grayscale")
+        case .contrast: return NativeLocalization.string("Contrast")
+        case .highContrast: return NativeLocalization.string("High contrast")
         }
     }
 }
@@ -935,10 +964,10 @@ enum ScoreCropPreset: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .fullPage: return "Full page"
-        case .trimMargins: return "Trim margins"
-        case .upperHalf: return "Upper half"
-        case .lowerHalf: return "Lower half"
+        case .fullPage: return NativeLocalization.string("Full page")
+        case .trimMargins: return NativeLocalization.string("Trim margins")
+        case .upperHalf: return NativeLocalization.string("Upper half")
+        case .lowerHalf: return NativeLocalization.string("Lower half")
         }
     }
 }
@@ -1019,6 +1048,242 @@ struct ImportedScore: Codable, Equatable, Identifiable {
     }
 }
 
+struct NativeNoteEvent: Equatable {
+    let writtenNote: String
+    let writtenOctave: Int
+    let startedAtMs: Int
+    let endedAtMs: Int
+    let durationMs: Int
+    let sampleCount: Int
+    let averageSignedCents: Double
+    let averageAbsoluteCents: Double
+    let medianCents: Double
+    let standardDeviationCents: Double
+    let minimumCents: Double
+    let maximumCents: Double
+    let inTunePercentage: Double
+    let stabilityScore: Double
+}
+
+struct NativeNoteStatistics: Equatable {
+    let writtenNote: String
+    let writtenOctave: Int
+    let noteLabel: String
+    let averageSignedCents: Double
+    let averageAbsoluteCents: Double
+    let medianCents: Double
+    let standardDeviationCents: Double
+    let inTunePercentage: Double
+    let durationMs: Double
+    let sampleCount: Int
+    let eventCount: Int
+    let stabilityScore: Double
+    let trend: String
+    let severity: String
+    let problemSeverity: Double
+}
+
+struct NativePracticeRecommendation: Equatable {
+    let category: String
+    let relatedNote: String
+}
+
+enum NativePitchAnalytics {
+    static let maximumMergeGapMs = 340
+    static let minimumEventDurationMs = 120
+
+    static func segmentNoteEvents(
+        frames: [PitchFrame],
+        maximumMergeGapMs: Int = maximumMergeGapMs,
+        minimumDurationMs: Int = minimumEventDurationMs
+    ) -> [NativeNoteEvent] {
+        let ordered = frames.sorted { $0.timestampMs < $1.timestampMs }
+        var events: [NativeNoteEvent] = []
+        var current: [PitchFrame] = []
+        var currentLabel: String?
+        var lastValidTimestamp: Int?
+
+        func label(for frame: PitchFrame) -> String? {
+            guard let note = frame.writtenNoteName, let octave = frame.writtenOctave else { return nil }
+            return "\(note)\(octave)"
+        }
+
+        func event(from frames: [PitchFrame]) -> NativeNoteEvent? {
+            let valid = frames.filter { $0.isValidForRecording && $0.centsDeviation != nil }
+            guard let first = valid.first,
+                  let last = valid.last,
+                  let note = first.writtenNoteName,
+                  let octave = first.writtenOctave else { return nil }
+            let cents = valid.compactMap(\.centsDeviation)
+            let gaps = zip(valid.dropFirst(), valid).map { current, previous in
+                current.timestampMs - previous.timestampMs
+            }
+            let inferredTail = gaps.isEmpty ? 0 : max(60, min(Int(median(gaps.map(Double.init))), 180))
+            let duration = max(0, last.timestampMs - first.timestampMs) + inferredTail
+            let mean = average(cents)
+            let deviation = populationStandardDeviation(cents)
+            let inTuneCount = valid.filter { $0.tuningStatus == .inTune }.count
+            return NativeNoteEvent(
+                writtenNote: note,
+                writtenOctave: octave,
+                startedAtMs: first.timestampMs,
+                endedAtMs: last.timestampMs,
+                durationMs: duration,
+                sampleCount: valid.count,
+                averageSignedCents: mean,
+                averageAbsoluteCents: average(cents.map(abs)),
+                medianCents: median(cents),
+                standardDeviationCents: deviation,
+                minimumCents: cents.min() ?? 0,
+                maximumCents: cents.max() ?? 0,
+                inTunePercentage: Double(inTuneCount) / Double(valid.count) * 100,
+                stabilityScore: max(0, min(100, 100 - deviation * 5))
+            )
+        }
+
+        func flush() {
+            guard let value = event(from: current), value.durationMs >= minimumDurationMs else {
+                current.removeAll(keepingCapacity: true)
+                return
+            }
+            events.append(value)
+            current.removeAll(keepingCapacity: true)
+        }
+
+        for frame in ordered {
+            let valid = frame.isValidForRecording && frame.centsDeviation != nil && label(for: frame) != nil
+            guard valid else {
+                if !current.isEmpty,
+                   let lastValidTimestamp,
+                   frame.timestampMs - lastValidTimestamp > maximumMergeGapMs {
+                    flush()
+                    currentLabel = nil
+                }
+                continue
+            }
+            let frameLabel = label(for: frame)
+            if current.isEmpty {
+                current = [frame]
+                currentLabel = frameLabel
+                lastValidTimestamp = frame.timestampMs
+                continue
+            }
+            let gap = frame.timestampMs - (lastValidTimestamp ?? frame.timestampMs)
+            if frameLabel != currentLabel || gap > maximumMergeGapMs {
+                flush()
+            }
+            currentLabel = frameLabel
+            current.append(frame)
+            lastValidTimestamp = frame.timestampMs
+        }
+        flush()
+        return events
+    }
+
+    static func calculateNoteStatistics(events: [NativeNoteEvent]) -> [NativeNoteStatistics] {
+        Dictionary(grouping: events) { "\($0.writtenNote)\($0.writtenOctave)" }
+            .values
+            .compactMap { items in
+                guard let first = items.first else { return nil }
+                let totalDuration = items.reduce(0.0) { $0 + Double($1.durationMs) }
+                let denominator = totalDuration > 0 ? totalDuration : Double(items.count)
+                func weight(_ event: NativeNoteEvent) -> Double {
+                    totalDuration > 0 ? Double(event.durationMs) : 1
+                }
+                let centers = items.map(\.averageSignedCents)
+                let averageSigned = items.reduce(0.0) { $0 + $1.averageSignedCents * weight($1) } / denominator
+                let averageAbsolute = items.reduce(0.0) { $0 + $1.averageAbsoluteCents * weight($1) } / denominator
+                let inTune = items.reduce(0.0) { $0 + $1.inTunePercentage * weight($1) } / denominator
+                let stability = items.reduce(0.0) { $0 + $1.stabilityScore * weight($1) } / denominator
+                let deviation = items.count > 1 ? populationStandardDeviation(centers) : first.standardDeviationCents
+                let trend = classifyTrend(averageSignedCents: averageSigned, standardDeviationCents: deviation, stabilityScore: stability)
+                let severity = classifyProblem(averageAbsoluteCents: averageAbsolute, inTunePercentage: inTune)
+                let problem = roundedHundredth(averageAbsolute * 2 + deviation + max(0, 80 - inTune) * 0.25)
+                return NativeNoteStatistics(
+                    writtenNote: first.writtenNote,
+                    writtenOctave: first.writtenOctave,
+                    noteLabel: "\(first.writtenNote)\(first.writtenOctave)",
+                    averageSignedCents: averageSigned,
+                    averageAbsoluteCents: averageAbsolute,
+                    medianCents: median(centers),
+                    standardDeviationCents: deviation,
+                    inTunePercentage: inTune,
+                    durationMs: denominator,
+                    sampleCount: items.reduce(0) { $0 + $1.sampleCount },
+                    eventCount: items.count,
+                    stabilityScore: stability,
+                    trend: trend,
+                    severity: severity,
+                    problemSeverity: problem
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.writtenOctave == rhs.writtenOctave
+                    ? lhs.writtenNote < rhs.writtenNote
+                    : lhs.writtenOctave < rhs.writtenOctave
+            }
+    }
+
+    static func recommendation(for stats: NativeNoteStatistics) -> NativePracticeRecommendation {
+        let category: String
+        if stats.durationMs / 1_000 < 3 {
+            category = "Insufficient data"
+        } else if stats.trend == "Unstable" {
+            category = "Inconsistent pitch"
+        } else if stats.averageSignedCents >= 10 {
+            category = "Sharp tendency"
+        } else if stats.averageSignedCents <= -10 {
+            category = "Flat tendency"
+        } else if stats.severity == "severe issue" {
+            category = "Severe problem note"
+        } else {
+            category = "Good progress"
+        }
+        return NativePracticeRecommendation(category: category, relatedNote: stats.noteLabel)
+    }
+
+    static func classifyTrend(
+        averageSignedCents: Double,
+        standardDeviationCents: Double,
+        stabilityScore: Double
+    ) -> String {
+        if standardDeviationCents >= 12 || stabilityScore < 50 { return "Unstable" }
+        if averageSignedCents >= 6 { return "Mostly sharp" }
+        if averageSignedCents <= -6 { return "Mostly flat" }
+        return "Centered"
+    }
+
+    static func classifyProblem(averageAbsoluteCents: Double, inTunePercentage: Double) -> String {
+        if averageAbsoluteCents <= 5, inTunePercentage >= 80 { return "excellent" }
+        if averageAbsoluteCents <= 8 { return "good" }
+        if averageAbsoluteCents <= 15 { return "moderate issue" }
+        return "severe issue"
+    }
+
+    private static func average(_ values: [Double]) -> Double {
+        values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+    }
+
+    private static func median(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let middle = sorted.count / 2
+        return sorted.count.isMultiple(of: 2)
+            ? (sorted[middle - 1] + sorted[middle]) / 2
+            : sorted[middle]
+    }
+
+    private static func populationStandardDeviation(_ values: [Double]) -> Double {
+        guard values.count > 1 else { return 0 }
+        let center = average(values)
+        return sqrt(average(values.map { pow($0 - center, 2) }))
+    }
+
+    private static func roundedHundredth(_ value: Double) -> Double {
+        (value * 100).rounded() / 100
+    }
+}
+
 struct PracticeSession: Codable, Equatable, Identifiable {
     let id: UUID
     var name: String
@@ -1091,6 +1356,14 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         return values.reduce(0, +) / Double(values.count)
     }
 
+    var noteEvents: [NativeNoteEvent] {
+        NativePitchAnalytics.segmentNoteEvents(frames: frames)
+    }
+
+    var noteStatistics: [NativeNoteStatistics] {
+        NativePitchAnalytics.calculateNoteStatistics(events: noteEvents)
+    }
+
     var inTunePercentage: Double {
         let values = frames.filter(\.isValidForRecording).compactMap(\.centsDeviation)
         guard !values.isEmpty else { return 0 }
@@ -1111,7 +1384,7 @@ struct PracticeSession: Codable, Equatable, Identifiable {
             guard let note = frame.writtenNoteName, let octave = frame.writtenOctave else { return nil }
             return "\(note)\(octave)"
         })
-        guard !noteNames.isEmpty else { return "No notes detected" }
+        guard !noteNames.isEmpty else { return NativeLocalization.string("No notes detected") }
         return noteNames.sorted().joined(separator: ", ")
     }
 
@@ -1166,18 +1439,18 @@ struct AnalyticsSnapshot: Equatable {
 
     var recommendation: String {
         guard hasSessions else {
-            return "Record your first note to see a practice tip."
+            return NativeLocalization.string("Record your first note to see a practice tip.")
         }
         guard hasUsableEvidence else {
-            return "Play a little longer so BrassTune can suggest what to practice next."
+            return NativeLocalization.string("Play a little longer so BrassTune can suggest what to practice next.")
         }
         if averageAbsCents > 8 {
-            return "Start with drone matching and slow attacks before extending range."
+            return NativeLocalization.string("Start with drone matching and slow attacks before extending range.")
         }
         if averageInTunePercentage < 75 {
-            return "Repeat stable long tones and hold each pitch through the release."
+            return NativeLocalization.string("Repeat stable long tones and hold each pitch through the release.")
         }
-        return "Intonation is settling. Add a repertoire excerpt after the next long-tone pass."
+        return NativeLocalization.string("Intonation is settling. Add a repertoire excerpt after the next long-tone pass.")
     }
 
     init(sessions: [PracticeSession]) {
@@ -1240,10 +1513,10 @@ struct EnsembleSummary: Codable, Equatable, Identifiable {
 
     var viewerRoleLabel: String {
         switch viewerRole {
-        case "owner": return "Class owner"
-        case "assistant": return "Assistant"
-        case "admin_observer": return "Administrator observer"
-        default: return "Student"
+        case "owner": return NativeLocalization.string("Class owner")
+        case "assistant": return NativeLocalization.string("Assistant")
+        case "admin_observer": return NativeLocalization.string("Administrator observer")
+        default: return NativeLocalization.string("Student")
         }
     }
 }
@@ -1256,10 +1529,10 @@ enum AuthState: Equatable {
 
     var displayTitle: String {
         switch self {
-        case .signedOut: return "Signed out"
-        case .guest: return "Guest practice"
-        case .signedIn(let email): return email
-        case .emailConfirmationRequired(let email): return "Confirm \(email)"
+        case .signedOut: return NativeLocalization.string("Signed out")
+        case .guest: return NativeLocalization.string("Guest practice")
+        case .signedIn(let email): return NativeLocalization.preserve(email)
+        case .emailConfirmationRequired(let email): return NativeLocalization.format("Confirm %@", email)
         }
     }
 
@@ -1285,17 +1558,17 @@ enum UserVisibleError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .microphoneDenied: return String(localized: "Microphone access is off. Allow it in Settings, then try again.")
-        case .networkUnavailable: return String(localized: "The account service is unavailable right now.")
-        case .malformedResponse: return String(localized: "The account service returned an unreadable response.")
-        case .timeout: return String(localized: "The request timed out.")
-        case .appleSignInCancelled: return String(localized: "Apple sign-in was cancelled.")
-        case .accountDeletionRequiresConfirmation: return String(localized: "Please confirm deletion and try again.")
-        case .missingAuthConfiguration: return String(localized: "Account sign-in isn't available right now. You can keep practicing as a guest.")
-        case .authenticationFailed: return String(localized: "BrassTune could not complete authentication.")
-        case .secureStorageUnavailable: return String(localized: "BrassTune couldn't securely save your sign-in on this device. Check device storage and try again.")
-        case .emailConfirmationRequired: return String(localized: "Check your email to confirm this BrassTune account before signing in.")
-        case .microphoneUnavailable: return String(localized: "BrassTune could not hear the microphone. Check your audio input and try again.")
+        case .microphoneDenied: return NativeLocalization.string("Microphone access is off. Allow it in Settings, then try again.")
+        case .networkUnavailable: return NativeLocalization.string("The account service is unavailable right now.")
+        case .malformedResponse: return NativeLocalization.string("The account service returned an unreadable response.")
+        case .timeout: return NativeLocalization.string("The request timed out.")
+        case .appleSignInCancelled: return NativeLocalization.string("Apple sign-in was cancelled.")
+        case .accountDeletionRequiresConfirmation: return NativeLocalization.string("Please confirm deletion and try again.")
+        case .missingAuthConfiguration: return NativeLocalization.string("Account sign-in isn't available right now. You can keep practicing as a guest.")
+        case .authenticationFailed: return NativeLocalization.string("BrassTune could not complete authentication.")
+        case .secureStorageUnavailable: return NativeLocalization.string("BrassTune couldn't securely save your sign-in on this device. Check device storage and try again.")
+        case .emailConfirmationRequired: return NativeLocalization.string("Check your email to confirm this BrassTune account before signing in.")
+        case .microphoneUnavailable: return NativeLocalization.string("BrassTune could not hear the microphone. Check your audio input and try again.")
         case .apiRequestFailed(_, let message): return message
         }
     }

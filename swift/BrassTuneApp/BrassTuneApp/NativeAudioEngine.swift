@@ -48,8 +48,8 @@ final class NativeAudioEngine: ObservableObject {
                 if wasPlayingTone { self.stopTone() }
                 self.routeChanged = true
                 self.audioNotice = wasPlayingTone
-                    ? "The reference tone stopped because your audio output changed. Check your headphones or speaker before restarting."
-                    : "Your audio output changed. Check your headphones or speaker before continuing."
+                    ? NativeLocalization.string("The reference tone stopped because your audio output changed. Check your headphones or speaker before restarting.")
+                    : NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
             }
         }
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -62,9 +62,13 @@ final class NativeAudioEngine: ObservableObject {
                 guard let self else { return }
                 if typeValue == AVAudioSession.InterruptionType.began.rawValue {
                     self.stopAndResetAudioEngine()
-                    self.audioNotice = "Recording stopped because the audio session was interrupted."
+                    self.audioNotice = NativeLocalization.string("Recording stopped because the audio session was interrupted.")
                 }
             }
+        }
+        if ProcessInfo.processInfo.arguments.contains("UITEST_MIC_DENIED") {
+            permissionDenied = true
+            audioNotice = NativeLocalization.string("Microphone access is off. Allow it in Settings, then try again.")
         }
     }
 
@@ -80,7 +84,7 @@ final class NativeAudioEngine: ObservableObject {
             }
         }
         permissionDenied = !granted
-        audioNotice = granted ? nil : "Microphone access is off. Allow it in Settings, then try again."
+        audioNotice = granted ? nil : NativeLocalization.string("Microphone access is off. Allow it in Settings, then try again.")
         return granted
     }
 
@@ -266,7 +270,7 @@ final class NativeAudioEngine: ObservableObject {
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
-            audioNotice = "BrassTune can't hear a microphone."
+            audioNotice = NativeLocalization.string("BrassTune can't hear a microphone.")
             throw NativeAudioEngineError.inputUnavailable
         }
 
@@ -302,7 +306,7 @@ final class NativeAudioEngine: ObservableObject {
             try engine.start()
         } catch {
             stopAndResetAudioEngine()
-            audioNotice = "BrassTune couldn't start the microphone. Check your audio input and try again."
+            audioNotice = NativeLocalization.string("BrassTune couldn't start the microphone. Check your audio input and try again.")
             throw error
         }
 
@@ -427,9 +431,9 @@ enum NativePitchDetector {
 
     private static func autocorrelationPitch(samples: [Double], sampleRate: Double, instrumentId: String) -> (frequencyHz: Double?, confidence: Double) {
         guard samples.count >= 64 else { return (nil, 0) }
-        let profileRange = frequencyRange(for: instrumentId)
-        let minFrequency = max(45.0, profileRange.min * 0.75)
-        let maxFrequency = min(1_500.0, profileRange.max * 1.12)
+        let profileRange = acousticRange(for: instrumentId)
+        let minFrequency = profileRange.minimumHz
+        let maxFrequency = profileRange.maximumHz
         let minLag = max(1, Int(sampleRate / maxFrequency))
         let maxLag = min(samples.count / 2, Int(sampleRate / minFrequency))
         guard minLag < maxLag else { return (nil, 0) }
@@ -470,6 +474,10 @@ enum NativePitchDetector {
         return (sampleRate / refinedLag, min(0.999, max(0, selectedCorrelation)))
     }
 
+    static func acousticRange(for instrumentId: String) -> InstrumentAcousticRange {
+        InstrumentAcousticRange.forInstrument(instrumentId)
+    }
+
     private static func correlation(samples: [Double], lag: Int) -> Double {
         var numerator = 0.0
         var energyA = 0.0
@@ -487,16 +495,6 @@ enum NativePitchDetector {
         return numerator / sqrt(energyA * energyB)
     }
 
-    private static func frequencyRange(for instrumentId: String) -> (min: Double, max: Double) {
-        switch instrumentId {
-        case "trumpet": return (130, 1_500)
-        case "horn": return (80, 1_200)
-        case "trombone": return (50, 700)
-        case "euphonium": return (55, 700)
-        case "tuba": return (32, 500)
-        default: return (55, 1_300)
-        }
-    }
 }
 
 @MainActor

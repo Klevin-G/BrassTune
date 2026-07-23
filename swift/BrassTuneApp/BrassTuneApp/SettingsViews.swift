@@ -59,6 +59,7 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .btMinimumInteractiveSize(alignment: .leading)
                 .accessibilityIdentifier("settings.advancedTunerSettings")
 
                 if advancedTunerExpanded {
@@ -99,7 +100,7 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings.metronomeBPM")
                 Picker("Meter", selection: Binding(get: { model.metronome.beatsPerMeasure }, set: { model.setMeter(beats: $0) })) {
                     ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
-                        Text("\(beats)/\(model.metronome.beatUnit)").tag(beats)
+                        Text(verbatim: NativeLocalization.isolate("\(beats)/\(model.metronome.beatUnit)")).tag(beats)
                     }
                 }
                 .accessibilityIdentifier("settings.metronomeMeter")
@@ -139,7 +140,7 @@ struct SettingsView: View {
                 SettingsNavigationRow(
                     title: "Sheet music",
                     systemImage: "music.note.list",
-                    detail: "\(model.scores.count)",
+                    detail: NativeLocalization.isolate(String(model.scores.count)),
                     identifier: "settings.scoresLink"
                 ) {
                     ScorePracticeView()
@@ -147,7 +148,7 @@ struct SettingsView: View {
                 SettingsNavigationRow(
                     title: "Offline practice packs",
                     systemImage: "shippingbox",
-                    detail: "\(model.practicePacks.count)",
+                    detail: NativeLocalization.isolate(String(model.practicePacks.count)),
                     identifier: "settings.practicePacksLink"
                 ) {
                     PracticePacksView()
@@ -286,7 +287,14 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "About", subtitle: "Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))")
+                BTSectionHeader(
+                    title: "About",
+                    subtitle: NativeLocalization.format(
+                        "Version %@ (%@)",
+                        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0",
+                        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+                    )
+                )
             }
 
             if let error = model.lastError {
@@ -296,6 +304,7 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings.status")
             }
         }
+        .controlSize(.large)
         .navigationTitle("Settings")
         .accessibilityIdentifier("screen.settings")
         .alert(item: $pendingDestructiveAction) { action in
@@ -313,13 +322,13 @@ struct SettingsView: View {
     private var accountStatusMessage: String {
         switch model.authState {
         case .guest:
-            return "You're practicing as a guest. Your data stays on this device."
+            return NativeLocalization.string("You're practicing as a guest. Your data stays on this device.")
         case .signedOut:
-            return "You're signed out. Your practice data is still on this device."
+            return NativeLocalization.string("You're signed out. Your practice data is still on this device.")
         case .signedIn(let email):
-            return "Signed in as \(email)."
+            return NativeLocalization.format("Signed in as %@.", email)
         case .emailConfirmationRequired(let email):
-            return "Check \(email) to finish signing in."
+            return NativeLocalization.format("Check %@ to finish signing in.", email)
         }
     }
 
@@ -329,15 +338,15 @@ struct SettingsView: View {
 
     private var deletionHelpText: String {
         if model.authState.usesRemoteAccount {
-            return "Deleting your account also removes practice history and sheet music saved on this device."
+            return NativeLocalization.string("Deleting your account also removes practice history and sheet music saved on this device.")
         }
-        return "This removes practice history, sheet music, and saved sign-in information from this device."
+        return NativeLocalization.string("This removes practice history, sheet music, and saved sign-in information from this device.")
     }
 
     private func destructiveAlertTitle(for action: DestructiveAction) -> String {
         switch action {
         case .clearPracticeData:
-            return "Delete practice data?"
+            return NativeLocalization.string("Delete practice data?")
         case .deleteAccount:
             return model.authState.usesRemoteAccount ? "Delete your account?" : "Clear all app data?"
         }
@@ -346,19 +355,19 @@ struct SettingsView: View {
     private func destructiveAlertMessage(for action: DestructiveAction) -> String {
         switch action {
         case .clearPracticeData:
-            return "All practice history and imported sheet music on this device will be deleted. This can't be undone."
+            return NativeLocalization.string("All practice history and imported sheet music on this device will be deleted. This can't be undone.")
         case .deleteAccount:
             if model.authState.usesRemoteAccount {
-                return "Your account, saved sign-in, practice history, and imported sheet music will be deleted. This can't be undone."
+                return NativeLocalization.string("Your account, saved sign-in, practice history, and imported sheet music will be deleted. This can't be undone.")
             }
-            return "Practice history, imported sheet music, and saved sign-in information will be deleted from this device. This can't be undone."
+            return NativeLocalization.string("Practice history, imported sheet music, and saved sign-in information will be deleted from this device. This can't be undone.")
         }
     }
 
     private func destructiveButtonTitle(for action: DestructiveAction) -> String {
         switch action {
         case .clearPracticeData:
-            return "Delete practice data"
+            return NativeLocalization.string("Delete practice data")
         case .deleteAccount:
             return model.authState.usesRemoteAccount ? "Delete account" : "Clear all data"
         }
@@ -436,6 +445,7 @@ struct ClassesView: View {
                 .accessibilityIdentifier("classes.error")
             }
         }
+        .controlSize(.large)
         .navigationTitle("Classes")
         .accessibilityIdentifier("screen.classes")
         .task {
@@ -446,7 +456,7 @@ struct ClassesView: View {
         }
         .alert(item: $pendingLeave) { ensemble in
             Alert(
-                title: Text("Leave \(ensemble.name)?"),
+                title: Text(NativeLocalization.format("Leave %@?", ensemble.name)),
                 message: Text("Your other classes and practice history will stay available."),
                 primaryButton: .destructive(Text("Leave class")) {
                     Task { await model.leaveEnsemble(id: ensemble.id) }
@@ -533,6 +543,7 @@ struct ClassesView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                        .btMinimumInteractiveSize()
                         .disabled(model.ensembleMutationInProgress)
                         .accessibilityIdentifier("classes.leave.\(ensemble.id)")
                     } else {
@@ -580,7 +591,7 @@ private struct SettingsNavigationRow<Destination: View>: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.vertical, BTSpacing.sm)
         }
         .accessibilityIdentifier(identifier)
@@ -631,9 +642,9 @@ struct LegalDetailView: View {
 
     private var title: String {
         switch kind {
-        case .privacy: return "Privacy"
-        case .terms: return "Terms"
-        case .support: return "Support"
+        case .privacy: return NativeLocalization.string("Privacy")
+        case .terms: return NativeLocalization.string("Terms")
+        case .support: return NativeLocalization.string("Support")
         }
     }
 }
