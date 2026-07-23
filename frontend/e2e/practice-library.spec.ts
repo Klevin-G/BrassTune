@@ -385,23 +385,27 @@ test('locale selection updates language, direction, manifest, Intl output, and p
 
 test('built-in shortcut labels follow the selected locale while custom titles and stored targets stay unchanged', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('brasstune.onboardingComplete', 'true');
-    localStorage.setItem('brasstune.guestAccess', 'true');
-    localStorage.setItem('brasstune.demoMode', 'true');
-    sessionStorage.setItem('e2e.practiceLibrary.initialized', 'true');
-    localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
-      version: 1,
-      customExercises: [{ id: 'custom-a-g', name: 'A-G Warmup', notes: ['A', 'B', 'C'], source: 'custom', createdAt: '2026-07-23T12:00:00.000Z' }],
-      metronomePresets: [],
-      favorites: [
-        { kind: 'warmup', id: 'guided-5', label: 'stale warm-up label', href: '/practice#warmup' },
-        { kind: 'play-along', id: 'custom-a-g', label: 'A-G Warmup', href: '/practice/play-along?exercise=custom-a-g' },
-      ],
-      recents: [{ kind: 'play-along', id: 'cmaj', label: 'stale scale label', href: '/practice/play-along?exercise=cmaj' }],
-      reflections: [],
-      warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-23T12:00:00.000Z' },
-      weeklyGoal: { week: '2026-07-20', targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
-    }));
+    const seedKey = 'e2e.practiceLibrary.localeShortcutsSeeded';
+    if (sessionStorage.getItem(seedKey) !== 'true') {
+      localStorage.setItem('brasstune.onboardingComplete', 'true');
+      localStorage.setItem('brasstune.guestAccess', 'true');
+      localStorage.setItem('brasstune.demoMode', 'true');
+      sessionStorage.setItem('e2e.practiceLibrary.initialized', 'true');
+      localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
+        version: 1,
+        customExercises: [{ id: 'custom-a-g', name: 'A-G Warmup', notes: ['A', 'B', 'C'], source: 'custom', createdAt: '2026-07-23T12:00:00.000Z' }],
+        metronomePresets: [],
+        favorites: [
+          { kind: 'warmup', id: 'guided-5', label: 'stale warm-up label', href: '/practice#warmup' },
+          { kind: 'play-along', id: 'custom-a-g', label: 'A-G Warmup', href: '/practice/play-along?exercise=custom-a-g' },
+        ],
+        recents: [{ kind: 'play-along', id: 'cmaj', label: 'stale scale label', href: '/practice/play-along?exercise=cmaj' }],
+        reflections: [],
+        warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-23T12:00:00.000Z' },
+        weeklyGoal: { week: '2026-07-20', targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
+      }));
+      sessionStorage.setItem(seedKey, 'true');
+    }
   });
   await page.goto('/practice');
 
