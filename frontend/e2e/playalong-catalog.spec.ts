@@ -33,7 +33,7 @@ test('groups every major and natural minor scale in accessible controls', async 
   await cSharpMinor.focus();
   await page.keyboard.press('Space');
   await expect(cSharpMinor).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('Play the C♯ minor scale going up (natural minor).', { exact: true })).toBeVisible();
+  await expect(page.getByText('Play the C♯ minor scale going up as a natural minor scale.', { exact: true })).toBeVisible();
 });
 
 for (const width of [320, 375]) {

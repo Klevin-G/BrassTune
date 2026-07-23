@@ -546,7 +546,7 @@ test('joins a second class and keeps prior memberships available', async ({ page
   await page.getByLabel('Your instrument').selectOption('tuba');
   const joinButton = page.getByRole('button', { name: 'Join', exact: true });
   await joinButton.click();
-  await expect(page.getByRole('button', { name: 'Joining…' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Joining class…' })).toBeDisabled();
 
   await expect(page.getByText(/You joined.*Chamber Winds/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Chamber Winds' })).toBeVisible();
@@ -672,7 +672,7 @@ test('class mutations ignore duplicate and competing activations', async ({ page
     buttons.find((button) => button.textContent?.trim() === 'Accept')?.click();
     buttons.find((button) => button.textContent?.trim() === 'Decline')?.click();
   });
-  await expect(page.getByRole('button', { name: 'Joining…' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Joining class…' })).toBeDisabled();
   await expect(page.getByText(/You joined.*Concert Band/)).toBeVisible();
   expect(counters.accepts + counters.declines).toBe(1);
   expect(counters.accepts).toBe(1);

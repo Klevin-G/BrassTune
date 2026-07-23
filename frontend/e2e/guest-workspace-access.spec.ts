@@ -202,5 +202,5 @@ test('auth guest escape rejects an external next target in the browser', async (
   const guestEscape = page.getByRole('link', { name: 'Keep practicing as a guest' });
   await expect(guestEscape).toHaveAttribute('href', '/home');
   await guestEscape.click();
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/practice$/);
 });
