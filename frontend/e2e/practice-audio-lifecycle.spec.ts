@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { expect, test } from 'playwright/test';
-import type { Page, Route } from 'playwright/test';
+import type { Locator, Page, Route } from 'playwright/test';
 
 const signedInAuthModule = `
 const session = { access_token: 'audio-lifecycle-token', user: { id: 'audio-lifecycle-user' } };
@@ -150,6 +150,10 @@ async function savedWeeklyCompletion(page: Page, ownerKey = 'account%3A91') {
       ? { minutes: weeklyGoal.completedMinutes, sessions: weeklyGoal.completedSessions }
       : { minutes: 0, sessions: 0 };
   }, ownerKey);
+}
+
+function appShellLink(page: Page, name: string): Locator {
+  return page.locator('.sidebar:visible, .floating-tabbar:visible').getByRole('link', { name, exact: true });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -334,17 +338,137 @@ test('leaving the Tuner route waits for a pending start and then finalizes it', 
   await expect.poll(() => fixture.calls.starts).toBe(1);
 
   await page.getByRole('link', { name: 'Metronome' }).click();
-  await expect(page).toHaveURL(/\/metronome$/);
+  await expect(page).toHaveURL(/\/practice$/);
+  await expect(page.getByRole('button', { name: 'Starting your take' })).toBeVisible();
   expect(fixture.calls.stops).toBe(0);
 
   fixture.releaseStart();
 
+  await expect(page).toHaveURL(/\/metronome$/);
   await expect.poll(() => fixture.calls.uploads).toBe(1);
   await expect.poll(() => fixture.calls.stops).toBe(1);
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __tunerRecorderTest: { starts: number; stops: number } }
   ).__tunerRecorderTest)).toEqual({ starts: 1, stops: 1 });
   await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 1, sessions: 1 });
+});
+
+test('a failed active Tuner stop keeps an AppShell navigation on Tuner until the player retries', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { failFirstStop: true });
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+
+  await appShellLink(page, 'Progress').click();
+
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect(page).toHaveURL(/\/practice$/);
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Cloud practice is unavailable');
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 0, sessions: 0 });
+
+  await appShellLink(page, 'Progress').click();
+
+  await expect(page).toHaveURL(/\/progress$/);
+  await expect.poll(() => fixture.calls.stops).toBe(2);
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+});
+
+test('clicking the already-active Tuner navigation never finalizes an active take', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page);
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+
+  await appShellLink(page, 'Tuner').click();
+  await page.waitForTimeout(150);
+
+  expect(fixture.calls.stops).toBe(0);
+  expect(fixture.calls.uploads).toBe(0);
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Stop and save' }).click();
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+});
+
+test('a failed pending Tuner stop keeps an AppShell navigation on Tuner until the player retries', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { failFirstStop: true, pendingStart: true });
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect.poll(() => fixture.calls.starts).toBe(1);
+
+  await appShellLink(page, 'Progress').click();
+  await expect(page).toHaveURL(/\/practice$/);
+  fixture.releaseStart();
+
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect(page).toHaveURL(/\/practice$/);
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Cloud practice is unavailable');
+  await expect.poll(() => savedWeeklyCompletion(page)).toEqual({ minutes: 0, sessions: 0 });
+
+  await appShellLink(page, 'Progress').click();
+
+  await expect(page).toHaveURL(/\/progress$/);
+  await expect.poll(() => fixture.calls.stops).toBe(2);
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+});
+
+test('competing AppShell links commit only the first destination after a pending Tuner stop', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { pendingStart: true });
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect.poll(() => fixture.calls.starts).toBe(1);
+
+  await appShellLink(page, 'Progress').evaluate((link) => (link as HTMLAnchorElement).click());
+  await page.getByRole('link', { name: 'Metronome' }).evaluate((link) => (link as HTMLAnchorElement).click());
+  await expect(page).toHaveURL(/\/practice$/);
+  fixture.releaseStart();
+
+  await expect(page).toHaveURL(/\/progress$/);
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/practice$/);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/progress$/);
+});
+
+test('browser Back waits for an active Tuner take to stop before leaving the route', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page);
+  await page.goto('/progress');
+  await appShellLink(page, 'Tuner').click();
+  await expect(page).toHaveURL(/\/practice$/);
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+
+  await page.goBack();
+
+  await expect(page).toHaveURL(/\/progress$/);
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+});
+
+test('a failed browser Back stop restores the Tuner retry surface before a later Back succeeds', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { failFirstStop: true });
+  await page.goto('/progress');
+  await appShellLink(page, 'Tuner').click();
+  await expect(page).toHaveURL(/\/practice$/);
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+
+  await page.goBack();
+
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect(page).toHaveURL(/\/practice$/);
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Cloud practice is unavailable');
+
+  await page.goBack();
+
+  await expect(page).toHaveURL(/\/progress$/);
+  await expect.poll(() => fixture.calls.stops).toBe(2);
 });
 
 test('Drone waits for a pending Tuner start and serializes rapid switch attempts through one finalization', async ({ page }) => {

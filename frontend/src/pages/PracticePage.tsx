@@ -1,6 +1,6 @@
 import { FileText, Timer } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { Link, useBlocker, useLocation, useSearchParams } from 'react-router-dom';
 import { friendlyUserFacingError } from '../api/client';
 import { NoteDisplay } from '../components/NoteDisplay';
 import { SessionControls } from '../components/SessionControls';
@@ -64,6 +64,8 @@ export function PracticePage() {
   const toolSwitchPromiseRef = useRef<Promise<void> | null>(null);
   const stopRef = useRef(async (): Promise<PracticeSession | null> => null);
   const recordSavedSessionRef = useRef(recordSavedSession);
+  const navigationIntentRef = useRef(false);
+  const blockedNavigationRef = useRef(false);
 
   const stream = usePitchStream({
     enabled: practiceTool === 'tuner',
@@ -241,6 +243,73 @@ export function PracticePage() {
     });
   };
   stopRef.current = stop;
+
+  const hasTakeLifecycleToFinalize = () => Boolean(
+    takeTransitionRef.current
+    || activeSessionIdRef.current !== null
+    || recorderRef.current.activeSession
+    || recorderRef.current.busy
+    || recorderRef.current.recording
+    || audioRecorderRef.current.status === 'recording'
+    || audioRecorderRef.current.status === 'uploading',
+  );
+
+  const navigationBlocker = useBlocker(({ currentLocation, nextLocation }) => (
+    currentLocation.pathname !== nextLocation.pathname
+    || currentLocation.search !== nextLocation.search
+    || currentLocation.hash !== nextLocation.hash
+  ) && hasTakeLifecycleToFinalize());
+
+  // The data router blocks before this route unmounts, preserving the current
+  // Tuner instance and its Stop/retry surface if finalization fails.
+  useEffect(() => {
+    if (navigationBlocker.state !== 'blocked' || blockedNavigationRef.current) return;
+    blockedNavigationRef.current = true;
+    void (async () => {
+      await stopRef.current();
+      if (activeSessionIdRef.current === null && !takeTransitionRef.current) {
+        // A query/hash transition can preserve this page instance. Release the
+        // first-intent capture before proceeding so later links remain usable.
+        navigationIntentRef.current = false;
+        navigationBlocker.proceed();
+        return;
+      }
+      navigationIntentRef.current = false;
+      navigationBlocker.reset();
+    })().finally(() => {
+      blockedNavigationRef.current = false;
+    });
+  }, [navigationBlocker]);
+
+  // The router owns link and history transitions. This capture listener only
+  // suppresses later same-origin link clicks while the first blocked link is
+  // being finalized, preventing a second destination from replacing it.
+  useEffect(() => {
+    const onDocumentClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest('a[href]');
+      if (!(anchor instanceof HTMLAnchorElement) || anchor.target || anchor.hasAttribute('download')) return;
+      const destination = new URL(anchor.href, window.location.href);
+      if (destination.origin !== window.location.origin) return;
+      const current = `${location.pathname}${location.search}${location.hash}`;
+      const next = `${destination.pathname}${destination.search}${destination.hash}`;
+      if (next === current || !hasTakeLifecycleToFinalize()) return;
+
+      if (navigationIntentRef.current) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      navigationIntentRef.current = true;
+    };
+
+    document.addEventListener('click', onDocumentClick, true);
+    return () => {
+      document.removeEventListener('click', onDocumentClick, true);
+    };
+  }, [location.hash, location.pathname, location.search]);
 
   // Navigation must use the same serialized stop path as the Stop control so
   // an active cloud or guest take is finalized exactly once before this route

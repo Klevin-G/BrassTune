@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import App from './App';
 import { exposeBuildRevision } from './buildRevision';
 import { AuthProvider } from './state/AuthContext';
@@ -13,11 +13,12 @@ import { LocaleProvider } from './i18n/LocaleContext';
 
 exposeBuildRevision(document);
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <LocaleProvider>
-      <ThemeProvider>
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+const router = createBrowserRouter([
+  {
+    path: '*',
+    element: (
+      <LocaleProvider>
+        <ThemeProvider>
           <AuthProvider>
             <AppSettingsProvider>
               <PracticeLibraryProvider>
@@ -25,9 +26,17 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               </PracticeLibraryProvider>
             </AppSettingsProvider>
           </AuthProvider>
-        </BrowserRouter>
-      </ThemeProvider>
-    </LocaleProvider>
+        </ThemeProvider>
+      </LocaleProvider>
+    ),
+  },
+], {
+  future: { v7_relativeSplatPath: true },
+});
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <RouterProvider router={router} future={{ v7_startTransition: true }} />
   </React.StrictMode>,
 );
 
