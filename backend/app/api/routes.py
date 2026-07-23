@@ -23,7 +23,7 @@ from app.db.readiness import public_readiness_report, readiness_report, version_
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
+from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, local_audio_path, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 from app.services.usage import record_event
@@ -260,15 +260,23 @@ class ExportBudget:
         if self.max_rows_per_session and max(samples, events) > self.max_rows_per_session:
             raise HTTPException(status_code=413, detail="Export contains too many pitch rows. Narrow the export scope.")
 
-    def require_total_rows(self, db: Session, session_ids: list[int] | None = None) -> None:
+    def require_total_rows(
+        self,
+        db: Session,
+        session_ids: list[int] | None = None,
+        additional_rows: int = 0,
+    ) -> None:
         samples = db.query(PitchSample.id)
         events = db.query(NoteEvent.id)
         if session_ids is not None:
             if not session_ids:
+                total_rows = max(0, int(additional_rows))
+                if self.max_total_rows and total_rows > self.max_total_rows:
+                    raise HTTPException(status_code=413, detail="Export contains too many rows. Narrow the export scope.")
                 return
             samples = samples.filter(PitchSample.session_id.in_(session_ids))
             events = events.filter(NoteEvent.session_id.in_(session_ids))
-        total_rows = samples.count() + events.count()
+        total_rows = samples.count() + events.count() + max(0, int(additional_rows))
         if self.max_total_rows and total_rows > self.max_total_rows:
             raise HTTPException(status_code=413, detail="Export contains too many rows. Narrow the export scope.")
 
@@ -311,12 +319,13 @@ def _write_session_audio_to_archive(archive: zipfile.ZipFile, session: PracticeS
     budget.write_bytes(archive, archive_path, data, audio=True)
 
 
-async def _read_limited_body(request: Request, max_bytes: int = MAX_AUDIO_UPLOAD_BYTES) -> bytes:
+async def _read_limited_body(request: Request, max_bytes: Optional[int] = None) -> bytes:
+    limit = audio_upload_limit_bytes() if max_bytes is None else min(max_bytes, audio_upload_limit_bytes())
     chunks = []
     total = 0
     async for chunk in request.stream():
         total += len(chunk)
-        if total > max_bytes:
+        if total > limit:
             raise HTTPException(status_code=413, detail="Audio upload is too large.")
         chunks.append(chunk)
     return b"".join(chunks)
@@ -773,26 +782,53 @@ def _invitation_to_dict(row: Invitation):
     }
 
 
+def _usage_event_to_dict(row: UsageEvent):
+    return {
+        "id": row.id,
+        "event_name": row.event_name,
+        "properties": row.properties if isinstance(row.properties, dict) else {},
+        "created_at": _iso(row.created_at),
+    }
+
+
 def _account_export_zip(db: Session, auth: AuthContext):
     user = auth.user
-    sessions = db.query(PracticeSession).filter(PracticeSession.user_id == user.id).order_by(PracticeSession.started_at.asc()).all()
-    memberships = db.query(GroupMember).filter(GroupMember.user_id == user.id).order_by(GroupMember.group_id.asc()).all()
-    owned_groups = db.query(Group).filter(Group.director_user_id == user.id).order_by(Group.id.asc()).all()
-    invitations = (
+    budget = ExportBudget()
+    sessions_query = db.query(PracticeSession).filter(PracticeSession.user_id == user.id)
+    session_count = sessions_query.count()
+    budget.require_session_count(session_count)
+    sessions = sessions_query.order_by(PracticeSession.started_at.asc()).all()
+
+    memberships_query = db.query(GroupMember).filter(GroupMember.user_id == user.id)
+    owned_groups_query = db.query(Group).filter(Group.director_user_id == user.id)
+    invitations_query = (
         db.query(Invitation)
         .filter((Invitation.invited_user_id == user.id) | (Invitation.invited_by_user_id == user.id))
-        .order_by(Invitation.created_at.asc())
-        .all()
     )
-    recommendations = db.query(Recommendation).filter(Recommendation.user_id == user.id).order_by(Recommendation.created_at.asc()).all()
+    recommendations_query = db.query(Recommendation).filter(Recommendation.user_id == user.id)
+    usage_events_query = db.query(UsageEvent).filter(UsageEvent.user_id == user.id)
+    related_rows = sum(
+        query.count()
+        for query in (
+            memberships_query,
+            owned_groups_query,
+            invitations_query,
+            recommendations_query,
+            usage_events_query,
+        )
+    )
+    budget.require_total_rows(db, [session.id for session in sessions], additional_rows=related_rows)
+
+    memberships = memberships_query.order_by(GroupMember.group_id.asc()).all()
+    owned_groups = owned_groups_query.order_by(Group.id.asc()).all()
+    invitations = invitations_query.order_by(Invitation.created_at.asc()).all()
+    recommendations = recommendations_query.order_by(Recommendation.created_at.asc()).all()
+    usage_events = usage_events_query.order_by(UsageEvent.created_at.asc()).all()
     account = user_to_dict(user)
     account["email"] = user.email
     account["supabase_user_id"] = user.supabase_user_id
     account["created_at"] = _iso(user.created_at)
     account["updated_at"] = _iso(user.updated_at)
-    budget = ExportBudget()
-    budget.require_session_count(len(sessions))
-    budget.require_total_rows(db, [session.id for session in sessions])
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         budget.write_text(archive, "README.txt", "BrassTune account export for the authenticated user. Source recordings are included only for this user's sessions when available.")
@@ -802,6 +838,7 @@ def _account_export_zip(db: Session, auth: AuthContext):
         budget.write_text(archive, "owned_groups.json", json.dumps([group_to_dict(group) for group in owned_groups], indent=2))
         budget.write_text(archive, "invitations.json", json.dumps([_invitation_to_dict(row) for row in invitations], indent=2))
         budget.write_text(archive, "recommendations.json", json.dumps([_recommendation_to_dict(row) for row in recommendations], indent=2))
+        budget.write_text(archive, "usage_events.json", json.dumps([_usage_event_to_dict(row) for row in usage_events], indent=2))
         for session in sessions:
             folder = "sessions/%s" % session.id
             payload = _session_json_payload(db, session, budget)
@@ -1061,17 +1098,15 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
     db.add(job)
     db.commit()
 
-    supabase_sessions_revoked = False
     supabase_identity_deleted = False
     if not auth.is_guest and supabase_user_id:
         try:
             _mark_deletion_job(job, "external_cleanup_started", "in_progress")
             db.add(job)
             db.commit()
-            supabase_sessions_revoked = supabase_global_sign_out(auth.access_token)
+            supabase_global_sign_out(auth.access_token)
             supabase_identity_deleted = delete_supabase_identity(supabase_user_id)
         except Exception:
-            supabase_sessions_revoked = False
             supabase_identity_deleted = False
         if not supabase_identity_deleted:
             _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "external_identity_cleanup_failed")

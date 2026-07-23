@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from app.api.auth import AuthContext, auth_context_from_token, local_auth_enabled
+from app.api.errors import error_code_for_status
 from app.core.security import LOCAL_ENVIRONMENTS, app_environment, origin_is_allowed
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.core.pitch.detector import PitchDetector
@@ -157,10 +158,14 @@ def _can_track_pending_session(pending_frames, session_id: int) -> bool:
     return session_id in pending_frames or not limit or len(pending_frames) < limit
 
 
-async def _reject(websocket: WebSocket, message: str, code: int = 1008) -> None:
+async def _send_error(websocket: WebSocket, message: str, error_code: str) -> None:
+    await websocket.send_json({"type": "error", "code": error_code, "message": message})
+
+
+async def _reject(websocket: WebSocket, message: str, error_code: str, close_code: int = 1008) -> None:
     await websocket.accept()
-    await websocket.send_json({"type": "error", "message": message})
-    await websocket.close(code=code)
+    await _send_error(websocket, message, error_code)
+    await websocket.close(code=close_code)
 
 
 def _origin_allowed(websocket: WebSocket) -> bool:
@@ -175,7 +180,7 @@ def _origin_allowed(websocket: WebSocket) -> bool:
 @router.websocket("/ws/pitch")
 async def pitch_socket(websocket: WebSocket):
     if not _origin_allowed(websocket):
-        await _reject(websocket, "WebSocket origin is not allowed.")
+        await _reject(websocket, "WebSocket origin is not allowed.", "origin_not_allowed")
         return
 
     client_host = _websocket_client_host(websocket)
@@ -185,7 +190,12 @@ async def pitch_socket(websocket: WebSocket):
         _positive_int_env("BRASSTUNE_WS_MAX_CONNECTIONS_PER_IP", 8),
     )
     if not ip_acquired:
-        await _reject(websocket, "Too many WebSocket connections from this network.", code=1013)
+        await _reject(
+            websocket,
+            "Too many WebSocket connections from this network.",
+            "rate_limited",
+            close_code=1013,
+        )
         return
 
     db = None
@@ -215,18 +225,18 @@ async def pitch_socket(websocket: WebSocket):
             return True
 
         if websocket.query_params:
-            await websocket.send_json({"type": "error", "message": "WebSocket query-token auth is disabled."})
+            await _send_error(websocket, "WebSocket query-token auth is disabled.", "query_auth_disabled")
             await websocket.close(code=1008)
             return
         if local_auth_enabled():
             try:
                 auth = auth_context_from_token(db, None)
             except HTTPException as exc:
-                await websocket.send_json({"type": "error", "message": exc.detail})
+                await _send_error(websocket, exc.detail, error_code_for_status(exc.status_code))
                 await websocket.close(code=1008)
                 return
             if not acquire_account(auth):
-                await websocket.send_json({"type": "error", "message": "Too many WebSocket connections for this account."})
+                await _send_error(websocket, "Too many WebSocket connections for this account.", "rate_limited")
                 await websocket.close(code=1013)
                 return
 
@@ -252,30 +262,41 @@ async def pitch_socket(websocket: WebSocket):
 
         while True:
             try:
-                raw = await asyncio.wait_for(
-                    websocket.receive_text(),
+                received = await asyncio.wait_for(
+                    websocket.receive(),
                     timeout=UNAUTHENTICATED_TIMEOUT_SECONDS if auth is None else IDLE_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:
-                await websocket.send_json({"type": "error", "message": "WebSocket authentication timed out." if auth is None else "WebSocket idle timeout."})
+                await _send_error(
+                    websocket,
+                    "WebSocket authentication timed out." if auth is None else "WebSocket idle timeout.",
+                    "authentication_timeout" if auth is None else "idle_timeout",
+                )
                 await websocket.close(code=1008 if auth is None else 1001)
                 return
+            if received.get("type") == "websocket.disconnect":
+                raise WebSocketDisconnect(received.get("code", 1000))
+            raw = received.get("text")
+            if raw is None:
+                await _send_error(websocket, "Binary WebSocket messages are not supported.", "binary_message_not_supported")
+                await websocket.close(code=1003)
+                return
             if len(raw.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
-                await websocket.send_json({"type": "error", "message": "WebSocket message is too large."})
+                await _send_error(websocket, "WebSocket message is too large.", "payload_too_large")
                 await websocket.close(code=1009)
                 return
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:
-                await websocket.send_json({"type": "error", "message": "Malformed JSON frame."})
+                await _send_error(websocket, "Malformed JSON frame.", "malformed_json")
                 continue
             if not isinstance(message, dict):
-                await websocket.send_json({"type": "error", "message": "WebSocket messages must be JSON objects."})
+                await _send_error(websocket, "WebSocket messages must be JSON objects.", "invalid_message")
                 continue
             msg_type = message.get("type")
             if auth is None:
                 if msg_type != "authenticate":
-                    await websocket.send_json({"type": "error", "message": "Authenticate before sending pitch frames."})
+                    await _send_error(websocket, "Authenticate before sending pitch frames.", "authentication_required")
                     unauthenticated_errors += 1
                     if unauthenticated_errors >= MAX_UNAUTHENTICATED_ERRORS:
                         await websocket.close(code=1008)
@@ -285,15 +306,17 @@ async def pitch_socket(websocket: WebSocket):
                     token = message.get("token")
                     if not isinstance(token, str) or not token:
                         raise HTTPException(status_code=401, detail="Authentication token is required.")
+                    if len(token) > 16_384:
+                        raise HTTPException(status_code=413, detail="Authentication token is too large.")
                     authenticated = auth_context_from_token(db, token)
                     if not acquire_account(authenticated):
-                        await websocket.send_json({"type": "error", "message": "Too many WebSocket connections for this account."})
+                        await _send_error(websocket, "Too many WebSocket connections for this account.", "rate_limited")
                         await websocket.close(code=1013)
                         return
                     auth = authenticated
                     await websocket.send_json({"type": "authenticated"})
                 except HTTPException as exc:
-                    await websocket.send_json({"type": "error", "message": exc.detail})
+                    await _send_error(websocket, exc.detail, error_code_for_status(exc.status_code))
                     await websocket.close(code=1008)
                     return
                 continue
@@ -311,13 +334,13 @@ async def pitch_socket(websocket: WebSocket):
                         }
                     )
                 except ValidationError:
-                    await websocket.send_json({"type": "error", "message": "Session details are invalid."})
+                    await _send_error(websocket, "Session details are invalid.", "request_validation_failed")
                     continue
                 if not is_valid_instrument_id(request.instrument_id):
-                    await websocket.send_json({"type": "error", "message": "Unknown instrument_id: %s" % request.instrument_id})
+                    await _send_error(websocket, "Unknown instrument_id: %s" % request.instrument_id, "invalid_instrument")
                     continue
                 if not _try_consume_session_start(str(auth.user.id), client_host):
-                    await websocket.send_json({"type": "error", "message": "Too many session starts. Wait a moment before trying again."})
+                    await _send_error(websocket, "Too many session starts. Wait a moment before trying again.", "rate_limited")
                     continue
                 try:
                     session = start_session(
@@ -329,23 +352,32 @@ async def pitch_socket(websocket: WebSocket):
                     )
                 except HTTPException as exc:
                     db.rollback()
-                    await websocket.send_json({"type": "error", "message": exc.detail})
+                    await _send_error(websocket, exc.detail, error_code_for_status(exc.status_code))
                     continue
                 await websocket.send_json({"type": "session_started", "session": {"id": session.id, "name": session.name}})
             elif msg_type == "stop_session":
-                session_id = int(message.get("session_id", 0))
+                raw_session_id = message.get("session_id")
+                if isinstance(raw_session_id, bool):
+                    raw_session_id = None
+                try:
+                    session_id = int(raw_session_id)
+                except (TypeError, ValueError):
+                    session_id = 0
+                if session_id <= 0:
+                    await _send_error(websocket, "Session id is invalid.", "request_validation_failed")
+                    continue
                 try:
                     writable_session = session_for_write(session_id)
                 except HTTPException as exc:
-                    await websocket.send_json({"type": "error", "message": exc.detail})
+                    await _send_error(websocket, exc.detail, error_code_for_status(exc.status_code))
                     continue
                 if writable_session is None:
-                    await websocket.send_json({"type": "error", "message": "Session not found."})
+                    await _send_error(websocket, "Session not found.", "not_found")
                     continue
                 flush_session(session_id)
                 session = stop_session(db, writable_session.id)
                 if session is None:
-                    await websocket.send_json({"type": "error", "message": "Session not found."})
+                    await _send_error(websocket, "Session not found.", "not_found")
                 else:
                     await websocket.send_json({"type": "session_stopped", "session": {"id": session.id, "average_abs_cents": session.average_abs_cents}})
             elif msg_type == "audio_frame":
@@ -353,15 +385,15 @@ async def pitch_socket(websocket: WebSocket):
                     raw_pcm = message.get("pcm")
                     sample_count = len(raw_pcm) if isinstance(raw_pcm, list) else 0
                     if not frame_budget.consume(sample_count):
-                        await websocket.send_json({"type": "error", "message": "WebSocket audio frame rate limit exceeded."})
+                        await _send_error(websocket, "WebSocket audio frame rate limit exceeded.", "rate_limited")
                         await websocket.close(code=1008)
                         return
                     payload = AudioFrameIn(**message)
                     if not is_valid_instrument_id(payload.instrument_id):
-                        await websocket.send_json({"type": "error", "message": "Unknown instrument_id: %s" % payload.instrument_id})
+                        await _send_error(websocket, "Unknown instrument_id: %s" % payload.instrument_id, "invalid_instrument")
                         continue
                     if not _try_acquire_pitch_compute_slot():
-                        await websocket.send_json({"type": "error", "message": "Pitch processing is busy. Reconnect in a moment."})
+                        await _send_error(websocket, "Pitch processing is busy. Reconnect in a moment.", "service_busy")
                         await websocket.close(code=1013)
                         return
                     def estimate_with_slot():
@@ -384,10 +416,10 @@ async def pitch_socket(websocket: WebSocket):
                     frame = detected.to_dict()
                     if payload.session_id:
                         if not can_write_session(payload.session_id):
-                            await websocket.send_json({"type": "error", "message": "You do not have access to this session."})
+                            await _send_error(websocket, "You do not have access to this session.", "permission_denied")
                             continue
                         if not _can_track_pending_session(pending_frames, payload.session_id):
-                            await websocket.send_json({"type": "error", "message": "Too many pending sessions on this WebSocket connection."})
+                            await _send_error(websocket, "Too many pending sessions on this WebSocket connection.", "rate_limited")
                             await websocket.close(code=1008)
                             return
                         pending_frames[payload.session_id].append(frame)
@@ -397,11 +429,11 @@ async def pitch_socket(websocket: WebSocket):
                 except Exception as exc:
                     detail = str(exc).lower()
                     if "pcm" in detail and ("too large" in detail or "at most" in detail):
-                        await websocket.send_json({"type": "error", "message": "PCM frame is too large."})
+                        await _send_error(websocket, "PCM frame is too large.", "payload_too_large")
                     else:
-                        await websocket.send_json({"type": "error", "message": "Pitch detection failed."})
+                        await _send_error(websocket, "Pitch detection failed.", "pitch_detection_failed")
             else:
-                await websocket.send_json({"type": "error", "message": "Unsupported WebSocket message type."})
+                await _send_error(websocket, "Unsupported WebSocket message type.", "unsupported_message_type")
     except WebSocketDisconnect:
         pass
     finally:

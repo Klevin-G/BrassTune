@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
+from app.core.security import LOCAL_ENVIRONMENTS, app_environment
 from app.db.database import DATA_DIR
 from app.models.db import AudioStorageJob, PracticeSession, User
 from app.services.serializers import session_to_dict
@@ -33,11 +34,15 @@ MAGIC_BYTES = {
     "audio/wav": (b"RIFF",),
     "audio/ogg": (b"OggS",),
 }
-MAX_AUDIO_UPLOAD_BYTES = int(os.getenv("SESSION_AUDIO_MAX_BYTES", str(50 * 1024 * 1024)))
+MAX_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_AUDIO_DURATION_SECONDS = 24 * 60 * 60
 LOCAL_AUDIO_DIR = DATA_DIR / "audio"
 AUDIO_JOB_ACTIVE_STATUSES = ("reserved", "pending", "in_progress", "retryable_failure")
 AUDIO_DELETE_ACTIVE_STATUSES = ("pending", "in_progress", "retryable_failure")
+AUDIO_JOB_TERMINAL_STATUSES = ("completed", "cancelled")
+DEFAULT_AUDIO_JOB_TERMINAL_RETENTION_DAYS = 7
+MAX_AUDIO_JOB_TERMINAL_RETENTION_DAYS = 30
+MAX_AUDIO_JOB_PURGE_BATCH = 1000
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -46,6 +51,14 @@ def _positive_int_env(name: str, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return value if value >= 0 else default
+
+
+def audio_upload_limit_bytes() -> int:
+    """A deployment may lower, but never disable or raise, the 50 MiB cap."""
+    configured = _positive_int_env("SESSION_AUDIO_MAX_BYTES", MAX_AUDIO_UPLOAD_BYTES)
+    if configured <= 0:
+        return MAX_AUDIO_UPLOAD_BYTES
+    return min(configured, MAX_AUDIO_UPLOAD_BYTES)
 
 
 def _lock_audio_account_and_session(db: Session, session: PracticeSession) -> PracticeSession:
@@ -123,6 +136,13 @@ def storage_backend() -> str:
     return os.getenv("SESSION_AUDIO_STORAGE_BACKEND", "local").strip().lower() or "local"
 
 
+def _validated_storage_backend() -> str:
+    provider = storage_backend()
+    if provider not in {"local", "supabase"}:
+        raise HTTPException(status_code=503, detail="Unsupported SESSION_AUDIO_STORAGE_BACKEND.")
+    return provider
+
+
 def audio_extension(mime_type: str) -> str:
     if mime_type not in ALLOWED_AUDIO_MIME_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported audio MIME type.")
@@ -134,7 +154,7 @@ def read_audio_bytes(data: bytes, mime_type: str) -> Tuple[bytes, str]:
     audio_extension(mime_type)
     if not data:
         raise HTTPException(status_code=400, detail="Audio upload was empty.")
-    if len(data) > MAX_AUDIO_UPLOAD_BYTES:
+    if len(data) > audio_upload_limit_bytes():
         raise HTTPException(status_code=413, detail="Audio upload is too large.")
     signatures = MAGIC_BYTES.get(mime_type, ())
     if mime_type == "audio/mp4":
@@ -180,8 +200,9 @@ def staged_object_key_for(session: PracticeSession, mime_type: str) -> str:
 
 def local_audio_path(object_key: str) -> Path:
     safe_parts = [part for part in object_key.split("/") if part not in {"", ".", ".."}]
-    path = LOCAL_AUDIO_DIR.joinpath(*safe_parts).resolve()
-    if not str(path).startswith(str(LOCAL_AUDIO_DIR.resolve())):
+    root = LOCAL_AUDIO_DIR.resolve()
+    path = root.joinpath(*safe_parts).resolve()
+    if not path.is_relative_to(root):
         raise HTTPException(status_code=400, detail="Invalid audio object key.")
     return path
 
@@ -197,21 +218,41 @@ def _supabase_headers(mime_type: Optional[str] = None) -> dict:
 
 
 def _supabase_url(path: str) -> str:
-    base = os.getenv("SUPABASE_URL")
+    base = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
     if not base:
         raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
     parsed = urllib.parse.urlparse(base)
-    is_local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    is_local_http = (
+        app_environment() in LOCAL_ENVIRONMENTS
+        and parsed.scheme == "http"
+        and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    )
     if parsed.scheme != "https" and not is_local_http:
         raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
-    if not parsed.netloc:
+    if (
+        not parsed.netloc
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
         raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
     return "%s/%s" % (base.rstrip("/"), path.lstrip("/"))
 
 
+def _supabase_bucket() -> str:
+    bucket = (os.getenv("SUPABASE_STORAGE_BUCKET") or "session-audio").strip()
+    if not bucket or len(bucket) > 100 or any(char in bucket for char in "/\\?#\x00\r\n"):
+        raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
+    return urllib.parse.quote(bucket, safe="")
+
+
 def _upload_to_supabase(object_key: str, data: bytes, mime_type: str) -> None:
-    bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "session-audio")
-    encoded_key = urllib.parse.quote(object_key)
+    bucket = _supabase_bucket()
+    encoded_key = urllib.parse.quote(object_key, safe="/")
     request = urllib.request.Request(
         _supabase_url("/storage/v1/object/%s/%s" % (bucket, encoded_key)),
         data=data,
@@ -226,8 +267,8 @@ def _upload_to_supabase(object_key: str, data: bytes, mime_type: str) -> None:
 
 
 def _read_supabase_object(object_key: str) -> bytes:
-    bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "session-audio")
-    encoded_key = urllib.parse.quote(object_key)
+    bucket = _supabase_bucket()
+    encoded_key = urllib.parse.quote(object_key, safe="/")
     request = urllib.request.Request(
         _supabase_url("/storage/v1/object/%s/%s" % (bucket, encoded_key)),
         headers=_supabase_headers(),
@@ -240,8 +281,8 @@ def _read_supabase_object(object_key: str) -> bytes:
 
 
 def _delete_supabase_object(object_key: str) -> None:
-    bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "session-audio")
-    encoded_key = urllib.parse.quote(object_key)
+    bucket = _supabase_bucket()
+    encoded_key = urllib.parse.quote(object_key, safe="/")
     request = urllib.request.Request(
         _supabase_url("/storage/v1/object/%s/%s" % (bucket, encoded_key)),
         method="DELETE",
@@ -257,8 +298,8 @@ def _delete_supabase_object(object_key: str) -> None:
 
 
 def create_supabase_signed_url(object_key: str, expires_in: int = 900) -> str:
-    bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "session-audio")
-    encoded_key = urllib.parse.quote(object_key)
+    bucket = _supabase_bucket()
+    encoded_key = urllib.parse.quote(object_key, safe="/")
     request = urllib.request.Request(
         _supabase_url("/storage/v1/object/sign/%s/%s" % (bucket, encoded_key)),
         data=json.dumps({"expiresIn": expires_in}).encode("utf-8"),
@@ -271,11 +312,21 @@ def create_supabase_signed_url(object_key: str, expires_in: int = 900) -> str:
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Supabase signed URL failed.") from exc
     signed = payload.get("signedURL") or payload.get("signedUrl") or payload.get("signed_url")
-    if not signed:
+    if not isinstance(signed, str) or not signed or len(signed) > 8192 or any(char in signed for char in "\x00\r\n"):
         raise HTTPException(status_code=502, detail="Supabase did not return a signed playback URL.")
-    if signed.startswith("http"):
-        return signed
-    return _supabase_url(signed)
+    base = _supabase_url("/").rstrip("/")
+    resolved = urllib.parse.urljoin(base + "/", str(signed))
+    parsed_base = urllib.parse.urlparse(base)
+    parsed_signed = urllib.parse.urlparse(resolved)
+    if (
+        parsed_signed.scheme != parsed_base.scheme
+        or parsed_signed.netloc != parsed_base.netloc
+        or parsed_signed.username
+        or parsed_signed.password
+        or parsed_signed.fragment
+    ):
+        raise HTTPException(status_code=502, detail="Supabase returned an invalid signed playback URL.")
+    return resolved
 
 
 def _write_audio_object(provider: str, object_key: str, data: bytes, mime_type: str) -> None:
@@ -331,7 +382,9 @@ def prepare_audio_upload(
     mime_type: str,
     duration_seconds: Optional[float],
 ) -> StagedAudioUpload:
-    provider = storage_backend()
+    # Validate before creating a durable reservation. Otherwise a misspelled
+    # provider can produce a job that neither upload nor cleanup can process.
+    provider = _validated_storage_backend()
     stage = StagedAudioUpload(
         user_id=session.user_id,
         session_id=session.id,
@@ -450,6 +503,8 @@ def reserve_audio_upload(db: Session, session: PracticeSession, stage: StagedAud
 
 
 def _mark_audio_job_completed(db: Session, job_id: int, status: str = "completed") -> bool:
+    if status not in AUDIO_JOB_TERMINAL_STATUSES:
+        return False
     try:
         job = db.query(AudioStorageJob).filter(AudioStorageJob.id == job_id).with_for_update().first()
         if job is None:
@@ -460,6 +515,15 @@ def _mark_audio_job_completed(db: Session, job_id: int, status: str = "completed
         job.safe_error_category = None
         job.completed_at = job.completed_at or dt.datetime.utcnow()
         job.updated_at = dt.datetime.utcnow()
+        # Operational fields are required only while work is pending. Scrub
+        # account/session/object metadata immediately at terminal transition so
+        # account deletion never leaves identifiable job history after cleanup.
+        job.user_id = None
+        job.session_id = None
+        job.idempotency_key = "terminal:%s" % job.id
+        job.object_key = "[redacted]"
+        job.size_bytes = 0
+        job.details_json = {}
         db.add(job)
         db.commit()
         return True
@@ -773,6 +837,49 @@ def _audio_retry_candidates(db: Session, limit: int):
     )
 
 
+def _audio_job_terminal_retention_days() -> int:
+    configured = _positive_int_env(
+        "BRASSTUNE_AUDIO_JOB_TERMINAL_RETENTION_DAYS",
+        DEFAULT_AUDIO_JOB_TERMINAL_RETENTION_DAYS,
+    )
+    if configured <= 0:
+        return DEFAULT_AUDIO_JOB_TERMINAL_RETENTION_DAYS
+    return min(configured, MAX_AUDIO_JOB_TERMINAL_RETENTION_DAYS)
+
+
+def purge_terminal_audio_storage_jobs(db: Session) -> dict:
+    """Purge already-redacted terminal audit rows after a short bounded TTL."""
+    retention_days = _audio_job_terminal_retention_days()
+    cutoff = dt.datetime.utcnow() - dt.timedelta(days=retention_days)
+    try:
+        candidate_ids = [
+            row.id
+            for row in (
+                db.query(AudioStorageJob.id)
+                .filter(
+                    AudioStorageJob.status.in_(AUDIO_JOB_TERMINAL_STATUSES),
+                    AudioStorageJob.completed_at.is_not(None),
+                    AudioStorageJob.completed_at <= cutoff,
+                )
+                .order_by(AudioStorageJob.completed_at.asc(), AudioStorageJob.id.asc())
+                .limit(MAX_AUDIO_JOB_PURGE_BATCH)
+                .all()
+            )
+        ]
+        purged = 0
+        if candidate_ids:
+            purged = (
+                db.query(AudioStorageJob)
+                .filter(AudioStorageJob.id.in_(candidate_ids))
+                .delete(synchronize_session=False)
+            )
+        db.commit()
+        return {"retention_days": retention_days, "purged": int(purged or 0), "failed": False}
+    except Exception:
+        db.rollback()
+        return {"retention_days": retention_days, "purged": 0, "failed": True}
+
+
 def _claim_audio_job(db: Session, job_id: int) -> Optional[dict]:
     try:
         job = (
@@ -893,6 +1000,7 @@ def retry_audio_storage_jobs(db: Session, limit: int = 10) -> dict:
         "completed": sum(1 for row in results if row["status"] == "completed"),
         "still_retryable": sum(1 for row in results if row["status"] != "completed"),
         "results": results,
+        "terminal_purge": purge_terminal_audio_storage_jobs(db),
     }
 
 

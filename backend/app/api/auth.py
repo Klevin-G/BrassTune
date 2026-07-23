@@ -57,6 +57,10 @@ def assert_auth_configured() -> None:
         raise RuntimeError("SUPABASE_PUBLISHABLE_KEY is required when BRASSTUNE_AUTH_MODE=supabase.")
     if not os.getenv("SUPABASE_SECRET_KEY"):
         raise RuntimeError("SUPABASE_SECRET_KEY is required when BRASSTUNE_AUTH_MODE=supabase.")
+    try:
+        _supabase_endpoint("/")
+    except HTTPException as exc:
+        raise RuntimeError("SUPABASE_URL must be an HTTPS origin without credentials, paths, or query parameters.") from exc
 
 
 def _bearer_token(authorization: Optional[str]) -> Optional[str]:
@@ -65,7 +69,10 @@ def _bearer_token(authorization: Optional[str]) -> Optional[str]:
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token:
         return None
-    return token.strip()
+    token = token.strip()
+    if len(token) > 16_384:
+        raise HTTPException(status_code=413, detail="Authentication token is too large.")
+    return token
 
 
 def _normalize_username(value: Optional[str], fallback: str) -> str:
@@ -154,14 +161,27 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
 
 
 def _supabase_endpoint(path: str) -> str:
-    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_url = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
     if not supabase_url:
         raise HTTPException(status_code=401, detail="Supabase auth is not configured on the backend.")
     parsed = urllib.parse.urlparse(supabase_url)
-    is_local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    is_local_http = (
+        app_environment() in LOCAL_ENVIRONMENTS
+        and parsed.scheme == "http"
+        and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    )
     if parsed.scheme != "https" and not is_local_http:
         raise HTTPException(status_code=503, detail="SUPABASE_URL must be HTTPS outside local development.")
-    if not parsed.netloc:
+    if (
+        not parsed.netloc
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
         raise HTTPException(status_code=503, detail="SUPABASE_URL is invalid.")
     return "%s/%s" % (supabase_url.rstrip("/"), path.lstrip("/"))
 

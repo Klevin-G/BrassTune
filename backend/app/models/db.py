@@ -221,7 +221,9 @@ class AudioStorageJob(Base):
     __tablename__ = "audio_storage_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False, index=True)
+    # Nullable by design: terminal jobs are immediately scrubbed of account and
+    # session identifiers, then purged after the short maintenance TTL.
+    user_id = Column(Integer, nullable=True, index=True)
     session_id = Column(Integer, nullable=True, index=True)
     idempotency_key = Column(String, nullable=False, unique=True, index=True)
     action = Column(String, nullable=False)

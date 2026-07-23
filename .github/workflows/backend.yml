@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_DB: brasstune_test
           POSTGRES_PASSWORD: postgres
@@ -75,10 +75,18 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import psycopg
+          from psycopg import sql
 
           migrations_dir = Path("../supabase/migrations")
           with psycopg.connect("postgresql://postgres:postgres@localhost:5432/brasstune_test", autocommit=True) as conn:
               with conn.cursor() as cur:
+                  for role in ("anon", "authenticated", "service_role"):
+                      cur.execute(
+                          "select 1 from pg_roles where rolname = %s",
+                          (role,),
+                      )
+                      if cur.fetchone() is None:
+                          cur.execute(sql.SQL("create role {} nologin").format(sql.Identifier(role)))
                   cur.execute("create schema if not exists storage")
                   cur.execute(
                       "create table if not exists storage.buckets "
