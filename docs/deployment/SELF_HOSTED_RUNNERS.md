@@ -1,6 +1,6 @@
 # Self-Hosted GitHub Runners
 
-Date: 2026-06-28
+Date: 2026-07-24
 
 This runbook is for recovering BrassTune CI when GitHub-hosted Actions are blocked by billing, spending-limit, quota, or hosted-runner capacity state.
 
@@ -26,6 +26,15 @@ macOS native runner:
 ["self-hosted","brasstune","macos","xcode"]
 ```
 
+Production account-deletion maintenance runner:
+
+```json
+["brasstune-production-maintenance"]
+```
+
+The maintenance runner is registered with `--no-default-labels`. Its single
+composite label does not overlap with the Linux CI or macOS Xcode pools.
+
 ## Repository Variables
 
 Set only the variables for runners that are registered and online. Values must be valid JSON for `runs-on`.
@@ -37,16 +46,20 @@ BRASSTUNE_SECURITY_RUNNER=["self-hosted","brasstune","linux","ci"]
 BRASSTUNE_POSTGRES_RUNNER=["self-hosted","brasstune","linux","ci"]
 BRASSTUNE_DEVICE_SIMULATION_RUNNER=["self-hosted","brasstune","linux","ci"]
 BRASSTUNE_SWIFT_RUNNER=["self-hosted","brasstune","macos","xcode"]
+BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER=["brasstune-production-maintenance"]
 ```
 
-Every workflow must keep a hosted default so contributors without these variables still run on `ubuntu-latest` or `macos-latest`.
-Production deployment, smoke, and account-deletion retry selectors are
-intentionally not assigned to the persistent CI pool; they retain clean hosted
-defaults or are executed directly through the reviewed provider tooling.
+General build and test workflows keep hosted defaults so contributors without
+runner variables can use `ubuntu-latest` or `macos-latest`. The production
+account-deletion retry workflow is different: its default fails closed to the
+dedicated maintenance label so exhausted hosted minutes cannot silently skip the
+job and its secret cannot reach the general CI pool. Production deployment and
+smoke selectors remain unassigned to persistent self-hosted runners and are
+executed through reviewed provider tooling.
 
 ## Security Rules
 
-- Prefer repository-scoped runner access for `aryasalem09/BrassTune` only.
+- Prefer repository-scoped runner access for `Klevin-G/BrassTune` only.
 - Do not run any pull-request event on these persistent self-hosted runners.
 - Keep Backend, Frontend, Security, and Swift self-hosted checks limited to trusted
   pushes to `main`. Validate pull requests locally, merge only an exact reviewed
@@ -55,6 +68,9 @@ defaults or are executed directly through the reviewed provider tooling.
   socket access, or another host-elevation path. Pre-provision runner images; pinned
   setup actions select the job's Node and Python toolchains.
 - Do not place production deploy secrets in normal PR check jobs.
+- Route the account-deletion maintenance secret only to the dedicated
+  `brasstune-production-maintenance` label. Keep the workflow checkout-free and
+  scope the secret to its curl step.
 - Use protected GitHub Environments for deploy and production smoke jobs.
 - Keep the runner workspace clean between jobs.
 - Remove emergency runner registrations after recovery unless the owner intentionally keeps them.
@@ -97,6 +113,74 @@ The runtime container uses a repository-scoped registration, runs as the
 unprivileged `runner` user, and does not mount the Docker socket. PostgreSQL is
 started as a temporary, unprivileged process inside each matching main-branch
 job. Production credentials never run on this persistent CI pool.
+
+## Dedicated Production Maintenance Runner
+
+The reviewed curl-only image is in `scripts/ci/maintenance-runner/`. It pins the
+Actions Runner archive and checksum, runs as UID 1001, disables runner
+self-updates, and omits `git`, system `node`, Python, PostgreSQL, Docker, and
+`sudo`. The Actions Runner distribution contains its own internal runtime, but
+no `node` executable is exposed on `PATH` to workflow steps.
+
+Build and verify the image before registration:
+
+```bash
+docker build \
+  --tag brasstune-actions-runner-maintenance-arm64:2.336.0-r1 \
+  scripts/ci/maintenance-runner
+
+docker run --rm --entrypoint bash \
+  brasstune-actions-runner-maintenance-arm64:2.336.0-r1 \
+  -lc 'test "$(id -u)" = 1001 && command -v curl >/dev/null && for binary in docker git node npm psql python python3 sudo; do ! command -v "${binary}"; done && /opt/actions-runner-template/bin/Runner.Listener --version'
+```
+
+Register it without placing the one-time token in an argument, environment
+variable, file, log, or shell history. The pipeline sends it only to container
+standard input:
+
+```bash
+gh api --method POST \
+  repos/Klevin-G/BrassTune/actions/runners/registration-token \
+  --jq .token |
+docker run --detach --interactive \
+  --name brasstune-actions-runner-production-maintenance \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --pids-limit 128 \
+  --memory 256m \
+  --cpus 0.5 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+  --mount source=brasstune-actions-runner-production-maintenance,target=/opt/actions-runner \
+  --label com.brasstune.purpose=github-actions-production-maintenance-runner \
+  --env RUNNER_NAME=brasstune-linux-arm64-production-maintenance \
+  brasstune-actions-runner-maintenance-arm64:2.336.0-r1
+```
+
+Do not mount host paths or `/var/run/docker.sock`. After registration, confirm
+that the runner is repository-scoped, online, and has only the
+`brasstune-production-maintenance` label before setting the selector:
+
+```bash
+gh api repos/Klevin-G/BrassTune/actions/runners \
+  --jq '.runners[] | select(.name == "brasstune-linux-arm64-production-maintenance") | {name,status,labels:[.labels[].name]}'
+
+gh variable set BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER \
+  --repo Klevin-G/BrassTune \
+  --body '["brasstune-production-maintenance"]'
+```
+
+Verify with one `workflow_dispatch` on `main`, then inspect the job through the
+Actions API. It must show the dedicated runner name, at least one executed step,
+and a successful conclusion. Confirm the following scheduled run also succeeds.
+Never print the maintenance secret or the registration token while gathering
+evidence.
+
+Rollback is fail-closed: stop the container first so no new job can start,
+remove its repository runner registration, preserve any required diagnostics,
+and delete its named volume. Revert the workflow selector and remove the
+repository variable only after hosted billing is restored. Rotate the
+maintenance endpoint secret if compromise or unintended exposure is suspected.
 
 ## Recovery Sequence
 
