@@ -21,6 +21,19 @@ def _positive_int_env(name: str, default: int) -> int:
     return value if value >= 0 else default
 
 
+def _utc_naive(value: dt.datetime) -> dt.datetime:
+    """Return a UTC wall-clock value that is safe to compare across DB backends.
+
+    SQLite returns the app's historical naive timestamps unchanged, while the
+    Supabase/PostgreSQL ``timestamptz`` columns are returned as UTC-aware
+    values.  Session finalization may receive either representation during the
+    staged migration period, so normalize only at the arithmetic boundary.
+    """
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(dt.timezone.utc).replace(tzinfo=None)
+
+
 def get_or_create_default_user(db: Session) -> User:
     user = db.query(User).filter(User.id == 1).first()
     if user:
@@ -233,7 +246,10 @@ def _finalize_session(
     if events:
         session.duration_seconds = float(summary["duration_seconds"])
     else:
-        session.duration_seconds = max(0.0, (session.ended_at - session.started_at).total_seconds())
+        session.duration_seconds = max(
+            0.0,
+            (_utc_naive(session.ended_at) - _utc_naive(session.started_at)).total_seconds(),
+        )
     session.notes_count = int(summary["notes_count"])
     session.average_signed_cents = float(summary["average_signed_cents"])
     session.average_abs_cents = float(summary["average_abs_cents"])

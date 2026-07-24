@@ -352,12 +352,28 @@ def test_deploy_uses_an_audited_locked_local_vercel_cli_and_disallows_all_target
     assert "- all" not in deploy
     assert "target == 'all'" not in deploy
 
-    assert security.count('".github/workflows/deploy.yml"') == 2
-    assert security.count('".github/tools/vercel-cli/**"') == 2
+    # Persistent self-hosted CI runners only execute trusted main revisions.
+    # Secret scanning runs on every main push, with no path filter that could
+    # let a credential in docs, Swift, scripts, or another workflow bypass it.
+    assert "pull_request:" not in security
+    assert "workflow_dispatch:" not in security
+    assert "push:\n    branches: [main]" in security
+    assert "\n    paths:" not in security
+    assert security.count('".github/workflows/deploy.yml"') == 0
+    assert security.count('".github/tools/vercel-cli/**"') == 0
     assert "frontend/package-lock.json\n            .github/tools/vercel-cli/package-lock.json" in security
     assert install in security
     assert audit in security
-    assert security.index(install) < security.index(audit) < security.index("secrets.GITHUB_TOKEN")
+    assert security.index(install) < security.index(audit) < security.index("Gitleaks trusted-main merge scan")
+    assert "gitleaks/gitleaks-action@" not in security
+    assert "--full-history --diff-merges=first-parent ${BEFORE_SHA}..${HEAD_SHA}" in security
+    assert 'git merge-base --is-ancestor "$BEFORE_SHA" "$HEAD_SHA"' in security
+    assert 'git rev-list --count "${BEFORE_SHA}..${HEAD_SHA}"' in security
+    assert "sha256sum --check --strict" in security
+    assert "5f2edbe1f49f7b920f9e06e90759947d3c5dfc16f752fb93aaafc17e9d14cf07" in security
+    assert "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c" in security
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in security
+    assert "secrets.GITHUB_TOKEN" not in security
     assert "VERCEL_TOKEN" not in security
 
 

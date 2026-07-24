@@ -448,7 +448,8 @@ test('partial class failures stay unavailable, clipboard failure is manual, and 
     status: 200,
     contentType: 'application/javascript',
     body: `
-export function usePitchStream() {
+export function usePitchStream({ onFrame }) {
+  window.__playAlongEmitFrame = onFrame;
   return {
     micActive: true,
     statusMessage: '',
@@ -472,8 +473,34 @@ export function usePitchStream() {
   await expect(page.locator('.playalong-note').first()).toHaveAttribute('aria-label', /C, current target/);
   const liveAxe = await new AxeBuilder({ page }).include('main').analyze();
   expect(liveAxe.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
+  const liveAnnouncement = page.locator('output.visually-hidden[aria-live="polite"]');
+  const initialAnnouncement = await liveAnnouncement.textContent();
+  await expect.poll(() => page.evaluate(() => typeof window.__playAlongEmitFrame)).toBe('function');
+  const emitCurrentTargetFrame = () => page.evaluate(() => {
+    window.__playAlongEmitFrame?.({
+      timestamp_ms: Date.now(), frequency_hz: 261.63, confidence: 1, rms: 0.2,
+      midi_note_float: 60, nearest_midi: 60, concert_note_name: 'C', concert_octave: 4,
+      written_note_name: 'C', written_octave: 4, cents_deviation: 0, tuning_status: 'in_tune',
+      instrument_id: 'trumpet', reference_pitch_hz: 440, is_valid_for_recording: true,
+    });
+  });
+  await emitCurrentTargetFrame();
+  await expect(page.locator('.playalong-detected strong')).toHaveText('C');
+  await page.waitForTimeout(100);
+  await emitCurrentTargetFrame();
+  await expect(liveAnnouncement).toHaveText(initialAnnouncement ?? '');
+  for (let index = 0; index < 3; index += 1) {
+    await page.waitForTimeout(100);
+    await emitCurrentTargetFrame();
+  }
+  await expect(liveAnnouncement).toHaveText(initialAnnouncement ?? '');
+  await page.waitForTimeout(100);
+  await emitCurrentTargetFrame();
+  await expect(liveAnnouncement).toContainText('Hold progress 25 percent');
+  await page.getByRole('button', { name: 'Skip note' }).click();
+  await expect(liveAnnouncement).toContainText('Target D. Note 2 of 8. Hold progress 0 percent.');
   const skip = page.getByRole('button', { name: 'Skip note' });
-  for (let index = 0; index < 8; index += 1) await skip.click();
+  for (let index = 0; index < 7; index += 1) await skip.click();
   await expect(page.locator('.pa-verdict')).toBeFocused();
   await expect(page.locator('.pa-verdict')).toHaveJSProperty('tagName', 'SECTION');
   const summaryHeight = await page.locator('.pa-details > summary').evaluate((element) => element.getBoundingClientRect().height);

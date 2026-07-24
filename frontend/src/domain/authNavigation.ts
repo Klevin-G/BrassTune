@@ -1,6 +1,12 @@
 export const DEFAULT_AUTH_RETURN_PATH = '/home';
 export const PENDING_AUTH_RETURN_KEY = 'brasstune.pendingAuthNext';
 
+// Some constrained webviews and non-browser test runtimes expose no usable
+// sessionStorage. Keep the same sanitized value in memory for the current
+// document so an OAuth launch/callback flow remains deterministic whenever the
+// page has not been unloaded. sessionStorage remains the durable browser path.
+let inMemoryPendingAuthReturn: string | null = null;
+
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const ENCODED_CONTROL_OR_SLASH = /%(?:0[0-9a-f]|1[0-9a-f]|7f|2f|5c)/i;
 
@@ -75,10 +81,12 @@ export function oauthCallbackRedirectURL(origin = currentOrigin()): string {
 }
 
 export function rememberPendingAuthReturn(next: string): void {
+  const safeNext = safeReturnPath(next);
+  inMemoryPendingAuthReturn = safeNext;
   try {
-    sessionStorage.setItem(PENDING_AUTH_RETURN_KEY, safeReturnPath(next));
+    sessionStorage.setItem(PENDING_AUTH_RETURN_KEY, safeNext);
   } catch {
-    // The URL still carries the return path for the current auth flow.
+    // The in-memory fallback preserves the current document's auth flow.
   }
 }
 
@@ -86,13 +94,20 @@ export function readPendingAuthReturn({ consume = false }: { consume?: boolean }
   try {
     const value = sessionStorage.getItem(PENDING_AUTH_RETURN_KEY);
     if (consume) sessionStorage.removeItem(PENDING_AUTH_RETURN_KEY);
-    return value;
+    if (value !== null) {
+      if (consume) inMemoryPendingAuthReturn = null;
+      return value;
+    }
   } catch {
-    return null;
+    // Fall through to the current-document fallback.
   }
+  const fallback = inMemoryPendingAuthReturn;
+  if (consume) inMemoryPendingAuthReturn = null;
+  return fallback;
 }
 
 export function clearPendingAuthReturn(): void {
+  inMemoryPendingAuthReturn = null;
   try {
     sessionStorage.removeItem(PENDING_AUTH_RETURN_KEY);
   } catch {

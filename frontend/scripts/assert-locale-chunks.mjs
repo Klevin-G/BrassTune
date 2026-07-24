@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const assetsDirectory = new URL('../dist/assets/', import.meta.url);
@@ -15,4 +15,6 @@ if (entrySource.includes('Псевдолокаль') || entrySource.includes('�
   throw new Error('A production translation leaked into the eager entry chunk.');
 }
 
-console.log(`Verified ${expectedLocales.length} lazy locale chunks outside ${entryName}.`);
+await access(new URL('../dist/licenses/GoogleSans-OFL.txt', import.meta.url));
+
+console.log(`Verified ${expectedLocales.length} lazy locale chunks and the Google Sans license outside ${entryName}.`);

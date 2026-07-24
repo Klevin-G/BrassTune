@@ -135,7 +135,7 @@ test.describe('hosted read-only smoke', () => {
     }
   });
 
-  test('production exposes Google and email sign-in from fresh storage', async ({ page }) => {
+  test('production exposes Google, Apple, and email sign-in from fresh storage', async ({ page }) => {
     test.skip(!productionHostedAuth, 'Canonical production auth is not required for local or preview smoke runs.');
     await startWithFreshAuthStorage(page);
 
@@ -144,6 +144,8 @@ test.describe('hosted read-only smoke', () => {
     expect(rootResponse?.status(), 'Production root should load without protection or routing errors.').toBeLessThan(400);
 
     await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Apple sign-in unavailable' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Apple sign-in unavailable' })).toBeDisabled();
     const emailDisclosure = page.getByRole('button', { name: 'Sign in with email' });
     await expect(emailDisclosure).toBeVisible();
     await emailDisclosure.click();
@@ -155,6 +157,8 @@ test.describe('hosted read-only smoke', () => {
     await assertNotProtectedPreview(signInResponse, page, '/auth/sign-in');
     expect(signInResponse?.status(), 'Production sign-in route should load without protection or routing errors.').toBeLessThan(400);
     await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Apple sign-in unavailable' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Apple sign-in unavailable' })).toBeDisabled();
     await expect(page.getByLabel('Email')).toBeVisible();
     await expect(page.locator('input[type="password"]')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
