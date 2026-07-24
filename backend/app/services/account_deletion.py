@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import os
 
-from sqlalchemy import text
+from sqlalchemy import String, cast, literal, or_, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -102,10 +102,13 @@ def terminal_job_is_scrubbed(job: AccountDeletionJob) -> bool:
     return bool(
         job.status == "completed"
         and job.id is not None
+        and job.stage == "completed"
         and job.user_id is None
         and job.supabase_user_id is None
         and job.idempotency_key == "terminal:%s" % job.id
+        and job.safe_error_category is None
         and (job.counts_json == {} or job.counts_json == "{}")
+        and job.next_retry_at is None
         and job.completed_at is not None
     )
 
@@ -148,13 +151,20 @@ def _terminal_job_retention_days() -> int:
 
 def scrub_legacy_terminal_account_deletion_jobs(db: Session, limit: int = 1_000) -> dict:
     """Backfill tombstones before removing identifiers from legacy terminal rows."""
+    expected_terminal_key = literal("terminal:") + cast(AccountDeletionJob.id, String)
     jobs = (
         db.query(AccountDeletionJob)
         .filter(
             AccountDeletionJob.status == "completed",
-            (
-                AccountDeletionJob.user_id.is_not(None)
-                | AccountDeletionJob.supabase_user_id.is_not(None)
+            or_(
+                AccountDeletionJob.stage != "completed",
+                AccountDeletionJob.user_id.is_not(None),
+                AccountDeletionJob.supabase_user_id.is_not(None),
+                AccountDeletionJob.idempotency_key != expected_terminal_key,
+                AccountDeletionJob.safe_error_category.is_not(None),
+                AccountDeletionJob.counts_json != {},
+                AccountDeletionJob.next_retry_at.is_not(None),
+                AccountDeletionJob.completed_at.is_(None),
             ),
         )
         .order_by(AccountDeletionJob.completed_at.asc(), AccountDeletionJob.id.asc())

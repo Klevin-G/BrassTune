@@ -80,7 +80,7 @@ jobs:
           "$pg_bin/createdb" --host=127.0.0.1 --port=55432 --username=postgres brasstune_test
           echo "BRASSTUNE_PG_BIN=$pg_bin" >> "$GITHUB_ENV"
           echo "BRASSTUNE_PG_DATA=$pg_data" >> "$GITHUB_ENV"
-      - name: Apply Supabase migrations
+      - name: Apply Supabase expand migrations
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -88,6 +88,7 @@ jobs:
           from psycopg import sql
 
           migrations_dir = Path("../supabase/migrations")
+          contract_name = "20260724034725_enforce_account_deletion_terminal_privacy.sql"
           with psycopg.connect("postgresql://postgres@127.0.0.1:55432/brasstune_test", autocommit=True) as conn:
               with conn.cursor() as cur:
                   for role in ("anon", "authenticated", "service_role"):
@@ -103,13 +104,34 @@ jobs:
                       "(id text primary key, name text not null, public boolean not null default false)"
                   )
                   for path in sorted(migrations_dir.glob("*.sql")):
+                      if path.name == contract_name:
+                          continue
                       print(f"Applying {path.name}")
                       cur.execute(path.read_text())
+          PY
+      - name: Initialize and scrub deletion privacy
+        env:
+          BRASSTUNE_DATABASE_URL: postgresql+psycopg://postgres@127.0.0.1:55432/brasstune_test
+        run: python -m app.db.scrub_deletion_privacy
+      - name: Apply terminal privacy contract migration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import psycopg
+
+          contract = (
+              Path("../supabase/migrations")
+              / "20260724034725_enforce_account_deletion_terminal_privacy.sql"
+          )
+          with psycopg.connect("postgresql://postgres@127.0.0.1:55432/brasstune_test", autocommit=True) as conn:
+              with conn.cursor() as cur:
+                  print(f"Applying {contract.name}")
+                  cur.execute(contract.read_text())
           PY
       - name: Validate PostgreSQL readiness
         env:
           BRASSTUNE_DATABASE_URL: postgresql+psycopg://postgres@127.0.0.1:55432/brasstune_test
-        run: python -m app.db.scrub_deletion_privacy && python -m app.db.check_ready
+        run: python -m app.db.check_ready
       - name: Run pytest against PostgreSQL
         run: python -m pytest
       - name: Stop isolated PostgreSQL

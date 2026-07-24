@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from psycopg.errors import CheckViolation, RaiseException
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
@@ -288,10 +289,17 @@ def test_postgresql_integration_workflow_supplies_test_only_tombstone_secret_to_
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github" / "workflows" / "backend.yml").read_text()
     test_secret = "ci-test-only-deletion-tombstone-secret-20260723"
+    expand_step = workflow.index("- name: Apply Supabase expand migrations")
+    scrub_step = workflow.index("- name: Initialize and scrub deletion privacy")
+    contract_step = workflow.index("- name: Apply terminal privacy contract migration")
+    readiness_step = workflow.index("- name: Validate PostgreSQL readiness")
 
     assert f"BRASSTUNE_DELETION_TOMBSTONE_SECRET: {test_secret}" in workflow
     assert len(test_secret.encode("utf-8")) >= 32
-    assert "python -m app.db.scrub_deletion_privacy && python -m app.db.check_ready" in workflow
+    assert "20260724034725_enforce_account_deletion_terminal_privacy.sql" in workflow
+    assert "python -m app.db.scrub_deletion_privacy" in workflow
+    assert "python -m app.db.check_ready" in workflow
+    assert expand_step < scrub_step < contract_step < readiness_step
 
 
 def test_deploy_uses_an_audited_locked_local_vercel_cli_and_disallows_all_target():
@@ -3645,6 +3653,39 @@ def test_legacy_completed_deletion_job_is_hmac_backfilled_and_scrubbed_by_mainte
         db.close()
 
 
+def test_completed_deletion_job_with_null_identifiers_but_dirty_terminal_fields_is_scrubbed():
+    db = _test_db()
+    try:
+        job = AccountDeletionJob(
+            user_id=None,
+            supabase_user_id=None,
+            idempotency_key="legacy-terminal-key",
+            stage="external_cleanup_started",
+            status="completed",
+            retry_count=2,
+            next_retry_at=dt.datetime.utcnow() + dt.timedelta(minutes=5),
+            safe_error_category="legacy-detail",
+            counts_json={"practice_sessions": 4},
+            completed_at=dt.datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+
+        assert account_deletion_module.terminal_job_is_scrubbed(job) is False
+        result = account_deletion_module.scrub_legacy_terminal_account_deletion_jobs(db)
+
+        assert result == {"scrubbed": 1, "failed": 0}
+        db.refresh(job)
+        assert account_deletion_module.terminal_job_is_scrubbed(job) is True
+        assert job.stage == "completed"
+        assert job.idempotency_key == "terminal:%s" % job.id
+        assert job.safe_error_category is None
+        assert job.counts_json == {}
+        assert job.next_retry_at is None
+    finally:
+        db.close()
+
+
 @pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL migration compatibility regression")
 def test_postgres_expand_new_writer_scrubs_and_tombstones_terminal_job():
     """The privacy-aware writer finishes safely while the database is in expand."""
@@ -3740,6 +3781,194 @@ def test_postgres_expand_allows_old_writer_before_strict_contract():
                 ("%s.account_deletion_jobs" % schema,),
             )
             assert cursor.fetchone()[0] == 0
+    finally:
+        try:
+            with driver_connection.cursor() as cursor:
+                cursor.execute("drop schema if exists %s cascade" % schema)
+        finally:
+            driver_connection.autocommit = original_autocommit
+            raw_connection.close()
+
+
+def _prepare_postgres_account_deletion_contract_schema(cursor, schema):
+    migrations_dir = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
+    expand_sql = (migrations_dir / "20260723021828_account_deletion_privacy_tombstones.sql").read_text()
+    cursor.execute("drop schema if exists %s cascade" % schema)
+    cursor.execute("create schema %s" % schema)
+    cursor.execute(
+        "create table %s.account_deletion_jobs ("
+        "id bigserial primary key, user_id bigint not null, supabase_user_id text, "
+        "idempotency_key text not null unique, stage text not null, status text not null, "
+        "retry_count integer not null default 0, next_retry_at timestamptz, "
+        "safe_error_category text, counts_json jsonb not null default '{}'::jsonb, "
+        "completed_at timestamptz, created_at timestamptz not null default now(), "
+        "updated_at timestamptz not null default now())" % schema
+    )
+    cursor.execute(expand_sql.replace("public.", "%s." % schema))
+    return (
+        migrations_dir / "20260724034725_enforce_account_deletion_terminal_privacy.sql"
+    ).read_text().replace("public.", "%s." % schema)
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL contract migration regression")
+@pytest.mark.parametrize(
+    ("prerequisite", "expected_error", "expected_phase"),
+    (
+        (
+            "missing_config",
+            "requires exactly one config row total with id=1, found 0",
+            None,
+        ),
+        (
+            "extra_config",
+            "requires exactly one config row total with id=1, found 2",
+            "expand",
+        ),
+        (
+            "contract_config",
+            "requires config id=1 in expand, found contract",
+            "contract",
+        ),
+        (
+            "invalid_verifier",
+            "requires config id=1 key_verifier to be lowercase 64-hex",
+            "expand",
+        ),
+        (
+            "dirty_terminal",
+            "requires all completed jobs to be fully scrubbed",
+            "expand",
+        ),
+    ),
+)
+def test_postgres_account_deletion_contract_aborts_atomically_without_prerequisites(
+    prerequisite,
+    expected_error,
+    expected_phase,
+):
+    schema = "del_contract_%s_%s" % (prerequisite, os.getpid())
+    raw_connection = engine.raw_connection()
+    driver_connection = raw_connection.driver_connection
+    original_autocommit = driver_connection.autocommit
+    driver_connection.autocommit = True
+    try:
+        with driver_connection.cursor() as cursor:
+            contract_sql = _prepare_postgres_account_deletion_contract_schema(cursor, schema)
+            if prerequisite == "extra_config":
+                cursor.execute(
+                    "alter table %s.deleted_identity_tombstone_config "
+                    "drop constraint deleted_identity_tombstone_config_singleton_check" % schema
+                )
+                cursor.execute(
+                    "insert into %s.deleted_identity_tombstone_config "
+                    "(id, key_verifier, enforcement_phase) "
+                    "values (1, repeat('a', 64), 'expand'), "
+                    "(2, repeat('b', 64), 'expand')" % schema
+                )
+            elif prerequisite == "contract_config":
+                cursor.execute(
+                    "insert into %s.deleted_identity_tombstone_config "
+                    "(id, key_verifier, enforcement_phase) "
+                    "values (1, repeat('a', 64), 'contract')" % schema
+                )
+            elif prerequisite == "invalid_verifier":
+                cursor.execute(
+                    "alter table %s.deleted_identity_tombstone_config "
+                    "drop constraint deleted_identity_tombstone_config_verifier_check" % schema
+                )
+                cursor.execute(
+                    "insert into %s.deleted_identity_tombstone_config "
+                    "(id, key_verifier, enforcement_phase) "
+                    "values (1, repeat('A', 64), 'expand')" % schema
+                )
+            elif prerequisite == "dirty_terminal":
+                cursor.execute(
+                    "insert into %s.deleted_identity_tombstone_config "
+                    "(id, key_verifier, enforcement_phase) "
+                    "values (1, repeat('a', 64), 'expand')" % schema
+                )
+                cursor.execute(
+                    "insert into %s.account_deletion_jobs "
+                    "(id, user_id, supabase_user_id, idempotency_key, stage, status, counts_json, completed_at) "
+                    "values (101, 42, 'legacy-subject-42', 'delete-user-42', 'completed', 'completed', "
+                    "'{\"practice_sessions\": 2}'::jsonb, now())" % schema
+                )
+
+            with pytest.raises(RaiseException, match=expected_error):
+                cursor.execute(contract_sql)
+            driver_connection.rollback()
+
+            cursor.execute(
+                "select enforcement_phase from %s.deleted_identity_tombstone_config where id = 1" % schema
+            )
+            phase_row = cursor.fetchone()
+            assert (phase_row[0] if phase_row else None) == expected_phase
+            cursor.execute(
+                "select count(*) from pg_constraint where "
+                "conrelid = %s::regclass and conname = 'account_deletion_jobs_terminal_privacy_check'",
+                ("%s.account_deletion_jobs" % schema,),
+            )
+            assert cursor.fetchone()[0] == 0
+    finally:
+        try:
+            driver_connection.rollback()
+            with driver_connection.cursor() as cursor:
+                cursor.execute("drop schema if exists %s cascade" % schema)
+        finally:
+            driver_connection.autocommit = original_autocommit
+            raw_connection.close()
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL contract migration regression")
+def test_postgres_account_deletion_contract_validates_and_enforces_strict_terminal_shape():
+    schema = "del_contract_success_%s" % os.getpid()
+    raw_connection = engine.raw_connection()
+    driver_connection = raw_connection.driver_connection
+    original_autocommit = driver_connection.autocommit
+    driver_connection.autocommit = True
+    try:
+        with driver_connection.cursor() as cursor:
+            contract_sql = _prepare_postgres_account_deletion_contract_schema(cursor, schema)
+            cursor.execute(
+                "insert into %s.deleted_identity_tombstone_config "
+                "(id, key_verifier, enforcement_phase) "
+                "values (1, repeat('a', 64), 'expand')" % schema
+            )
+            cursor.execute(
+                "insert into %s.account_deletion_jobs "
+                "(id, user_id, supabase_user_id, idempotency_key, stage, status, "
+                "safe_error_category, counts_json, next_retry_at, completed_at) "
+                "values (201, null, null, 'terminal:201', 'completed', 'completed', "
+                "null, '{}'::jsonb, null, now())" % schema
+            )
+
+            cursor.execute(contract_sql)
+            cursor.execute(
+                "select enforcement_phase from %s.deleted_identity_tombstone_config where id = 1" % schema
+            )
+            assert cursor.fetchone()[0] == "contract"
+            cursor.execute(
+                "select convalidated from pg_constraint where "
+                "conrelid = %s::regclass and conname = 'account_deletion_jobs_terminal_privacy_check'",
+                ("%s.account_deletion_jobs" % schema,),
+            )
+            assert cursor.fetchone()[0] is True
+
+            with pytest.raises(CheckViolation):
+                cursor.execute(
+                    "insert into %s.account_deletion_jobs "
+                    "(id, user_id, supabase_user_id, idempotency_key, stage, status, counts_json, completed_at) "
+                    "values (202, 42, 'raw-subject', 'delete-user-42', 'completed', 'completed', "
+                    "'{}'::jsonb, now())" % schema
+                )
+
+            with pytest.raises(RaiseException, match="requires config id=1 in expand, found contract"):
+                cursor.execute(contract_sql)
+            driver_connection.rollback()
+            cursor.execute(
+                "select enforcement_phase from %s.deleted_identity_tombstone_config where id = 1" % schema
+            )
+            assert cursor.fetchone()[0] == "contract"
     finally:
         try:
             with driver_connection.cursor() as cursor:
@@ -4524,6 +4753,58 @@ def test_account_deletion_privacy_expand_migration_is_private_and_old_writer_com
     assert "idx_account_deletion_jobs_terminal_purge" in expand_migration
     assert "default 7-day ttl bounded to 30 days" in expand_migration
     assert "b84dacc" in expand_migration
+
+
+def test_account_deletion_privacy_contract_migration_is_atomic_strict_and_data_preserving():
+    contract_migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260724034725_enforce_account_deletion_terminal_privacy.sql"
+    ).read_text().lower()
+    assert contract_migration.startswith("-- contract phase")
+    assert "applies each migration batch and its history record transactionally" in contract_migration
+    assert "deliberately a one-shot migration" in contract_migration
+    assert "\nbegin;" not in contract_migration
+    assert "\ncommit;" not in contract_migration
+    assert "lock table public.account_deletion_jobs in share row exclusive mode" in contract_migration
+    assert (
+        "lock table public.deleted_identity_tombstone_config in share row exclusive mode"
+        in contract_migration
+    )
+    assert "select count(*)" in contract_migration
+    assert "config_rows <> 1" in contract_migration
+    assert "requires exactly one config row total with id=1" in contract_migration
+    assert "from public.deleted_identity_tombstone_config" in contract_migration
+    assert "where id = 1" in contract_migration
+    assert "for update" in contract_migration
+    assert "if not found then" in contract_migration
+    assert "current_phase <> 'expand'" in contract_migration
+    assert "current_key_verifier !~ '^[0-9a-f]{64}$'" in contract_migration
+    assert "requires all completed jobs to be fully scrubbed" in contract_migration
+    assert "add constraint account_deletion_jobs_terminal_privacy_check" in contract_migration
+    assert "status <> 'completed'" in contract_migration
+    assert "stage = 'completed'" in contract_migration
+    assert "user_id is null" in contract_migration
+    assert "supabase_user_id is null" in contract_migration
+    assert "idempotency_key = 'terminal:' || id::text" in contract_migration
+    assert "safe_error_category is null" in contract_migration
+    assert "counts_json = '{}'::jsonb" in contract_migration
+    assert "next_retry_at is null" in contract_migration
+    assert "completed_at is not null" in contract_migration
+    add_position = contract_migration.index("add constraint account_deletion_jobs_terminal_privacy_check")
+    not_valid_position = contract_migration.index(") not valid;", add_position)
+    validate_position = contract_migration.index(
+        "validate constraint account_deletion_jobs_terminal_privacy_check",
+        not_valid_position,
+    )
+    phase_position = contract_migration.index("set enforcement_phase = 'contract'", validate_position)
+    row_count_position = contract_migration.index("get diagnostics updated_rows = row_count", phase_position)
+    assert "if updated_rows <> 1 then" in contract_migration
+    assert add_position < not_valid_position < validate_position < phase_position < row_count_position
+    assert "update public.account_deletion_jobs" not in contract_migration
+    assert "delete from public.account_deletion_jobs" not in contract_migration
+    assert "truncate public.account_deletion_jobs" not in contract_migration
 
 
 def test_backend_data_and_audio_privacy_reassertion_is_separately_sequenced():

@@ -67,7 +67,7 @@ create index if not exists idx_account_deletion_jobs_terminal_purge
 -- update, so adding it before the privacy-aware backend is live would break the
 -- known-good b84dacc writer and make that rollback unsafe. The backend startup
 -- scrubber initializes the keyed tombstone state and converts legacy terminal
--- rows. 20260723052642_enforce_account_deletion_terminal_privacy.sql is the
+-- rows. 20260724034725_enforce_account_deletion_terminal_privacy.sql is the
 -- separately applied contract phase and adds/validates the strict CHECK only
 -- after that scrub succeeds.
 
