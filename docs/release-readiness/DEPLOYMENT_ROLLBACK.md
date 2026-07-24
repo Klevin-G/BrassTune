@@ -43,14 +43,15 @@
 
 1. Apply only `20260723021828_account_deletion_privacy_tombstones.sql` as the database expand phase. It adds private tombstone/config storage and nullable terminal identifiers but deliberately adds no terminal-row CHECK, so the deployed `b84dacc` writer remains compatible.
 2. Deploy the privacy-aware backend. Require its startup scrubber to report success, confirm the tombstone config is initialized in `expand`, and record the exact deploy artifact/SHA as the database-compatible rollback target.
-3. In a separate migration release, apply `20260723052642_enforce_account_deletion_terminal_privacy.sql`. It aborts unless the privacy-aware backend initialized the phase and every legacy terminal row was scrubbed, then adds and validates the strict CHECK and flips the phase to `contract` atomically.
+3. In a separate migration release, apply `20260724034725_enforce_account_deletion_terminal_privacy.sql`. It aborts unless the privacy-aware backend initialized the phase and every legacy terminal row was scrubbed, then adds and validates the strict CHECK and flips the phase to `contract` atomically.
 4. Only after contract succeeds should frontend rollout and hosted deletion/readiness smoke proceed.
 
 Before contract, rollback to `b84dacc` remains database-compatible. After contract, `b84dacc` is not a safe rollback target because it completes jobs without tombstoning or scrubbing. Roll back to the retained exact privacy-aware backend artifact instead. Do not apply contract until that artifact is recorded and restorable; do not weaken the CHECK or drop tombstones as an emergency application rollback.
 
 ## Current Deployment Notes
 
-- Hosted WebSocket handshake passed after Render deployed exact commit `395a9d29870b25a7aadf161dc1d69c988bdaa841`.
+- The retained pre-contract rollback target is Render deployment `dep-d9hdu7navr4c73edcutg` at exact commit `898c85de53ea7a696334b4305eef36c9d0e5921e`. Its startup privacy scrub reported `ok: true`, `scrubbed: 0`, and no contract constraint; `/api/live`, `/api/ready`, `/api/version`, REST/CORS, and WebSocket protocol smoke passed.
+- Vercel production deployment `dpl_CjkgbkG3mHjZ81RH74jhnDg1dAik` served the same exact commit through the canonical `https://brasstune.vercel.app` alias before contract enforcement.
 - After PR merge, run `POST_MERGE_PRODUCTION_CHECKLIST.md` before inviting production closed-beta testers.
 - Protected Vercel preview page journeys still need an automation bypass; direct connector fetch and hosted API/WS smoke passed.
 - `render.yaml` no longer provides a broad `https://.*\.vercel\.app` CORS regex by default. Configure exact production and preview origins before deployment.
