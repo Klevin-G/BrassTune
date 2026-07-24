@@ -1,12 +1,10 @@
-# Human Actions
+# Human and External Actions
 
-Only items requiring owner/legal/account/hardware access are listed here.
+Updated: 2026-07-23. These are real external gates, not missing local implementation work.
 
-1. Provide Apple Developer team access, final bundle ID, signing certificates/profiles, and App Store Connect app record.
-2. Provide legal owner/controller identity, public Privacy Policy URL, Terms URL/text approval, support URL/email, copyright owner, age-rating decisions, school/minor-data policy decision, and export-compliance answer.
-3. Configure Sign in with Apple capability, Apple Services ID/native callbacks, Supabase Apple provider, and Supabase redirect allowlist.
-4. Provide disposable live Supabase test credentials/project for email sign-up, duplicate handling, weak password, confirmation, reset, Apple OAuth, token refresh, account export, account deletion, storage deletion, and identity cleanup tests.
-5. Provide a Vercel automation bypass or temporarily allow unauthenticated preview access so Playwright can exercise protected preview page journeys; connector fetch and direct hosted API/WS smoke passed, but browser page automation still receives `401`.
-6. Confirm Vercel/Render/Supabase alert ownership, log access, backup/restore expectations, incident contacts, scheduled production smoke ownership, and whether the Render keepalive workflow should stay enabled.
-7. Run the physical-device protocol on supported iPhone/iPad hardware with real brass instruments.
-8. Create App Store review demo account or approve demo mode and review notes.
+1. Reconnect the Gmail integration as `brasstune1@gmail.com` before creating outreach drafts. The connected account is different; no professor drafts were written to it. The researched draft set is preserved outside the repository for review.
+2. Provide/configure Apple Developer Team, App ID capability, Services ID, key metadata, and Supabase Apple provider. Then enable Apple in production only after a disposable live authorization succeeds.
+3. Run physical iPhone/iPad validation for microphone/brass capture, audio routes/interruption, VoiceOver/Dynamic Type, and all shipped locales.
+4. Configure signing, archive the app, verify TestFlight processing, and complete App Store Connect/legal/privacy/reviewer metadata.
+5. After exact-SHA CI and merge, apply the approved Supabase expand migrations/configuration and perform disposable live account/export/delete/storage/class/OAuth checks.
+6. Assign ongoing ownership for provider billing, incident response, backups, support contact, and production monitoring.

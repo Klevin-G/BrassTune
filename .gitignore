@@ -20,6 +20,9 @@ DerivedData/
 *.xcarchive
 .DS_Store
 .idea/
+.omo/evidence/
+.xcodebuildmcp/
+tmp/pdfs/
 .pytest_cache/
 .env
 .env.local

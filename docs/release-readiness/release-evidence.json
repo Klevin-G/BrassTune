@@ -1,129 +1,28 @@
 {
-  "schema_version": 1,
-  "generated_at": "2026-07-23",
-  "phase": "pr1_candidate_test_only_successor_not_deployed",
-  "candidate_sha": "e1b3f61351d62e1438ac457c31b1a8d40691a1d5",
-  "billing_attempt_and_exact_local_gate_basis_sha": "99e5a7f",
-  "full_gate_predecessor_sha": "2106768f177c64a1475c6168eed6d9a172633435",
-  "candidate_delta": "Playwright seed-once persistence coverage and release documentation only; production application code is identical to the full-gate predecessor",
-  "heavy_gate_base_sha": "8ee07d63ddf201efc59f4b8c0b8d661cfd491082",
-  "artifact_bundle": "/Users/aryasalem/Downloads/BrassTune-safety-bundles/20260723T094812Z-gates-8ee07d6",
-  "branch": "arya/ux-parity-localization-20260722",
-  "pull_request": {
-    "number": 11,
-    "status": "open_and_pushed",
-    "url": "https://github.com/Klevin-G/BrassTune/pull/11"
+  "updated": "2026-07-23",
+  "candidate_revision": "428a123",
+  "decision": "pending_final_backend_race_fix_and_release_gates",
+  "local": {
+    "backend": "244 passed, 4 skipped; final rerun pending duplicate-identity PII race correction",
+    "frontend_units": "251/251",
+    "frontend_build": "passed; 11 lazy non-English locale chunks",
+    "frontend_audit": "0 findings",
+    "frontend_e2e": "443 passed, 7 skipped, 0 failed",
+    "swift_core": "3/3",
+    "native_units": "139/139",
+    "native_ui": "15/15",
+    "native_builds": "Debug iPhone/iPad and Release iPhone passed with zero warnings"
   },
-  "local_gates": {
-    "backend_pytest": "223 passed, 4 PostgreSQL-only skips",
-    "frontend_units": "39 files, 199 tests",
-    "frontend_build": "passed; 11 locale chunks; dependency audit 0 findings",
-    "frontend_full_e2e": "398 passed, 7 intended skips in 4.9m",
-    "frontend_focused_mobile_webkit": "10/10",
-    "native_core": "3/3",
-    "native_app_units": "113/113",
-    "native_ui": "9/9",
-    "native_simulator_builds": "4 passed with launch/plist/localization/black-band checks"
+  "provider_state": {
+    "google": "enabled; authorize-start verified",
+    "apple": "client implementation complete; linked provider disabled pending Apple Developer and Supabase setup"
   },
-  "ci_gates": {
-    "basis_sha": "2106768f177c64a1475c6168eed6d9a172633435",
-    "backend": {
-      "run_id": 30002610359,
-      "status": "success",
-      "result": "PostgreSQL 226 passed, 1 skipped; readiness green"
-    },
-    "security": {
-      "run_id": 30002610363,
-      "status": "success",
-      "result": "clean recorded security/dependency gate"
-    },
-    "frontend": {
-      "run_id": 30002610356,
-      "status": "success",
-      "result": "398 passed, 7 skipped in 20.7m"
-    },
-    "swift": {
-      "run_id": 30002610369,
-      "status": "success"
-    }
-  },
-  "exact_head_ci_attempts": {
-    "basis_sha": "99e5a7f",
-    "status": "blocked_before_checkout",
-    "reason": "GitHub billing/spending enforcement",
-    "workflow_step_execution": "none",
-    "self_hosted_runners_available": 0,
-    "paid_or_new_runner_workaround_authorized": false,
-    "merge_gate": "blocked until all exact-head checks execute green",
-    "frontend": {
-      "run_id": 30004831887,
-      "status": "blocked_before_checkout"
-    },
-    "security": {
-      "run_id": 30004831904,
-      "status": "blocked_before_checkout"
-    },
-    "backend": {
-      "run_id": 30004831929,
-      "status": "blocked_before_checkout"
-    },
-    "swift": {
-      "run_id": 30004831943,
-      "status": "blocked_before_checkout"
-    }
-  },
-  "exact_local_gates": {
-    "basis_sha": "99e5a7f",
-    "backend": "223 passed, 4 skipped; Bandit clean; installed-environment dependency audit clean",
-    "frontend": "199 unit tests passed; production build and 11 locale chunks passed; production dependency audit reported 0 vulnerabilities; full browser matrix 398 passed and 7 intended skips in 5.0 minutes",
-    "native": "BrassTuneCore 3 passed; app unit tests 113 passed; Debug build passed on a dynamically discovered iPhone 17 Pro simulator",
-    "boundary": "local and simulator evidence only; no physical-device, signing, or hosted-production claim"
-  },
-  "independent_reviews": {
-    "security": "approved; no P0-P2",
-    "audio_scorer": "approved after explicit denominator-beat contract",
-    "source_deploy_preflight": "approved",
-    "postgresql_ci_fix": "approved; no P0-P2",
-    "final_gate": "P2 false-positive persistence fixture identified and fixed in candidate e1b3f61; rereview pending",
-    "final_exact_artifact": "pending for the final documentation-only successor"
-  },
-  "vercel_preview": {
-    "deployment_id": "dpl_7xmSMfo1bX3dX9WQEXGxPhfpa2VJ",
-    "source_sha": "2106768f177c64a1475c6168eed6d9a172633435",
-    "status": "predecessor-source production-identical predecessor preview; not an exact 99e5a7f preview; not production"
-  },
-  "supabase": {
-    "linked_project_ref": "yznziwewxrlwnwiynlvl",
-    "pr1_migrations_unapplied": [
-      "20260716201825_audio_storage_jobs_and_upload_reservations.sql",
-      "20260723021828_account_deletion_privacy_tombstones.sql"
-    ],
-    "terminal_privacy_contract_migration_in_pr1": false
-  },
-  "rollback": {
-    "render_pre_pr1": {
-      "deployment_id": "dep-d9c4s2u1a83c73boitl0",
-      "git_sha": "b84daccfd287669b227a1c40b8e9676573d1ab8d"
-    },
-    "vercel_clean_pre_release": {
-      "deployment_id": "dpl_4xD8XQDQLBpr5ufn6K2VaLBm6Gex",
-      "git_sha": "b84daccfd287669b227a1c40b8e9676573d1ab8d",
-      "immutable_url": "brass-tune-lbvluzdg4-kelvis-prject.vercel.app"
-    },
-    "canonical_vercel_current_not_rollback_eligible": "dpl_EJxHe3E8hFutSmhn9Diah158KKCg has dirty provider metadata and is stale"
-  },
-  "release_status": "not_merged_not_migrated_not_deployed",
   "pending": [
-    "restore authorized Actions capacity or an authorized eligible runner, then execute all exact-head checks green before merging PR #11",
-    "apply and validate the two PR1 Supabase migrations",
-    "deploy Render then separate PR2 terminal-privacy contract, Render, and Vercel from exact SHAs",
-    "strict hosted smoke",
-    "physical-device audio/accessibility, signing/archive, TestFlight, and App Store gates"
-  ],
-  "boundaries": [
-    "Local and CI gates do not prove hosted deployment.",
-    "Vercel preview is not production evidence.",
-    "No Supabase migration was applied.",
-    "No physical-device, signing, archive, TestFlight, or App Store claim is made."
+    "final backend rerun and independent review",
+    "exact-SHA self-hosted CI",
+    "three Supabase expand migrations and config push",
+    "same-SHA Render/Vercel deployment and hosted smoke",
+    "terminal privacy contract after expand cleanup",
+    "physical-device, signing, TestFlight, and App Store gates"
   ]
 }
