@@ -8,7 +8,7 @@ enum GatewayAuthMode: String, Identifiable {
     var id: String { rawValue }
 
     var title: String {
-        NativeLocalization.string(self == .signIn ? "Sign in" : "Create account")
+        NativeLocalization.string(self == .signIn ? "Sign in" : "Create free account")
     }
 }
 
@@ -156,12 +156,12 @@ private struct GatewayPracticePreview: View {
         .accessibilityIdentifier("gateway.practicePreview")
     }
 
-    private func previewCard(title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
+    private func previewCard(title: BTCopy, detail: BTCopy) -> some View {
         VStack(alignment: .leading, spacing: BTSpacing.sm) {
-            Text(title)
+            Text(verbatim: title.resolved)
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
-            Text(detail)
+            Text(verbatim: detail.resolved)
                 .font(.subheadline)
                 .foregroundStyle(BTTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)

@@ -256,6 +256,15 @@ class MaintenanceRequestNonce(Base):
     expires_at = Column(DateTime, nullable=False, index=True)
 
 
+class MaintenanceHeartbeat(Base):
+    """Minimal durable proof that a backend maintenance endpoint succeeded."""
+
+    __tablename__ = "maintenance_heartbeats"
+
+    purpose = Column(String(64), primary_key=True)
+    last_succeeded_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class AudioStorageJob(Base):
     """Durable upload reservations, cleanup tombstones, and reconciliations.
 

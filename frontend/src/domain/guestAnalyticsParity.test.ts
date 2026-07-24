@@ -136,7 +136,7 @@ describe('guest/backend fixture parity', () => {
     expect(generateGuestNoteRecommendation(stats).category).toBe(category);
   });
 
-  it('duration-weights aggregate centers and preserves event medians', () => {
+  it('duration-weights aggregate centers, medians, and population deviation', () => {
     const events = buildGuestNoteEvents(-7, [
       ...Array.from({ length: 11 }, (_, index) => fixtureFrame({
         timestamp_ms: index * 100,
@@ -152,7 +152,11 @@ describe('guest/backend fixture parity', () => {
     const stats = calculateGuestNoteStats(events)[0];
     expect(events).toHaveLength(2);
     expect(stats.avg_signed_cents).toBeCloseTo(22 / 7, 9);
-    expect(stats.median_cents).toBe(6);
+    expect(stats.median_cents).toBe(0);
+    expect(stats.stddev_cents).toBeCloseTo(
+      Math.sqrt((1_100 * (12 - 22 / 7) ** 2 + 3_100 * (22 / 7) ** 2) / 4_200),
+      9,
+    );
     expect(stats.duration_ms).toBe(4_200);
   });
 
@@ -165,6 +169,8 @@ describe('guest/backend fixture parity', () => {
 
     expect(stats.avg_signed_cents).toBeCloseTo(5.01, 9);
     expect(stats.avg_abs_cents).toBeCloseTo(5.01, 9);
+    expect(stats.median_cents).toBeCloseTo(5.01, 9);
+    expect(stats.stddev_cents).toBe(0);
     expect(stats.in_tune_percentage).toBe(70);
     expect(stats.stability_score).toBe(90);
     expect(stats.duration_ms).toBe(4_000);
@@ -178,6 +184,8 @@ describe('guest/backend fixture parity', () => {
 
     expect(stats.avg_signed_cents).toBe(7);
     expect(stats.avg_abs_cents).toBe(7);
+    expect(stats.median_cents).toBe(7);
+    expect(stats.stddev_cents).toBe(3);
     expect(stats.duration_ms).toBe(0);
   });
 

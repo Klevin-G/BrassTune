@@ -10,6 +10,7 @@ from app.core.instruments.profiles import require_instrument_profile
 from app.core.music.theory import MIN_RECORDING_CONFIDENCE, frequency_to_pitch_frame, transpose_concert_to_written
 from app.core.sessions.segmentation import compute_session_summary, segment_note_events
 from app.models.db import NoteEvent, PitchSample, PracticeSession, User
+from app.services.account_mutation import account_mutation_guard, assert_account_accepts_mutation
 from app.services.serializers import sample_to_frame_dict, session_to_dict
 
 
@@ -57,51 +58,54 @@ def get_or_create_default_user(db: Session) -> User:
 
 
 def start_session(db: Session, instrument_id: str, name: Optional[str], reference_pitch_hz: float, user_id: int = 1) -> PracticeSession:
-    profile = require_instrument_profile(instrument_id)
-    # Lock the owner row so concurrent HTTP/WebSocket starts for one account
-    # serialize around the quota check on PostgreSQL.
-    user = db.query(User).filter(User.id == user_id).with_for_update().first()
-    if user is None:
-        raise HTTPException(status_code=404, detail="Account not found.")
-    max_sessions = _positive_int_env("BRASSTUNE_MAX_SESSIONS_PER_USER", 5000)
-    if max_sessions:
-        session_count = int(
-            db.query(func.count(PracticeSession.id))
-            .filter(PracticeSession.user_id == user.id)
-            .scalar()
-            or 0
-        )
-        if session_count >= max_sessions:
-            raise HTTPException(
-                status_code=409,
-                detail="Session storage limit reached. Delete old cloud sessions before starting another.",
+    with account_mutation_guard(db, user_id):
+        profile = require_instrument_profile(instrument_id)
+        # Keep the existing row lock inside the cross-commit account guard. The
+        # row lock protects quota decisions within this transaction; the
+        # advisory/process guard also excludes deletion and audio replacement.
+        user = db.query(User).filter(User.id == user_id).with_for_update().first()
+        if user is None:
+            raise HTTPException(status_code=404, detail="Account not found.")
+        assert_account_accepts_mutation(db, user.id)
+        max_sessions = _positive_int_env("BRASSTUNE_MAX_SESSIONS_PER_USER", 5000)
+        if max_sessions:
+            session_count = int(
+                db.query(func.count(PracticeSession.id))
+                .filter(PracticeSession.user_id == user.id)
+                .scalar()
+                or 0
             )
-    # A mode switch or dropped client must not leave overlapping active
-    # sessions. Finalize any stranded session in the same owner-locked
-    # transaction before creating its replacement.
-    active_sessions = (
-        db.query(PracticeSession)
-        .filter(
-            PracticeSession.user_id == user.id,
-            PracticeSession.ended_at.is_(None),
+            if session_count >= max_sessions:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Session storage limit reached. Delete old cloud sessions before starting another.",
+                )
+        # A mode switch or dropped client must not leave overlapping active
+        # sessions. Finalize any stranded session in the same owner-locked
+        # transaction before creating its replacement.
+        active_sessions = (
+            db.query(PracticeSession)
+            .filter(
+                PracticeSession.user_id == user.id,
+                PracticeSession.ended_at.is_(None),
+            )
+            .with_for_update()
+            .all()
         )
-        .with_for_update()
-        .all()
-    )
-    ended_at = dt.datetime.utcnow()
-    for active_session in active_sessions:
-        _finalize_session(db, active_session, ended_at=ended_at)
-    session = PracticeSession(
-        user_id=user.id,
-        instrument_id=instrument_id,
-        name=name or "%s practice" % profile.display_name,
-        reference_pitch_hz=reference_pitch_hz,
-        started_at=dt.datetime.utcnow(),
-    )
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    return session
+        ended_at = dt.datetime.utcnow()
+        for active_session in active_sessions:
+            _finalize_session(db, active_session, ended_at=ended_at)
+        session = PracticeSession(
+            user_id=user.id,
+            instrument_id=instrument_id,
+            name=name or "%s practice" % profile.display_name,
+            reference_pitch_hz=reference_pitch_hz,
+            started_at=dt.datetime.utcnow(),
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return session
 
 
 def save_pitch_frame(db: Session, session_id: int, frame: Dict[str, object]) -> Optional[PitchSample]:

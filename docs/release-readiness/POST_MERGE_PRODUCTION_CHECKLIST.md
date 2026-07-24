@@ -1,24 +1,17 @@
-# Post-Merge Production Checklist
+# Direct Production Deployment Checklist
 
-Updated: 2026-07-23. Run this only after the exact merged SHA passes required self-hosted CI.
+Updated: 2026-07-24. Final revision: `PENDING_FINAL_SHA`.
 
-## Ordered rollout
+GitHub Actions is disabled. Do not wait for, trigger, or cite Actions checks for this candidate.
 
-1. Record the final `main` SHA and verify Backend, Frontend, Security, and Swift checks ran on matching configured self-hosted runners.
-2. Inspect linked migration state and apply the three reviewed expand migrations:
-   - `20260716201825_audio_storage_jobs_and_upload_reservations.sql`
-   - `20260723021828_account_deletion_privacy_tombstones.sql`
-   - `20260723120000_reassert_backend_data_and_audio_privacy.sql`
-3. Push approved Supabase configuration, including narrow reset/callback URLs and the iOS Google callback. Preserve Apple provider disabled until Apple setup is verified.
-4. Deploy the privacy-aware Render backend at the exact SHA; verify readiness, version identity, privacy scrub/expand state, REST, and WebSocket paths.
-5. Only after expand cleanup and retained backend rollback evidence, create/review/apply a separate terminal privacy contract migration. Do not create it early.
-6. Deploy Vercel from the same SHA; require the canonical alias `https://brasstune.vercel.app` and provider commit metadata to match.
-7. Run hosted smoke: signed-out guest, email auth, Google auth, Apple unavailable copy, class privacy, audio, offline workspace, REST/CORS/WebSocket, and account lifecycle with disposable users.
+1. Record the final committed SHA in this file and the release evidence JSON.
+2. Reconfirm the applied state of `20260724072904_account_deletion_maintenance_heartbeats.sql`; local and remote histories matched after the 2026-07-24 application.
+3. Deploy the backend directly to Render from `PENDING_FINAL_SHA`. Record the deployment ID and verify readiness, reported revision, and maintenance-heartbeat behavior.
+4. Deploy the frontend directly to Vercel from the same SHA. Record the deployment ID and verify the canonical production alias serves that revision.
+5. Run hosted smoke for web, REST, WebSocket, auth, class, audio, offline, and account lifecycle. Record failures and rollback decisions.
+6. Keep Apple live provider setup, signing, and physical-device microphone validation as separate external gates.
+7. Do not create Gmail outreach drafts: reconnect the designated BrassTune sender first.
 
-## Rollback
+## Completion record
 
-Before terminal contract enforcement, retain the privacy-aware expand backend as the rollback target. After enforcement, do not restore a backend that can write unsanitized terminal deletion data. Roll back Vercel independently if necessary and record affected data/surfaces.
-
-## Explicitly excluded
-
-This checklist does not establish Apple provider completion, physical-device validation, signing, TestFlight, or App Store readiness.
+Do not mark production complete until the SHA, Supabase migration state, Render/Vercel deployment IDs, and hosted-smoke result are all recorded. Current values are pending.

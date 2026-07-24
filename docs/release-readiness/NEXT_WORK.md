@@ -4,8 +4,8 @@
 
 - [P0] Verify the final integration pull-request head
   - Owner type: repo
-  - Acceptance criteria: the latest PR head has Backend, Frontend, Security, Swift, and Vercel checks all green on the exact new SHA.
-  - Verification command or evidence: GitHub Actions and Vercel status for the current integration pull request on its exact latest commit.
+  - Acceptance criteria: the latest PR head has local Backend, Frontend, Security, and Swift gates green, with direct Vercel/Render deployment reserved for the merged SHA.
+  - Verification command or evidence: recorded local commands and result artifacts in `TEST_MATRIX.md`; GitHub Actions is disabled and must not be used.
 
 - [P0] Owner-approved Render deployment before production beta smoke
   - Owner type: owner/provider
@@ -14,7 +14,7 @@
 
 - [P1] Keep release docs non-contradictory
   - Owner type: repo
-  - Acceptance criteria: canonical reports do not say the branch is merge-ready before latest Actions, exact-SHA preview, and hosted smoke pass, and do not call the product release ready.
+  - Acceptance criteria: canonical reports do not say the branch is released before direct exact-SHA provider deployments and hosted smoke pass, and do not call the product release ready.
   - Verification command or evidence: `MASTER_FINDINGS.md`, `TEST_MATRIX.md`, `FINAL_REPORT.md`, and `release-evidence.json` reference the same SHA/evidence state.
 
 ## Should Finish During Closed Beta
@@ -22,7 +22,7 @@
 - [P0] Run post-merge production smoke before inviting testers
   - Owner type: provider
   - Acceptance criteria: production Vercel and Render are on the merged commit; root, deep links, health, CORS, WebSocket, legal routes, export surfaces, and no-localhost checks pass.
-  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted` or a green `.github/workflows/production-smoke.yml` run.
+  - Verification command or evidence: `BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted`.
 
 - [P0] Validate live Supabase auth and account lifecycle with disposable users
   - Owner type: provider
@@ -88,10 +88,10 @@
   - Acceptance criteria: non-production Supabase project can run auth/export/delete/storage lifecycle tests without real user data.
   - Verification command or evidence: CI/manual env-gated test command documented; disposable project evidence redacted.
 
-- [P1] Confirm Security workflow on the exact pushed SHA
+- [P1] Confirm local security gates on the exact pushed SHA
   - Owner type: repo
-  - Acceptance criteria: Security workflow reruns after this commit and passes dependency, Bandit, and secret checks on the exact PR head.
-  - Verification command or evidence: GitHub Actions Security result for the latest pushed SHA.
+  - Acceptance criteria: dependency, Bandit, secret, and artifact-hygiene checks pass after the exact candidate commit.
+  - Verification command or evidence: local command output recorded in `TEST_MATRIX.md`; GitHub Actions is disabled and must not be used.
 
 - [P2] Revisit WebSocket auth hardening after live auth stabilizes
   - Owner type: repo

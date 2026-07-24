@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "{name}をお気に入りに追加",
   "metronomePreset.delete": "{name}を削除",
   "playAlong.title": "練習スコア",
-  "playAlong.description": "エクササイズを選んでプレイしてください。各音の調子がどの程度合っているかを聞いて教えていただきます。",
+  "playAlong.description": "練習を選び、それぞれの音を安定して伸ばしてください。BrassTune は、どの音を吹いたかと音程を確認します。リズム、強弱、楽譜に対するタイミングは採点しません。",
   "playAlong.choose": "エクササイズを選択してください",
   "playAlong.majorScales": "メジャースケール",
   "playAlong.minorScales": "マイナースケール",

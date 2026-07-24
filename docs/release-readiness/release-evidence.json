@@ -1,44 +1,33 @@
 {
-  "updated": "2026-07-23",
-  "candidate_revision": "a3f436ea7442c471760e06ed1422ec3ddbbf1217",
-  "decision": "pending_exact_sha_ci_and_release_gates",
+  "updated": "2026-07-24",
+  "candidate_revision": "PENDING_FINAL_SHA",
+  "decision": "local_candidate_complete_pending_direct_deployment_and_external_gates",
+  "github_actions": {
+    "status": "disabled",
+    "release_gate": "must_not_be_used"
+  },
   "local": {
-    "backend": "246 passed, 4 skipped after the 428a123 duplicate-identity PII race correction",
-    "frontend_units": "251/251",
-    "frontend_build": "passed; 11 lazy non-English locale chunks",
-    "frontend_audit": "0 findings",
-    "frontend_e2e": "443 passed, 7 skipped, 0 failed",
+    "backend": "286 passed, 11 skipped",
+    "frontend_units": "253/253",
+    "frontend_build": "passed",
+    "device_simulation": "12 viewport profiles passed",
     "swift_core": "3/3",
-    "native_units": "140/140",
-    "native_ui": "17/17 in one invocation; result bundle /tmp/brasstune-final-a3f436e-all-ui.xcresult",
-    "native_builds": "Debug iPhone/iPad and Release iPhone passed with zero warnings",
-    "google_branding": "independent review approved"
+    "native_iphone_units": "145/145",
+    "native_iphone_ui": "20/20",
+    "native_ipad_journeys": "first-run, main, and class passed",
+    "localization": "660 keys across 12 locales, 0 issues"
   },
-  "provider_state": {
-    "google": "enabled; authorize-start verified",
-    "apple": "client implementation complete; linked provider disabled pending Apple Developer and Supabase setup"
+  "supabase": {
+    "heartbeat_migration": "20260724072904 applied; local and remote histories matched on 2026-07-24",
+    "google_provider": "enabled",
+    "apple_provider": "disabled_pending_apple_developer_credentials"
   },
-  "locales": [
-    "English",
-    "Spanish",
-    "Simplified Chinese",
-    "Traditional Chinese",
-    "Arabic",
-    "French",
-    "German",
-    "Russian",
-    "Portuguese (Brazil)",
-    "Japanese",
-    "Korean",
-    "Vietnamese"
-  ],
-  "pending": [
-    "independent review",
-    "post-merge exact-SHA self-hosted CI, including live confirmation of the pre-baked SQLite runtime",
-    "three Supabase expand migrations and config push",
-    "same-SHA Render/Vercel deployment and hosted smoke",
-    "terminal privacy contract after expand cleanup",
-    "physical-device, signing, TestFlight, and App Store gates",
-    "Gmail reconnect as the designated BrassTune sender before professor drafts"
-  ]
+  "pending": {
+    "render_deployment": "PENDING_RENDER_DEPLOYMENT_ID",
+    "vercel_deployment": "PENDING_VERCEL_DEPLOYMENT_ID",
+    "hosted_smoke": "not_run_for_this_candidate",
+    "apple_provider_and_signing": "external",
+    "physical_device_microphone": "external",
+    "gmail_sender_identity": "incorrect_do_not_create_drafts"
+  }
 }

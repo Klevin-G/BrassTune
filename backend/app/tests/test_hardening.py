@@ -1750,6 +1750,27 @@ def test_session_exports_reject_too_many_rows(monkeypatch):
             assert "too many" in response.json()["detail"].lower()
 
 
+def test_json_and_csv_exports_apply_encoded_response_byte_cap(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_EXPORT_MAX_ARCHIVE_BYTES", "1")
+    main_module._EXPENSIVE_RATE_LIMIT_BUCKETS.clear()
+    try:
+        with TestClient(app) as client:
+            session = client.post(
+                "/api/sessions/start",
+                json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+            ).json()
+            for path in (
+                f"/api/export/session/{session['id']}.csv",
+                f"/api/export/session/{session['id']}.json",
+                f"/api/export/note-events/{session['id']}.csv",
+            ):
+                response = client.get(path)
+                assert response.status_code == 413
+                assert response.json()["code"] == "payload_too_large"
+    finally:
+        main_module._EXPENSIVE_RATE_LIMIT_BUCKETS.clear()
+
+
 def test_account_export_rejects_too_many_sessions(monkeypatch):
     monkeypatch.setenv("BRASSTUNE_EXPORT_MAX_SESSIONS", "1")
     with TestClient(app) as client:
@@ -1840,6 +1861,56 @@ def test_websocket_stop_session_requires_owner_or_admin():
         assert "access" in message["message"].lower()
         session = client.get(f"/api/sessions/{created['id']}", headers={"Authorization": "Bearer dev-user-3"}).json()
         assert session["ended_at"] is None
+
+
+def test_websocket_rejects_attached_session_pitch_contract_before_computation(monkeypatch):
+    detector_calls = []
+
+    class CountingDetector:
+        def estimate_frame(self, *_args):
+            detector_calls.append(True)
+            raise AssertionError("mismatched attached frames must not be computed")
+
+    monkeypatch.setattr("app.api.websocket.PitchDetector", CountingDetector)
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 442},
+        ).json()
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_json(
+                {
+                    "type": "audio_frame",
+                    "session_id": created["id"],
+                    "instrument_id": "horn",
+                    "reference_pitch_hz": 442,
+                    "sample_rate": 48_000,
+                    "pcm": [0.0],
+                }
+            )
+            instrument_error = websocket.receive_json()
+            websocket.send_json(
+                {
+                    "type": "audio_frame",
+                    "session_id": created["id"],
+                    "instrument_id": "trumpet",
+                    "reference_pitch_hz": 440,
+                    "sample_rate": 48_000,
+                    "pcm": [0.0],
+                }
+            )
+            reference_error = websocket.receive_json()
+            websocket.send_json({"type": "ping"})
+            assert websocket.receive_json()["type"] == "pong"
+
+        samples = client.get(f"/api/sessions/{created['id']}/samples").json()
+
+    assert instrument_error["code"] == "conflict"
+    assert "instrument" in instrument_error["message"].lower()
+    assert reference_error["code"] == "conflict"
+    assert "reference pitch" in reference_error["message"].lower()
+    assert detector_calls == []
+    assert samples == []
 
 
 def test_websocket_pcm_frame_size_is_limited():

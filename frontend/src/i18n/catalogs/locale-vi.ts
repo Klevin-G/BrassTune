@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "Thêm {name} vào danh mục yêu thích",
   "metronomePreset.delete": "Xóa {name}",
   "playAlong.title": "Chấm điểm luyện tập",
-  "playAlong.description": "Chọn một bài tập và chơi nó. Chúng tôi sẽ lắng nghe và cho bạn biết từng nốt nhạc được điều chỉnh như thế nào.",
+  "playAlong.description": "Chọn một bài tập và giữ từng nốt thật ổn định. BrassTune kiểm tra nốt bạn chơi và độ chuẩn của cao độ. Ứng dụng không chấm nhịp điệu, cường độ hay thời điểm so với bản nhạc.",
   "playAlong.choose": "Chọn một bài tập",
   "playAlong.majorScales": "âm giai trưởng",
   "playAlong.minorScales": "âm giai thứ",

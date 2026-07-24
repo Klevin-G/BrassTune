@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "Ajouter {name} aux favoris",
   "metronomePreset.delete": "Supprimer {name}",
   "playAlong.title": "Évaluation de pratique",
-  "playAlong.description": "Choisissez un exercice et jouez-le. Nous vous écouterons et vous dirons à quel point chaque note est accordée.",
+  "playAlong.description": "Choisissez un exercice et tenez chaque note sans la faire bouger. BrassTune vérifie la note jouée et sa justesse. Il n’évalue pas le rythme, les nuances ni le placement dans la partition.",
   "playAlong.choose": "Choisissez un exercice",
   "playAlong.majorScales": "Gammes majeures",
   "playAlong.minorScales": "Gammes mineures",

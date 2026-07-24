@@ -161,6 +161,59 @@ function populationStdDev(values: number[]) {
   return Math.sqrt(average(values.map((value) => (value - center) ** 2)));
 }
 
+function durationWeightedEntries(
+  items: NoteEvent[],
+  value: (item: NoteEvent) => number,
+): Array<{ value: number; weight: number }> {
+  const entries = items.map((item) => ({
+    value: value(item),
+    weight: Math.max(0, item.duration_ms),
+  }));
+  if (entries.some((entry) => entry.weight > 0)) {
+    return entries.filter((entry) => entry.weight > 0);
+  }
+  return entries.map((entry) => ({ ...entry, weight: 1 }));
+}
+
+function durationWeightedMedian(
+  items: NoteEvent[],
+  value: (item: NoteEvent) => number,
+) {
+  const entries = durationWeightedEntries(items, value)
+    .sort((left, right) => left.value - right.value);
+  if (!entries.length) return 0;
+  const halfway = entries.reduce((sum, entry) => sum + entry.weight, 0) / 2;
+  let cumulative = 0;
+  for (let index = 0; index < entries.length; index += 1) {
+    cumulative += entries[index].weight;
+    if (Math.abs(cumulative - halfway) <= 1e-12) {
+      return index + 1 < entries.length
+        ? (entries[index].value + entries[index + 1].value) / 2
+        : entries[index].value;
+    }
+    if (cumulative > halfway) return entries[index].value;
+  }
+  return entries[entries.length - 1].value;
+}
+
+function durationWeightedPopulationStdDev(
+  items: NoteEvent[],
+  value: (item: NoteEvent) => number,
+) {
+  const entries = durationWeightedEntries(items, value);
+  if (!entries.length) return 0;
+  const totalWeight = entries.reduce((sum, entry) => sum + entry.weight, 0);
+  const center = entries.reduce(
+    (sum, entry) => sum + entry.value * entry.weight,
+    0,
+  ) / totalWeight;
+  const variance = entries.reduce(
+    (sum, entry) => sum + entry.weight * (entry.value - center) ** 2,
+    0,
+  ) / totalWeight;
+  return Math.sqrt(Math.max(0, variance));
+}
+
 function noteLabel(frame: PitchFrame) {
   return `${frame.written_note_name ?? 'Note'}${frame.written_octave ?? ''}`;
 }
@@ -307,15 +360,16 @@ export function calculateGuestNoteStats(events: NoteEvent[]): NoteStats[] {
       const denominator = durationMs > 0 ? durationMs : items.length;
       const weight = (item: NoteEvent) => (durationMs > 0 ? Math.max(0, item.duration_ms) : 1);
       const sampleCount = items.reduce((sum, item) => sum + item.sample_count, 0);
-      const eventCenters = items.map((item) => item.avg_signed_cents);
       const row: NoteStats = {
         written_note: first.written_note,
         written_octave: first.written_octave,
         note_label: first.note_label,
         avg_signed_cents: items.reduce((sum, item) => sum + item.avg_signed_cents * weight(item), 0) / denominator,
         avg_abs_cents: items.reduce((sum, item) => sum + item.avg_abs_cents * weight(item), 0) / denominator,
-        median_cents: median(eventCenters),
-        stddev_cents: items.length > 1 ? populationStdDev(eventCenters) : first.stddev_cents,
+        median_cents: durationWeightedMedian(items, (item) => item.median_cents),
+        stddev_cents: items.length > 1
+          ? durationWeightedPopulationStdDev(items, (item) => item.avg_signed_cents)
+          : first.stddev_cents,
         in_tune_percentage: items.reduce((sum, item) => sum + item.in_tune_percentage * weight(item), 0) / denominator,
         duration_ms: durationMs,
         duration_seconds: durationMs / 1000,

@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "Añadir {name} a favoritos",
   "metronomePreset.delete": "Eliminar {name}",
   "playAlong.title": "Evaluador de práctica",
-  "playAlong.description": "Elige un ejercicio y practícalo. Te escucharemos y te diremos qué tan afinada está cada nota.",
+  "playAlong.description": "Elige un ejercicio y mantén cada nota estable. BrassTune comprueba qué nota tocas y qué tan afinada está. No evalúa el ritmo, la dinámica ni la sincronización con la partitura.",
   "playAlong.choose": "Elige un ejercicio",
   "playAlong.majorScales": "Escalas mayores",
   "playAlong.minorScales": "Escalas menores",

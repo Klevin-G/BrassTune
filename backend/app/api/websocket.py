@@ -2,6 +2,7 @@ import json
 import asyncio
 from collections import defaultdict, deque
 import ipaddress
+import math
 import os
 import threading
 import time
@@ -402,6 +403,38 @@ async def pitch_socket(websocket: WebSocket):
                     if not is_valid_instrument_id(payload.instrument_id):
                         await _send_error(websocket, "Unknown instrument_id: %s" % payload.instrument_id, "invalid_instrument")
                         continue
+                    writable_session = None
+                    if payload.session_id:
+                        try:
+                            writable_session = session_for_write(payload.session_id)
+                        except HTTPException as exc:
+                            await _send_error(websocket, exc.detail, error_code_for_status(exc.status_code))
+                            continue
+                        if writable_session is None:
+                            await _send_error(websocket, "Session not found.", "not_found")
+                            continue
+                        if writable_session.ended_at is not None:
+                            await _send_error(websocket, "Practice session has already ended.", "conflict")
+                            continue
+                        if payload.instrument_id != writable_session.instrument_id:
+                            await _send_error(
+                                websocket,
+                                "Audio frame instrument does not match the attached session.",
+                                "conflict",
+                            )
+                            continue
+                        if not math.isclose(
+                            float(payload.reference_pitch_hz),
+                            float(writable_session.reference_pitch_hz or 440.0),
+                            rel_tol=0.0,
+                            abs_tol=1e-6,
+                        ):
+                            await _send_error(
+                                websocket,
+                                "Audio frame reference pitch does not match the attached session.",
+                                "conflict",
+                            )
+                            continue
                     if not _try_acquire_pitch_compute_slot():
                         await _send_error(websocket, "Pitch processing is busy. Reconnect in a moment.", "service_busy")
                         await websocket.close(code=1013)
@@ -424,18 +457,7 @@ async def pitch_socket(websocket: WebSocket):
                         estimate_with_slot,
                     )
                     frame = detected.to_dict()
-                    if payload.session_id:
-                        try:
-                            writable_session = session_for_write(payload.session_id)
-                        except HTTPException as exc:
-                            await _send_error(websocket, exc.detail, error_code_for_status(exc.status_code))
-                            continue
-                        if writable_session is None:
-                            await _send_error(websocket, "Session not found.", "not_found")
-                            continue
-                        if writable_session.ended_at is not None:
-                            await _send_error(websocket, "Practice session has already ended.", "conflict")
-                            continue
+                    if payload.session_id and writable_session is not None:
                         if not _can_track_pending_session(pending_frames, payload.session_id):
                             await _send_error(websocket, "Too many pending sessions on this WebSocket connection.", "rate_limited")
                             await websocket.close(code=1008)

@@ -1,10 +1,10 @@
 # Release Readiness Docs Index
 
-Updated: 2026-07-23. Candidate source revision: `7c12b15` (includes `428a123`, `4f742a0`, and `cc3a8dc`).
+Updated: 2026-07-24. Candidate source revision: `PENDING_FINAL_SHA`.
 
 ## Current decision
 
-Local implementation evidence is strong, but this is **not deployed or released**. The duplicate-identity PII race is fixed and the full backend suite now passes; the merged SHA still requires self-hosted CI, Supabase migration/config rollout, exact-SHA Render/Vercel deploys, and hosted smoke.
+Local implementation evidence is strong, but this is **not deployed or released**. Local web, backend, Swift, simulator, audit, and independent-review gates pass, and linked Supabase migrations match through `20260724072904`. The committed SHA still requires direct same-SHA Render/Vercel deployments and hosted smoke. GitHub Actions is disabled and must not be used.
 
 ## Primary documents
 

@@ -23,7 +23,7 @@ from app.api.routes import (
 from app.db.database import SessionLocal
 from app.db.readiness import maintenance_readiness_issues
 from app.main import app
-from app.models.db import MaintenanceRequestNonce
+from app.models.db import MaintenanceHeartbeat, MaintenanceRequestNonce
 
 
 CURRENT_KEY_ID = "maintenance-2026-07"
@@ -160,6 +160,84 @@ def test_maintenance_hmac_binds_canonical_query_and_uses_fixed_limit(
     assert response.status_code == 204
     assert response.content == b""
     assert observed_limits == [MAINTENANCE_RETRY_LIMIT, MAINTENANCE_RETRY_LIMIT]
+
+
+def test_successful_account_maintenance_records_backend_heartbeat(
+    maintenance_hmac_env,
+):
+    before = dt.datetime.now(dt.timezone.utc)
+    with TestClient(app) as client:
+        db = SessionLocal()
+        try:
+            db.query(MaintenanceHeartbeat).filter(
+                MaintenanceHeartbeat.purpose == ACCOUNT_DELETION_RETRY_PURPOSE
+            ).delete(synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()
+        response = client.post(ACCOUNT_PATH, headers=_signed_headers())
+    after = dt.datetime.now(dt.timezone.utc)
+
+    assert response.status_code == 204
+    db = SessionLocal()
+    try:
+        heartbeat = db.get(
+            MaintenanceHeartbeat,
+            ACCOUNT_DELETION_RETRY_PURPOSE,
+        )
+        assert heartbeat is not None
+        succeeded_at = heartbeat.last_succeeded_at
+        if succeeded_at.tzinfo is None:
+            succeeded_at = succeeded_at.replace(tzinfo=dt.timezone.utc)
+        assert before <= succeeded_at <= after
+    finally:
+        db.close()
+
+
+def test_failed_account_maintenance_does_not_advance_backend_heartbeat(
+    maintenance_hmac_env,
+    monkeypatch,
+):
+    previous_success = dt.datetime(2026, 7, 24, 1, 2, 3)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        db = SessionLocal()
+        try:
+            heartbeat = db.get(
+                MaintenanceHeartbeat,
+                ACCOUNT_DELETION_RETRY_PURPOSE,
+            )
+            if heartbeat is None:
+                heartbeat = MaintenanceHeartbeat(
+                    purpose=ACCOUNT_DELETION_RETRY_PURPOSE,
+                    last_succeeded_at=previous_success,
+                )
+            else:
+                heartbeat.last_succeeded_at = previous_success
+            db.add(heartbeat)
+            db.commit()
+        finally:
+            db.close()
+
+        monkeypatch.setattr(
+            routes_module,
+            "retry_account_deletion_jobs",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("maintenance failed")
+            ),
+        )
+        response = client.post(ACCOUNT_PATH, headers=_signed_headers())
+
+    assert response.status_code == 500
+    db = SessionLocal()
+    try:
+        heartbeat = db.get(
+            MaintenanceHeartbeat,
+            ACCOUNT_DELETION_RETRY_PURPOSE,
+        )
+        assert heartbeat is not None
+        assert heartbeat.last_succeeded_at == previous_success
+    finally:
+        db.close()
 
 
 def test_maintenance_hmac_binds_actual_body_and_invalid_hmac_does_not_reserve_nonce(

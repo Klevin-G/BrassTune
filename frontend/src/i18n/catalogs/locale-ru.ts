@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "Добавить {name} в избранное",
   "metronomePreset.delete": "Удалить {name}",
   "playAlong.title": "Оценка практики",
-  "playAlong.description": "Выберите упражнение и играйте в него. Мы послушаем и расскажем, насколько гармонична каждая нота.",
+  "playAlong.description": "Выберите упражнение и удерживайте каждую ноту ровно. BrassTune проверяет, какую ноту вы играете и насколько чисто она настроена. Ритм, динамика и совпадение по времени с нотной записью не оцениваются.",
   "playAlong.choose": "Выберите упражнение",
   "playAlong.majorScales": "Мажорные гаммы",
   "playAlong.minorScales": "Минорные гаммы",
