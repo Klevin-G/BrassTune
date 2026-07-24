@@ -1,3 +1,5 @@
+import base64
+import binascii
 import hmac
 import os
 import re
@@ -53,6 +55,14 @@ REQUIRED_TABLE_COLUMNS = {
     },
     "deleted_identity_tombstones": {"id", "subject_digest", "created_at"},
     "deleted_identity_tombstone_config": {"id", "key_verifier", "enforcement_phase", "created_at"},
+    "maintenance_request_nonces": {
+        "id",
+        "nonce_digest",
+        "key_id",
+        "purpose",
+        "created_at",
+        "expires_at",
+    },
     "audio_storage_jobs": {
         "id",
         "user_id",
@@ -83,11 +93,15 @@ REQUIRED_INDEX_COLUMN_SETS = {
         ("status", "next_retry_at", "updated_at", "id"),
         ("completed_at", "id"),
     },
+    "maintenance_request_nonces": {
+        ("expires_at",),
+    },
 }
 
 REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS = {
     "group_members": {("group_id", "user_id")},
     "deleted_identity_tombstones": {("subject_digest",)},
+    "maintenance_request_nonces": {("nonce_digest",)},
 }
 
 REQUIRED_POSTGRES_COLUMN_TYPES = {
@@ -118,6 +132,7 @@ BACKEND_APPLICATION_TABLES = {
     "account_deletion_jobs",
     "usage_events",
     "audio_storage_jobs",
+    "maintenance_request_nonces",
 }
 DATA_API_ROLES = {"anon", "authenticated"}
 
@@ -419,6 +434,7 @@ def _postgres_account_deletion_security_issues(connection) -> list[str]:
         "account_deletion_jobs",
         "deleted_identity_tombstones",
         "deleted_identity_tombstone_config",
+        "maintenance_request_nonces",
     ):
         rls_enabled = connection.execute(
             text(
@@ -663,8 +679,40 @@ def maintenance_readiness_issues() -> list[str]:
     if app_environment() not in DEPLOYED_ENVIRONMENTS:
         return []
     issues = []
-    if not os.getenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET"):
-        issues.append("Missing BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET for maintenance retry executors.")
+    key_id = (os.getenv("BRASSTUNE_MAINTENANCE_HMAC_KEY_ID") or "").strip()
+    key_value = (os.getenv("BRASSTUNE_MAINTENANCE_HMAC_KEY") or "").strip()
+    previous_key_id = (os.getenv("BRASSTUNE_MAINTENANCE_HMAC_PREVIOUS_KEY_ID") or "").strip()
+    previous_key_value = (os.getenv("BRASSTUNE_MAINTENANCE_HMAC_PREVIOUS_KEY") or "").strip()
+    key_id_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+    if not key_id or not key_value:
+        issues.append("Missing current HMAC key configuration for maintenance retry executors.")
+    elif not key_id_pattern.fullmatch(key_id):
+        issues.append("Current maintenance HMAC key id is invalid.")
+    else:
+        try:
+            decoded_key = base64.b64decode(key_value, validate=True)
+        except (binascii.Error, ValueError):
+            decoded_key = b""
+        if len(decoded_key) < 32:
+            issues.append("Current maintenance HMAC key must be valid base64 encoding at least 32 bytes.")
+
+    if bool(previous_key_id) != bool(previous_key_value):
+        issues.append("Previous maintenance HMAC key id and key must be configured together.")
+    elif previous_key_id:
+        if not key_id_pattern.fullmatch(previous_key_id):
+            issues.append("Previous maintenance HMAC key id is invalid.")
+        elif previous_key_id == key_id:
+            issues.append("Current and previous maintenance HMAC key ids must be distinct.")
+        try:
+            decoded_previous_key = base64.b64decode(previous_key_value, validate=True)
+        except (binascii.Error, ValueError):
+            decoded_previous_key = b""
+        if len(decoded_previous_key) < 32:
+            issues.append("Previous maintenance HMAC key must be valid base64 encoding at least 32 bytes.")
+
+    if os.getenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET"):
+        issues.append("Legacy maintenance retry secret must be removed in deployed environments.")
     tombstone_issue = deletion_tombstone_secret_issue()
     if tombstone_issue:
         issues.append(tombstone_issue)

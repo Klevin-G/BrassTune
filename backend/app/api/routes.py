@@ -1,19 +1,31 @@
+import base64
+import binascii
 import csv
 import datetime as dt
+import hashlib
 import hmac
 import io
 import json
+import logging
 import os
+import re
+import threading
+import time
+import uuid
 import zipfile
+from contextlib import contextmanager
 from typing import List, Optional
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
+from starlette.concurrency import run_in_threadpool
 
 from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
+from app.core.security import DEPLOYED_ENVIRONMENTS, app_environment
 from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics, duration_weighted_mean
 from app.core.ensemble.analytics import calculate_ensemble_summary, generate_rehearsal_report
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
@@ -21,7 +33,7 @@ from app.core.recommendations.rules import generate_practice_plan, generate_reco
 from app.db.database import get_db
 from app.db.readiness import public_readiness_report, readiness_report, version_payload
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
-from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
+from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, MaintenanceRequestNonce, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
 from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
 from app.services.account_deletion import (
@@ -46,6 +58,27 @@ DEFAULT_MAX_OWNED_CLASSES_PER_USER = 10
 DEFAULT_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER = 20
 DEFAULT_MAX_PENDING_CLASS_INVITATIONS_PER_USER = 20
 CLASS_PRACTICE_AGGREGATE_SCOPE_CODE = "cloud_practice_sessions_since_membership_v1"
+MAINTENANCE_HMAC_VERSION = "v1"
+MAINTENANCE_MAX_CLOCK_SKEW_SECONDS = 5 * 60
+MAINTENANCE_REPLAY_TTL_GRACE_SECONDS = 1
+MAINTENANCE_MAX_BODY_BYTES = 8 * 1024
+MAINTENANCE_RETRY_LIMIT = 10
+ACCOUNT_DELETION_RETRY_PURPOSE = "account-deletions-retry-v1"
+AUDIO_STORAGE_RETRY_PURPOSE = "audio-storage-retry-v1"
+_MAINTENANCE_HMAC_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_MAINTENANCE_SIGNATURE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
+_MAINTENANCE_RANDOM_NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
+_MAINTENANCE_HEADER_NAMES = {
+    "version": "x-brasstune-maintenance-version",
+    "key_id": "x-brasstune-maintenance-key-id",
+    "timestamp": "x-brasstune-maintenance-timestamp",
+    "nonce": "x-brasstune-maintenance-nonce",
+    "purpose": "x-brasstune-maintenance-purpose",
+    "signature": "x-brasstune-maintenance-signature",
+}
+_MAINTENANCE_POSTGRES_LOCK_ID = 0x425241535354554E
+_MAINTENANCE_PROCESS_LOCK = threading.Lock()
+maintenance_logger = logging.getLogger("brasstune.maintenance")
 
 
 def _bad_instrument(instrument_id: str) -> HTTPException:
@@ -1071,34 +1104,331 @@ def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
     }
 
 
-def _require_account_deletion_retry_secret(header_value: Optional[str]) -> None:
-    expected = os.getenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET")
-    if not expected:
-        raise HTTPException(status_code=503, detail="Account deletion retry executor is not configured.")
-    if not header_value or not hmac.compare_digest(header_value, expected):
-        raise HTTPException(status_code=403, detail="Account deletion retry executor is not authorized.")
+def _decode_maintenance_hmac_key(value: str) -> bytes:
+    try:
+        decoded = base64.b64decode(value.strip(), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise RuntimeError("Maintenance HMAC key configuration is invalid.") from exc
+    if len(decoded) < 32:
+        raise RuntimeError("Maintenance HMAC key configuration is invalid.")
+    return decoded
 
 
-@router.post("/maintenance/account-deletions/retry")
-def retry_account_deletions(
-    limit: int = Query(default=10, ge=1, le=50),
-    x_brasstune_maintenance_secret: Optional[str] = Header(default=None, alias="X-BrassTune-Maintenance-Secret"),
+def _maintenance_hmac_keys() -> dict[str, bytes]:
+    current_key_id = (os.getenv("BRASSTUNE_MAINTENANCE_HMAC_KEY_ID") or "").strip()
+    current_key_value = (os.getenv("BRASSTUNE_MAINTENANCE_HMAC_KEY") or "").strip()
+    previous_key_id = (os.getenv("BRASSTUNE_MAINTENANCE_HMAC_PREVIOUS_KEY_ID") or "").strip()
+    previous_key_value = (os.getenv("BRASSTUNE_MAINTENANCE_HMAC_PREVIOUS_KEY") or "").strip()
+
+    if (
+        not current_key_id
+        or not current_key_value
+        or not _MAINTENANCE_HMAC_KEY_ID_PATTERN.fullmatch(current_key_id)
+    ):
+        raise RuntimeError("Maintenance HMAC key configuration is invalid.")
+    keys = {current_key_id: _decode_maintenance_hmac_key(current_key_value)}
+    if bool(previous_key_id) != bool(previous_key_value):
+        raise RuntimeError("Maintenance HMAC key configuration is invalid.")
+    if previous_key_id:
+        if (
+            previous_key_id == current_key_id
+            or not _MAINTENANCE_HMAC_KEY_ID_PATTERN.fullmatch(previous_key_id)
+        ):
+            raise RuntimeError("Maintenance HMAC key configuration is invalid.")
+        keys[previous_key_id] = _decode_maintenance_hmac_key(previous_key_value)
+    return keys
+
+
+def _single_maintenance_header(request: Request, name: str) -> Optional[str]:
+    encoded_name = name.encode("ascii")
+    values = [
+        value.decode("latin1")
+        for key, value in request.scope.get("headers", [])
+        if key.lower() == encoded_name
+    ]
+    if len(values) != 1 or len(values[0]) > 256:
+        return None
+    return values[0]
+
+
+def _valid_maintenance_nonce(value: str) -> bool:
+    try:
+        parsed = uuid.UUID(value)
+    except (ValueError, AttributeError):
+        return bool(_MAINTENANCE_RANDOM_NONCE_PATTERN.fullmatch(value))
+    return str(parsed) == value.lower()
+
+
+def _canonical_maintenance_query(request: Request) -> str:
+    pairs = sorted(request.query_params.multi_items(), key=lambda pair: (pair[0], pair[1]))
+    return urlencode(pairs, doseq=True, quote_via=quote, safe="~")
+
+
+def _maintenance_signature_payload(
+    *,
+    version: str,
+    method: str,
+    path: str,
+    canonical_query: str,
+    body_sha256: str,
+    timestamp: str,
+    nonce: str,
+    purpose: str,
+) -> bytes:
+    return "\n".join(
+        (
+            version,
+            method.upper(),
+            path,
+            canonical_query,
+            body_sha256,
+            timestamp,
+            nonce,
+            purpose,
+        )
+    ).encode("utf-8")
+
+
+async def _read_maintenance_body(request: Request) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            parsed_length = int(content_length)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid request size.") from exc
+        if parsed_length < 0 or parsed_length > MAINTENANCE_MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="Request body is too large.")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAINTENANCE_MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="Request body is too large.")
+    return bytes(body)
+
+
+def _reserve_maintenance_nonce(
+    db: Session,
+    *,
+    nonce: str,
+    key_id: str,
+    purpose: str,
+) -> None:
+    now = dt.datetime.utcnow()
+    db.query(MaintenanceRequestNonce).filter(
+        MaintenanceRequestNonce.expires_at <= now
+    ).delete(synchronize_session=False)
+    db.add(
+        MaintenanceRequestNonce(
+            nonce_digest=hashlib.sha256(nonce.encode("utf-8")).hexdigest(),
+            key_id=key_id,
+            purpose=purpose,
+            created_at=now,
+            expires_at=now
+            + dt.timedelta(
+                seconds=MAINTENANCE_MAX_CLOCK_SKEW_SECONDS
+                + MAINTENANCE_REPLAY_TTL_GRACE_SECONDS
+            ),
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=403,
+            detail="Maintenance request is not authorized.",
+        ) from exc
+
+
+async def _authenticate_maintenance_request(
+    request: Request,
+    db: Session,
+    *,
+    expected_path: str,
+    expected_purpose: str,
+) -> None:
+    if request.url.path != expected_path:
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+    if request.headers.get("x-brasstune-maintenance-secret"):
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+    authorization = request.headers.get("authorization", "")
+    if (
+        app_environment() in DEPLOYED_ENVIRONMENTS
+        and authorization.lower().startswith("bearer ")
+    ):
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+
+    headers = {
+        field: _single_maintenance_header(request, name)
+        for field, name in _MAINTENANCE_HEADER_NAMES.items()
+    }
+    if any(value is None for value in headers.values()):
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+    version = str(headers["version"])
+    key_id = str(headers["key_id"])
+    timestamp_value = str(headers["timestamp"])
+    nonce = str(headers["nonce"])
+    purpose = str(headers["purpose"])
+    signature = str(headers["signature"])
+    if (
+        version != MAINTENANCE_HMAC_VERSION
+        or purpose != expected_purpose
+        or not _MAINTENANCE_HMAC_KEY_ID_PATTERN.fullmatch(key_id)
+        or not _valid_maintenance_nonce(nonce)
+        or not _MAINTENANCE_SIGNATURE_PATTERN.fullmatch(signature)
+        or not re.fullmatch(r"[0-9]{10,11}", timestamp_value)
+    ):
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+
+    signed_timestamp = int(timestamp_value)
+    if str(signed_timestamp) != timestamp_value:
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+    if abs(int(time.time()) - signed_timestamp) > MAINTENANCE_MAX_CLOCK_SKEW_SECONDS:
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+
+    try:
+        key = _maintenance_hmac_keys().get(key_id)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Maintenance request authentication is not configured.",
+        ) from exc
+    if key is None:
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+
+    body = await _read_maintenance_body(request)
+    signature_payload = _maintenance_signature_payload(
+        version=version,
+        method=request.method,
+        path=expected_path,
+        canonical_query=_canonical_maintenance_query(request),
+        body_sha256=hashlib.sha256(body).hexdigest(),
+        timestamp=timestamp_value,
+        nonce=nonce,
+        purpose=purpose,
+    )
+    expected_signature = base64.urlsafe_b64encode(
+        hmac.new(key, signature_payload, hashlib.sha256).digest()
+    ).rstrip(b"=").decode("ascii")
+    if not hmac.compare_digest(signature, expected_signature):
+        raise HTTPException(status_code=403, detail="Maintenance request is not authorized.")
+    _reserve_maintenance_nonce(
+        db,
+        nonce=nonce,
+        key_id=key_id,
+        purpose=purpose,
+    )
+
+
+@contextmanager
+def _maintenance_executor_guard(db: Session):
+    bind = db.get_bind()
+    if bind.dialect.name == "postgresql":
+        lock_connection = bind.connect()
+        acquired = False
+        try:
+            acquired = bool(
+                lock_connection.execute(
+                    text("select pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": _MAINTENANCE_POSTGRES_LOCK_ID},
+                ).scalar()
+            )
+            if not acquired:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A maintenance retry executor is already running.",
+                )
+            yield
+        finally:
+            if acquired:
+                try:
+                    lock_connection.execute(
+                        text("select pg_advisory_unlock(:lock_id)"),
+                        {"lock_id": _MAINTENANCE_POSTGRES_LOCK_ID},
+                    )
+                except Exception:
+                    maintenance_logger.error("maintenance_advisory_unlock_failed")
+            lock_connection.close()
+        return
+
+    acquired = _MAINTENANCE_PROCESS_LOCK.acquire(blocking=False)
+    if not acquired:
+        raise HTTPException(
+            status_code=409,
+            detail="A maintenance retry executor is already running.",
+        )
+    try:
+        yield
+    finally:
+        _MAINTENANCE_PROCESS_LOCK.release()
+
+
+def _aggregate_retry_count(result: dict, field: str) -> int:
+    value = result.get(field, 0)
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _run_account_maintenance(db: Session) -> tuple[dict, dict]:
+    with _maintenance_executor_guard(db):
+        account_result = retry_account_deletion_jobs(db, limit=MAINTENANCE_RETRY_LIMIT)
+        audio_result = retry_audio_storage_jobs(db, limit=MAINTENANCE_RETRY_LIMIT)
+    return account_result, audio_result
+
+
+def _run_audio_maintenance(db: Session) -> dict:
+    with _maintenance_executor_guard(db):
+        return retry_audio_storage_jobs(db, limit=MAINTENANCE_RETRY_LIMIT)
+
+
+@router.post("/maintenance/account-deletions/retry", status_code=204)
+async def retry_account_deletions(
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    _require_account_deletion_retry_secret(x_brasstune_maintenance_secret)
-    account_result = retry_account_deletion_jobs(db, limit=limit)
-    account_result["audio_storage"] = retry_audio_storage_jobs(db, limit=limit)
-    return account_result
+    await _authenticate_maintenance_request(
+        request,
+        db,
+        expected_path="/api/maintenance/account-deletions/retry",
+        expected_purpose=ACCOUNT_DELETION_RETRY_PURPOSE,
+    )
+    account_result, audio_result = await run_in_threadpool(
+        _run_account_maintenance,
+        db,
+    )
+    maintenance_logger.info(
+        "maintenance_retry_completed purpose=%s account_processed=%d account_completed=%d "
+        "account_retryable=%d audio_processed=%d audio_completed=%d audio_retryable=%d",
+        ACCOUNT_DELETION_RETRY_PURPOSE,
+        _aggregate_retry_count(account_result, "processed"),
+        _aggregate_retry_count(account_result, "completed"),
+        _aggregate_retry_count(account_result, "still_retryable"),
+        _aggregate_retry_count(audio_result, "processed"),
+        _aggregate_retry_count(audio_result, "completed"),
+        _aggregate_retry_count(audio_result, "still_retryable"),
+    )
+    return Response(status_code=204)
 
 
-@router.post("/maintenance/audio-storage/retry")
-def retry_audio_storage(
-    limit: int = Query(default=10, ge=1, le=50),
-    x_brasstune_maintenance_secret: Optional[str] = Header(default=None, alias="X-BrassTune-Maintenance-Secret"),
+@router.post("/maintenance/audio-storage/retry", status_code=204)
+async def retry_audio_storage(
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    _require_account_deletion_retry_secret(x_brasstune_maintenance_secret)
-    return retry_audio_storage_jobs(db, limit=limit)
+    await _authenticate_maintenance_request(
+        request,
+        db,
+        expected_path="/api/maintenance/audio-storage/retry",
+        expected_purpose=AUDIO_STORAGE_RETRY_PURPOSE,
+    )
+    result = await run_in_threadpool(_run_audio_maintenance, db)
+    maintenance_logger.info(
+        "maintenance_retry_completed purpose=%s processed=%d completed=%d retryable=%d",
+        AUDIO_STORAGE_RETRY_PURPOSE,
+        _aggregate_retry_count(result, "processed"),
+        _aggregate_retry_count(result, "completed"),
+        _aggregate_retry_count(result, "still_retryable"),
+    )
+    return Response(status_code=204)
 
 
 @router.delete("/users/me")

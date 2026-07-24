@@ -26,15 +26,6 @@ macOS native runner:
 ["self-hosted","brasstune","macos","xcode"]
 ```
 
-Production account-deletion maintenance runner:
-
-```json
-["brasstune-production-maintenance"]
-```
-
-The maintenance runner is registered with `--no-default-labels`. Its single
-composite label does not overlap with the Linux CI or macOS Xcode pools.
-
 ## Repository Variables
 
 Set only the variables for runners that are registered and online. Values must be valid JSON for `runs-on`.
@@ -49,13 +40,10 @@ BRASSTUNE_SWIFT_RUNNER=["self-hosted","brasstune","macos","xcode"]
 ```
 
 General build and test workflows keep hosted defaults so contributors without
-runner variables can use `ubuntu-latest` or `macos-latest`. The production
-account-deletion retry workflow is different: its runner label is hard-coded to
-the dedicated maintenance runner so a repository-variable change cannot route
-the secret elsewhere, exhausted hosted minutes cannot silently skip the job,
-and the secret cannot reach the general CI pool. Production deployment and smoke
-selectors remain unassigned to persistent self-hosted runners and are executed
-through reviewed provider tooling.
+runner variables can use `ubuntu-latest` or `macos-latest`. Production deployment
+and smoke selectors remain unassigned to persistent self-hosted runners and are
+executed through reviewed provider tooling. Account-deletion retry maintenance is
+scheduled inside Supabase with pg_cron and pg_net, not on any GitHub runner.
 
 ## Security Rules
 
@@ -68,9 +56,8 @@ through reviewed provider tooling.
   socket access, or another host-elevation path. Pre-provision runner images; pinned
   setup actions select the job's Node and Python toolchains.
 - Do not place production deploy secrets in normal PR check jobs.
-- Route the account-deletion maintenance secret only to the dedicated
-  `brasstune-production-maintenance` label. Keep the workflow checkout-free and
-  scope the secret to its curl step.
+- Do not route account-deletion maintenance credentials to GitHub runners. The
+  Supabase-only schedule is documented in `ACCOUNT_DELETION_MAINTENANCE.md`.
 - Use protected GitHub Environments for deploy and production smoke jobs.
 - Keep the runner workspace clean between jobs.
 - Remove emergency runner registrations after recovery unless the owner intentionally keeps them.
@@ -114,94 +101,25 @@ unprivileged `runner` user, and does not mount the Docker socket. PostgreSQL is
 started as a temporary, unprivileged process inside each matching main-branch
 job. Production credentials never run on this persistent CI pool.
 
-## Dedicated Production Maintenance Runner
+## Retired Account-Deletion Maintenance Runner
 
-The reviewed curl-only image is in `scripts/ci/maintenance-runner/`. It pins the
-Actions Runner archive and checksum, runs as UID 1001, disables runner
-self-updates, and omits `git`, system `node`, Python, PostgreSQL, Docker, and
-`sudo`. The Actions Runner distribution contains its own internal runtime, but
-no `node` executable is exposed on `PATH` to workflow steps.
+The dedicated curl-only runner and `.github/workflows/account-deletion-retry.yml`
+were retired on 2026-07-24. The retry endpoint is now triggered by a private,
+zero-argument Supabase function scheduled with pg_cron. It consumes no GitHub
+Actions minutes and never routes its HMAC credentials through a runner.
 
-Build and verify the image before registration:
-
-```bash
-docker build \
-  --tag brasstune-actions-runner-maintenance-arm64:2.336.0-r1 \
-  scripts/ci/maintenance-runner
-
-docker run --rm --entrypoint bash \
-  brasstune-actions-runner-maintenance-arm64:2.336.0-r1 \
-  -lc 'test "$(id -u)" = 1001 && command -v curl >/dev/null && for binary in docker git node npm psql python python3 sudo; do ! command -v "${binary}"; done && /opt/actions-runner-template/bin/Runner.Listener --version'
-```
-
-Register it without placing the one-time token in a host argument, environment
-variable, file, log, or shell history. A short-lived registration container
-reads the token from standard input, writes only the runner registration to the
-dedicated volume, and exits. `config.sh` necessarily receives the token inside
-that isolated container process:
-
-```bash
-gh api --method POST \
-  repos/Klevin-G/BrassTune/actions/runners/registration-token \
-  --jq .token |
-docker run --rm --interactive \
-  --name brasstune-actions-runner-production-maintenance-register \
-  --read-only \
-  --cap-drop ALL \
-  --security-opt no-new-privileges \
-  --pids-limit 128 \
-  --memory 256m \
-  --cpus 0.5 \
-  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
-  --mount source=brasstune-actions-runner-production-maintenance,target=/opt/actions-runner \
-  --env RUNNER_NAME=brasstune-linux-arm64-production-maintenance \
-  --entrypoint bash \
-  brasstune-actions-runner-maintenance-arm64:2.336.0-r1 \
-  -lc 'set -euo pipefail; cd /opt/actions-runner; test ! -f .runner; if [ ! -x ./config.sh ]; then cp -a /opt/actions-runner-template/. .; fi; IFS= read -r registration_token; test -n "${registration_token}"; ./config.sh --unattended --disableupdate --no-default-labels --url https://github.com/Klevin-G/BrassTune --token "${registration_token}" --name "${RUNNER_NAME}" --labels brasstune-production-maintenance --work _work; unset registration_token'
-
-docker run --detach \
-  --name brasstune-actions-runner-production-maintenance \
-  --read-only \
-  --cap-drop ALL \
-  --security-opt no-new-privileges \
-  --pids-limit 128 \
-  --memory 256m \
-  --cpus 0.5 \
-  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
-  --mount source=brasstune-actions-runner-production-maintenance,target=/opt/actions-runner \
-  --label com.brasstune.purpose=github-actions-production-maintenance-runner \
-  --env RUNNER_NAME=brasstune-linux-arm64-production-maintenance \
-  brasstune-actions-runner-maintenance-arm64:2.336.0-r1
-```
-
-Do not mount host paths or `/var/run/docker.sock`. After registration, confirm
-that the runner is repository-scoped, online, and has only the
-`brasstune-production-maintenance` label:
-
-```bash
-gh api repos/Klevin-G/BrassTune/actions/runners \
-  --jq '.runners[] | select(.name == "brasstune-linux-arm64-production-maintenance") | {name,status,labels:[.labels[].name]}'
-```
-
-Verify with one `workflow_dispatch` on `main`, then inspect the job through the
-Actions API. It must show the dedicated runner name, at least one executed step,
-and a successful conclusion. Confirm the following scheduled run also succeeds.
-Never print the maintenance secret or the registration token while gathering
-evidence.
-
-Rollback is fail-closed: stop the container first so no new job can start,
-remove its repository runner registration, preserve any required diagnostics,
-and delete its named volume. Revert the hard-coded workflow selector only after
-hosted billing is restored. Rotate the maintenance endpoint secret if compromise
-or unintended exposure is suspected.
+After the Supabase schedule has produced a successful request, remove the retired
+repository runner registration and its isolated container/volume according to the
+normal host change process. Do not remove the general Linux or macOS CI runners.
+The historical image under `scripts/ci/maintenance-runner/` is not an active
+production path and must not be started for account-deletion maintenance.
 
 ## Recovery Sequence
 
 1. Confirm the precise Actions blocker from check-run annotations.
 2. Register only the minimum runner required to start the blocked BrassTune jobs.
-3. Confirm each workflow selector matches its registered runner labels. General
-   CI pools use repository variables; the production maintenance label is
-   hard-coded.
+3. Confirm each CI workflow selector matches its registered runner labels.
+   Account-deletion retry maintenance is intentionally absent from GitHub Actions.
 4. Complete the documented local release matrix on the exact candidate SHA.
 5. Merge that reviewed SHA, then confirm the post-merge Backend, Frontend, Security,
    and Swift jobs have nonzero steps, use the intended runner, and pass on the exact

@@ -1,3 +1,4 @@
+import base64
 import datetime as dt
 import importlib.util
 import io
@@ -762,7 +763,12 @@ def test_deployed_readiness_requires_dedicated_stable_deletion_tombstone_key(mon
     from app.db.readiness import maintenance_readiness_issues
 
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", "configured")
+    monkeypatch.setenv("BRASSTUNE_MAINTENANCE_HMAC_KEY_ID", "maintenance-current")
+    monkeypatch.setenv(
+        "BRASSTUNE_MAINTENANCE_HMAC_KEY",
+        base64.b64encode(b"M" * 32).decode("ascii"),
+    )
+    monkeypatch.delenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", raising=False)
     monkeypatch.delenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", raising=False)
     assert "BRASSTUNE_DELETION_TOMBSTONE_SECRET" in " ".join(maintenance_readiness_issues())
     monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "too-short")
@@ -3312,29 +3318,6 @@ def test_account_deletion_retryable_job_blocks_existing_user_token():
         db.close()
 
 
-def test_account_deletion_retry_endpoint_requires_secret(monkeypatch):
-    monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", "retry-secret")
-    with TestClient(app) as client:
-        response = client.post("/api/maintenance/account-deletions/retry")
-        assert response.status_code == 403
-        response = client.post("/api/maintenance/account-deletions/retry", headers={"X-BrassTune-Maintenance-Secret": "retry-secret"})
-        assert response.status_code == 200
-        assert "audio_storage" in response.json()
-
-
-def test_audio_storage_retry_endpoint_reuses_secure_maintenance_secret(monkeypatch):
-    monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", "retry-secret")
-    with TestClient(app) as client:
-        response = client.post("/api/maintenance/audio-storage/retry")
-        assert response.status_code == 403
-        response = client.post(
-            "/api/maintenance/audio-storage/retry",
-            headers={"X-BrassTune-Maintenance-Secret": "retry-secret"},
-        )
-        assert response.status_code == 200
-        assert {"processed", "completed", "still_retryable", "results"}.issubset(response.json())
-
-
 def test_account_deletion_retry_executor_completes_external_cleanup(monkeypatch):
     db = _test_db()
     try:
@@ -4789,6 +4772,41 @@ def test_audio_storage_jobs_migration_is_private_idempotent_and_indexed():
     assert "where status in ('reserved', 'pending', 'in_progress', 'retryable_failure')" in migration
     assert "default 7-day ttl" in migration
     assert "rollback notes" in migration
+
+
+def test_supabase_maintenance_scheduler_migration_fails_closed_and_is_private():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260724053727_schedule_account_deletion_maintenance_via_supabase_cron.sql"
+    ).read_text()
+    lowered = migration.lower()
+    bootstrap = lowered.index("do $bootstrap$")
+    schedule = lowered.index("select cron.schedule(")
+
+    assert "create table if not exists public.maintenance_request_nonces" in lowered
+    assert "nonce_digest text not null unique" in lowered
+    assert "enable row level security" in lowered
+    assert "revoke all privileges on table public.maintenance_request_nonces" in lowered
+    assert "revoke all privileges on sequence public.maintenance_request_nonces_id_seq" in lowered
+    assert "('anon', 'authenticated', 'service_role')" in lowered
+    assert "idx_maintenance_request_nonces_expires_at" in lowered
+
+    assert bootstrap < lowered.index("key_id_value !~", bootstrap) < schedule
+    assert bootstrap < lowered.index("pg_catalog.decode(key_base64_value, 'base64')", bootstrap) < schedule
+    assert bootstrap < lowered.index("octet_length(key_value) < 32", bootstrap) < schedule
+    assert "url_value <> 'https://brasstune-u8qj.onrender.com'" in lowered
+    assert "raise exception" in lowered[bootstrap:schedule]
+
+    assert "security invoker" in lowered
+    assert "set search_path = ''" in lowered
+    assert "returns bigint" in lowered
+    assert "net.http_post(" in lowered
+    assert "timeout_milliseconds := 55000" in lowered
+    assert "'x-brasstune-maintenance-purpose', 'account-deletions-retry-v1'" in lowered
+    assert "'*/15 * * * *'" in lowered
+    assert "cron.job" not in lowered.replace("never edit cron.job directly", "")
 
 
 def test_account_deletion_privacy_expand_migration_is_private_and_old_writer_compatible():
