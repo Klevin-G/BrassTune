@@ -1,6 +1,6 @@
 # Web / Native Parity Contract
 
-Updated: 2026-07-24. Candidate source revision: `PENDING_FINAL_SHA`.
+Updated: 2026-07-24. Source candidate included in application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
 
 | Surface | Web | iOS | Evidence boundary |
 |---|---|---|---|

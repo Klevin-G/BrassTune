@@ -1,17 +1,17 @@
 # Direct Production Deployment Checklist
 
-Updated: 2026-07-24. Final revision: `PENDING_FINAL_SHA`.
+Updated: 2026-07-24. Deployed application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
 
 GitHub Actions is disabled. Do not wait for, trigger, or cite Actions checks for this candidate.
 
-1. Record the final committed SHA in this file and the release evidence JSON.
-2. Reconfirm the applied state of `20260724072904_account_deletion_maintenance_heartbeats.sql`; local and remote histories matched after the 2026-07-24 application.
-3. Deploy the backend directly to Render from `PENDING_FINAL_SHA`. Record the deployment ID and verify readiness, reported revision, and maintenance-heartbeat behavior.
-4. Deploy the frontend directly to Vercel from the same SHA. Record the deployment ID and verify the canonical production alias serves that revision.
-5. Run hosted smoke for web, REST, WebSocket, auth, class, audio, offline, and account lifecycle. Record failures and rollback decisions.
+1. [x] Record final merged application SHA `26683c82c42839016383fb9cab676c9a35d554ca`.
+2. [x] Reconfirm `20260724072904_account_deletion_maintenance_heartbeats.sql`; local and remote histories matched after the 2026-07-24 application.
+3. [x] Deploy Render directly: `dep-d9hinqjeo5us73e9eqng`; `/api/ready` and `/api/version` pass with the exact SHA.
+4. [x] Deploy Vercel: `dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v`; `https://brasstune.vercel.app` serves the production artifact.
+5. [x] Run hosted smoke: all 8 checks passed; provider error queries returned no errors for the checked window.
 6. Keep Apple live provider setup, signing, and physical-device microphone validation as separate external gates.
 7. Do not create Gmail outreach drafts: reconnect the designated BrassTune sender first.
 
 ## Completion record
 
-Do not mark production complete until the SHA, Supabase migration state, Render/Vercel deployment IDs, and hosted-smoke result are all recorded. Current values are pending.
+The web/backend production record is complete for the exact application revision above. Apple/provider signing, physical-device audio, disposable-account lifecycle, and the designated Gmail sender remain separate gates.
