@@ -5,8 +5,7 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: account-deletion-retry
@@ -16,16 +15,18 @@ jobs:
   retry:
     name: trigger-retry-executor
     if: ${{ github.ref == 'refs/heads/main' }}
-    # Production credentials never run on the persistent CI runner pool.
-    runs-on: ${{ fromJSON(vars.BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER || '"ubuntu-latest"') }}
+    # Fail closed to the curl-only maintenance runner. This runner has one
+    # no-default-labels label and cannot receive general CI jobs.
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER || '["brasstune-production-maintenance"]') }}
     timeout-minutes: 5
     environment: production
     env:
       BRASSTUNE_API_BASE_URL: ${{ vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
-      BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET: ${{ secrets.BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET }}
     steps:
       - name: Trigger account deletion retry executor
         shell: bash
+        env:
+          BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET: ${{ secrets.BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET }}
         run: |
           set -euo pipefail
           if [ -z "${BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET:-}" ]; then
@@ -36,7 +37,11 @@ jobs:
             echo "BRASSTUNE_API_BASE_URL must be the approved Render production host before sending the maintenance secret."
             exit 1
           fi
-          curl --fail --show-error --silent --max-time 30 \
+          curl --fail --show-error --silent \
+            --proto '=https' \
+            --tlsv1.2 \
+            --connect-timeout 10 \
+            --max-time 30 \
             -X POST \
             -H "X-BrassTune-Maintenance-Secret: ${BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET}" \
             "${BRASSTUNE_API_BASE_URL%/}/api/maintenance/account-deletions/retry"
