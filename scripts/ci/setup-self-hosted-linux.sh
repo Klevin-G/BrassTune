@@ -1,6 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+install_sqlite_runtime() {
+  if [ ! -r /etc/os-release ]; then
+    printf 'SQLite runtime provisioning supports Debian/Ubuntu runners only.\n' >&2
+    return 1
+  fi
+
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  if [ "${ID:-}" != "debian" ] && [ "${ID:-}" != "ubuntu" ]; then
+    printf 'SQLite runtime provisioning supports Debian/Ubuntu runners only; found %s.\n' "${ID:-unknown}" >&2
+    return 1
+  fi
+
+  local -a elevate=()
+  if [ "$(id -u)" -ne 0 ]; then
+    if ! command -v sudo >/dev/null 2>&1 || ! sudo -n true 2>/dev/null; then
+      printf 'SQLite runtime provisioning requires root or passwordless sudo.\n' >&2
+      return 1
+    fi
+    elevate=(sudo -n)
+  fi
+
+  "${elevate[@]}" apt-get update
+  "${elevate[@]}" apt-get install --yes --no-install-recommends libsqlite3-0
+}
+
+if [ "${1:-}" = "--install-sqlite-runtime" ]; then
+  install_sqlite_runtime
+  exit 0
+fi
+
+if [ "$#" -ne 0 ]; then
+  printf 'usage: %s [--install-sqlite-runtime]\n' "$0" >&2
+  exit 2
+fi
+
 missing=0
 
 require_cmd() {
