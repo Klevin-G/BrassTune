@@ -1,7 +1,7 @@
 {
   "updated": "2026-07-24",
-  "candidate_revision": "PENDING_FINAL_SHA",
-  "decision": "local_candidate_complete_pending_direct_deployment_and_external_gates",
+  "deployed_application_revision": "26683c82c42839016383fb9cab676c9a35d554ca",
+  "decision": "web_backend_production_gate_passed_pending_external_native_identity_and_outreach_gates",
   "github_actions": {
     "status": "disabled",
     "release_gate": "must_not_be_used"
@@ -22,12 +22,25 @@
     "google_provider": "enabled",
     "apple_provider": "disabled_pending_apple_developer_credentials"
   },
+  "production": {
+    "render": {
+      "deployment_id": "dep-d9hinqjeo5us73e9eqng",
+      "status": "live",
+      "reported_revision": "26683c82c42839016383fb9cab676c9a35d554ca"
+    },
+    "vercel": {
+      "deployment_id": "dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v",
+      "status": "ready",
+      "canonical_url": "https://brasstune.vercel.app"
+    },
+    "hosted_smoke": "8/8 passed",
+    "provider_error_scan": "no errors returned in checked post-deploy window"
+  },
   "pending": {
-    "render_deployment": "PENDING_RENDER_DEPLOYMENT_ID",
-    "vercel_deployment": "PENDING_VERCEL_DEPLOYMENT_ID",
-    "hosted_smoke": "not_run_for_this_candidate",
     "apple_provider_and_signing": "external",
     "physical_device_microphone": "external",
+    "disposable_live_account_lifecycle": "not_completed",
+    "human_language_and_accessibility_review": "external",
     "gmail_sender_identity": "incorrect_do_not_create_drafts"
   }
 }

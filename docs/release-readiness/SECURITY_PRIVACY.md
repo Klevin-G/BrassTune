@@ -1,10 +1,10 @@
 # Security and Privacy Data Map
 
-Updated: 2026-07-24. Candidate source revision: `PENDING_FINAL_SHA`.
+Updated: 2026-07-24. Deployed application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
 
 ## Current boundary
 
-Local privacy/security work is implemented and independently reviewed with no P0-P2 source finding. The full backend suite passed `286 passed, 11 skipped`. The linked Supabase migration history matches through `20260724072904`; no hosted application deployment is claimed complete in this document.
+Privacy/security work is implemented and independently reviewed with no P0-P2 source finding. The full backend suite passed `286 passed, 11 skipped`. The linked Supabase migration history matches through `20260724072904`; Render/Vercel are deployed on the recorded application revision and hosted readiness/version/CORS/WebSocket smoke passes.
 
 ## Data and controls
 
@@ -29,6 +29,6 @@ Application-level disposable-account export/delete verification still requires t
 
 ## Remaining risks and gates
 
-- Commit the exact candidate and deploy it directly; GitHub Actions is disabled and must not be used.
-- Verify provider configuration, disposable auth/export/delete lifecycle, storage, and hosted WebSocket behavior live.
+- Verify disposable auth/export/delete lifecycle and storage cleanup with non-personal test accounts.
+- Keep GitHub Actions disabled; direct provider deployment and hosted smoke are the release path.
 - Apple credentials, Services ID, signing, archive, and physical-device audio remain external gates.

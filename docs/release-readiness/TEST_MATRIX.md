@@ -1,6 +1,6 @@
 # Release Test Matrix
 
-Updated: 2026-07-24. Final release revision: `PENDING_FINAL_SHA`.
+Updated: 2026-07-24. Deployed application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
 
 | Gate | Evidence | Status | Release meaning |
 |---|---|---|---|
@@ -14,11 +14,13 @@ Updated: 2026-07-24. Final release revision: `PENDING_FINAL_SHA`.
 | Native iPad journeys | First-run, main, and class passed | Passed in simulator | Unsigned simulator evidence only. |
 | Localization | 660 keys, 12 locales, 0 issues | Passed locally | No human linguistic review recorded. |
 | GitHub Actions | Disabled | Not applicable | Must not be used for this release candidate. |
-| Supabase heartbeat migration | `20260724072904_account_deletion_maintenance_heartbeats.sql`; local/remote histories matched | Applied | Reconfirm before the dependent production verification. |
-| Render/Vercel same-SHA deployment | Direct deployment planned | Pending | Record provider deployment identities and exact revision. |
-| Hosted smoke | No current hosted result | Pending | Cover web, REST, WebSocket, auth, class, audio, offline, and account lifecycle. |
+| Supabase heartbeat migration | `20260724072904_account_deletion_maintenance_heartbeats.sql`; local/remote histories matched | Applied | Private heartbeat storage is present for readiness. |
+| Render deployment | `dep-d9hinqjeo5us73e9eqng`; exact revision reported by `/api/version` | Passed | Backend is live on the recorded revision. |
+| Vercel deployment | `dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v`; canonical alias attached | Passed | Production web artifact is ready. |
+| Hosted smoke | 8/8 checks passed | Passed | Web root, readiness/version, CORS, and WebSocket safety boundary verified. |
+| Post-deploy error scan | Render and Vercel returned no errors in the checked window | Passed | Point-in-time provider evidence only. |
 | Apple/signing/physical microphone | External | Pending | Required for Apple/live-audio claims. |
 
 ## Reproduction boundary
 
-The results above are supplied current working-tree evidence. Re-run affected local gates if the final commit changes; replace `PENDING_FINAL_SHA` only after that final commit is recorded.
+Local test results cover the source candidate merged into the recorded application revision. The hosted rows cover the exact production deployment identities above; later code changes require fresh deployment and smoke evidence.

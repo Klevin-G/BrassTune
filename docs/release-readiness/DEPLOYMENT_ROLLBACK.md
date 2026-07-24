@@ -1,20 +1,19 @@
 # Direct Deployment And Rollback
 
-Updated: 2026-07-24. Target revision: `PENDING_FINAL_SHA`.
+Updated: 2026-07-24. Deployed application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
 
 ## Deployment boundary
 
 - GitHub Actions is disabled and must not be used for this candidate.
 - Supabase migration `20260724072904_account_deletion_maintenance_heartbeats.sql` was applied on 2026-07-24; local and remote migration histories match.
-- Direct Render and Vercel deployment is planned; no deployment IDs or hosted results are recorded yet.
+- Render deployment `dep-d9hinqjeo5us73e9eqng` and Vercel deployment `dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v` are live/ready for the recorded application revision.
 
 ## Order
 
-1. Record `PENDING_FINAL_SHA` after the final commit exists.
-2. Reconfirm the applied migration state before deployment.
-3. Deploy Render directly from the final SHA; verify readiness, reported revision, and maintenance-heartbeat behavior.
-4. Deploy Vercel directly from the same SHA; verify the production alias and reported revision.
-5. Run hosted smoke before expanding access or making production-complete claims.
+1. Reconfirm the applied migration state before any replacement deployment.
+2. Deploy Render directly from the intended exact SHA and verify readiness/version.
+3. Deploy Vercel from the same application source and verify the production alias.
+4. Run hosted smoke before expanding access or making updated production claims.
 
 ## Known-good rollback boundary
 

@@ -1,10 +1,10 @@
 # BrassTune Completion Candidate
 
-Updated: 2026-07-24. Candidate final revision: `PENDING_FINAL_SHA`.
+Updated: 2026-07-24. Deployed application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
 
 ## Decision
 
-Local validation is complete for the current working-tree candidate. It is **not deployed** and is not a production-release certification. GitHub Actions is disabled and must not be used as a release gate for this candidate.
+The verified web/backend candidate is deployed at the exact merged revision above. Direct Render/Vercel deployment, revision checks, hosted smoke, provider error scans, and the linked Supabase migration state pass. This does not certify Apple distribution, physical-device audio, or every live identity/account-lifecycle path. GitHub Actions remained disabled and was not used.
 
 ## Local evidence
 
@@ -19,13 +19,13 @@ Local validation is complete for the current working-tree candidate. It is **not
 | Native iPad journeys | First-run, main, and class journeys passed | Simulator evidence only. |
 | Localization verifier | 660 keys across 12 locales; 0 issues | Does not prove human linguistic review. |
 
-## Required release actions
+## Production deployment record
 
-1. Record the committed release revision as `PENDING_FINAL_SHA`; do not replace this placeholder until the final commit is known.
-2. Reconfirm that `20260724072904_account_deletion_maintenance_heartbeats.sql` remains matched in local and remote Supabase migration history. It was applied on 2026-07-24.
-3. Deploy the backend directly to Render and verify its reported revision/readiness and authenticated maintenance heartbeat behavior.
-4. Deploy the frontend directly to Vercel and verify its reported revision matches the backend and `PENDING_FINAL_SHA`.
-5. Run and record hosted smoke against the deployed web, REST, WebSocket, auth, class, audio, offline, and account-lifecycle surfaces.
+1. Supabase migration history matched through `20260724072904_account_deletion_maintenance_heartbeats.sql`.
+2. Render deployment `dep-d9hinqjeo5us73e9eqng` is live and reports commit `26683c82c42839016383fb9cab676c9a35d554ca`.
+3. Vercel deployment `dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v` is ready and owns `https://brasstune.vercel.app`.
+4. Hosted smoke passed web root, readiness, exact version, two CORS paths, WebSocket app response, query-token rejection, and bad-Origin rejection.
+5. Render and Vercel post-deploy error queries returned no errors for the checked window.
 
 ## External blockers
 
@@ -34,4 +34,4 @@ Local validation is complete for the current working-tree candidate. It is **not
 - Physical-device microphone/audio validation remains external.
 - The connected Gmail sender identity is incorrect. Do not create outreach drafts until the designated sender is connected.
 
-No claim here establishes a deployed revision, live provider enablement, signed native delivery, physical-device microphone quality, or sent/created Gmail drafts.
+No claim here establishes Apple live-provider enablement, signed native delivery, physical-device microphone quality, disposable live-account lifecycle completion, or sent/created Gmail drafts.
