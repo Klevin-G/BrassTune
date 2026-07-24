@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum GatewayAuthMode: String, Identifiable {
     case signIn
@@ -25,7 +26,10 @@ private struct GatewayAuthPresentation: Identifiable {
 
 struct AuthGatewayView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var authPresentation: GatewayAuthPresentation?
+    @AccessibilityFocusState private var gatewayErrorFocused: Bool
+    @State private var focusedGatewayError: String?
 
     var body: some View {
         NavigationStack {
@@ -33,6 +37,9 @@ struct AuthGatewayView: View {
                 VStack(alignment: .leading, spacing: BTSpacing.xl) {
                     Spacer(minLength: BTSpacing.lg)
                     GatewayWelcomeHeader()
+                    if horizontalSizeClass == .regular {
+                        GatewayPracticePreview()
+                    }
 
                     if case .emailConfirmationRequired(let email) = model.authState {
                         BTCard(tint: BTTheme.surfaceWarm) {
@@ -43,6 +50,22 @@ struct AuthGatewayView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .accessibilityIdentifier("gateway.confirmationRequired")
+                    }
+
+                    if model.authNoticeIsError, let notice = model.authNotice {
+                        BTCard(tint: BTTheme.surfaceWarm) {
+                            Label {
+                                Text(verbatim: notice)
+                            } icon: {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                            }
+                            .font(.headline)
+                            .foregroundStyle(BTTheme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityFocused($gatewayErrorFocused)
+                        .accessibilityIdentifier("gateway.sessionError")
                     }
 
                     if let persistenceError = model.persistenceErrorMessage {
@@ -76,6 +99,22 @@ struct AuthGatewayView: View {
         .sheet(item: $authPresentation) { presentation in
             GatewayAuthForm(mode: presentation.mode, context: presentation.context)
         }
+        .onAppear { focusGatewayErrorIfNeeded() }
+        .onChange(of: model.authNotice) { _, _ in
+            focusGatewayErrorIfNeeded()
+        }
+    }
+
+    private func focusGatewayErrorIfNeeded() {
+        guard UIAccessibility.isVoiceOverRunning,
+              model.authNoticeIsError,
+              let notice = model.authNotice else {
+            focusedGatewayError = nil
+            return
+        }
+        guard focusedGatewayError != notice else { return }
+        focusedGatewayError = notice
+        DispatchQueue.main.async { gatewayErrorFocused = true }
     }
 }
 
@@ -95,6 +134,41 @@ private struct GatewayWelcomeHeader: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+private struct GatewayPracticePreview: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: BTSpacing.md) {
+            previewCard(
+                title: "Find the center",
+                detail: "Play a note and BrassTune will show whether it is flat, in tune, or sharp."
+            )
+            previewCard(
+                title: "Guided five-minute warm-up",
+                detail: "Five short steps for steady air, relaxed attacks, and centered notes."
+            )
+            previewCard(
+                title: "Practice momentum",
+                detail: "See what you did today, how this week is going, and what to try next."
+            )
+        }
+        .accessibilityIdentifier("gateway.practicePreview")
+    }
+
+    private func previewCard(title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
+        VStack(alignment: .leading, spacing: BTSpacing.sm) {
+            Text(title)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            Text(detail)
+                .font(.subheadline)
+                .foregroundStyle(BTTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(BTSpacing.lg)
+        .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+        .btContentSurface(tint: BTTheme.surface)
     }
 }
 
@@ -125,9 +199,9 @@ private struct GatewayActions: View {
                 }
             } else {
                 Label {
-                    Text(verbatim: model.accountUnavailableMessage ?? NativeLocalization.string("Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device."))
+                    Text(verbatim: model.accountUnavailableMessage ?? NativeLocalization.string("Practice as a guest today. Online backup and Classes will appear when account access is available."))
                 } icon: {
-                    Image(systemName: "wrench.and.screwdriver")
+                    Image(systemName: "icloud.slash")
                 }
                 .font(.footnote)
                 .foregroundStyle(BTTheme.muted)
@@ -204,21 +278,23 @@ struct GatewayAuthForm: View {
                     }
                 }
 
+                providerSignInSection
+
                 if model.accountFeaturesEnabled {
-                    accountForm
+                    emailAccountForm
                 } else {
                     Section {
                         Label {
-                            Text(verbatim: model.accountUnavailableMessage ?? NativeLocalization.string("Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device."))
+                            Text(verbatim: model.accountUnavailableMessage ?? NativeLocalization.string("Practice as a guest today. Online backup and Classes will appear when account access is available."))
                         } icon: {
-                            Image(systemName: "wrench.and.screwdriver")
+                            Image(systemName: "icloud.slash")
                         }
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("gateway.authUnavailable")
                     } header: {
-                        Text("Accounts unavailable")
+                        Text("Practice is ready")
                     } footer: {
-                        Text("This is a build configuration issue, not a problem with your email or password.")
+                        Text("You can start as guest and add account backup later.")
                     }
                 }
 
@@ -258,16 +334,40 @@ struct GatewayAuthForm: View {
             }
         }
         .presentationDetents([.large])
+        .task {
+            await model.loadAuthProviderConfiguration()
+        }
     }
 
     @ViewBuilder
-    private var accountForm: some View {
+    private var providerSignInSection: some View {
         Section {
             NativeAppleSignInButton(identifier: "gateway.authAppleSignIn")
+            NativeGoogleSignInButton(identifier: "gateway.authGoogleSignIn")
+            if model.authProviderConfigurationLoading {
+                ProgressView("Checking sign-in providers…")
+                    .accessibilityIdentifier("gateway.authProvidersLoading")
+            }
+            if let recovery = model.authProviderRecoveryMessage {
+                Text(verbatim: recovery)
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("gateway.authProvidersRecovery")
+                if model.accountFeaturesEnabled {
+                    Button("Retry provider check") {
+                        Task { await model.loadAuthProviderConfiguration(force: true) }
+                    }
+                    .accessibilityIdentifier("gateway.authProvidersRetry")
+                }
+            }
         } header: {
-            Text("Apple")
+            Text("Apple and Google")
         }
+    }
 
+    @ViewBuilder
+    private var emailAccountForm: some View {
         Section {
             TextField("Email", text: $email)
                 .textContentType(.emailAddress)

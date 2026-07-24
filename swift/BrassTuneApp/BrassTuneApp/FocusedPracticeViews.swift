@@ -44,6 +44,8 @@ struct PlayAlongIdleView: View {
             }
             .buttonStyle(.plain)
             .btMinimumInteractiveSize()
+            .accessibilityValue(moreWaysExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint("More ways to practice")
             .accessibilityIdentifier("playAlong.moreWaysDisclosure")
 
             if moreWaysExpanded {
@@ -254,6 +256,7 @@ private struct PracticeShortcutRow: View {
             Image(systemName: systemImage)
                 .foregroundStyle(BTTheme.accent)
                 .frame(width: 28, height: 44)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: BTSpacing.xs) {
                 Text(verbatim: shortcut.displayTitle)
                     .font(.subheadline.weight(.semibold))
@@ -268,7 +271,9 @@ private struct PracticeShortcutRow: View {
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
+        .accessibilityElement(children: .combine)
         .contentShape(Rectangle())
         .frame(minHeight: 44)
     }
@@ -294,6 +299,7 @@ struct MicrophoneRecoveryCard: View {
                 .foregroundStyle(BTTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("microphone.recovery")
     }
 }
@@ -360,6 +366,15 @@ struct ProgressTabView: View {
 
                 ProgressNextStepSection()
 
+                Button {
+                    selectedTab = .tuner
+                } label: {
+                    Label("Open Tuner", systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BTPrimaryButtonStyle())
+                .accessibilityIdentifier("progress.openTuner")
+
                 if let _ = model.weakTransitionInsight {
                     WeakTransitionCard()
                 }
@@ -373,19 +388,6 @@ struct ProgressTabView: View {
         }
         .background(BTTheme.background.ignoresSafeArea())
         .navigationTitle("Progress")
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button {
-                selectedTab = .tuner
-            } label: {
-                Label("Open Tuner", systemImage: "arrow.right.circle.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(BTPrimaryButtonStyle())
-            .accessibilityIdentifier("progress.openTuner")
-            .padding(.horizontal, BTSpacing.lg)
-            .padding(.vertical, BTSpacing.sm)
-            .background(.bar)
-        }
     }
 }
 

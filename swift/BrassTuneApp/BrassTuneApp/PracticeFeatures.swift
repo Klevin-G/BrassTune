@@ -608,6 +608,10 @@ struct FocusedWorkspaceCheckpoint: Codable, Equatable {
     let firstStartedAt: Date
     var blockAccumulatedSeconds: TimeInterval
     var blockRunningSince: Date?
+    // Optional keeps snapshots from builds before active-time accounting
+    // decodable. The value contains time practiced in blocks that the player
+    // has already moved away from; the current block remains separate.
+    var priorBlockActiveSeconds: TimeInterval?
     var completed: Bool
 
     var currentBlock: PracticePackBlock? {
@@ -620,6 +624,10 @@ struct FocusedWorkspaceCheckpoint: Codable, Equatable {
     func elapsedInBlock(at now: Date) -> TimeInterval {
         let live = blockRunningSince.map { max(0, now.timeIntervalSince($0)) } ?? 0
         return min(currentBlock?.durationSeconds ?? 0, max(0, blockAccumulatedSeconds + live))
+    }
+
+    func activeElapsed(at now: Date) -> TimeInterval {
+        max(0, priorBlockActiveSeconds ?? 0) + elapsedInBlock(at: now)
     }
 }
 
@@ -906,7 +914,8 @@ extension AppModel {
 
     private func completeWarmup(now: Date) {
         guard var checkpoint = practiceFeatures.warmupCheckpoint, !checkpoint.completed else { return }
-        checkpoint.accumulatedSeconds = GuidedWarmupPlan.fiveMinute.durationSeconds
+        let activeDuration = checkpoint.elapsed(at: now)
+        checkpoint.accumulatedSeconds = activeDuration
         checkpoint.runningSince = nil
         checkpoint.completed = true
         practiceFeatures.warmupCheckpoint = checkpoint
@@ -915,8 +924,8 @@ extension AppModel {
                 id: UUID(),
                 name: GuidedWarmupPlan.fiveMinute.title,
                 instrumentId: selectedInstrumentId,
-                startedAt: checkpoint.firstStartedAt,
-                endedAt: max(now, checkpoint.firstStartedAt.addingTimeInterval(GuidedWarmupPlan.fiveMinute.durationSeconds)),
+                startedAt: now.addingTimeInterval(-activeDuration),
+                endedAt: now,
                 frames: [],
                 retainedRecordingURL: nil,
                 practiceNotes: "Completed the guided five-minute warm-up.",
@@ -968,6 +977,7 @@ extension AppModel {
             firstStartedAt: now,
             blockAccumulatedSeconds: 0,
             blockRunningSince: nil,
+            priorBlockActiveSeconds: 0,
             completed: false
         )
         recordPracticeStart(PracticeShortcut(kind: .practicePack, referenceID: pack.id, title: pack.name), now: now)
@@ -1022,6 +1032,8 @@ extension AppModel {
         pauseWorkspace(now: now)
         guard let refreshed = practiceFeatures.workspaceCheckpoint else { return }
         checkpoint = refreshed
+        checkpoint.priorBlockActiveSeconds = max(0, checkpoint.priorBlockActiveSeconds ?? 0)
+            + max(0, checkpoint.blockAccumulatedSeconds)
         let target = min(checkpoint.pack.blocks.count - 1, max(0, checkpoint.blockIndex + offset))
         checkpoint.blockIndex = target
         checkpoint.blockAccumulatedSeconds = 0
@@ -1031,7 +1043,9 @@ extension AppModel {
 
     func finishWorkspace(now: Date = Date()) {
         guard var checkpoint = practiceFeatures.workspaceCheckpoint, !checkpoint.completed else { return }
+        let activeDuration = checkpoint.activeElapsed(at: now)
         stopFeatureAudio()
+        checkpoint.blockAccumulatedSeconds = checkpoint.elapsedInBlock(at: now)
         checkpoint.blockRunningSince = nil
         checkpoint.completed = true
         practiceFeatures.workspaceCheckpoint = checkpoint
@@ -1040,8 +1054,8 @@ extension AppModel {
                 id: UUID(),
                 name: checkpoint.pack.name,
                 instrumentId: selectedInstrumentId,
-                startedAt: checkpoint.firstStartedAt,
-                endedAt: max(now, checkpoint.firstStartedAt.addingTimeInterval(1)),
+                startedAt: now.addingTimeInterval(-activeDuration),
+                endedAt: now,
                 frames: [],
                 retainedRecordingURL: nil,
                 practiceNotes: NativeLocalization.format(

@@ -57,6 +57,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var playAlongGrade: PlayAlongGrade?
     @Published var ensembles: [EnsembleSummary] = []
     @Published var selectedEnsembleID: EnsembleSummary.ID?
+    @Published private(set) var ensembleInvitations: [EnsembleInvitation] = []
+    @Published private(set) var selectedEnsembleDetail: EnsembleSummary?
+    @Published private(set) var selectedEnsembleRoster: [EnsembleRosterStudent] = []
+    @Published private(set) var selectedEnsembleAggregate: EnsembleAggregateSummary?
     @Published private(set) var ensemblesLoading = false
     @Published private(set) var ensembleMutationInProgress = false
     @Published private(set) var ensembleStatusMessage: String?
@@ -65,6 +69,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var authOperationInProgress = false
     @Published private(set) var authNotice: String?
     @Published private(set) var authNoticeIsError = false
+    @Published private(set) var authProviderConfiguration: AuthProviderConfiguration?
+    @Published private(set) var authProviderConfigurationLoading = false
+    @Published private(set) var authProviderRecoveryMessage: String?
     @Published var lastError: UserVisibleError?
     @Published private(set) var persistenceErrorMessage: String?
     @Published private(set) var guestProgressSafetyPromptEligible = false
@@ -216,7 +223,15 @@ final class AppModel: ObservableObject {
     var accountUnavailableMessage: String? {
         accountFeaturesEnabled
             ? nil
-            : NativeLocalization.string("Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device.")
+            : NativeLocalization.string("Practice as a guest today. Online backup and Classes will appear when account access is available.")
+    }
+
+    var appleSignInAvailable: Bool {
+        accountFeaturesEnabled && authProviderConfiguration?.apple == true
+    }
+
+    var googleSignInAvailable: Bool {
+        accountFeaturesEnabled && authProviderConfiguration?.google == true
     }
 
     func resetForUITesting() {
@@ -247,6 +262,10 @@ final class AppModel: ObservableObject {
         stopMetronome()
         ensembles = NativeAudioEngine.testFixturesEnabled ? Self.demoEnsembles : []
         selectedEnsembleID = ensembles.first?.id
+        ensembleInvitations = []
+        selectedEnsembleDetail = nil
+        selectedEnsembleRoster = []
+        selectedEnsembleAggregate = nil
         ensembleStatusMessage = nil
         if clearedLocalArtifacts {
             lastError = nil
@@ -266,6 +285,10 @@ final class AppModel: ObservableObject {
         authState = .guest
         ensembles.removeAll()
         selectedEnsembleID = nil
+        ensembleInvitations = []
+        selectedEnsembleDetail = nil
+        selectedEnsembleRoster = []
+        selectedEnsembleAggregate = nil
         ensembleStatusMessage = nil
         authNotice = nil
         authNoticeIsError = false
@@ -485,6 +508,11 @@ final class AppModel: ObservableObject {
             guard !Task.isCancelled, generation == ensembleLoadGeneration else { return }
             ensembles = loaded
             selectAvailableEnsemble(preferredID: selectedEnsembleID)
+            if selectedEnsembleDetail?.id != selectedEnsembleID {
+                selectedEnsembleDetail = nil
+                selectedEnsembleRoster = []
+                selectedEnsembleAggregate = nil
+            }
             ensembleStatusMessage = nil
             lastError = nil
         } catch is CancellationError {
@@ -492,6 +520,441 @@ final class AppModel: ObservableObject {
         } catch {
             guard generation == ensembleLoadGeneration else { return }
             handleClassAuthOrNetworkError(error)
+        }
+    }
+
+    func loadClassWorkspace() async {
+        await loadEnsembles()
+        guard !Task.isCancelled else { return }
+        await loadEnsembleInvitations()
+        guard !Task.isCancelled, let selectedEnsembleID else { return }
+        await loadSelectedEnsembleDetails(id: selectedEnsembleID)
+    }
+
+    func loadEnsembleInvitations() async {
+        if NativeAudioEngine.testFixturesEnabled {
+            if ProcessInfo.processInfo.arguments.contains("UITEST_CLASS_FLOWS") {
+                ensembleInvitations = [
+                    EnsembleInvitation(
+                        memberID: 901,
+                        groupID: 3,
+                        groupName: "Invited studio",
+                        instrumentID: "unassigned",
+                        roleInGroup: "student",
+                        invitedAt: nil,
+                        directorName: "Director Rivera"
+                    )
+                ]
+            } else {
+                ensembleInvitations = []
+            }
+            return
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+            let response = try await apiClient.request(
+                EnsembleInvitationList.self,
+                path: "/api/ensemble/invitations",
+                config: config,
+                bearerToken: token
+            )
+            guard !Task.isCancelled else { return }
+            ensembleInvitations = response.invitations
+            lastError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            handleClassAuthOrNetworkError(error)
+        }
+    }
+
+    func loadSelectedEnsembleDetails(id: EnsembleSummary.ID) async {
+        guard selectedEnsembleID == id,
+              let summary = ensembles.first(where: { $0.id == id }) else { return }
+        if NativeAudioEngine.testFixturesEnabled {
+            let member = EnsembleMember(
+                id: 101,
+                groupID: id,
+                userID: 501,
+                username: "demo-student",
+                displayName: "Demo Student",
+                instrumentID: "trumpet",
+                roleInGroup: "student",
+                status: "active",
+                isCurrentUser: !summary.viewerCanManage,
+                activeSince: nil,
+                createdAt: nil
+            )
+            var detail = summary
+            detail.members = [member]
+            detail.rosterScope = summary.viewerCanManage ? "full" : "self"
+            selectedEnsembleDetail = detail
+            selectedEnsembleRoster = summary.viewerCanManage
+                ? [
+                    EnsembleRosterStudent(
+                        memberID: member.id,
+                        username: member.username,
+                        displayName: member.displayName,
+                        instrumentID: member.instrumentID,
+                        status: member.status,
+                        roleInGroup: member.roleInGroup,
+                        sessionsCount: 3,
+                        practiceMinutes: 24,
+                        averageAbsCents: 6.5,
+                        inTunePercentage: 82,
+                        lastPracticeAt: nil
+                    )
+                ]
+                : []
+            selectedEnsembleAggregate = summary.viewerCanManage
+                ? EnsembleAggregateSummary(
+                    groupID: id,
+                    sessionCount: 3,
+                    sections: [
+                        EnsembleSectionSummary(
+                            instrumentID: "trumpet",
+                            sessionCount: 3,
+                            practiceMinutes: 24,
+                            averageAbsCents: 6.5
+                        )
+                    ],
+                    overall: EnsembleSectionSummary(
+                        instrumentID: "all",
+                        sessionCount: 3,
+                        practiceMinutes: 24,
+                        averageAbsCents: 6.5
+                    )
+                )
+                : nil
+            return
+        }
+
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+            let detail = try await apiClient.request(
+                EnsembleSummary.self,
+                path: "/api/ensemble/groups/\(id)",
+                config: config,
+                bearerToken: token
+            )
+            guard !Task.isCancelled, selectedEnsembleID == id else { return }
+            selectedEnsembleDetail = detail
+            selectedEnsembleRoster = []
+            selectedEnsembleAggregate = nil
+            if detail.viewerCanManage {
+                async let rosterRequest = apiClient.request(
+                    EnsembleRoster.self,
+                    path: "/api/ensemble/groups/\(id)/roster",
+                    config: config,
+                    bearerToken: token
+                )
+                async let aggregateRequest = apiClient.request(
+                    EnsembleAggregateSummary.self,
+                    path: "/api/ensemble/groups/\(id)/summary",
+                    config: config,
+                    bearerToken: token
+                )
+                let (roster, aggregate) = try await (rosterRequest, aggregateRequest)
+                guard !Task.isCancelled, selectedEnsembleID == id else { return }
+                selectedEnsembleRoster = roster.students
+                selectedEnsembleAggregate = aggregate
+            }
+            lastError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedEnsembleID == id else { return }
+            handleClassAuthOrNetworkError(error)
+        }
+    }
+
+    @discardableResult
+    func createEnsemble(name: String) async -> Bool {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (2...80).contains(normalizedName.count) else {
+            lastError = .apiRequestFailed(
+                statusCode: 422,
+                message: NativeLocalization.string("Enter a class name with 2-80 characters.")
+            )
+            return false
+        }
+        if NativeAudioEngine.testFixturesEnabled {
+            let nextID = (ensembles.map(\.id).max() ?? 0) + 1
+            let created = EnsembleSummary(
+                id: nextID,
+                name: normalizedName,
+                directorUserID: nil,
+                joinCode: "DEMO\(nextID)",
+                viewerRole: "owner",
+                viewerCanLeave: false,
+                viewerCanManage: true,
+                createdAt: nil,
+                updatedAt: nil
+            )
+            ensembles.append(created)
+            ensembles.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            selectedEnsembleID = created.id
+            ensembleStatusMessage = NativeLocalization.format("Created %@.", created.name)
+            await loadSelectedEnsembleDetails(id: created.id)
+            return true
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+        guard !ensembleMutationInProgress else { return false }
+        ensembleMutationInProgress = true
+        defer { ensembleMutationInProgress = false }
+        do {
+            let body = try JSONSerialization.data(withJSONObject: ["name": normalizedName])
+            let response = try await apiClient.request(
+                EnsembleCreatedResponse.self,
+                path: "/api/ensemble/groups",
+                method: "POST",
+                body: body,
+                config: config,
+                bearerToken: token
+            )
+            selectedEnsembleID = response.id
+            await loadClassWorkspace()
+            ensembleStatusMessage = NativeLocalization.format("Created %@.", response.name)
+            lastError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func inviteEnsembleMember(
+        groupID: EnsembleSummary.ID,
+        username: String,
+        instrumentID: String?
+    ) async -> Bool {
+        let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789_-")
+        guard (3...32).contains(normalizedUsername.count),
+              normalizedUsername.unicodeScalars.allSatisfy(allowed.contains) else {
+            lastError = .apiRequestFailed(
+                statusCode: 422,
+                message: NativeLocalization.string("Enter a valid username using letters, numbers, underscores, or hyphens.")
+            )
+            return false
+        }
+        if NativeAudioEngine.testFixturesEnabled {
+            ensembleStatusMessage = NativeLocalization.format("Invitation sent to %@.", "@\(normalizedUsername)")
+            return true
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+        guard !ensembleMutationInProgress else { return false }
+        ensembleMutationInProgress = true
+        defer { ensembleMutationInProgress = false }
+        do {
+            var payload: [String: Any] = [
+                "username": normalizedUsername,
+                "role_in_group": "student",
+            ]
+            if let instrumentID, !instrumentID.isEmpty {
+                payload["instrument_id"] = instrumentID
+            }
+            let body = try JSONSerialization.data(withJSONObject: payload)
+            _ = try await apiClient.request(
+                EnsembleMember.self,
+                path: "/api/ensemble/groups/\(groupID)/members/by-username",
+                method: "POST",
+                body: body,
+                config: config,
+                bearerToken: token
+            )
+            await loadSelectedEnsembleDetails(id: groupID)
+            ensembleStatusMessage = NativeLocalization.format("Invitation sent to %@.", "@\(normalizedUsername)")
+            lastError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func rotateEnsembleJoinCode(id: EnsembleSummary.ID) async -> Bool {
+        if NativeAudioEngine.testFixturesEnabled {
+            let code = "NEW\(id)CODE"
+            updateEnsembleJoinCode(id: id, code: code)
+            ensembleStatusMessage = NativeLocalization.string("A new class code is ready. The previous code no longer works.")
+            return true
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+        guard !ensembleMutationInProgress else { return false }
+        ensembleMutationInProgress = true
+        defer { ensembleMutationInProgress = false }
+        do {
+            let response = try await apiClient.request(
+                EnsembleJoinCodeResponse.self,
+                path: "/api/ensemble/groups/\(id)/join-code/rotate",
+                method: "POST",
+                config: config,
+                bearerToken: token
+            )
+            updateEnsembleJoinCode(id: response.groupID, code: response.joinCode)
+            ensembleStatusMessage = NativeLocalization.string("A new class code is ready. The previous code no longer works.")
+            lastError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func respondToEnsembleInvitation(
+        memberID: EnsembleInvitation.ID,
+        accept: Bool,
+        instrumentID: String? = nil
+    ) async -> Bool {
+        guard let invitation = ensembleInvitations.first(where: { $0.memberID == memberID }) else { return false }
+        if accept, (instrumentID ?? "").isEmpty {
+            lastError = .apiRequestFailed(
+                statusCode: 422,
+                message: NativeLocalization.string("Choose your instrument before accepting.")
+            )
+            return false
+        }
+        if NativeAudioEngine.testFixturesEnabled {
+            ensembleInvitations.removeAll { $0.memberID == memberID }
+            if accept {
+                let joined = EnsembleSummary(
+                    id: invitation.groupID,
+                    name: invitation.groupName,
+                    directorUserID: nil,
+                    joinCode: nil,
+                    viewerRole: "student",
+                    viewerCanLeave: true,
+                    viewerCanManage: false,
+                    createdAt: nil,
+                    updatedAt: nil
+                )
+                ensembles.removeAll { $0.id == joined.id }
+                ensembles.append(joined)
+                selectedEnsembleID = joined.id
+                ensembleStatusMessage = NativeLocalization.format("Joined %@.", joined.name)
+            } else {
+                ensembleStatusMessage = NativeLocalization.format("Declined the invitation to %@.", invitation.groupName)
+            }
+            return true
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+        guard !ensembleMutationInProgress else { return false }
+        ensembleMutationInProgress = true
+        defer { ensembleMutationInProgress = false }
+        do {
+            let path = accept
+                ? "/api/ensemble/invitations/\(memberID)/accept"
+                : "/api/ensemble/invitations/\(memberID)/decline"
+            let body = accept
+                ? try JSONSerialization.data(withJSONObject: ["instrument_id": instrumentID ?? selectedInstrumentId])
+                : nil
+            _ = try await apiClient.request(
+                EnsembleInvitationDecisionResponse.self,
+                path: path,
+                method: "POST",
+                body: body,
+                config: config,
+                bearerToken: token
+            )
+            ensembleInvitations.removeAll { $0.memberID == memberID }
+            if accept {
+                selectedEnsembleID = invitation.groupID
+                await loadClassWorkspace()
+                ensembleStatusMessage = NativeLocalization.format("Joined %@.", invitation.groupName)
+            } else {
+                ensembleStatusMessage = NativeLocalization.format("Declined the invitation to %@.", invitation.groupName)
+            }
+            lastError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func removeEnsembleMember(groupID: EnsembleSummary.ID, memberID: EnsembleMember.ID) async -> Bool {
+        if NativeAudioEngine.testFixturesEnabled {
+            selectedEnsembleDetail?.members?.removeAll { $0.id == memberID }
+            selectedEnsembleRoster.removeAll { $0.memberID == memberID }
+            ensembleStatusMessage = NativeLocalization.string("Member removed.")
+            return true
+        }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+        guard !ensembleMutationInProgress else { return false }
+        ensembleMutationInProgress = true
+        defer { ensembleMutationInProgress = false }
+        do {
+            let response = try await apiClient.request(
+                EnsembleMemberRemovalResponse.self,
+                path: "/api/ensemble/groups/\(groupID)/members/\(memberID)",
+                method: "DELETE",
+                config: config,
+                bearerToken: token
+            )
+            guard response.removed else { throw UserVisibleError.malformedResponse }
+            await loadSelectedEnsembleDetails(id: groupID)
+            ensembleStatusMessage = NativeLocalization.string("Member removed.")
+            lastError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            handleClassAuthOrNetworkError(error)
+            return false
+        }
+    }
+
+    private func updateEnsembleJoinCode(id: EnsembleSummary.ID, code: String) {
+        if let index = ensembles.firstIndex(where: { $0.id == id }) {
+            ensembles[index].joinCode = code
+        }
+        if selectedEnsembleDetail?.id == id {
+            selectedEnsembleDetail?.joinCode = code
         }
     }
 
@@ -548,7 +1011,7 @@ final class AppModel: ObservableObject {
                 ensembles.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             }
             await loadEnsembles()
-            ensembleStatusMessage = "Joined \(response.groupName)."
+            ensembleStatusMessage = NativeLocalization.format("Joined %@.", response.groupName)
             lastError = nil
             return true
         } catch is CancellationError {
@@ -598,7 +1061,12 @@ final class AppModel: ObservableObject {
             ensembleLoadGeneration += 1
             ensembles.removeAll { $0.id == id }
             selectAvailableEnsemble(preferredID: selectedEnsembleID == id ? nil : selectedEnsembleID)
-            ensembleStatusMessage = "Left \(target.name)."
+            if selectedEnsembleDetail?.id == id {
+                selectedEnsembleDetail = nil
+                selectedEnsembleRoster = []
+                selectedEnsembleAggregate = nil
+            }
+            ensembleStatusMessage = NativeLocalization.format("Left %@.", target.name)
             lastError = nil
             return true
         } catch is CancellationError {
@@ -628,13 +1096,21 @@ final class AppModel: ObservableObject {
     private func handleClassAuthOrNetworkError(_ error: Error) {
         let visible = (error as? UserVisibleError) ?? .networkUnavailable
         if case .apiRequestFailed(let statusCode, _) = visible, statusCode == 401 {
+            let expired = UserVisibleError.apiRequestFailed(
+                statusCode: 401,
+                message: NativeLocalization.string("Your sign-in expired. Sign in again, then retry.")
+            )
             try? authService.signOut()
             transitionToUnauthenticated(.signedOut)
+            setAuthFailure(expired)
+            return
         } else if visible == .authenticationFailed {
             try? authService.signOut()
             transitionToUnauthenticated(.signedOut)
+            setAuthFailure(visible)
+            return
         }
-        lastError = visible
+        setAuthFailure(visible)
     }
 
     private func selectAvailableEnsemble(preferredID: EnsembleSummary.ID?) {
@@ -692,6 +1168,48 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func loadAuthProviderConfiguration(force: Bool = false) async {
+        if !force, authProviderConfiguration != nil { return }
+        guard accountFeaturesEnabled else {
+            authProviderConfiguration = nil
+            authProviderRecoveryMessage = NativeLocalization.string(
+                "Account sign-in needs secure service configuration. You can keep practicing as a guest."
+            )
+            return
+        }
+        if ProcessInfo.processInfo.arguments.contains("UITEST_AUTH_PROVIDERS") {
+            authProviderConfiguration = AuthProviderConfiguration(apple: false, google: true)
+            authProviderRecoveryMessage = NativeLocalization.string(
+                "One sign-in provider needs setup. Use an available provider or email and password."
+            )
+            return
+        }
+        guard !authProviderConfigurationLoading else { return }
+        authProviderConfigurationLoading = true
+        authProviderRecoveryMessage = nil
+        defer { authProviderConfigurationLoading = false }
+        do {
+            let providers = try await authService.loadProviderConfiguration(config: config)
+            authProviderConfiguration = providers
+            if !providers.apple && !providers.google {
+                authProviderRecoveryMessage = NativeLocalization.string(
+                    "Apple and Google sign-in need provider setup. Email and password still work."
+                )
+            } else if !providers.apple || !providers.google {
+                authProviderRecoveryMessage = NativeLocalization.string(
+                    "One sign-in provider needs setup. Use an available provider or email and password."
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            authProviderConfiguration = nil
+            authProviderRecoveryMessage = NativeLocalization.string(
+                "BrassTune couldn't check Apple and Google sign-in. Retry or use email and password."
+            )
+        }
+    }
+
     func completeAppleSignIn(identityToken: Data, rawNonce: String) async {
         guard beginAuthOperation() else { return }
         defer { authOperationInProgress = false }
@@ -717,6 +1235,32 @@ final class AppModel: ObservableObject {
         } catch {
             setAuthFailure(error)
         }
+    }
+
+    func completeGoogleSignIn() async {
+        guard googleSignInAvailable else {
+            setAuthFailure(UserVisibleError.oauthProviderUnavailable)
+            return
+        }
+        guard beginAuthOperation() else { return }
+        defer { authOperationInProgress = false }
+        do {
+            let session = try await authService.signInWithGoogle(config: config)
+            guard activateStorageNamespace(.account(userID: session.userID)) else { return }
+            authState = .signedIn(email: session.email)
+            gatewayCompleted = true
+            lastError = nil
+            setAuthNotice(NativeLocalization.string("Signed in with Google."))
+            requestTutorialPresentation()
+        } catch is CancellationError {
+            // View-lifecycle cancellation is not an authentication failure.
+        } catch {
+            setAuthFailure(error)
+        }
+    }
+
+    func reportAuthFailure(_ error: UserVisibleError) {
+        setAuthFailure(error)
     }
 
     private func beginAuthOperation() -> Bool {
@@ -1761,6 +2305,10 @@ final class AppModel: ObservableObject {
         appLanguage = .system
         ensembles = []
         selectedEnsembleID = nil
+        ensembleInvitations = []
+        selectedEnsembleDetail = nil
+        selectedEnsembleRoster = []
+        selectedEnsembleAggregate = nil
         ensembleStatusMessage = nil
         isRestoringLocalState = false
         authState = state

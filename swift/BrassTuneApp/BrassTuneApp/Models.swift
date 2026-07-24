@@ -1578,6 +1578,8 @@ struct EnsembleSummary: Codable, Equatable, Identifiable {
     var viewerRole: String
     var viewerCanLeave: Bool
     var viewerCanManage: Bool
+    var members: [EnsembleMember]? = nil
+    var rosterScope: String? = nil
     // Backend timestamps are informational here and may include fractional
     // seconds without a timezone, so retain them without fragile date parsing.
     var createdAt: String?
@@ -1591,6 +1593,8 @@ struct EnsembleSummary: Codable, Equatable, Identifiable {
         case viewerRole = "viewer_role"
         case viewerCanLeave = "viewer_can_leave"
         case viewerCanManage = "viewer_can_manage"
+        case members
+        case rosterScope = "roster_scope"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -1605,6 +1609,177 @@ struct EnsembleSummary: Codable, Equatable, Identifiable {
         default: return NativeLocalization.string("Student")
         }
     }
+}
+
+struct EnsembleMember: Codable, Equatable, Identifiable {
+    let id: Int
+    let groupID: Int
+    let userID: Int?
+    let username: String?
+    let displayName: String?
+    let instrumentID: String
+    let roleInGroup: String
+    let status: String
+    let isCurrentUser: Bool?
+    let activeSince: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case groupID = "group_id"
+        case userID = "user_id"
+        case username
+        case displayName = "display_name"
+        case instrumentID = "instrument_id"
+        case roleInGroup = "role_in_group"
+        case status
+        case isCurrentUser = "is_current_user"
+        case activeSince = "active_since"
+        case createdAt = "created_at"
+    }
+
+    var displayLabel: String {
+        if isCurrentUser == true { return NativeLocalization.string("You") }
+        if let username, !username.isEmpty { return NativeLocalization.preserve("@\(username)") }
+        if let displayName, !displayName.isEmpty { return NativeLocalization.preserve(displayName) }
+        return NativeLocalization.string("Student")
+    }
+}
+
+struct EnsembleInvitationList: Codable, Equatable {
+    let invitations: [EnsembleInvitation]
+}
+
+struct EnsembleInvitation: Codable, Equatable, Identifiable {
+    var id: Int { memberID }
+    let memberID: Int
+    let groupID: Int
+    let groupName: String
+    let instrumentID: String
+    let roleInGroup: String
+    let invitedAt: String?
+    let directorName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case memberID = "member_id"
+        case groupID = "group_id"
+        case groupName = "group_name"
+        case instrumentID = "instrument_id"
+        case roleInGroup = "role_in_group"
+        case invitedAt = "invited_at"
+        case directorName = "director_name"
+    }
+}
+
+struct EnsembleRoster: Codable, Equatable {
+    let groupID: Int
+    let students: [EnsembleRosterStudent]
+
+    enum CodingKeys: String, CodingKey {
+        case groupID = "group_id"
+        case students
+    }
+}
+
+struct EnsembleRosterStudent: Codable, Equatable, Identifiable {
+    var id: Int { memberID }
+    let memberID: Int
+    let username: String?
+    let displayName: String?
+    let instrumentID: String
+    let status: String
+    let roleInGroup: String
+    let sessionsCount: Int
+    let practiceMinutes: Double
+    let averageAbsCents: Double?
+    let inTunePercentage: Double?
+    let lastPracticeAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case memberID = "member_id"
+        case username
+        case displayName = "display_name"
+        case instrumentID = "instrument_id"
+        case status
+        case roleInGroup = "role_in_group"
+        case sessionsCount = "sessions_count"
+        case practiceMinutes = "practice_minutes"
+        case averageAbsCents = "average_abs_cents"
+        case inTunePercentage = "in_tune_percentage"
+        case lastPracticeAt = "last_practice_at"
+    }
+
+    var displayLabel: String {
+        if let username, !username.isEmpty { return NativeLocalization.preserve("@\(username)") }
+        if let displayName, !displayName.isEmpty { return NativeLocalization.preserve(displayName) }
+        return NativeLocalization.string("Student")
+    }
+}
+
+struct EnsembleAggregateSummary: Codable, Equatable {
+    let groupID: Int
+    let sessionCount: Int
+    let sections: [EnsembleSectionSummary]
+    let overall: EnsembleSectionSummary
+
+    enum CodingKeys: String, CodingKey {
+        case groupID = "group_id"
+        case sessionCount = "session_count"
+        case sections, overall
+    }
+}
+
+struct EnsembleSectionSummary: Codable, Equatable, Identifiable {
+    var id: String { instrumentID }
+    let instrumentID: String
+    let sessionCount: Int
+    let practiceMinutes: Double
+    let averageAbsCents: Double
+
+    enum CodingKeys: String, CodingKey {
+        case instrumentID = "instrument_id"
+        case sessionCount = "session_count"
+        case practiceMinutes = "practice_minutes"
+        case averageAbsCents = "average_abs_cents"
+    }
+}
+
+struct EnsembleCreatedResponse: Codable, Equatable {
+    let id: Int
+    let name: String
+    let directorUserID: Int?
+    let joinCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case directorUserID = "director_user_id"
+        case joinCode = "join_code"
+    }
+}
+
+struct EnsembleJoinCodeResponse: Codable, Equatable {
+    let groupID: Int
+    let joinCode: String
+
+    enum CodingKeys: String, CodingKey {
+        case groupID = "group_id"
+        case joinCode = "join_code"
+    }
+}
+
+struct EnsembleInvitationDecisionResponse: Codable, Equatable {
+    let accepted: Bool?
+    let declined: Bool?
+    let groupID: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case accepted, declined
+        case groupID = "group_id"
+    }
+}
+
+struct EnsembleMemberRemovalResponse: Codable, Equatable {
+    let removed: Bool
 }
 
 enum AuthState: Equatable {
@@ -1634,6 +1809,9 @@ enum UserVisibleError: LocalizedError, Equatable {
     case malformedResponse
     case timeout
     case appleSignInCancelled
+    case googleSignInCancelled
+    case oauthCallbackInvalid
+    case oauthProviderUnavailable
     case accountDeletionRequiresConfirmation
     case missingAuthConfiguration
     case authenticationFailed
@@ -1650,6 +1828,9 @@ enum UserVisibleError: LocalizedError, Equatable {
         case .malformedResponse: return NativeLocalization.string("The account service returned an unreadable response.")
         case .timeout: return NativeLocalization.string("The request timed out.")
         case .appleSignInCancelled: return NativeLocalization.string("Apple sign-in was cancelled.")
+        case .googleSignInCancelled: return NativeLocalization.string("Google sign-in was cancelled.")
+        case .oauthCallbackInvalid: return NativeLocalization.string("The sign-in callback could not be verified. Start sign-in again.")
+        case .oauthProviderUnavailable: return NativeLocalization.string("That sign-in provider is not available right now. Try another sign-in method or keep practicing as a guest.")
         case .accountDeletionRequiresConfirmation: return NativeLocalization.string("Please confirm deletion and try again.")
         case .missingAuthConfiguration: return NativeLocalization.string("Account sign-in isn't available right now. You can keep practicing as a guest.")
         case .authenticationFailed: return NativeLocalization.string("BrassTune could not complete authentication.")

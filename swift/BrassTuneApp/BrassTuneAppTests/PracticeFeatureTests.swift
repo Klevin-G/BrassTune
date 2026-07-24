@@ -114,6 +114,28 @@ final class PracticeFeatureTests: XCTestCase {
         XCTAssertEqual(model.sessions.count, 1)
     }
 
+    @MainActor
+    func testPausedWarmupRecordsOnlyActiveTimeAndWeeklyProgress() throws {
+        let model = makeModel()
+        let start = Date(timeIntervalSince1970: 100_000)
+        model.startOrResumeWarmup(now: start)
+        model.pauseWarmup(now: start.addingTimeInterval(120))
+
+        let resume = start.addingTimeInterval(10_000)
+        model.startOrResumeWarmup(now: resume)
+        model.advanceWarmup(now: resume.addingTimeInterval(180))
+
+        let session = try XCTUnwrap(model.sessions.first)
+        XCTAssertEqual(session.durationSeconds, 300, accuracy: 0.001)
+        XCTAssertEqual(session.startedAt, resume.addingTimeInterval(-120))
+        let progress = WeeklyPracticeProgress.calculate(
+            sessions: model.sessions,
+            now: resume.addingTimeInterval(180)
+        )
+        XCTAssertEqual(progress.minutes, 5)
+        XCTAssertEqual(progress.sessionCount, 1)
+    }
+
     func testGuidedWarmupMatchesFiveStepFiveMinuteContract() {
         XCTAssertEqual(GuidedWarmupPlan.fiveMinute.steps.map(\.id), ["breathe", "buzz", "long-tone", "slur", "scale"])
         XCTAssertEqual(GuidedWarmupPlan.fiveMinute.steps.map(\.durationSeconds), [45, 45, 75, 75, 60])
@@ -255,14 +277,54 @@ final class PracticeFeatureTests: XCTestCase {
         XCTAssertEqual(model.sessions.first?.name, pack.name)
     }
 
-    private var modelTestURL: URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("PracticeFeatureTests-state.json")
+    @MainActor
+    func testPausedWorkspaceRecordsActiveTimeAcrossBlocksInsteadOfWallClock() async throws {
+        let model = makeModel()
+        let pack = PracticePack(
+            id: "active-time-test",
+            name: "Active time test",
+            detail: "Two instruction blocks",
+            blocks: [
+                PracticePackBlock(
+                    title: "Block one",
+                    instruction: "Play",
+                    kind: .instruction,
+                    durationSeconds: 100
+                ),
+                PracticePackBlock(
+                    title: "Block two",
+                    instruction: "Play",
+                    kind: .instruction,
+                    durationSeconds: 100
+                ),
+            ],
+            isBuiltIn: false
+        )
+        let start = Date(timeIntervalSince1970: 200_000)
+        model.startWorkspace(pack: pack, now: start)
+        await model.beginWorkspaceCurrentBlock(now: start)
+        model.pauseWorkspace(now: start.addingTimeInterval(30))
+
+        let secondBlockStart = start.addingTimeInterval(10_000)
+        model.moveWorkspace(by: 1, now: secondBlockStart)
+        await model.beginWorkspaceCurrentBlock(now: secondBlockStart)
+        model.finishWorkspace(now: secondBlockStart.addingTimeInterval(40))
+
+        let session = try XCTUnwrap(model.sessions.first)
+        XCTAssertEqual(session.durationSeconds, 70, accuracy: 0.001)
+        XCTAssertEqual(session.startedAt, secondBlockStart.addingTimeInterval(-30))
+        let progress = WeeklyPracticeProgress.calculate(
+            sessions: model.sessions,
+            now: secondBlockStart.addingTimeInterval(40)
+        )
+        XCTAssertEqual(progress.minutes, 1)
+        XCTAssertEqual(progress.sessionCount, 1)
     }
 
     @MainActor
     private func makeModel(at url: URL? = nil) -> AppModel {
-        let fileURL = url ?? modelTestURL
-        if url == nil { try? FileManager.default.removeItem(at: fileURL) }
+        let fileURL = url ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("PracticeFeatureTests-\(UUID().uuidString).json")
         let model = AppModel(
             persistenceStore: .ephemeral(fileURL: fileURL),
             scoreStorageDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

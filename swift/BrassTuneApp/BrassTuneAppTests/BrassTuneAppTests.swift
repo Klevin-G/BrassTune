@@ -559,7 +559,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertFalse(model.accountFeaturesEnabled)
         XCTAssertEqual(
             model.accountUnavailableMessage,
-            "Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device."
+            "Practice as a guest today. Online backup and Classes will appear when account access is available."
         )
     }
 
@@ -748,6 +748,26 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(try value("Beat unit", "de"), "Notenwert")
         XCTAssertEqual(try value("Accent first beat", "es"), "Acentuar el primer pulso")
         XCTAssertEqual(try value("Count-in", "zh-Hant"), "預備拍")
+        XCTAssertEqual(try value("Class", "ar"), "الصف")
+        let arabicClassKeys = [
+            "Active class",
+            "Class code",
+            "Return to Settings and sign in before joining a class.",
+            "Sign in before using classes.",
+            "That class action conflicts with your current membership.",
+            "That class could not be found.",
+        ]
+        for key in arabicClassKeys {
+            let arabic = try value(key, "ar")
+            XCTAssertFalse(arabic.contains("فئة"), "\(key) used the category translation for Class")
+            XCTAssertFalse(arabic.contains("دعوى"), "\(key) used lawsuit wording")
+        }
+        let firstRecording = try value(
+            "Use the Tuner or finish a Play-Along exercise to save your first recording.",
+            "ar"
+        )
+        XCTAssertFalse(firstRecording.contains("Tuner"))
+        XCTAssertFalse(firstRecording.contains("Play-Along"))
 
         let infoData = try Data(contentsOf: resourceDirectory.appendingPathComponent("InfoPlist.xcstrings"))
         let info = try XCTUnwrap(JSONSerialization.jsonObject(with: infoData) as? [String: Any])
@@ -771,8 +791,220 @@ final class BrassTuneAppTests: XCTestCase {
         )
     }
 
+    func testTuningMeterGeometryClampsSymmetricallyAndDoesNotMirrorInArabic() {
+        let previous = NativeLocalization.language
+        defer { NativeLocalization.language = previous }
+
+        NativeLocalization.language = .english
+        XCTAssertEqual(tuningMeterIndicatorOffset(cents: -50, width: 200), -95, accuracy: 0.001)
+        XCTAssertEqual(tuningMeterIndicatorOffset(cents: 0, width: 200), 0, accuracy: 0.001)
+        XCTAssertEqual(tuningMeterIndicatorOffset(cents: 50, width: 200), 95, accuracy: 0.001)
+        XCTAssertEqual(tuningMeterIndicatorOffset(cents: -500, width: 200), -95, accuracy: 0.001)
+        XCTAssertEqual(tuningMeterIndicatorOffset(cents: 500, width: 200), 95, accuracy: 0.001)
+
+        NativeLocalization.language = .arabic
+        XCTAssertEqual(tuningMeterIndicatorOffset(cents: -25, width: 200), -47.5, accuracy: 0.001)
+        XCTAssertEqual(tuningMeterIndicatorOffset(cents: 25, width: 200), 47.5, accuracy: 0.001)
+        XCTAssertEqual(tuningMeterIndicatorOffset(cents: nil, width: 200), 0, accuracy: 0.001)
+    }
+
     func testKeychainSessionUsesThisDeviceOnlyAccessibility() {
         XCTAssertEqual(KeychainStore.sessionAccessibility, kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
+    }
+
+    @MainActor
+    func testGoogleOAuthTransactionUsesPKCEStateAndExactNativeCallback() throws {
+        let verifier = String(repeating: "v", count: 64)
+        let transaction = try AuthService.googleOAuthTransaction(
+            config: makeAuthConfig(),
+            state: "state-123",
+            codeVerifier: verifier
+        )
+        let components = try XCTUnwrap(
+            URLComponents(url: transaction.authorizationURL, resolvingAgainstBaseURL: false)
+        )
+        let values = Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+                item.value.map { (item.name, $0) }
+            }
+        )
+        XCTAssertEqual(components.scheme, "https")
+        XCTAssertEqual(components.host, "project.supabase.co")
+        XCTAssertEqual(components.path, "/auth/v1/authorize")
+        XCTAssertEqual(values["provider"], "google")
+        XCTAssertEqual(values["scopes"], "openid email profile")
+        XCTAssertEqual(values["code_challenge_method"], "s256")
+        XCTAssertNotEqual(values["code_challenge"], verifier)
+        XCTAssertEqual(
+            values["redirect_to"],
+            "com.brasstune.auth://oauth/google?state=state-123"
+        )
+        XCTAssertNil(values["apikey"], "The publishable key belongs in API headers, not browser history.")
+        XCTAssertEqual(transaction.callbackURL.scheme, AuthService.oauthCallbackScheme)
+    }
+
+    @MainActor
+    func testGoogleOAuthCallbackRejectsStateMismatchTokensAndUnexpectedFields() throws {
+        let valid = try XCTUnwrap(
+            URL(string: "com.brasstune.auth://oauth/google?state=expected&code=single-use-code")
+        )
+        XCTAssertEqual(
+            try AuthService.validatedGoogleOAuthCode(valid, expectedState: "expected"),
+            "single-use-code"
+        )
+
+        for invalid in [
+            "com.brasstune.auth://oauth/google?state=wrong&code=single-use-code",
+            "com.brasstune.auth://oauth/google?state=expected&access_token=must-not-be-accepted",
+            "com.brasstune.auth://oauth/google?state=expected&code=ok&extra=unexpected",
+            "com.brasstune.auth://oauth/google?state=expected&code=ok#access_token=secret",
+            "other.app://oauth/google?state=expected&code=ok",
+        ] {
+            let url = try XCTUnwrap(URL(string: invalid))
+            XCTAssertThrowsError(
+                try AuthService.validatedGoogleOAuthCode(url, expectedState: "expected"),
+                invalid
+            ) { error in
+                XCTAssertEqual(error as? UserVisibleError, .oauthCallbackInvalid)
+            }
+        }
+    }
+
+    @MainActor
+    func testProviderSettingsAndGoogleOAuthStoreOnlyExchangedSupabaseSession() async throws {
+        let networkSession = makeStubSession()
+        let stored = InMemoryAuthSessionStore()
+        nonisolated(unsafe) var authorizationURL: URL?
+        nonisolated(unsafe) var tokenRequest: CapturedRequest?
+        let authService = AuthService(
+            session: networkSession,
+            readSessionPayload: { stored.payload },
+            saveSessionPayload: { stored.payload = $0 },
+            deleteSessionPayload: { stored.payload = nil },
+            webAuthentication: { url, callbackScheme in
+                authorizationURL = url
+                XCTAssertEqual(callbackScheme, AuthService.oauthCallbackScheme)
+                let authorizationComponents = try XCTUnwrap(
+                    URLComponents(url: url, resolvingAgainstBaseURL: false)
+                )
+                let redirect = try XCTUnwrap(
+                    authorizationComponents.queryItems?.first(where: { $0.name == "redirect_to" })?.value
+                )
+                var callbackComponents = try XCTUnwrap(
+                    URLComponents(string: redirect)
+                )
+                callbackComponents.queryItems = (callbackComponents.queryItems ?? [])
+                    + [URLQueryItem(name: "code", value: "authorization-code")]
+                return try XCTUnwrap(callbackComponents.url)
+            }
+        )
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            ),
+            authService: authService
+        )
+        model.config = makeAuthConfig()
+        defer { StubURLProtocol.handler = nil }
+
+        StubURLProtocol.handler = { request in
+            if request.url?.path == "/auth/v1/settings" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: Data(#"{"external":{"email":true,"apple":false,"google":true}}"#.utf8)
+                )
+            }
+            tokenRequest = CapturedRequest(
+                method: request.httpMethod ?? "GET",
+                path: request.url?.path ?? "",
+                authorization: request.value(forHTTPHeaderField: "Authorization"),
+                body: requestBodyData(request)
+            )
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"google-access","refresh_token":"google-refresh","expires_in":3600,"user":{"id":"google-user","email":"google@example.com"}}"#.utf8)
+            )
+        }
+
+        await model.loadAuthProviderConfiguration()
+        XCTAssertFalse(model.appleSignInAvailable)
+        XCTAssertTrue(model.googleSignInAvailable)
+        await model.completeGoogleSignIn()
+
+        XCTAssertEqual(model.authState, .signedIn(email: "google@example.com"))
+        XCTAssertEqual(model.persistenceAccessState, .account(userID: "google-user"))
+        XCTAssertEqual(model.authNotice, "Signed in with Google.")
+        XCTAssertNotNil(authorizationURL)
+        XCTAssertNotNil(stored.payload)
+        XCTAssertFalse(stored.payload?.contains("authorization-code") == true)
+        let request = try XCTUnwrap(tokenRequest)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/auth/v1/token")
+        let tokenPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(request.body)) as? [String: String]
+        )
+        XCTAssertEqual(tokenPayload["auth_code"], "authorization-code")
+        XCTAssertNotNil(tokenPayload["code_verifier"])
+        XCTAssertGreaterThanOrEqual(tokenPayload["code_verifier"]?.count ?? 0, 43)
+    }
+
+    @MainActor
+    func testProviderAndAppleFailuresRemainAtRecoverableGatewayWithoutWritingSession() async {
+        let stored = InMemoryAuthSessionStore()
+        let authService = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { stored.payload },
+            saveSessionPayload: { stored.payload = $0 },
+            deleteSessionPayload: { stored.payload = nil }
+        )
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            ),
+            authService: authService
+        )
+
+        await model.loadAuthProviderConfiguration()
+        XCTAssertFalse(model.appleSignInAvailable)
+        XCTAssertFalse(model.googleSignInAvailable)
+        XCTAssertNotNil(model.authProviderRecoveryMessage)
+
+        model.reportAuthFailure(.appleSignInCancelled)
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertEqual(model.persistenceAccessState, .restoringIdentity)
+        XCTAssertTrue(model.authNoticeIsError)
+        XCTAssertEqual(model.authNotice, UserVisibleError.appleSignInCancelled.localizedDescription)
+        XCTAssertNil(stored.payload)
+    }
+
+    @MainActor
+    func testInfoPlistRegistersOnlyTheNativeOAuthCallbackScheme() throws {
+        let appDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let infoURL = appDirectory.appendingPathComponent("BrassTuneApp/Info.plist")
+        let data = try Data(contentsOf: infoURL)
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let urlTypes = try XCTUnwrap(plist["CFBundleURLTypes"] as? [[String: Any]])
+        let schemes = urlTypes.flatMap { type in
+            type["CFBundleURLSchemes"] as? [String] ?? []
+        }
+        XCTAssertEqual(schemes, [AuthService.oauthCallbackScheme])
+        XCTAssertNil(String(data: data, encoding: .utf8)?.range(of: "secret", options: .caseInsensitive))
+
+        let repositoryRoot = appDirectory
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let supabaseConfig = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("supabase/config.toml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            supabaseConfig.contains(#""com.brasstune.auth://oauth/google?state=*""#),
+            "The bounded native callback must be present locally before a dashboard config push."
+        )
     }
 
     @MainActor
@@ -2554,6 +2786,136 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testClassDirectorAndInvitationFlowsUseExistingAPIContracts() async throws {
+        let session = makeStubSession()
+        let client = APIClient(session: session)
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            apiClient: client,
+            classAccessTokenProvider: { _ in "fresh-token" }
+        )
+        model.config = AppConfig(
+            environment: .staging,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
+            supabaseURL: nil,
+            supabasePublishableKey: nil
+        )
+        defer {
+            StubURLProtocol.handler = nil
+            try? FileManager.default.removeItem(at: stateURL)
+        }
+
+        nonisolated(unsafe) var capturedRequests: [CapturedRequest] = []
+        StubURLProtocol.handler = { request in
+            capturedRequests.append(
+                CapturedRequest(
+                    method: request.httpMethod ?? "GET",
+                    path: request.url?.path ?? "",
+                    authorization: request.value(forHTTPHeaderField: "Authorization"),
+                    body: requestBodyData(request)
+                )
+            )
+            let method = request.httpMethod ?? "GET"
+            let path = request.url?.path ?? ""
+            let data: Data
+            switch (method, path) {
+            case ("POST", "/api/ensemble/groups"):
+                data = Data(#"{"id":7,"name":"Wind Ensemble","director_user_id":42,"join_code":"OLD7"}"#.utf8)
+            case ("GET", "/api/ensemble/groups"):
+                data = Data(#"[{"id":7,"name":"Wind Ensemble","director_user_id":42,"join_code":"OLD7","viewer_role":"owner","viewer_can_leave":false,"viewer_can_manage":true}]"#.utf8)
+            case ("GET", "/api/ensemble/invitations"):
+                data = Data(#"{"invitations":[{"member_id":901,"group_id":8,"group_name":"Studio One","instrument_id":"unassigned","role_in_group":"student","director_name":"Rivera"},{"member_id":902,"group_id":9,"group_name":"Studio Two","instrument_id":"unassigned","role_in_group":"student","director_name":"Chen"}]}"#.utf8)
+            case ("GET", "/api/ensemble/groups/7"):
+                data = Data(#"{"id":7,"name":"Wind Ensemble","director_user_id":42,"join_code":"OLD7","viewer_role":"owner","viewer_can_leave":false,"viewer_can_manage":true,"roster_scope":"full","members":[{"id":101,"group_id":7,"user_id":501,"username":"student_one","display_name":"Student One","instrument_id":"trumpet","role_in_group":"student","status":"active"}]}"#.utf8)
+            case ("GET", "/api/ensemble/groups/7/roster"):
+                data = Data(#"{"group_id":7,"practice_aggregate_scope":"membership_interval","students":[{"member_id":101,"user_id":501,"username":"student_one","display_name":"Student One","instrument_id":"trumpet","status":"active","role_in_group":"student","sessions_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"in_tune_percentage":82.0}]}"#.utf8)
+            case ("GET", "/api/ensemble/groups/7/summary"):
+                data = Data(#"{"group_id":7,"session_count":3,"sections":[{"instrument_id":"trumpet","session_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"top_problem_notes":[]}],"overall":{"instrument_id":"all","session_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"top_problem_notes":[]},"practice_aggregate_scope":"membership_interval"}"#.utf8)
+            case ("POST", "/api/ensemble/groups/7/members/by-username"):
+                data = Data(#"{"id":102,"group_id":7,"user_id":502,"username":"new_student","display_name":"New Student","instrument_id":"horn","role_in_group":"student","status":"invited"}"#.utf8)
+            case ("POST", "/api/ensemble/groups/7/join-code/rotate"):
+                data = Data(#"{"group_id":7,"join_code":"NEW7"}"#.utf8)
+            case ("DELETE", "/api/ensemble/groups/7/members/101"):
+                data = Data(#"{"removed":true}"#.utf8)
+            case ("POST", "/api/ensemble/invitations/901/decline"):
+                data = Data(#"{"declined":true}"#.utf8)
+            case ("POST", "/api/ensemble/invitations/902/accept"):
+                data = Data(#"{"accepted":true,"group_id":9}"#.utf8)
+            default:
+                XCTFail("Unexpected class request: \(method) \(path)")
+                data = Data()
+            }
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: data
+            )
+        }
+
+        let created = await model.createEnsemble(name: " Wind Ensemble ")
+        XCTAssertTrue(created)
+        XCTAssertEqual(model.selectedEnsembleRoster.map(\.memberID), [101])
+        XCTAssertEqual(model.selectedEnsembleAggregate?.sessionCount, 3)
+
+        let invited = await model.inviteEnsembleMember(
+            groupID: 7,
+            username: " NEW_STUDENT ",
+            instrumentID: "horn"
+        )
+        XCTAssertTrue(invited)
+        let rotated = await model.rotateEnsembleJoinCode(id: 7)
+        XCTAssertTrue(rotated)
+        XCTAssertEqual(model.ensembles.first?.joinCode, "NEW7")
+        let removed = await model.removeEnsembleMember(groupID: 7, memberID: 101)
+        XCTAssertTrue(removed)
+
+        let declined = await model.respondToEnsembleInvitation(memberID: 901, accept: false)
+        XCTAssertTrue(declined)
+        let accepted = await model.respondToEnsembleInvitation(
+            memberID: 902,
+            accept: true,
+            instrumentID: "trombone"
+        )
+        XCTAssertTrue(accepted)
+
+        XCTAssertTrue(capturedRequests.allSatisfy { $0.authorization == "Bearer fresh-token" })
+        let invite = try XCTUnwrap(capturedRequests.first {
+            $0.method == "POST" && $0.path == "/api/ensemble/groups/7/members/by-username"
+        })
+        let invitePayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(invite.body)) as? [String: String]
+        )
+        XCTAssertEqual(invitePayload["username"], "new_student")
+        XCTAssertEqual(invitePayload["role_in_group"], "student")
+        XCTAssertEqual(invitePayload["instrument_id"], "horn")
+        let accept = try XCTUnwrap(capturedRequests.first {
+            $0.method == "POST" && $0.path == "/api/ensemble/invitations/902/accept"
+        })
+        let acceptPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(accept.body)) as? [String: String]
+        )
+        XCTAssertEqual(acceptPayload["instrument_id"], "trombone")
+    }
+
+    func testClassAggregateDTOsIgnoreRecordingAndReflectionFields() throws {
+        let decoder = JSONDecoder()
+        let roster = try decoder.decode(
+            EnsembleRoster.self,
+            from: Data(#"{"group_id":7,"students":[{"member_id":101,"username":"student_one","display_name":"Student One","instrument_id":"trumpet","status":"active","role_in_group":"student","sessions_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"in_tune_percentage":82.0,"recording_url":"https://private.invalid/audio.wav","reflection":"private"}]}"#.utf8)
+        )
+        XCTAssertEqual(roster.students.first?.sessionsCount, 3)
+        XCTAssertEqual(roster.students.first?.practiceMinutes, 24)
+
+        let encoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(roster)) as? [String: Any]
+        )
+        let students = try XCTUnwrap(encoded["students"] as? [[String: Any]])
+        let student = try XCTUnwrap(students.first)
+        XCTAssertNil(student["recording_url"])
+        XCTAssertNil(student["reflection"])
+    }
+
+    @MainActor
     func testClass401LocksPriorAccountDataUntilExplicitGuestEntry() async throws {
         let authService = makeIsolatedAuthService(session: makeStubSession())
         let config = makeAuthConfig()
@@ -2595,6 +2957,10 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(model.authState, .signedOut)
         XCTAssertEqual(model.persistenceAccessState, .lockedSignedOut)
         XCTAssertFalse(model.gatewayCompleted)
+        XCTAssertEqual(
+            model.authNotice,
+            NativeLocalization.string("Your sign-in expired. Sign in again, then retry.")
+        )
         XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertTrue(model.scores.isEmpty)
         model.enterGuestDemo(presentTutorial: false)

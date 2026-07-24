@@ -373,12 +373,6 @@ struct PlayAlongView: View {
         .background(BTTheme.background.ignoresSafeArea())
         .navigationTitle("Play-Along")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: model.playAlongSession?.currentNoteIndex) { oldIndex, newIndex in
-            guard oldIndex != nil, newIndex != nil, oldIndex != newIndex,
-                  UIAccessibility.isVoiceOverRunning,
-                  let announcement = playAlongAdvanceAnnouncement(for: model.playAlongSession) else { return }
-            UIAccessibility.post(notification: .announcement, argument: announcement)
-        }
     }
 }
 
@@ -395,6 +389,7 @@ func playAlongAdvanceAnnouncement(for session: PlayAlongSession?) -> String? {
 
 private struct PlayAlongLiveView: View {
     let session: PlayAlongSession
+    @AccessibilityFocusState private var targetNoteFocused: Bool
 
     var body: some View {
         BTCard(tint: BTTheme.surfaceWarm) {
@@ -407,10 +402,15 @@ private struct PlayAlongLiveView: View {
                 .foregroundStyle(BTTheme.muted)
 
             Text(verbatim: NativeLocalization.isolate(session.currentNoteName ?? "—"))
-                .font(.system(size: 64, weight: .bold, design: .rounded))
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
                 .foregroundStyle(BTTheme.accent)
                 .frame(maxWidth: .infinity)
-                .minimumScaleFactor(0.7)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(
+                    playAlongAdvanceAnnouncement(for: session)
+                        ?? NativeLocalization.string("Exercise complete. Your results are ready.")
+                )
+                .accessibilityFocused($targetNoteFocused)
                 .accessibilityIdentifier("playAlong.targetNote")
 
             Text("Hold steady")
@@ -443,11 +443,27 @@ private struct PlayAlongLiveView: View {
         }
 
         PlayAlongSequenceView(session: session)
+            .onAppear {
+                guard UIAccessibility.isVoiceOverRunning else { return }
+                DispatchQueue.main.async { targetNoteFocused = true }
+            }
+            .onChange(of: session.currentNoteIndex) { oldIndex, newIndex in
+                guard oldIndex != newIndex, UIAccessibility.isVoiceOverRunning else { return }
+                if session.currentNoteName == nil {
+                    if let announcement = playAlongAdvanceAnnouncement(for: session) {
+                        UIAccessibility.post(notification: .announcement, argument: announcement)
+                    }
+                } else {
+                    targetNoteFocused = false
+                    DispatchQueue.main.async { targetNoteFocused = true }
+                }
+            }
     }
 }
 
 private struct PlayAlongSequenceView: View {
     let session: PlayAlongSession
+    @ScaledMetric(relativeTo: .headline) private var noteCellSize = 44
 
     var body: some View {
         BTCard {
@@ -463,7 +479,11 @@ private struct PlayAlongSequenceView: View {
                         Text(verbatim: NativeLocalization.isolate(note))
                             .font(.headline.monospaced())
                             .foregroundStyle(tint)
-                            .frame(width: 44, height: 44)
+                            .frame(
+                                minWidth: max(44, noteCellSize),
+                                minHeight: max(44, noteCellSize)
+                            )
+                            .fixedSize(horizontal: true, vertical: true)
                             .background(tint.opacity(active || completed ? 0.15 : 0.06), in: Circle())
                             .overlay {
                                 Circle().stroke(tint.opacity(active ? 0.75 : 0.25), lineWidth: active ? 2 : 1)
@@ -505,6 +525,7 @@ private struct PlayAlongResultsView: View {
             }
             .font(.title2)
             .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(NativeLocalization.format(
                 "%@ out of 3 stars",
                 String(grade.stars)
@@ -613,6 +634,8 @@ struct TunerView: View {
     // transport re-render live as frames/recording change (SwiftUI does not
     // subscribe to a nested ObservableObject reached through `model`).
     @EnvironmentObject private var audioEngine: NativeAudioEngine
+    @AccessibilityFocusState private var microphoneIssueFocused: Bool
+    @State private var lastFocusedMicrophoneIssue: String?
 
     private var activeFrame: PitchFrame? {
         guard audioEngine.recording else { return nil }
@@ -634,6 +657,7 @@ struct TunerView: View {
 
             if hasMicrophoneIssue {
                 MicrophoneRecoveryCard()
+                    .accessibilityFocused($microphoneIssueFocused)
             }
 
             TunerReadout(frame: activeFrame, isListening: audioEngine.recording)
@@ -668,23 +692,51 @@ struct TunerView: View {
                     .padding(.horizontal, BTSpacing.lg)
                     .padding(.bottom, BTSpacing.md)
             } else {
-                Button {
-                    Task { await model.startRecording() }
-                } label: {
-                    Label("Start listening", systemImage: "mic.fill")
-                        .frame(maxWidth: .infinity)
+                VStack(spacing: BTSpacing.sm) {
+                    Text("Tap Start Listening, allow microphone access, then play for 2–3 seconds.")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("tuner.microphoneGuidance")
+                    Button {
+                        Task { await model.startRecording() }
+                    } label: {
+                        Label("Start listening", systemImage: "mic.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                    .disabled(model.recordingStartInProgress)
+                    .accessibilityIdentifier("tuner.recordButton")
                 }
-                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
-                .disabled(model.recordingStartInProgress)
                 .padding(.horizontal, BTSpacing.lg)
                 .padding(.bottom, BTSpacing.md)
-                .accessibilityIdentifier("tuner.recordButton")
             }
+        }
+        .onAppear { focusMicrophoneIssueIfNeeded() }
+        .onChange(of: microphoneIssueMessage) { _, _ in
+            focusMicrophoneIssueIfNeeded()
         }
     }
 
     private var hasMicrophoneIssue: Bool {
         audioEngine.permissionDenied || model.lastError == .microphoneUnavailable
+    }
+
+    private var microphoneIssueMessage: String? {
+        guard hasMicrophoneIssue else { return nil }
+        return model.lastError?.localizedDescription
+            ?? UserVisibleError.microphoneDenied.localizedDescription
+    }
+
+    private func focusMicrophoneIssueIfNeeded() {
+        guard UIAccessibility.isVoiceOverRunning,
+              let message = microphoneIssueMessage else {
+            lastFocusedMicrophoneIssue = nil
+            return
+        }
+        guard lastFocusedMicrophoneIssue != message else { return }
+        lastFocusedMicrophoneIssue = message
+        DispatchQueue.main.async { microphoneIssueFocused = true }
     }
 }
 
@@ -727,10 +779,10 @@ private struct TunerReadout: View {
     var body: some View {
         BTCard(tint: BTTheme.surfaceWarm) {
             Text(verbatim: noteLabel)
-                .font(.system(size: 64, weight: .bold, design: .rounded))
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
                 .foregroundStyle(tint)
                 .frame(maxWidth: .infinity)
-                .minimumScaleFactor(0.65)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("tuner.note")
 
             Text(verbatim: verdict)
@@ -762,7 +814,6 @@ private struct TuningMeter: View {
     var body: some View {
         VStack(spacing: BTSpacing.sm) {
             GeometryReader { proxy in
-                let travel = max(0, proxy.size.width / 2 - 5)
                 ZStack {
                     Capsule()
                         .fill(BTTheme.surfaceAlt)
@@ -774,25 +825,32 @@ private struct TuningMeter: View {
                         .fill(BTTheme.text)
                         .frame(width: 4, height: 34)
                         .clipShape(Capsule())
-                        .offset(x: CGFloat(clampedCents / 50) * travel)
+                        .offset(x: tuningMeterIndicatorOffset(
+                            cents: clampedCents,
+                            width: proxy.size.width
+                        ))
                 }
                 .frame(maxHeight: .infinity)
             }
             .frame(height: 40)
             .environment(\.layoutDirection, .leftToRight)
 
-            HStack {
-                Label("Flat", systemImage: "arrow.down")
-                    .foregroundStyle(BTTheme.flat)
-                    .environment(\.layoutDirection, interfaceLayoutDirection)
-                Spacer()
-                Text("In tune")
-                    .foregroundStyle(BTTheme.success)
-                    .environment(\.layoutDirection, interfaceLayoutDirection)
-                Spacer()
-                Label("Sharp", systemImage: "arrow.up")
-                    .foregroundStyle(BTTheme.sharp)
-                    .environment(\.layoutDirection, interfaceLayoutDirection)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    tuningAxisLabel("Flat", systemImage: "arrow.down", tint: BTTheme.flat)
+                    Spacer()
+                    Text("In tune")
+                        .foregroundStyle(BTTheme.success)
+                        .environment(\.layoutDirection, interfaceLayoutDirection)
+                    Spacer()
+                    tuningAxisLabel("Sharp", systemImage: "arrow.up", tint: BTTheme.sharp)
+                }
+                VStack(spacing: BTSpacing.xs) {
+                    tuningAxisLabel("Flat", systemImage: "arrow.down", tint: BTTheme.flat)
+                    Text("In tune")
+                        .foregroundStyle(BTTheme.success)
+                    tuningAxisLabel("Sharp", systemImage: "arrow.up", tint: BTTheme.sharp)
+                }
             }
             .font(.caption.weight(.semibold))
             .environment(\.layoutDirection, .leftToRight)
@@ -802,6 +860,23 @@ private struct TuningMeter: View {
         .accessibilityValue(accessibilityVerdict)
         .accessibilityIdentifier("tuner.meter")
     }
+
+    private func tuningAxisLabel(_ title: LocalizedStringKey, systemImage: String, tint: Color) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: systemImage)
+                .accessibilityHidden(true)
+        }
+        .foregroundStyle(tint)
+        .environment(\.layoutDirection, interfaceLayoutDirection)
+    }
+}
+
+func tuningMeterIndicatorOffset(cents: Double?, width: CGFloat) -> CGFloat {
+    let clamped = min(50, max(-50, cents ?? 0))
+    let travel = max(0, width / 2 - 5)
+    return CGFloat(clamped / 50) * travel
 }
 
 private struct FloatingPracticeControlBar: View {
@@ -1257,6 +1332,8 @@ struct MetronomeView: View {
                         .accessibilityIdentifier("metronome.advancedRhythm")
                 }
                 .tint(BTTheme.accent)
+                .accessibilityValue(advancedRhythmExpanded ? "Expanded" : "Collapsed")
+                .accessibilityHint("Advanced rhythm")
             }
 
             MetronomePresetsCard()

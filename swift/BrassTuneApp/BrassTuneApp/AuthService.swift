@@ -2,13 +2,20 @@ import AuthenticationServices
 import CryptoKit
 import Foundation
 import Security
+import UIKit
 
 @MainActor
 final class AuthService: NSObject {
+    static let oauthCallbackScheme = "com.brasstune.auth"
+    static let googleOAuthCallbackHost = "oauth"
+    static let googleOAuthCallbackPath = "/google"
+
     private let session: URLSession
     private let readSessionPayload: () throws -> String?
     private let saveSessionPayload: (String) throws -> Void
     private let deleteSessionPayload: () throws -> Void
+    private let webAuthenticationOverride: ((URL, String) async throws -> URL)?
+    private var webAuthenticationSession: ASWebAuthenticationSession?
 
     init(
         session: URLSession = .shared,
@@ -16,7 +23,8 @@ final class AuthService: NSObject {
         account: String = "current-session",
         readSessionPayload: (() throws -> String?)? = nil,
         saveSessionPayload: ((String) throws -> Void)? = nil,
-        deleteSessionPayload: (() throws -> Void)? = nil
+        deleteSessionPayload: (() throws -> Void)? = nil,
+        webAuthentication: ((URL, String) async throws -> URL)? = nil
     ) {
         self.session = session
         self.readSessionPayload = readSessionPayload ?? {
@@ -31,6 +39,7 @@ final class AuthService: NSObject {
         self.deleteSessionPayload = deleteSessionPayload ?? {
             try KeychainStore.delete(service: service, account: account)
         }
+        self.webAuthenticationOverride = webAuthentication
         super.init()
     }
 
@@ -137,6 +146,91 @@ final class AuthService: NSObject {
         return AppleSignInResult(session: session, isNewUser: Self.appleNewUserSignal(from: response.user))
     }
 
+    func loadProviderConfiguration(config: AppConfig) async throws -> AuthProviderConfiguration {
+        guard config.hasUsableAccountConfiguration,
+              let supabaseURL = config.supabaseURL,
+              let publishableKey = config.supabasePublishableKey else {
+            throw UserVisibleError.missingAuthConfiguration
+        }
+        let url = supabaseURL.appending(path: "auth/v1/settings")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        request.setValue(publishableKey, forHTTPHeaderField: "apikey")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            throw UserVisibleError.timeout
+        } catch {
+            throw UserVisibleError.networkUnavailable
+        }
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            throw UserVisibleError.oauthProviderUnavailable
+        }
+        do {
+            let settings = try JSONDecoder().decode(SupabaseAuthSettings.self, from: data)
+            return AuthProviderConfiguration(
+                apple: settings.external["apple"] == true,
+                google: settings.external["google"] == true
+            )
+        } catch {
+            throw UserVisibleError.malformedResponse
+        }
+    }
+
+    func signInWithGoogle(config: AppConfig) async throws -> AuthSession {
+        let verifier = Self.randomURLSafeToken(byteCount: 48)
+        let state = Self.randomURLSafeToken(byteCount: 32)
+        let transaction = try Self.googleOAuthTransaction(
+            config: config,
+            state: state,
+            codeVerifier: verifier
+        )
+        let callback: URL
+        do {
+            if let webAuthenticationOverride {
+                callback = try await webAuthenticationOverride(
+                    transaction.authorizationURL,
+                    Self.oauthCallbackScheme
+                )
+            } else {
+                callback = try await authenticateUsingWebSession(
+                    url: transaction.authorizationURL,
+                    callbackScheme: Self.oauthCallbackScheme
+                )
+            }
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            throw UserVisibleError.googleSignInCancelled
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let visible as UserVisibleError {
+            throw visible
+        } catch {
+            throw UserVisibleError.authenticationFailed
+        }
+
+        let code = try Self.validatedGoogleOAuthCode(
+            callback,
+            expectedState: transaction.state
+        )
+        let response = try await requestAuth(
+            config: config,
+            path: "/auth/v1/token",
+            query: [URLQueryItem(name: "grant_type", value: "pkce")],
+            bearerToken: nil,
+            body: [
+                "auth_code": code,
+                "code_verifier": transaction.codeVerifier,
+            ]
+        )
+        return try store(response: response, fallbackEmail: response.user?.email ?? "Google user")
+    }
+
     func signOut() throws {
         do {
             try deleteSessionPayload()
@@ -192,11 +286,151 @@ final class AuthService: NSObject {
     }
 
     static func randomNonce() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        randomURLSafeToken(byteCount: 32)
     }
 
     static func sha256(_ input: String) -> String {
         SHA256.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func googleOAuthTransaction(
+        config: AppConfig,
+        state: String,
+        codeVerifier: String
+    ) throws -> GoogleOAuthTransaction {
+        guard config.hasUsableAccountConfiguration,
+              let supabaseURL = config.supabaseURL,
+              !state.isEmpty,
+              (43...128).contains(codeVerifier.count) else {
+            throw UserVisibleError.missingAuthConfiguration
+        }
+        let challenge = base64URLEncoded(Data(SHA256.hash(data: Data(codeVerifier.utf8))))
+        var callbackComponents = URLComponents()
+        callbackComponents.scheme = oauthCallbackScheme
+        callbackComponents.host = googleOAuthCallbackHost
+        callbackComponents.path = googleOAuthCallbackPath
+        callbackComponents.queryItems = [URLQueryItem(name: "state", value: state)]
+        guard let callbackURL = callbackComponents.url else {
+            throw UserVisibleError.malformedResponse
+        }
+
+        var authorizationComponents = URLComponents(
+            url: supabaseURL.appending(path: "auth/v1/authorize"),
+            resolvingAgainstBaseURL: false
+        )
+        authorizationComponents?.queryItems = [
+            URLQueryItem(name: "provider", value: "google"),
+            URLQueryItem(name: "redirect_to", value: callbackURL.absoluteString),
+            URLQueryItem(name: "scopes", value: "openid email profile"),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "code_challenge_method", value: "s256"),
+        ]
+        guard let authorizationURL = authorizationComponents?.url,
+              authorizationURL.scheme == "https",
+              authorizationURL.host == supabaseURL.host else {
+            throw UserVisibleError.malformedResponse
+        }
+        return GoogleOAuthTransaction(
+            authorizationURL: authorizationURL,
+            callbackURL: callbackURL,
+            state: state,
+            codeVerifier: codeVerifier
+        )
+    }
+
+    static func validatedGoogleOAuthCode(
+        _ callbackURL: URL,
+        expectedState: String
+    ) throws -> String {
+        guard callbackURL.scheme?.lowercased() == oauthCallbackScheme,
+              callbackURL.host?.lowercased() == googleOAuthCallbackHost,
+              callbackURL.path == googleOAuthCallbackPath,
+              callbackURL.user == nil,
+              callbackURL.password == nil,
+              callbackURL.port == nil,
+              callbackURL.fragment == nil,
+              let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
+            throw UserVisibleError.oauthCallbackInvalid
+        }
+        let queryItems = components.queryItems ?? []
+        let allowedNames = Set(["code", "state", "error", "error_code", "error_description"])
+        guard queryItems.allSatisfy({ allowedNames.contains($0.name) }),
+              queryItems.filter({ $0.name == "state" }).count == 1,
+              queryItems.first(where: { $0.name == "state" })?.value == expectedState else {
+            throw UserVisibleError.oauthCallbackInvalid
+        }
+        if queryItems.contains(where: { $0.name == "error" }) {
+            throw UserVisibleError.googleSignInCancelled
+        }
+        guard queryItems.filter({ $0.name == "code" }).count == 1,
+              let code = queryItems.first(where: { $0.name == "code" })?.value,
+              (1...4_096).contains(code.count),
+              code.unicodeScalars.allSatisfy({
+                  !CharacterSet.whitespacesAndNewlines.contains($0)
+                      && !CharacterSet.controlCharacters.contains($0)
+              }) else {
+            throw UserVisibleError.oauthCallbackInvalid
+        }
+        return code
+    }
+
+    static func randomURLSafeToken(byteCount: Int) -> String {
+        var bytes = [UInt8](repeating: 0, count: max(16, byteCount))
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        if status != errSecSuccess {
+            // UUID entropy is a bounded last-resort fallback. The OAuth flow
+            // still binds the callback to ASWebAuthenticationSession and PKCE.
+            return UUID().uuidString.replacingOccurrences(of: "-", with: "")
+                + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        }
+        return base64URLEncoded(Data(bytes))
+    }
+
+    private static func base64URLEncoded(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private func authenticateUsingWebSession(
+        url: URL,
+        callbackScheme: String
+    ) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            let completion: ASWebAuthenticationSession.CompletionHandler = { [weak self] callbackURL, error in
+                self?.webAuthenticationSession = nil
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let callbackURL {
+                    continuation.resume(returning: callbackURL)
+                } else {
+                    continuation.resume(throwing: UserVisibleError.oauthCallbackInvalid)
+                }
+            }
+            let authenticationSession: ASWebAuthenticationSession
+            if #available(iOS 17.4, *) {
+                authenticationSession = ASWebAuthenticationSession(
+                    url: url,
+                    callback: .customScheme(callbackScheme),
+                    completionHandler: completion
+                )
+            } else {
+                authenticationSession = ASWebAuthenticationSession(
+                    url: url,
+                    callbackURLScheme: callbackScheme,
+                    completionHandler: completion
+                )
+            }
+            authenticationSession.presentationContextProvider = self
+            authenticationSession.prefersEphemeralWebBrowserSession = true
+            webAuthenticationSession = authenticationSession
+            guard authenticationSession.start() else {
+                webAuthenticationSession = nil
+                continuation.resume(throwing: UserVisibleError.oauthProviderUnavailable)
+                return
+            }
+        }
     }
 
     func accessToken() throws -> String? {
@@ -327,6 +561,23 @@ final class AuthService: NSObject {
     }
 }
 
+extension AuthService: ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        let activeScenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive }
+        if let keyWindow = activeScenes
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow) {
+            return keyWindow
+        }
+        if let foregroundWindow = activeScenes.flatMap(\.windows).first {
+            return foregroundWindow
+        }
+        return ASPresentationAnchor()
+    }
+}
+
 enum KeychainStore {
     static let sessionAccessibility = kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String
 
@@ -389,6 +640,22 @@ struct AppleSignInResult: Equatable {
     /// `nil` means the server omitted timestamps needed to distinguish a new
     /// identity from a returning one. The app intentionally tours that case.
     let isNewUser: Bool?
+}
+
+struct AuthProviderConfiguration: Equatable {
+    let apple: Bool
+    let google: Bool
+}
+
+struct GoogleOAuthTransaction: Equatable {
+    let authorizationURL: URL
+    let callbackURL: URL
+    let state: String
+    let codeVerifier: String
+}
+
+private struct SupabaseAuthSettings: Decodable {
+    let external: [String: Bool]
 }
 
 struct SupabaseAuthResponse: Decodable {

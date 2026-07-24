@@ -112,14 +112,7 @@ final class NativeAudioEngine: ObservableObject {
     ) {
         self.audioSessionCoordinator = audioSessionCoordinator
         self.microphonePermissionRequester = microphonePermissionRequester ?? {
-            if #available(iOS 17.0, *) {
-                return await AVAudioApplication.requestRecordPermission()
-            }
-            return await withCheckedContinuation { continuation in
-                AVAudioSession.sharedInstance().requestRecordPermission { allowed in
-                    continuation.resume(returning: allowed)
-                }
-            }
+            await AVAudioApplication.requestRecordPermission()
         }
         self.simulateTonePlayback = simulateTonePlayback
         routeChangeObserver = NotificationCenter.default.addObserver(

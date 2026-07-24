@@ -37,32 +37,48 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings.authNotice")
                 }
 
-                if accountActionsEnabled && !model.authState.usesRemoteAccount {
-                    Button {
-                        authMode = .signIn
-                    } label: {
-                        Label("Sign in", systemImage: "person.crop.circle.badge.checkmark")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .accessibilityIdentifier("settings.signIn")
+                if !model.authState.usesRemoteAccount {
+                    if accountActionsEnabled {
+                        Button {
+                            authMode = .signIn
+                        } label: {
+                            Label("Sign in", systemImage: "person.crop.circle.badge.checkmark")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("settings.signIn")
 
-                    Button {
-                        authMode = .createAccount
-                    } label: {
-                        Label("Create account", systemImage: "person.crop.circle.badge.plus")
-                            .frame(maxWidth: .infinity)
+                        Button {
+                            authMode = .createAccount
+                        } label: {
+                            Label("Create account", systemImage: "person.crop.circle.badge.plus")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("settings.createAccount")
                     }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .accessibilityIdentifier("settings.createAccount")
 
                     NativeAppleSignInButton(identifier: "settings.appleSignIn")
-                } else if !accountActionsEnabled {
-                    Text(verbatim: model.accountUnavailableMessage ?? NativeLocalization.string("Online accounts aren't configured in this build. You can still practice as a guest, and your data stays on this device."))
-                        .font(.footnote)
-                        .foregroundStyle(BTTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("settings.accountConfigurationUnavailable")
+                    NativeGoogleSignInButton(identifier: "settings.googleSignIn")
+
+                    if model.authProviderConfigurationLoading {
+                        ProgressView("Checking sign-in providers…")
+                            .accessibilityIdentifier("settings.authProvidersLoading")
+                    }
+                    if let recovery = model.authProviderRecoveryMessage {
+                        Text(verbatim: recovery)
+                            .font(.footnote)
+                            .foregroundStyle(BTTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("settings.accountConfigurationUnavailable")
+                        if accountActionsEnabled {
+                            Button("Retry provider check") {
+                                Task { await model.loadAuthProviderConfiguration(force: true) }
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("settings.authProvidersRetry")
+                        }
+                    }
                 }
 
                 if model.authState.usesRemoteAccount {
@@ -102,6 +118,8 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .btMinimumInteractiveSize(alignment: .leading)
+                .accessibilityValue(advancedTunerExpanded ? "Expanded" : "Collapsed")
+                .accessibilityHint("Advanced tuner settings")
                 .accessibilityIdentifier("settings.advancedTunerSettings")
 
                 if advancedTunerExpanded {
@@ -240,6 +258,9 @@ struct SettingsView: View {
         .sheet(item: $authMode) { mode in
             GatewayAuthForm(mode: mode)
         }
+        .task {
+            await model.loadAuthProviderConfiguration()
+        }
         .alert(item: $pendingDestructiveAction) { action in
             Alert(
                 title: Text(verbatim: destructiveAlertTitle(for: action)),
@@ -332,7 +353,7 @@ struct NativeAppleSignInButton: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 50)
-        .disabled(model.authOperationInProgress || !model.accountFeaturesEnabled)
+        .disabled(model.authOperationInProgress || !model.appleSignInAvailable)
         .accessibilityIdentifier(identifier)
     }
 
@@ -341,25 +362,57 @@ struct NativeAppleSignInButton: View {
         case .success(let authorization):
             guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
                   let identityToken = credential.identityToken else {
-                model.lastError = .authenticationFailed
+                model.reportAuthFailure(.authenticationFailed)
                 return
             }
             Task { await model.completeAppleSignIn(identityToken: identityToken, rawNonce: rawAppleNonce) }
         case .failure(let error):
             if let authorizationError = error as? ASAuthorizationError,
                authorizationError.code == .canceled {
-                model.lastError = .appleSignInCancelled
+                model.reportAuthFailure(.appleSignInCancelled)
             } else {
-                model.lastError = .authenticationFailed
+                model.reportAuthFailure(.authenticationFailed)
             }
         }
+    }
+}
+
+struct NativeGoogleSignInButton: View {
+    @EnvironmentObject private var model: AppModel
+    let identifier: String
+
+    var body: some View {
+        Button {
+            Task { await model.completeGoogleSignIn() }
+        } label: {
+            // Complete official iOS button asset downloaded from Google's
+            // branding bundle on 2026-07-23:
+            // developers.google.com/static/identity/images/signin-assets.zip
+            Image("GoogleSignInIcon")
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 188, height: 44)
+                .frame(maxWidth: .infinity, minHeight: 50)
+        }
+        .buttonStyle(.plain)
+        .disabled(model.authOperationInProgress || !model.googleSignInAvailable)
+        .accessibilityLabel(Text("Sign in with Google"))
+        .accessibilityIdentifier(identifier)
     }
 }
 
 struct ClassesView: View {
     @EnvironmentObject private var model: AppModel
     @State private var joinCode = ""
+    @State private var newClassName = ""
+    @State private var inviteUsername = ""
+    @State private var inviteInstrumentID = ""
+    @State private var invitationInstruments: [EnsembleInvitation.ID: String] = [:]
+    @State private var createExpanded = false
     @State private var pendingLeave: EnsembleSummary?
+    @State private var pendingMemberRemoval: EnsembleMember?
+    @State private var pendingCodeRotation = false
     @State private var authMode: GatewayAuthMode?
 
     var body: some View {
@@ -371,7 +424,9 @@ struct ClassesView: View {
             )
 
             if model.testFixturesEnabled || model.authState.usesRemoteAccount {
+                invitationContent
                 joinCard
+                createClassCard
                 membershipContent
             } else {
                 BTCard {
@@ -398,6 +453,7 @@ struct ClassesView: View {
                     Label { Text(verbatim: message) } icon: { Image(systemName: "checkmark.circle.fill") }
                         .foregroundStyle(BTTheme.success)
                 }
+                .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("classes.status")
             }
 
@@ -417,11 +473,15 @@ struct ClassesView: View {
         .accessibilityIdentifier("screen.classes")
         .task(id: model.authState.usesRemoteAccount) {
             guard model.testFixturesEnabled || model.authState.usesRemoteAccount else { return }
-            await model.loadEnsembles()
+            await model.loadClassWorkspace()
+        }
+        .task(id: model.selectedEnsembleID) {
+            guard let selectedEnsembleID = model.selectedEnsembleID else { return }
+            await model.loadSelectedEnsembleDetails(id: selectedEnsembleID)
         }
         .refreshable {
             guard model.testFixturesEnabled || model.authState.usesRemoteAccount else { return }
-            await model.loadEnsembles()
+            await model.loadClassWorkspace()
         }
         .sheet(item: $authMode) { mode in
             GatewayAuthForm(mode: mode)
@@ -436,6 +496,125 @@ struct ClassesView: View {
                 secondaryButton: .cancel()
             )
         }
+        .confirmationDialog(
+            "Remove this class member?",
+            isPresented: Binding(
+                get: { pendingMemberRemoval != nil },
+                set: { if !$0 { pendingMemberRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let pendingMemberRemoval, let groupID = model.selectedEnsembleID {
+                Button("Remove member", role: .destructive) {
+                    Task {
+                        _ = await model.removeEnsembleMember(
+                            groupID: groupID,
+                            memberID: pendingMemberRemoval.id
+                        )
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They will lose access to this class. Their recordings and reflections stay private in their own account.")
+        }
+        .confirmationDialog(
+            "Replace the class code?",
+            isPresented: $pendingCodeRotation,
+            titleVisibility: .visible
+        ) {
+            if let groupID = model.selectedEnsembleID {
+                Button("Replace code", role: .destructive) {
+                    Task { _ = await model.rotateEnsembleJoinCode(id: groupID) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The current code will stop working immediately. Existing members keep access.")
+        }
+        .onChange(of: model.ensembleStatusMessage) { _, message in
+            guard UIAccessibility.isVoiceOverRunning, let message else { return }
+            UIAccessibility.post(notification: .announcement, argument: message)
+        }
+    }
+
+    @ViewBuilder
+    private var invitationContent: some View {
+        if !model.ensembleInvitations.isEmpty {
+            VStack(alignment: .leading, spacing: BTSpacing.md) {
+                BTSectionHeader(
+                    title: "Class invitations",
+                    subtitle: "You choose whether to join. Pick your own instrument before accepting."
+                )
+                ForEach(model.ensembleInvitations) { invitation in
+                    BTCard(tint: BTTheme.surfaceWarm) {
+                        Text(verbatim: invitation.groupName)
+                            .font(.headline)
+                        if let directorName = invitation.directorName {
+                            Text(verbatim: NativeLocalization.format("Invited by %@", directorName))
+                                .font(.subheadline)
+                                .foregroundStyle(BTTheme.muted)
+                        }
+                        Picker(
+                            "Your instrument",
+                            selection: Binding(
+                                get: {
+                                    invitationInstruments[invitation.id]
+                                        ?? (invitation.instrumentID == "unassigned"
+                                            ? model.selectedInstrumentId
+                                            : invitation.instrumentID)
+                                },
+                                set: { invitationInstruments[invitation.id] = $0 }
+                            )
+                        ) {
+                            instrumentPickerOptions()
+                        }
+                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("classes.invitationInstrument.\(invitation.id)")
+
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: BTSpacing.sm) {
+                                invitationDecisionButton(invitation, accept: true)
+                                invitationDecisionButton(invitation, accept: false)
+                            }
+                            VStack(spacing: BTSpacing.sm) {
+                                invitationDecisionButton(invitation, accept: true)
+                                invitationDecisionButton(invitation, accept: false)
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("classes.invitation.\(invitation.id)")
+                }
+            }
+        }
+    }
+
+    private func invitationDecisionButton(
+        _ invitation: EnsembleInvitation,
+        accept: Bool
+    ) -> some View {
+        Button(role: accept ? nil : .destructive) {
+            Task {
+                let chosen = invitationInstruments[invitation.id]
+                    ?? (invitation.instrumentID == "unassigned"
+                        ? model.selectedInstrumentId
+                        : invitation.instrumentID)
+                _ = await model.respondToEnsembleInvitation(
+                    memberID: invitation.id,
+                    accept: accept,
+                    instrumentID: accept ? chosen : nil
+                )
+            }
+        } label: {
+            Text(accept ? "Accept invitation" : "Decline invitation")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .tint(accept ? BTTheme.accent : BTTheme.danger)
+        .disabled(model.ensembleMutationInProgress)
+        .accessibilityIdentifier(
+            "classes.invitation.\(accept ? "accept" : "decline").\(invitation.id)"
+        )
     }
 
     private var joinCard: some View {
@@ -459,6 +638,51 @@ struct ClassesView: View {
             .buttonStyle(BTPrimaryButtonStyle())
             .disabled(model.ensembleMutationInProgress || joinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .accessibilityIdentifier("classes.join")
+        }
+    }
+
+    private var createClassCard: some View {
+        BTCard {
+            Button {
+                createExpanded.toggle()
+            } label: {
+                HStack(spacing: BTSpacing.sm) {
+                    Text("Create a class")
+                        .font(.headline)
+                    Spacer()
+                    Image(systemName: createExpanded ? "chevron.up" : "chevron.down")
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .btMinimumInteractiveSize()
+            .accessibilityValue(createExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint("Create a class")
+            .accessibilityIdentifier("classes.createDisclosure")
+
+            if createExpanded {
+                TextField("Class name", text: $newClassName)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("classes.createName")
+                Button {
+                    Task {
+                        if await model.createEnsemble(name: newClassName) {
+                            newClassName = ""
+                            createExpanded = false
+                        }
+                    }
+                } label: {
+                    Text(model.ensembleMutationInProgress ? "Creating…" : "Create a class")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BTPrimaryButtonStyle())
+                .disabled(
+                    model.ensembleMutationInProgress
+                        || newClassName.trimmingCharacters(in: .whitespacesAndNewlines).count < 2
+                )
+                .accessibilityIdentifier("classes.create")
+            }
         }
     }
 
@@ -491,43 +715,285 @@ struct ClassesView: View {
                 .accessibilityIdentifier("classes.activePicker")
             }
 
-            ForEach(model.ensembles) { ensemble in
-                BTCard(tint: model.selectedEnsembleID == ensemble.id ? BTTheme.surfaceWarm : BTTheme.surface) {
-                    HStack(alignment: .top, spacing: BTSpacing.md) {
-                        VStack(alignment: .leading, spacing: BTSpacing.xs) {
-                            Text(verbatim: ensemble.name)
+            if let selected = model.ensembles.first(where: { $0.id == model.selectedEnsembleID }) {
+                selectedClassCard(selected)
+                if selected.viewerCanManage {
+                    directorTools(for: selected)
+                } else {
+                    memberRoster
+                }
+            }
+        }
+    }
+
+    private func selectedClassCard(_ ensemble: EnsembleSummary) -> some View {
+        BTCard(tint: BTTheme.surfaceWarm) {
+            HStack(alignment: .top, spacing: BTSpacing.md) {
+                VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                    Text(verbatim: ensemble.name)
+                        .font(.headline)
+                    Text(verbatim: ensemble.viewerRoleLabel)
+                        .font(.subheadline)
+                        .foregroundStyle(BTTheme.muted)
+                }
+                Spacer()
+                BTStatusPill(text: "Selected", tint: BTTheme.success)
+            }
+
+            if ensemble.canLeave {
+                Button(role: .destructive) {
+                    pendingLeave = ensemble
+                } label: {
+                    Label("Leave class", systemImage: "rectangle.portrait.and.arrow.right")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .btMinimumInteractiveSize()
+                .disabled(model.ensembleMutationInProgress)
+                .accessibilityIdentifier("classes.leave.\(ensemble.id)")
+            }
+        }
+    }
+
+    private func directorTools(for ensemble: EnsembleSummary) -> some View {
+        VStack(alignment: .leading, spacing: BTSpacing.lg) {
+            BTCard {
+                BTSectionHeader(
+                    title: "Invite students",
+                    subtitle: "Share the code or send a private invitation to an existing username."
+                )
+                if let code = model.selectedEnsembleDetail?.joinCode ?? ensemble.joinCode {
+                    Text(verbatim: NativeLocalization.preserve(code))
+                        .font(.system(.title, design: .monospaced).weight(.bold))
+                        .textSelection(.enabled)
+                        .accessibilityLabel(NativeLocalization.format("Class code %@", code))
+                        .accessibilityIdentifier("classes.director.code")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: BTSpacing.sm) {
+                            shareCodeButton(ensemble: ensemble, code: code)
+                            rotateCodeButton
+                        }
+                        VStack(spacing: BTSpacing.sm) {
+                            shareCodeButton(ensemble: ensemble, code: code)
+                            rotateCodeButton
+                        }
+                    }
+                }
+
+                Picker("Student instrument (optional)", selection: $inviteInstrumentID) {
+                    Text("Student chooses").tag("")
+                    instrumentPickerOptions()
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("classes.director.inviteInstrument")
+                TextField("Student username", text: $inviteUsername)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("classes.director.username")
+                Button {
+                    Task {
+                        if await model.inviteEnsembleMember(
+                            groupID: ensemble.id,
+                            username: inviteUsername,
+                            instrumentID: inviteInstrumentID.isEmpty ? nil : inviteInstrumentID
+                        ) {
+                            inviteUsername = ""
+                            inviteInstrumentID = ""
+                        }
+                    }
+                } label: {
+                    Text(model.ensembleMutationInProgress ? "Sending…" : "Send invitation")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BTPrimaryButtonStyle())
+                .disabled(
+                    model.ensembleMutationInProgress
+                        || inviteUsername.trimmingCharacters(in: .whitespacesAndNewlines).count < 3
+                )
+                .accessibilityIdentifier("classes.director.invite")
+            }
+
+            BTCard(tint: BTTheme.surfaceWarm) {
+                BTSectionHeader(
+                    title: "What the director can see",
+                    subtitle: "Only class-level and student aggregate practice minutes, session counts, and tuning summaries are shared."
+                )
+                Text("Recordings, live microphone audio, imported sheet music, and private reflections are never shown here.")
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityIdentifier("classes.director.privacy")
+
+            directorRoster
+            directorSummary
+        }
+    }
+
+    private func shareCodeButton(ensemble: EnsembleSummary, code: String) -> some View {
+        ShareLink(
+            item: NativeLocalization.format(
+                "Join %@ with class code %@.",
+                ensemble.name,
+                code
+            )
+        ) {
+            Label("Share class code", systemImage: "square.and.arrow.up")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BTSecondaryButtonStyle())
+        .accessibilityIdentifier("classes.director.share")
+    }
+
+    private var rotateCodeButton: some View {
+        Button {
+            pendingCodeRotation = true
+        } label: {
+            Label("Replace class code", systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BTSecondaryButtonStyle())
+        .disabled(model.ensembleMutationInProgress)
+        .accessibilityIdentifier("classes.director.rotate")
+    }
+
+    @ViewBuilder
+    private var directorRoster: some View {
+        BTCard {
+            BTSectionHeader(title: "Student roster", subtitle: "Membership and aggregate practice activity.")
+            if model.ensemblesLoading && model.selectedEnsembleRoster.isEmpty {
+                ProgressView("Loading roster…")
+            } else if model.selectedEnsembleRoster.isEmpty {
+                Text("No students yet.")
+                    .foregroundStyle(BTTheme.muted)
+            } else {
+                ForEach(model.selectedEnsembleRoster) { student in
+                    VStack(alignment: .leading, spacing: BTSpacing.sm) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(verbatim: student.displayLabel)
                                 .font(.headline)
-                            Text(verbatim: ensemble.viewerRoleLabel)
+                            Spacer()
+                            if student.status == "invited" {
+                                BTStatusPill(text: "Invited", tint: BTTheme.warning)
+                            }
+                        }
+                        Text(verbatim: instrumentDisplayName(student.instrumentID))
+                            .font(.subheadline)
+                            .foregroundStyle(BTTheme.muted)
+                        if student.status == "active" {
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: BTSpacing.sm) {
+                                    rosterMetrics(student)
+                                }
+                                VStack(spacing: BTSpacing.sm) {
+                                    rosterMetrics(student)
+                                }
+                            }
+                        }
+                        Button(role: .destructive) {
+                            if let member = model.selectedEnsembleDetail?.members?.first(where: { $0.id == student.memberID }) {
+                                pendingMemberRemoval = member
+                            }
+                        } label: {
+                            Text("Remove member")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.ensembleMutationInProgress)
+                        .accessibilityIdentifier("classes.director.remove.\(student.memberID)")
+                    }
+                    .padding(.vertical, BTSpacing.sm)
+                    .accessibilityElement(children: .contain)
+                }
+            }
+        }
+        .accessibilityIdentifier("classes.director.roster")
+    }
+
+    @ViewBuilder
+    private func rosterMetrics(_ student: EnsembleRosterStudent) -> some View {
+        BTMetricTile(
+            title: "Practice time",
+            value: .verbatim(NativeLocalization.format("%@ minutes", formatClassNumber(student.practiceMinutes))),
+            detail: "aggregate"
+        )
+        BTMetricTile(
+            title: "Sessions",
+            value: .verbatim(NativeLocalization.isolate(String(student.sessionsCount))),
+            detail: "aggregate",
+            tint: BTTheme.secondaryAccent
+        )
+    }
+
+    @ViewBuilder
+    private var directorSummary: some View {
+        if let aggregate = model.selectedEnsembleAggregate {
+            BTCard {
+                BTSectionHeader(title: "Roster summary", subtitle: "Aggregate activity since each student joined.")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: BTSpacing.sm) {
+                        aggregateMetrics(aggregate)
+                    }
+                    VStack(spacing: BTSpacing.sm) {
+                        aggregateMetrics(aggregate)
+                    }
+                }
+            }
+            .accessibilityIdentifier("classes.director.summary")
+        }
+    }
+
+    @ViewBuilder
+    private func aggregateMetrics(_ aggregate: EnsembleAggregateSummary) -> some View {
+        BTMetricTile(
+            title: "Practice time",
+            value: .verbatim(NativeLocalization.format(
+                "%@ minutes",
+                formatClassNumber(aggregate.overall.practiceMinutes)
+            )),
+            detail: "all students"
+        )
+        BTMetricTile(
+            title: "Sessions",
+            value: .verbatim(NativeLocalization.isolate(String(aggregate.sessionCount))),
+            detail: "all students",
+            tint: BTTheme.secondaryAccent
+        )
+    }
+
+    @ViewBuilder
+    private var memberRoster: some View {
+        if let members = model.selectedEnsembleDetail?.members, !members.isEmpty {
+            BTCard {
+                BTSectionHeader(title: "Membership", subtitle: "Only the roster details permitted for your role are shown.")
+                ForEach(members) { member in
+                    HStack {
+                        VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                            Text(verbatim: member.displayLabel)
+                                .font(.headline)
+                            Text(verbatim: instrumentDisplayName(member.instrumentID))
                                 .font(.subheadline)
                                 .foregroundStyle(BTTheme.muted)
                         }
                         Spacer()
-                        if model.selectedEnsembleID == ensemble.id {
-                            BTStatusPill(text: "Selected", tint: BTTheme.success)
-                        }
-                    }
-
-                    if ensemble.canLeave {
-                        Button(role: .destructive) {
-                            pendingLeave = ensemble
-                        } label: {
-                            Label("Leave class", systemImage: "rectangle.portrait.and.arrow.right")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .btMinimumInteractiveSize()
-                        .disabled(model.ensembleMutationInProgress)
-                        .accessibilityIdentifier("classes.leave.\(ensemble.id)")
-                    } else {
-                        Text(verbatim: NativeLocalization.string(ensemble.viewerCanManage
-                            ? "Manage this class from its director tools."
-                            : "This class role cannot leave through self-service."))
-                            .font(.footnote)
+                        Text(verbatim: NativeLocalization.string(
+                            member.status == "invited" ? "Invited" : "Active"
+                        ))
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(BTTheme.muted)
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
+            .accessibilityIdentifier("classes.membership")
         }
+    }
+
+    private func formatClassNumber(_ value: Double) -> String {
+        if value.rounded() == value {
+            return NativeLocalization.isolate(String(Int(value)))
+        }
+        return NativeLocalization.isolate(String(format: "%.1f", value))
     }
 }
 
@@ -562,6 +1028,7 @@ private struct SettingsNavigationRow<Destination: View>: View {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.vertical, BTSpacing.sm)

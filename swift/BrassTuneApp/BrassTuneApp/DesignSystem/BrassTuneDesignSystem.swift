@@ -249,6 +249,7 @@ struct BTPageHeader: View {
                     .font(.system(.largeTitle, design: .rounded).weight(.bold))
                     .foregroundStyle(BTTheme.text)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
                     .font(.subheadline)
                     .foregroundStyle(BTTheme.muted)
@@ -272,6 +273,7 @@ struct BTSectionHeader: View {
             Text(title)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(BTTheme.text)
+                .accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(subtitle)
                     .font(.subheadline)
@@ -279,7 +281,6 @@ struct BTSectionHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .accessibilityElement(children: .combine)
     }
 }
 

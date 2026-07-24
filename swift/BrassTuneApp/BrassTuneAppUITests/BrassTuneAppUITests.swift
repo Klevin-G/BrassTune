@@ -91,6 +91,11 @@ final class BrassTuneAppUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["gateway.classIntent"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authUnavailable"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authAppleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authAppleSignIn"].isEnabled)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authGoogleSignIn"].isEnabled)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["gateway.email"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["gateway.password"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["gateway.submitAuth"].exists)
@@ -178,8 +183,9 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("Settings", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["settings.accountConfigurationUnavailable"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "aren't configured in this build")).firstMatch.exists)
+        let unavailableAccount = app.descendants(matching: .any)["settings.accountConfigurationUnavailable"]
+        XCTAssertTrue(unavailableAccount.waitForExistence(timeout: 5))
+        XCTAssertTrue(unavailableAccount.label.localizedCaseInsensitiveContains("Account sign-in needs secure"))
 
         let advancedTuner = app.descendants(matching: .any)["settings.advancedTunerSettings"]
         XCTAssertTrue(advancedTuner.waitForExistence(timeout: 5))
@@ -215,8 +221,14 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["screen.classes"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["classes.activePicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Demo brass studio"].exists)
-        XCTAssertTrue(app.staticTexts["Second demo class"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["classes.leave.1"].exists)
+        app.descendants(matching: .any)["classes.activePicker"].tap()
+        XCTAssertTrue(
+            app.buttons["Second demo class"].waitForExistence(timeout: 5),
+            "Every membership should be available from the active-Class picker."
+        )
+        app.buttons["Second demo class"].tap()
+        XCTAssertTrue(app.staticTexts["Second demo class"].waitForExistence(timeout: 5))
         openTab("Settings", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings.privacyLink"].waitForExistence(timeout: 5))
@@ -518,6 +530,7 @@ final class BrassTuneAppUITests: XCTestCase {
 
         app.descendants(matching: .any)["gateway.signIn"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authAppleSignIn"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.passwordReset"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
         app.buttons["Not now"].tap()
@@ -542,6 +555,35 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
+    func testConfiguredAuthShowsGoogleEmailAndUnavailableAppleWithGuestEscape() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "UITEST_RESET_STATE",
+            "UITEST_ENTRY_FLOW",
+            "UITEST_AUTH_EMPTY",
+            "UITEST_AUTH_PROVIDERS",
+        ]
+        app.launchEnvironment["BRASSTUNE_SUPABASE_URL"] = "https://ui-tests.invalid"
+        app.launchEnvironment["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"] = "sb_publishable_ui_tests"
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.signIn"].waitForExistence(timeout: 8))
+        app.descendants(matching: .any)["gateway.signIn"].tap()
+
+        let apple = app.descendants(matching: .any)["gateway.authAppleSignIn"]
+        let google = app.descendants(matching: .any)["gateway.authGoogleSignIn"]
+        XCTAssertTrue(apple.waitForExistence(timeout: 5))
+        XCTAssertFalse(apple.isEnabled)
+        XCTAssertTrue(google.exists)
+        XCTAssertTrue(google.isEnabled)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.email"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.password"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
+        keepScreenshot(named: "Native auth providers - Google available Apple recovery", from: app)
+    }
+
+    @MainActor
     func testFloatingTabBarKeepsPlayAlongProgressAndSettingsActionsUnobscured() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE"]
@@ -558,11 +600,18 @@ final class BrassTuneAppUITests: XCTestCase {
         )
 
         openTab("Progress", in: app)
-        assertAboveTabBar(
-            app.descendants(matching: .any)["progress.openTuner"],
-            tabBar: tabBar,
-            in: app
-        )
+        let goalSteppers = app.steppers.matching(identifier: "progress.weeklyGoal")
+        XCTAssertEqual(goalSteppers.count, 2)
+        for index in 0..<goalSteppers.count {
+            let goalStepper = goalSteppers.element(boundBy: index)
+            bringSafelyIntoView(goalStepper, in: app)
+            XCTAssertTrue(goalStepper.isHittable, "Weekly-goal controls must not sit behind a sticky CTA.")
+            XCTAssertLessThan(goalStepper.frame.maxY, tabBar.frame.minY)
+        }
+        let openTuner = app.descendants(matching: .any)["progress.openTuner"]
+        bringSafelyIntoView(openTuner, in: app)
+        XCTAssertTrue(openTuner.isHittable)
+        XCTAssertLessThan(openTuner.frame.maxY, tabBar.frame.minY)
 
         openTab("Settings", in: app)
         let clearAllData = app.descendants(matching: .any)["settings.deleteAccount"]
