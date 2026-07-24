@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import DEPLOYED_ENVIRONMENTS, LOCAL_ENVIRONMENTS, app_environment, auth_mode
@@ -161,7 +162,28 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
     now = dt.datetime.utcnow()
     user.last_active_at = now
     user.updated_at = now
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two first requests for the same remote identity can both observe that
+        # no local row exists. The unique constraint chooses the winner; the
+        # loser must not let the IntegrityError escape because its SQLAlchemy
+        # representation can include the attempted INSERT parameters.
+        db.rollback()
+        if is_new:
+            user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
+            if user is not None:
+                is_new = False
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Account setup is temporarily unavailable. Try again.",
+                ) from None
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="Account update is temporarily unavailable. Try again.",
+            ) from None
     db.refresh(user)
     if is_new:
         record_event(db, "signup", user.id, {"source": "supabase"})
