@@ -38,6 +38,7 @@ Do not record passwords, reset links, tokens, service keys, Apple private keys, 
 | Authenticated session save | Practice session is scoped to that user | Session id only |
 | Export | Export contains only the signed-in user's data | File manifest only |
 | Account deletion | App data, storage object, local session, and Supabase identity cleanup complete | Redacted provider/admin evidence |
+| Scheduled deletion retry | The named Supabase cron job invokes the private SQL signer; its `pg_net` response is `204` from the exact deployed Render revision | Cron job/run timestamp, opaque request id, status code, and deployment SHA only; never headers, Vault values, or request payload |
 
 ## Stop Conditions
 

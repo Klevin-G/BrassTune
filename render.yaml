@@ -29,7 +29,13 @@ services:
         sync: false
       - key: BRASSTUNE_RELEASE_SHA
         sync: false
-      - key: BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET
+      - key: BRASSTUNE_MAINTENANCE_HMAC_KEY_ID
+        sync: false
+      - key: BRASSTUNE_MAINTENANCE_HMAC_KEY
+        sync: false
+      - key: BRASSTUNE_MAINTENANCE_HMAC_PREVIOUS_KEY_ID
+        sync: false
+      - key: BRASSTUNE_MAINTENANCE_HMAC_PREVIOUS_KEY
         sync: false
       - key: BRASSTUNE_DELETION_TOMBSTONE_SECRET
         sync: false

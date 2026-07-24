@@ -1,9 +1,10 @@
-# Render keep-alive (Supabase pg_cron)
+# Render operations (Supabase pg_cron)
 
 The Render free web service (`https://brasstune-u8qj.onrender.com`) spins down after
 ~15 minutes of inactivity, adding a ~40s cold start to the next request. It is kept
 warm by a Postgres `pg_cron` job in Supabase — **not** GitHub Actions — so it consumes
-zero CI minutes.
+zero CI minutes. Account-deletion retry maintenance uses the same database-native
+approach; see [ACCOUNT_DELETION_MAINTENANCE.md](ACCOUNT_DELETION_MAINTENANCE.md).
 
 ## How it works
 
@@ -33,7 +34,7 @@ select cron.unschedule('render-keepalive');                                     
 
 ## Notes
 
-- The previous `.github/workflows/render-keepalive.yml` was removed — it consumed
-  GitHub Actions minutes on the private repo.
+- The previous `.github/workflows/render-keepalive.yml` and account-deletion retry
+  workflow were removed — neither task consumes GitHub Actions minutes.
 - Keeping the service warm 24/7 uses ~720 of Render free tier's 750 instance-hours/month.
   If that margin matters, narrow the cron to active hours (e.g. `*/14 6-23 * * *`).

@@ -238,6 +238,24 @@ class DeletedIdentityTombstoneConfig(Base):
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
 
 
+class MaintenanceRequestNonce(Base):
+    """Short-lived replay protection for authenticated maintenance requests.
+
+    Only a one-way nonce digest and coarse executor metadata are retained. Raw
+    nonces, request signatures, bodies, and user identifiers never enter this
+    table.
+    """
+
+    __tablename__ = "maintenance_request_nonces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nonce_digest = Column(String(64), nullable=False, unique=True, index=True)
+    key_id = Column(String(64), nullable=False)
+    purpose = Column(String(64), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
 class AudioStorageJob(Base):
     """Durable upload reservations, cleanup tombstones, and reconciliations.
 
