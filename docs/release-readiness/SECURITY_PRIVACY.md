@@ -1,10 +1,10 @@
 # Security and Privacy Data Map
 
-Updated: 2026-07-23. Candidate source revision: `428a123`.
+Updated: 2026-07-23. Candidate source revision: `7c12b15`.
 
 ## Current boundary
 
-Local privacy/security work is implemented and locally tested. Three additive Supabase migrations are pending; no migration, config push, or hosted deployment is claimed complete in this document. Final backend validation is pending the duplicate-identity PII race correction.
+Local privacy/security work is implemented and locally tested. `428a123` fixes the duplicate-identity PII race and the full backend suite passed `246 passed, 4 skipped`. Three additive Supabase migrations remain pending; no migration, config push, or hosted deployment is claimed complete in this document.
 
 ## Data and controls
 
@@ -33,7 +33,6 @@ Apply and verify these expand changes only after the final candidate is merged a
 
 ## Remaining risks and gates
 
-- Run the final backend suite after the duplicate-identity PII correction.
 - Run exact-SHA self-hosted CI and independent review.
 - Verify provider configuration, disposable auth/export/delete lifecycle, storage, and hosted WebSocket behavior live.
 - Apple credentials, Services ID, signing, archive, and physical-device audio remain external gates.

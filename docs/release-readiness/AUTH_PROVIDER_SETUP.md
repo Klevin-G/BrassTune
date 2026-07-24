@@ -10,7 +10,7 @@ Updated: 2026-07-23.
 | Backend auth | Supabase URL/publishable key, provider-side secret/JWKS configuration as used by backend | Never expose secrets to browser/native bundles. |
 | Google | Google OAuth client configuration, Supabase Google provider, callback allowlist | Linked provider is enabled; complete live lifecycle verification remains pending. |
 | Apple | Apple Team/Key/Services ID, native App ID capability, Supabase Apple provider, callback allowlist | Code complete; provider disabled pending credentials/setup. |
-| Native callbacks | `com.brasstune.auth://oauth/google?state=*` allowlist and app URL scheme | Must be pushed to linked Supabase configuration before live iOS Google QA. |
+| Native callbacks | `com.brasstune.auth://oauth/google?state=*` allowlist and app URL scheme | The Supabase TOML glob escapes the literal query marker as `google\\?state=*`; push it before live iOS Google QA. |
 
 ## Redirect URLs
 

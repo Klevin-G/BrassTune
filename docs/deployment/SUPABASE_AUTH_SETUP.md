@@ -6,7 +6,7 @@ Updated: 2026-07-23. Apply only as part of the reviewed post-merge rollout.
 
 - Vercel: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`.
 - Render: provider-side Supabase URL/publishable key/secret/JWKS configuration required by the backend. Do not expose provider-side keys in clients.
-- Native Google: allow `com.brasstune.auth://oauth/google?state=*` in Supabase Auth redirect URLs.
+- Native Google: allow `com.brasstune.auth://oauth/google?state=*` in Supabase Auth redirect URLs. In `supabase/config.toml`, the literal `?` is escaped: `com.brasstune.auth://oauth/google\\?state=*`.
 
 ## Narrow allowlist
 

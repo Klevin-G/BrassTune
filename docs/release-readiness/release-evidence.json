@@ -1,24 +1,24 @@
 {
   "updated": "2026-07-23",
-  "candidate_revision": "428a123",
-  "decision": "pending_final_backend_race_fix_and_release_gates",
+  "candidate_revision": "7c12b15",
+  "decision": "pending_exact_sha_ci_and_release_gates",
   "local": {
-    "backend": "244 passed, 4 skipped; final rerun pending duplicate-identity PII race correction",
+    "backend": "246 passed, 4 skipped after the 428a123 duplicate-identity PII race correction",
     "frontend_units": "251/251",
     "frontend_build": "passed; 11 lazy non-English locale chunks",
     "frontend_audit": "0 findings",
     "frontend_e2e": "443 passed, 7 skipped, 0 failed",
     "swift_core": "3/3",
     "native_units": "139/139",
-    "native_ui": "15/15",
-    "native_builds": "Debug iPhone/iPad and Release iPhone passed with zero warnings"
+    "native_ui": "15/15; affected welcome/auth follow-up checks 4/4 after 7c12b15",
+    "native_builds": "Debug iPhone/iPad and Release iPhone passed with zero warnings; 7c12b15 follow-up build also zero warnings"
   },
   "provider_state": {
     "google": "enabled; authorize-start verified",
     "apple": "client implementation complete; linked provider disabled pending Apple Developer and Supabase setup"
   },
   "pending": [
-    "final backend rerun and independent review",
+    "independent review",
     "exact-SHA self-hosted CI",
     "three Supabase expand migrations and config push",
     "same-SHA Render/Vercel deployment and hosted smoke",
