@@ -1,12 +1,16 @@
 -- Contract phase for account-deletion privacy. This migration is intentionally
 -- data-preserving: the deployed privacy-aware backend must initialize the
 -- singleton config and scrub every completed job during the expand phase.
---
--- Supabase applies each migration batch and its history record transactionally,
--- so every prerequisite, lock, constraint change, and phase update below is one
--- atomic unit. This is deliberately a one-shot migration: replay after success
--- fails closed because the config is no longer in expand and the named
--- constraint already exists. Do not make replay silently idempotent.
+-- Observed Supabase CLI 2.109.1 db push behavior requires this explicit
+-- transaction because LOCK TABLE otherwise runs outside a transaction block.
+-- BEGIN/COMMIT atomically covers every schema change and the phase update.
+-- Supabase CLI 2.109.1 appends its migration-history row after this COMMIT.
+-- Post-push, verify both contract schema/readiness and migration history.
+-- Never blind-retry if schema committed but history is missing; inspect and
+-- reconcile the schema/history split first. This is deliberately a one-shot migration:
+-- replay after success fails closed because the config is no longer in expand
+-- and the named constraint already exists. Do not make replay silently idempotent.
+begin;
 
 -- Prevent a completion write from racing between the prerequisite scan and the
 -- installation of the constraint. The lock is held until the transaction ends.
@@ -110,3 +114,5 @@ begin
   end if;
 end
 $phase$;
+
+commit;

@@ -3920,6 +3920,65 @@ def test_postgres_account_deletion_contract_aborts_atomically_without_prerequisi
 
 
 @pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL contract migration regression")
+def test_postgres_account_deletion_contract_rolls_back_validated_constraint_on_late_phase_failure():
+    schema = "del_contract_late_failure_%s" % os.getpid()
+    raw_connection = engine.raw_connection()
+    driver_connection = raw_connection.driver_connection
+    original_autocommit = driver_connection.autocommit
+    driver_connection.autocommit = True
+    try:
+        with driver_connection.cursor() as cursor:
+            contract_sql = _prepare_postgres_account_deletion_contract_schema(cursor, schema)
+            cursor.execute(
+                "insert into %s.deleted_identity_tombstone_config "
+                "(id, key_verifier, enforcement_phase) "
+                "values (1, repeat('a', 64), 'expand')" % schema
+            )
+            cursor.execute(
+                "insert into %s.account_deletion_jobs "
+                "(id, user_id, supabase_user_id, idempotency_key, stage, status, "
+                "safe_error_category, counts_json, next_retry_at, completed_at) "
+                "values (301, null, null, 'terminal:301', 'completed', 'completed', "
+                "null, '{}'::jsonb, null, now())" % schema
+            )
+            cursor.execute(
+                "create function %s.reject_contract_phase_update() returns trigger "
+                "language plpgsql as $$ begin "
+                "if new.enforcement_phase = 'contract' then "
+                "raise exception 'injected late contract phase failure'; "
+                "end if; return new; end $$" % schema
+            )
+            cursor.execute(
+                "create trigger reject_contract_phase_update "
+                "before update on %s.deleted_identity_tombstone_config "
+                "for each row execute function %s.reject_contract_phase_update()" % (schema, schema)
+            )
+
+            with pytest.raises(RaiseException, match="injected late contract phase failure"):
+                cursor.execute(contract_sql)
+            driver_connection.rollback()
+
+            cursor.execute(
+                "select enforcement_phase from %s.deleted_identity_tombstone_config where id = 1" % schema
+            )
+            assert cursor.fetchone()[0] == "expand"
+            cursor.execute(
+                "select count(*) from pg_constraint where "
+                "conrelid = %s::regclass and conname = 'account_deletion_jobs_terminal_privacy_check'",
+                ("%s.account_deletion_jobs" % schema,),
+            )
+            assert cursor.fetchone()[0] == 0
+    finally:
+        try:
+            driver_connection.rollback()
+            with driver_connection.cursor() as cursor:
+                cursor.execute("drop schema if exists %s cascade" % schema)
+        finally:
+            driver_connection.autocommit = original_autocommit
+            raw_connection.close()
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL contract migration regression")
 def test_postgres_account_deletion_contract_validates_and_enforces_strict_terminal_shape():
     schema = "del_contract_success_%s" % os.getpid()
     raw_connection = engine.raw_connection()
@@ -4763,10 +4822,13 @@ def test_account_deletion_privacy_contract_migration_is_atomic_strict_and_data_p
         / "20260724034725_enforce_account_deletion_terminal_privacy.sql"
     ).read_text().lower()
     assert contract_migration.startswith("-- contract phase")
-    assert "applies each migration batch and its history record transactionally" in contract_migration
+    assert "observed supabase cli 2.109.1 db push behavior" in contract_migration
+    assert "begin/commit atomically covers every schema change and the phase update" in contract_migration
+    assert "appends its migration-history row after this commit" in contract_migration
+    assert "verify both contract schema/readiness and migration history" in contract_migration
+    assert "never blind-retry if schema committed but history is missing" in contract_migration
+    assert "ci autocommit runner" not in contract_migration
     assert "deliberately a one-shot migration" in contract_migration
-    assert "\nbegin;" not in contract_migration
-    assert "\ncommit;" not in contract_migration
     assert "lock table public.account_deletion_jobs in share row exclusive mode" in contract_migration
     assert (
         "lock table public.deleted_identity_tombstone_config in share row exclusive mode"
@@ -4800,8 +4862,16 @@ def test_account_deletion_privacy_contract_migration_is_atomic_strict_and_data_p
     )
     phase_position = contract_migration.index("set enforcement_phase = 'contract'", validate_position)
     row_count_position = contract_migration.index("get diagnostics updated_rows = row_count", phase_position)
+    transaction_position = contract_migration.index("\nbegin;\n")
+    lock_position = contract_migration.index(
+        "lock table public.account_deletion_jobs in share row exclusive mode"
+    )
+    commit_position = contract_migration.rindex("\ncommit;")
     assert "if updated_rows <> 1 then" in contract_migration
     assert add_position < not_valid_position < validate_position < phase_position < row_count_position
+    assert transaction_position < lock_position < add_position
+    assert row_count_position < commit_position
+    assert contract_migration.rstrip().endswith("commit;")
     assert "update public.account_deletion_jobs" not in contract_migration
     assert "delete from public.account_deletion_jobs" not in contract_migration
     assert "truncate public.account_deletion_jobs" not in contract_migration
