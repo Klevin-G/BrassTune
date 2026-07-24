@@ -1,5 +1,6 @@
 import AuthenticationServices
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -377,6 +378,21 @@ struct NativeAppleSignInButton: View {
     }
 }
 
+enum NativeGoogleSignInBranding {
+    static let fontName = "GoogleSans-Medium"
+    static let fontSize: CGFloat = 14
+    static let lineHeight: CGFloat = 20
+    static let logoSize: CGFloat = 18
+    static let leadingPadding: CGFloat = 16
+    static let logoTextSpacing: CGFloat = 12
+    static let trailingPadding: CGFloat = 16
+
+    static var lineSpacing: CGFloat {
+        guard let font = UIFont(name: fontName, size: fontSize) else { return 0 }
+        return max(0, lineHeight - font.lineHeight)
+    }
+}
+
 struct NativeGoogleSignInButton: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
@@ -386,28 +402,31 @@ struct NativeGoogleSignInButton: View {
         Button {
             Task { await model.completeGoogleSignIn() }
         } label: {
-            ZStack {
+            HStack(spacing: NativeGoogleSignInBranding.logoTextSpacing) {
+                // Exact 18-point standard-color G crop from Google's official
+                // pre-approved iOS "Show text=No" artwork.
+                Image("GoogleSignInIcon")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(
+                        width: NativeGoogleSignInBranding.logoSize,
+                        height: NativeGoogleSignInBranding.logoSize
+                    )
+                    .accessibilityHidden(true)
+
                 Text("Sign in with Google")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.custom(
+                        NativeGoogleSignInBranding.fontName,
+                        fixedSize: NativeGoogleSignInBranding.fontSize
+                    ))
+                    .lineSpacing(NativeGoogleSignInBranding.lineSpacing)
                     .foregroundStyle(googleTextColor)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 44)
-
-                HStack {
-                    // Standard-color G pixels cropped without recoloring or
-                    // redrawing from Google's official pre-approved iOS
-                    // "Show text=No" assets, downloaded on 2026-07-23:
-                    // developers.google.com/static/identity/images/signin-assets.zip
-                    Image("GoogleSignInIcon")
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 18, height: 18)
-                        .accessibilityHidden(true)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 12)
+                    .frame(minHeight: NativeGoogleSignInBranding.lineHeight)
             }
+            .padding(.leading, NativeGoogleSignInBranding.leadingPadding)
+            .padding(.trailing, NativeGoogleSignInBranding.trailingPadding)
             .frame(maxWidth: .infinity, minHeight: 50)
             .background(googleBackgroundColor)
             .overlay {

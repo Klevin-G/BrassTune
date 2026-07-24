@@ -1,6 +1,8 @@
 import XCTest
 @testable import BrassTuneApp
 import BrassTuneCore
+import CoreText
+import CryptoKit
 import PDFKit
 import Security
 import UIKit
@@ -798,6 +800,99 @@ final class BrassTuneAppTests: XCTestCase {
         )
     }
 
+    func testGoogleSignInBrandFontIsBundledLicensedAndCoversEveryLocalizedCTA() throws {
+        let appDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let fontURL = appDirectory.appendingPathComponent(
+            "BrassTuneApp/Resources/Fonts/GoogleSans-Medium.ttf"
+        )
+        let fontData = try Data(contentsOf: fontURL)
+        let digest = SHA256.hash(data: fontData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        XCTAssertEqual(
+            digest,
+            "e9156f50951740b525f8e6d110e0be344214cb6d5fce1e76cd3e828a604997e9"
+        )
+
+        let license = try String(
+            contentsOf: appDirectory.appendingPathComponent(
+                "BrassTuneApp/Resources/Fonts/GoogleSans-OFL.txt"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(license.contains("Copyright 2025 The Google Sans Project Authors"))
+        XCTAssertTrue(license.contains("SIL OPEN FONT LICENSE Version 1.1"))
+
+        XCTAssertNotNil(Bundle.main.url(forResource: "GoogleSans-Medium", withExtension: "ttf"))
+        XCTAssertNotNil(Bundle.main.url(forResource: "GoogleSans-OFL", withExtension: "txt"))
+        let font = try XCTUnwrap(
+            UIFont(
+                name: NativeGoogleSignInBranding.fontName,
+                size: NativeGoogleSignInBranding.fontSize
+            )
+        )
+        XCTAssertEqual(font.fontName, "GoogleSans-Medium")
+        XCTAssertEqual(font.pointSize, 14, accuracy: 0.001)
+        XCTAssertEqual(
+            font.lineHeight + NativeGoogleSignInBranding.lineSpacing,
+            NativeGoogleSignInBranding.lineHeight,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(NativeGoogleSignInBranding.logoSize, 18)
+        XCTAssertEqual(NativeGoogleSignInBranding.leadingPadding, 16)
+        XCTAssertEqual(NativeGoogleSignInBranding.logoTextSpacing, 12)
+        XCTAssertEqual(NativeGoogleSignInBranding.trailingPadding, 16)
+
+        let coreTextFont = CTFontCreateWithName(
+            NativeGoogleSignInBranding.fontName as CFString,
+            NativeGoogleSignInBranding.fontSize,
+            nil
+        )
+        let englishCharacters = Array(AppLanguage.english.localized("Sign in with Google").utf16)
+        var englishGlyphs = [CGGlyph](repeating: 0, count: englishCharacters.count)
+        let googleSansCoversEnglishCTA = englishCharacters.withUnsafeBufferPointer { characterBuffer in
+            englishGlyphs.withUnsafeMutableBufferPointer { glyphBuffer in
+                CTFontGetGlyphsForCharacters(
+                    coreTextFont,
+                    characterBuffer.baseAddress!,
+                    glyphBuffer.baseAddress!,
+                    englishCharacters.count
+                )
+            }
+        }
+        XCTAssertTrue(googleSansCoversEnglishCTA)
+
+        for language in AppLanguage.allCases.dropFirst() {
+            let callToAction = language.localized("Sign in with Google")
+            let attributedCTA = NSAttributedString(
+                string: callToAction,
+                attributes: [
+                    NSAttributedString.Key(kCTFontAttributeName as String): coreTextFont,
+                ]
+            )
+            let line = CTLineCreateWithAttributedString(attributedCTA)
+            let runs = CTLineGetGlyphRuns(line) as! [CTRun]
+            XCTAssertFalse(runs.isEmpty, "No text run for \(language.rawValue)")
+            for run in runs {
+                let glyphCount = CTRunGetGlyphCount(run)
+                var glyphs = [CGGlyph](repeating: 0, count: glyphCount)
+                glyphs.withUnsafeMutableBufferPointer { glyphBuffer in
+                    CTRunGetGlyphs(
+                        run,
+                        CFRange(location: 0, length: 0),
+                        glyphBuffer.baseAddress!
+                    )
+                }
+                XCTAssertFalse(
+                    glyphs.contains(0),
+                    "Google Sans cascading could not render the CTA for \(language.rawValue)"
+                )
+            }
+        }
+    }
+
     func testTuningMeterGeometryClampsSymmetricallyAndDoesNotMirrorInArabic() {
         let previous = NativeLocalization.language
         defer { NativeLocalization.language = previous }
@@ -999,6 +1094,7 @@ final class BrassTuneAppTests: XCTestCase {
             type["CFBundleURLSchemes"] as? [String] ?? []
         }
         XCTAssertEqual(schemes, [AuthService.oauthCallbackScheme])
+        XCTAssertEqual(plist["UIAppFonts"] as? [String], ["GoogleSans-Medium.ttf"])
         XCTAssertNil(String(data: data, encoding: .utf8)?.range(of: "secret", options: .caseInsensitive))
 
         let repositoryRoot = appDirectory

@@ -635,6 +635,8 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertFalse(apple.isEnabled)
         XCTAssertTrue(google.exists)
         XCTAssertTrue(google.isEnabled)
+        XCTAssertEqual(google.label, "Sign in with Google")
+        XCTAssertGreaterThanOrEqual(google.frame.height, 50)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.email"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.password"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)

@@ -66,5 +66,9 @@
 	<string>BrassTune can import score images you select from Photos for local practice notes.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>GoogleSans-Medium.ttf</string>
+	</array>
 </dict>
 </plist>
