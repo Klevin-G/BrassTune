@@ -1,10 +1,11 @@
-import { ArrowRight, CheckCircle2, ChevronDown, KeyRound, LogIn, Mail, Music2, ShieldCheck, UserPlus } from 'lucide-react';
+import { ArrowRight, CheckCircle2, ChevronDown, KeyRound, LogIn, Mail, Music2, UserPlus } from 'lucide-react';
+import { appleSignInLogo } from '../assets/appleSignInLogo';
 import { GoogleIcon } from '../components/GoogleIcon';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
-import { readPendingAuthReturn, safeReturnPath } from '../domain/authNavigation';
+import { clearPendingAuthReturn, readPendingAuthReturn, rememberPendingAuthReturn, safeReturnPath } from '../domain/authNavigation';
 import { useI18n } from '../i18n/LocaleContext';
 import type { MessageId } from '../i18n/messages.base';
 import './AuthGatewayPage.css';
@@ -23,6 +24,7 @@ export function AuthGatewayPage() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [oauthProvider, setOauthProvider] = useState<'google' | 'apple' | null>(null);
   const [showEmail, setShowEmail] = useState(false);
 
   function localizeAuthError(error: unknown, fallback: MessageId) {
@@ -74,8 +76,22 @@ export function AuthGatewayPage() {
     }
   }
 
-  const callbackNext = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
-  const hasProviders = auth.providers.google || auth.providers.apple;
+  async function beginOAuth(provider: 'google' | 'apple') {
+    if (!auth.providers[provider]) return;
+    setBusy(true);
+    setOauthProvider(provider);
+    setMessage(null);
+    rememberPendingAuthReturn(next);
+    try {
+      await (provider === 'google' ? auth.signInWithGoogle() : auth.signInWithApple());
+    } catch (error) {
+      clearPendingAuthReturn();
+      setMessage(localizeAuthError(error, provider === 'google' ? 'auth.googleFailure' : 'auth.appleFailure'));
+    } finally {
+      setBusy(false);
+      setOauthProvider(null);
+    }
+  }
 
   return (
     <ScreenContainer>
@@ -119,25 +135,31 @@ export function AuthGatewayPage() {
 
             {!auth.loading && auth.configured && (
               <>
-                {hasProviders && (
-                  <>
-                    <div className="ag-providers">
-                      {auth.providers.google && (
-                        <button className="google-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithGoogle(callbackNext).catch((error) => setMessage(localizeAuthError(error, 'auth.googleFailure')))}>
-                          <GoogleIcon size={18} />
-                          {t('auth.google')}
-                        </button>
-                      )}
-                      {auth.providers.apple && (
-                        <button className="ghost-button ag-block" disabled={busy} type="button" onClick={() => auth.signInWithApple(callbackNext).catch((error) => setMessage(localizeAuthError(error, 'auth.appleFailure')))}>
-                          <ShieldCheck size={18} />
-                          {t('auth.apple')}
-                        </button>
-                      )}
-                    </div>
-                    <div className="auth-divider" aria-hidden="true"><span>{t('auth.or')}</span></div>
-                  </>
-                )}
+                <div className="ag-providers">
+                  <button
+                    className="google-button ag-block"
+                    disabled={busy || !auth.providers.google}
+                    type="button"
+                    onClick={() => void beginOAuth('google')}
+                  >
+                    <GoogleIcon size={18} />
+                    {oauthProvider === 'google'
+                      ? t('auth.googleLoading')
+                      : auth.providers.google ? t('auth.google') : t('auth.googleUnavailable')}
+                  </button>
+                  <button
+                    className="apple-button ag-block"
+                    disabled={busy || !auth.providers.apple}
+                    type="button"
+                    onClick={() => void beginOAuth('apple')}
+                  >
+                    {auth.providers.apple && <img src={appleSignInLogo} alt="" aria-hidden="true" />}
+                    {oauthProvider === 'apple'
+                      ? t('auth.appleLoading')
+                      : auth.providers.apple ? t('auth.apple') : t('auth.appleUnavailable')}
+                  </button>
+                </div>
+                <div className="auth-divider" aria-hidden="true"><span>{t('auth.or')}</span></div>
 
                 <button className="primary-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                   {t('auth.start')}

@@ -76,6 +76,7 @@ export interface PracticeWorkspace {
   startedAt: string;
   elapsedSecondsByStep: Record<string, number>;
   completedStepIds: string[];
+  activityRecordedStepIds: string[];
 }
 
 export interface PracticeLibrary {
@@ -240,6 +241,7 @@ interface StoredPracticeWorkspace {
   startedAt: string;
   elapsedSecondsByStep: Record<string, number>;
   completedStepIds: string[];
+  activityRecordedStepIds: string[];
 }
 
 const MAX_WORKSPACE_STEP_SECONDS = 24 * 60 * 60;
@@ -346,6 +348,7 @@ export function createPracticeWorkspace(pack: PracticePack, now = new Date()): P
     startedAt: now.toISOString(),
     elapsedSecondsByStep: emptyWorkspaceProgress(canonical),
     completedStepIds: [],
+    activityRecordedStepIds: [],
   };
 }
 
@@ -360,6 +363,7 @@ export function serializePracticeWorkspace(workspace: PracticeWorkspace): string
     startedAt: workspace.startedAt,
     elapsedSecondsByStep: workspace.elapsedSecondsByStep,
     completedStepIds: workspace.completedStepIds,
+    activityRecordedStepIds: workspace.activityRecordedStepIds,
   };
   return hydrateStoredWorkspace(stored, canonical) ? JSON.stringify(stored) : null;
 }
@@ -377,6 +381,7 @@ function hydrateStoredWorkspace(value: StoredPracticeWorkspace, pack: PracticePa
     || typeof value.elapsedSecondsByStep !== 'object'
     || Array.isArray(value.elapsedSecondsByStep)
     || !Array.isArray(value.completedStepIds)
+    || !Array.isArray(value.activityRecordedStepIds)
   ) {
     return null;
   }
@@ -391,6 +396,8 @@ function hydrateStoredWorkspace(value: StoredPracticeWorkspace, pack: PracticePa
   if (
     new Set(value.completedStepIds).size !== value.completedStepIds.length
     || value.completedStepIds.some((id) => typeof id !== 'string' || !stepIds.includes(id))
+    || new Set(value.activityRecordedStepIds).size !== value.activityRecordedStepIds.length
+    || value.activityRecordedStepIds.some((id) => typeof id !== 'string' || !stepIds.includes(id))
   ) {
     return null;
   }
@@ -401,6 +408,7 @@ function hydrateStoredWorkspace(value: StoredPracticeWorkspace, pack: PracticePa
     startedAt: value.startedAt,
     elapsedSecondsByStep: progress,
     completedStepIds: [...value.completedStepIds],
+    activityRecordedStepIds: [...value.activityRecordedStepIds],
   };
 }
 
@@ -430,9 +438,11 @@ export function parsePracticeWorkspace(raw: string | null): PracticeWorkspace | 
         startedAt: value.startedAt,
         elapsedSecondsByStep: emptyWorkspaceProgress(pack),
         completedStepIds: pack.steps.slice(0, value.stepIndex as number).map((step) => step.id),
+        activityRecordedStepIds: [],
       };
     }
-    if (!exactObjectKeys(value, [
+    const storedKeys = [
+      'activityRecordedStepIds',
       'completedStepIds',
       'elapsedSecondsByStep',
       'packId',
@@ -440,13 +450,20 @@ export function parsePracticeWorkspace(raw: string | null): PracticeWorkspace | 
       'startedAt',
       'stepIndex',
       'version',
-    ])) {
+    ];
+    const legacyStoredKeys = storedKeys.filter((key) => key !== 'activityRecordedStepIds');
+    if (!exactObjectKeys(value, storedKeys) && !exactObjectKeys(value, legacyStoredKeys)) {
       return null;
     }
     const pack = typeof value.packId === 'string'
       ? BUILT_IN_PRACTICE_PACKS.find((item) => item.id === value.packId)
       : null;
-    return pack ? hydrateStoredWorkspace(value as StoredPracticeWorkspace, pack) : null;
+    return pack
+      ? hydrateStoredWorkspace({
+        ...value,
+        activityRecordedStepIds: value.activityRecordedStepIds ?? [],
+      } as StoredPracticeWorkspace, pack)
+      : null;
   } catch {
     return null;
   }
@@ -468,6 +485,24 @@ export function completePracticeWorkspaceStep(workspace: PracticeWorkspace): Pra
   const stepId = workspace.pack.steps[workspace.stepIndex].id;
   if (workspace.completedStepIds.includes(stepId)) return workspace;
   return { ...workspace, completedStepIds: [...workspace.completedStepIds, stepId] };
+}
+
+export function recordPracticeWorkspaceStepActivity(
+  workspace: PracticeWorkspace,
+  source: Pick<PracticeTarget, 'kind' | 'id'>,
+): PracticeWorkspace {
+  const matchingStep = workspace.pack.steps.find(
+    (step) => step.kind === source.kind && step.id === source.id,
+  );
+  if (!matchingStep || workspace.activityRecordedStepIds.includes(matchingStep.id)) return workspace;
+  return {
+    ...workspace,
+    activityRecordedStepIds: [...workspace.activityRecordedStepIds, matchingStep.id],
+  };
+}
+
+export function shouldRecordPracticeWorkspaceCompletion(workspace: PracticeWorkspace): boolean {
+  return isPracticeWorkspaceComplete(workspace) && workspace.activityRecordedStepIds.length === 0;
 }
 
 export function isPracticeWorkspaceComplete(workspace: PracticeWorkspace): boolean {

@@ -70,6 +70,10 @@ export function passwordResetRedirectURL(next: string, origin = currentOrigin())
   return redirect.toString();
 }
 
+export function oauthCallbackRedirectURL(origin = currentOrigin()): string {
+  return new URL('/auth/callback', new URL(origin).origin).toString();
+}
+
 export function rememberPendingAuthReturn(next: string): void {
   try {
     sessionStorage.setItem(PENDING_AUTH_RETURN_KEY, safeReturnPath(next));

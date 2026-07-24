@@ -17,11 +17,13 @@ import {
   readPracticeLibrary,
   reconcilePracticeLibraryWeek,
   recordPracticeActivity,
+  recordPracticeWorkspaceStepActivity,
   millisecondsUntilNextPracticeWeek,
   removeCustomExercise,
   removeMetronomePreset,
   resolvePracticeOwner,
   serializePracticeWorkspace,
+  shouldRecordPracticeWorkspaceCompletion,
   upsertById,
   upsertCustomExercise,
   writePracticeLibrary,
@@ -52,7 +54,7 @@ interface PracticeLibraryState {
   isFavorite: (target: PracticeTarget) => boolean;
   recordRecent: (target: PracticeTarget) => void;
   setWeeklyGoal: (minutes: number, sessions?: number) => void;
-  recordActivity: (minutes: number) => void;
+  recordActivity: (minutes: number, source?: Pick<PracticeTarget, 'kind' | 'id'>) => void;
   recordSavedSession: (session: SavedPracticeSessionActivity) => boolean;
   saveReflection: (text: string, sessionId?: string) => PracticeReflection | null;
   updateReflection: (id: string, text: string) => boolean;
@@ -357,10 +359,6 @@ export function PracticeLibraryProvider({
     }));
   }, [updateLibrary]);
 
-  const recordActivity = useCallback((minutes: number) => {
-    updateLibrary((current) => recordPracticeActivity(current, minutes, now()));
-  }, [now, updateLibrary]);
-
   const recordSavedSession = useCallback((session: SavedPracticeSessionActivity) => {
     if (!ownerId) return false;
     const current = loadedStateRef.current;
@@ -462,6 +460,18 @@ export function PracticeLibraryProvider({
     setLoadedState(updated);
   }, [ownerId]);
 
+  const recordActivity = useCallback((
+    minutes: number,
+    source?: Pick<PracticeTarget, 'kind' | 'id'>,
+  ) => {
+    const saved = updateLibrary((current) => recordPracticeActivity(current, minutes, now()));
+    if (!saved || !source) return;
+    const currentWorkspace = loadedStateRef.current.workspace;
+    if (!currentWorkspace) return;
+    const attributed = recordPracticeWorkspaceStepActivity(currentWorkspace, source);
+    if (attributed !== currentWorkspace) persistWorkspace(attributed);
+  }, [now, persistWorkspace, updateLibrary]);
+
   const startWorkspace = useCallback((pack: PracticePack) => {
     persistWorkspace(createPracticeWorkspace(pack));
   }, [persistWorkspace]);
@@ -484,7 +494,7 @@ export function PracticeLibraryProvider({
     const wasComplete = isPracticeWorkspaceComplete(current);
     const next = completePracticeWorkspaceStep(current);
     persistWorkspace(next);
-    if (!wasComplete && isPracticeWorkspaceComplete(next)) {
+    if (!wasComplete && shouldRecordPracticeWorkspaceCompletion(next)) {
       recordActivity(completedPracticeWorkspaceMinutes(next));
     }
   }, [persistWorkspace, recordActivity]);

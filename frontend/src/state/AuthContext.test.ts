@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   readVerifiedPracticeNamespace,
+  startOAuthProviderSignIn,
   transitionToGuest,
   verifiedPracticeNamespaceKey,
   writeVerifiedPracticeNamespace,
@@ -133,5 +134,36 @@ describe('verified local practice namespace cache', () => {
     values.set(key, JSON.stringify({ version: 1, subject: 'subject-a', ownerId: 'account:42', injected: true }));
     expect(readVerifiedPracticeNamespace(storage, 'subject-a')).toBeNull();
     expect(readVerifiedPracticeNamespace(storage, 'x'.repeat(201))).toBeNull();
+  });
+});
+
+describe('social OAuth provider launch', () => {
+  it('starts Google and Apple with the exact allow-listed PKCE callback URL', async () => {
+    const signInWithOAuth = vi.fn().mockResolvedValue({ error: null });
+
+    await startOAuthProviderSignIn({ signInWithOAuth }, 'google', 'https://brasstune.test');
+    await startOAuthProviderSignIn({ signInWithOAuth }, 'apple', 'https://brasstune.test');
+
+    expect(signInWithOAuth).toHaveBeenNthCalledWith(1, {
+      provider: 'google',
+      options: {
+        redirectTo: 'https://brasstune.test/auth/callback',
+        scopes: 'openid email profile',
+        queryParams: { prompt: 'select_account' },
+      },
+    });
+    expect(signInWithOAuth).toHaveBeenNthCalledWith(2, {
+      provider: 'apple',
+      options: {
+        redirectTo: 'https://brasstune.test/auth/callback',
+      },
+    });
+  });
+
+  it('surfaces provider launch errors for localized recoverable handling', async () => {
+    const failure = new Error('network request failed');
+    await expect(startOAuthProviderSignIn({
+      signInWithOAuth: vi.fn().mockResolvedValue({ error: failure }),
+    }, 'google', 'https://brasstune.test')).rejects.toBe(failure);
   });
 });

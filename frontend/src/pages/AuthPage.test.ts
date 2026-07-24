@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { passwordResetRedirectURL } from '../domain/authNavigation';
+import {
+  clearPendingAuthReturn,
+  oauthCallbackRedirectURL,
+  passwordResetRedirectURL,
+  readPendingAuthReturn,
+  rememberPendingAuthReturn,
+} from '../domain/authNavigation';
 import { authPathWithNext, localizedOAuthError, safeAuthNext } from './AuthPage';
 
 describe('auth navigation', () => {
@@ -47,6 +53,18 @@ describe('auth navigation', () => {
 
     const malformed = new URL(passwordResetRedirectURL('//evil.example/steal', 'https://brasstune.test'));
     expect(malformed.searchParams.get('next')).toBe('/home');
+  });
+
+  it('keeps OAuth redirect exact and stores only a sanitized pending return path', () => {
+    expect(oauthCallbackRedirectURL('https://brasstune.test/unsafe?next=raw'))
+      .toBe('https://brasstune.test/auth/callback');
+
+    clearPendingAuthReturn();
+    rememberPendingAuthReturn('/ensemble?join=BRASS123');
+    expect(readPendingAuthReturn()).toBe('/ensemble?join=BRASS123');
+    rememberPendingAuthReturn('https://evil.example/steal');
+    expect(readPendingAuthReturn()).toBe('/home');
+    clearPendingAuthReturn();
   });
 
   it('maps OAuth failures to localized stable messages instead of raw provider text', () => {

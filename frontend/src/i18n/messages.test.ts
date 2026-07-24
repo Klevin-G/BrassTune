@@ -60,10 +60,26 @@ describe('web localization', () => {
       ko: ['튜너', '연습 평가', '수업'],
       vi: ['Máy lên dây', 'Chấm điểm luyện tập', 'Lớp học'],
     } as const;
+    const administratorTerms = {
+      en: 'administrators',
+      es: 'administradores',
+      'zh-Hans': '管理员',
+      'zh-Hant': '管理員',
+      ar: 'مسؤولي',
+      fr: 'administrateurs',
+      de: 'Administratoren',
+      ru: 'администраторы',
+      'pt-BR': 'administradores',
+      ja: '管理者',
+      ko: '관리자',
+      vi: 'quản trị viên',
+    } as const;
     for (const locale of productionLocales) {
       const messages = await loadMessagesForLocale(locale);
       expect([messages['nav.tuner'], messages['nav.playAlong'], messages['nav.class']]).toEqual(terminology[locale]);
       expect(messages['auth.lead']).toMatch(/\btuner\b|afinador|调音器|調音器|موالف|accordeur|Stimmgerät|тюнер|チューナー|튜너|lên dây/i);
+      expect(messages['class.practiceDisclosure']).toContain(administratorTerms[locale]);
+      expect(messages['class.practiceDisclosure']).toContain('BrassTune');
     }
   });
 
@@ -114,6 +130,7 @@ describe('web localization', () => {
     expect(messages['signal.confidence']).toBe('نسبة الثقة في اكتشاف طبقة الصوت');
     expect(messages['score.captureFailed']).toBe('تعذّر التقاط الصفحة. حاول مرة أخرى.');
     expect(messages['class.practiceDisclosure']).toContain('إجمالي تدريبك السحابي');
+    expect(messages['class.practiceDisclosure']).toContain('مسؤولي BrassTune');
     expect(messages['class.practiceDisclosure']).toContain('نص مراجعاتك');
     expect(messages['class.practiceDisclosure']).toContain('تسجيلاتك الصوتية');
   });

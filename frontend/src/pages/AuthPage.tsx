@@ -1,4 +1,5 @@
-import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, KeyRound, LockKeyhole, LogIn, Mail, Music2, ShieldCheck, UserPlus } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, Eye, EyeOff, KeyRound, LockKeyhole, LogIn, Mail, Music2, UserPlus } from 'lucide-react';
+import { appleSignInLogo } from '../assets/appleSignInLogo';
 import { GoogleIcon } from '../components/GoogleIcon';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -56,6 +57,10 @@ function MessageBanner({ message }: { message: Message }) {
       <span>{message.text}</span>
     </div>
   );
+}
+
+function DirectionalArrow({ dir }: { dir: 'ltr' | 'rtl' }) {
+  return dir === 'rtl' ? <ArrowLeft size={18} /> : <ArrowRight size={18} />;
 }
 
 function PasswordField({
@@ -136,10 +141,10 @@ export function localizedOAuthError(
 
 export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'callback' }) {
   const auth = useAuth();
-  const { locale, t } = useI18n();
+  const { dir, locale, t } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const storedRecoveryNext = mode === 'reset' && auth.hasAuthSession
+  const storedRecoveryNext = (mode === 'callback' || (mode === 'reset' && auth.hasAuthSession))
     ? readPendingAuthReturn()
     : null;
   const next = safeReturnPath(params.get('next') ?? storedRecoveryNext);
@@ -151,6 +156,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const [instrumentId, setInstrumentId] = useState('trumpet');
   const [message, setMessage] = useState<Message | null>(null);
   const [busy, setBusy] = useState(false);
+  const [oauthProvider, setOauthProvider] = useState<'google' | 'apple' | null>(null);
   const [pendingSignup, setPendingSignup] = useState(false);
   const [callbackStalled, setCallbackStalled] = useState(false);
   const [callbackErrored, setCallbackErrored] = useState(false);
@@ -158,6 +164,9 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
 
   const isSignup = mode === 'sign-up';
   const isPasswordRecovery = mode === 'reset' && auth.hasAuthSession;
+  const callbackProviderError = mode === 'callback'
+    ? callbackParams().get('error_description') || callbackParams().get('error')
+    : null;
 
   // Clear any leftover message when switching between form modes via the links.
   useEffect(() => {
@@ -170,18 +179,20 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   // Callback: detect an OAuth error once on entry.
   useEffect(() => {
     if (mode !== 'callback') return;
-    const error = callbackParams().get('error_description') || callbackParams().get('error');
-    if (error) setCallbackErrored(true);
-  }, [mode]);
+    if (callbackProviderError) {
+      clearPendingAuthReturn();
+      setCallbackErrored(true);
+    }
+  }, [callbackProviderError, mode]);
 
   // Callback: auto-redirect the moment the session is ready.
   useEffect(() => {
     if (mode !== 'callback') return;
-    if (auth.isSignedIn) {
+    if (auth.isSignedIn && !callbackProviderError) {
       clearPendingAuthReturn();
       navigate(next, { replace: true });
     }
-  }, [mode, auth.isSignedIn, navigate, next]);
+  }, [mode, auth.isSignedIn, callbackProviderError, navigate, next]);
 
   // Callback: if it hasn't resolved after a while, reveal a manual escape hatch.
   useEffect(() => {
@@ -256,6 +267,26 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
     }
   }
 
+  async function beginOAuth(provider: 'google' | 'apple') {
+    if (!auth.providers[provider]) return;
+    setBusy(true);
+    setOauthProvider(provider);
+    setMessage(null);
+    rememberPendingAuthReturn(next);
+    try {
+      await (provider === 'google' ? auth.signInWithGoogle() : auth.signInWithApple());
+    } catch (error) {
+      clearPendingAuthReturn();
+      setMessage({
+        type: 'error',
+        text: localizedOAuthError(error, t, provider === 'google' ? 'auth.googleFailure' : 'auth.appleFailure'),
+      });
+    } finally {
+      setBusy(false);
+      setOauthProvider(null);
+    }
+  }
+
   if (mode === 'callback') {
     const showError = callbackErrored || Boolean(auth.profileError);
     return (
@@ -269,7 +300,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                 </p>
                 <button className="primary-button au-block" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                   {t('auth.start')}
-                  <ArrowRight size={18} />
+                  <DirectionalArrow dir={dir} />
                 </button>
               </>
             ) : showError ? (
@@ -298,7 +329,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                   <div className="au-stack">
                     <Link className="primary-button au-block" to={next}>
                       {t('auth.continue')}
-                      <ArrowRight size={18} />
+                      <DirectionalArrow dir={dir} />
                     </Link>
                     <Link className="ghost-button au-block" to={`/auth/sign-in?next=${encodeURIComponent(next)}`}>
                       {t('auth.tryAgain')}
@@ -341,26 +372,39 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                   />
                   <button className="primary-button au-block" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                     {t('auth.continueGuest')}
-                    <ArrowRight size={18} />
+                    <DirectionalArrow dir={dir} />
                   </button>
                 </>
               )}
 
-              {mode !== 'reset' && auth.configured && auth.providers.google && (
+              {mode !== 'reset' && auth.configured && (
                 <>
-                  <button
-                    className="google-button au-block"
-                    disabled={busy}
-                    type="button"
-                    onClick={() =>
-                      auth
-                        .signInWithGoogle(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`)
-                        .catch((error) => setMessage({ type: 'error', text: localizedOAuthError(error, t, 'auth.googleFailure') }))
-                    }
-                  >
-                    <GoogleIcon size={18} />
-                    {isSignup ? t('auth.signupGoogle') : t('auth.google')}
-                  </button>
+                  <div className="provider-button-stack">
+                    <button
+                      className="google-button au-block"
+                      disabled={busy || !auth.providers.google}
+                      type="button"
+                      onClick={() => void beginOAuth('google')}
+                    >
+                      <GoogleIcon size={18} />
+                      {oauthProvider === 'google'
+                        ? t('auth.googleLoading')
+                        : !auth.providers.google
+                          ? t('auth.googleUnavailable')
+                          : isSignup ? t('auth.signupGoogle') : t('auth.google')}
+                    </button>
+                    <button
+                      className="apple-button au-block"
+                      disabled={busy || !auth.providers.apple}
+                      type="button"
+                      onClick={() => void beginOAuth('apple')}
+                    >
+                      {auth.providers.apple && <img src={appleSignInLogo} alt="" aria-hidden="true" />}
+                      {oauthProvider === 'apple'
+                        ? t('auth.appleLoading')
+                        : auth.providers.apple ? t('auth.apple') : t('auth.appleUnavailable')}
+                    </button>
+                  </div>
                   <div className="auth-divider" aria-hidden="true"><span>{t('auth.orEmail')}</span></div>
                 </>
               )}
@@ -466,26 +510,8 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                   }}
                 >
                   {t('auth.continueApp')}
-                  <ArrowRight size={18} />
+                  <DirectionalArrow dir={dir} />
                 </button>
-              )}
-
-              {mode !== 'reset' && auth.configured && auth.providers.apple && (
-                <div className="provider-button-stack">
-                  <button
-                    className="ghost-button au-block"
-                    disabled={busy}
-                    type="button"
-                    onClick={() =>
-                      auth
-                        .signInWithApple(`${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`)
-                        .catch((error) => setMessage({ type: 'error', text: localizedOAuthError(error, t, 'auth.appleFailure') }))
-                    }
-                  >
-                    <ShieldCheck size={18} />
-                    {t('auth.apple')}
-                  </button>
-                </div>
               )}
 
               {message && <MessageBanner message={message} />}
@@ -508,7 +534,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                       onClick={() => void continueAsGuest()}
                     >
                       {t('auth.keepGuest')}
-                      <ArrowRight size={18} />
+                      <DirectionalArrow dir={dir} />
                     </button>
                   )}
                 </>

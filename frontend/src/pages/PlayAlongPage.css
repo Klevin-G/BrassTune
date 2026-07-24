@@ -276,6 +276,11 @@
 }
 
 /* --- Note-by-note disclosure --------------------------------------------- */
+.playalong-sequence {
+  padding: 0;
+  list-style: none;
+}
+
 .pa-details {
   margin-top: 16px;
   border-top: 1px solid var(--line);

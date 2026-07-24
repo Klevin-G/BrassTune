@@ -4,7 +4,7 @@ import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/cl
 import { apiBase } from '../api/runtimeConfig';
 import { authProviders, supabase, supabaseConfigured } from '../lib/supabase';
 import { clearAccountPracticeState } from '../domain/practiceLibrary';
-import { passwordResetRedirectURL } from '../domain/authNavigation';
+import { oauthCallbackRedirectURL, passwordResetRedirectURL } from '../domain/authNavigation';
 
 interface BackendProfile {
   id: number;
@@ -43,8 +43,8 @@ interface AuthState {
   exitGuest: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
-  signInWithGoogle: (redirectTo?: string) => Promise<void>;
-  signInWithApple: (redirectTo?: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
   requestPasswordReset: (email: string, next?: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -179,6 +179,35 @@ export function friendlyAuthError(error: unknown) {
 
 function throwFriendlyAuthError(error: unknown): never {
   throw new Error(friendlyAuthError(error));
+}
+
+type OAuthProvider = 'apple' | 'google';
+
+interface OAuthClient {
+  signInWithOAuth: (credentials: {
+    provider: OAuthProvider;
+    options: {
+      redirectTo: string;
+      scopes?: string;
+      queryParams?: Record<string, string>;
+    };
+  }) => Promise<{ error: unknown }>;
+}
+
+export async function startOAuthProviderSignIn(
+  authClient: OAuthClient,
+  provider: OAuthProvider,
+  origin = window.location.origin,
+): Promise<void> {
+  const options = provider === 'google'
+    ? {
+      redirectTo: oauthCallbackRedirectURL(origin),
+      scopes: 'openid email profile',
+      queryParams: { prompt: 'select_account' },
+    }
+    : { redirectTo: oauthCallbackRedirectURL(origin) };
+  const { error } = await authClient.signInWithOAuth({ provider, options });
+  if (error) throw error;
 }
 
 /**
@@ -398,37 +427,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [adoptSession, loadProfile, resetAccountState]);
 
-  const signInWithApple = useCallback(async (redirectTo = `${window.location.origin}/auth/callback`) => {
+  const signInWithApple = useCallback(async () => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     if (!authProviders.apple) throw new Error('Apple sign-in is not available in this release.');
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'apple',
-        options: {
-          redirectTo,
-        },
-      });
-      if (error) throw error;
+      await startOAuthProviderSignIn(supabase.auth, 'apple');
     } catch (error) {
       throwFriendlyAuthError(error);
     }
   }, []);
 
-  const signInWithGoogle = useCallback(async (redirectTo = `${window.location.origin}/auth/callback`) => {
+  const signInWithGoogle = useCallback(async () => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     if (!authProviders.google) throw new Error('Google sign-in is not available in this release.');
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          scopes: 'openid email profile',
-          queryParams: {
-            prompt: 'select_account',
-          },
-        },
-      });
-      if (error) throw error;
+      await startOAuthProviderSignIn(supabase.auth, 'google');
     } catch (error) {
       throwFriendlyAuthError(error);
     }

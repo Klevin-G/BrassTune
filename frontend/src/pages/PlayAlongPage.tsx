@@ -193,7 +193,7 @@ export function PlayAlongPage() {
     recordBest(graderRef.current?.results ?? []);
     if (!completionRecordedRef.current) {
       completionRecordedRef.current = true;
-      practiceLibrary.recordActivity(1);
+      practiceLibrary.recordActivity(1, { kind: 'play-along', id: exerciseIdRef.current });
     }
   };
 
@@ -447,7 +447,7 @@ export function PlayAlongPage() {
 
       {phase === 'running' && snapshot && (
         <SectionCard title={t('playAlong.play')} eyebrow={t('playAlong.noteProgress', { current: formatNumber(Math.min(snapshot.index + 1, exercise.notes.length)), total: formatNumber(exercise.notes.length) })}>
-          <span className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+          <output className="visually-hidden" aria-live="polite" aria-atomic="true">
             {announcementBucket
               ? t('playAlong.a11yTargetProgress', {
                 note: snapshot.currentName ?? '—',
@@ -456,7 +456,7 @@ export function PlayAlongPage() {
                 percent: formatNumber(Math.min(100, Math.max(0, Math.floor(snapshot.heldFraction * 4) * 25))),
               })
               : ''}
-          </span>
+          </output>
           {!stream.micActive && (
             <div className="pa-error" role="status" aria-live="polite">
               <AlertCircle size={16} />
@@ -470,14 +470,13 @@ export function PlayAlongPage() {
             </div>
           )}
           <div className="playalong-live">
-            <div
-              className="playalong-target"
-              role="progressbar"
+            <progress
+              className="visually-hidden"
               aria-label={t('playAlong.a11yHoldProgress', { note: snapshot.currentName ?? '—' })}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(snapshot.heldFraction * 100)}
-            >
+              max={100}
+              value={Math.round(snapshot.heldFraction * 100)}
+            />
+            <div className="playalong-target">
               <HoldRing fraction={snapshot.heldFraction} />
               <div className="playalong-target-note">
                 <span className="playalong-target-label">{t('playAlong.playNote')}</span>
@@ -492,9 +491,9 @@ export function PlayAlongPage() {
                 const onTarget = samePitchClass(snapshot.detectedName, snapshot.currentName) && cents != null;
                 if (!onTarget) {
                   return (
-                    <span className="pa-live-verdict">
+                    <output className="pa-live-verdict" aria-live="off">
                       {snapshot.detectedName ? t('playAlong.playTarget', { note: snapshot.currentName ?? '' }) : t('playAlong.listening')}
-                    </span>
+                    </output>
                   );
                 }
                 const verdict = describeCents(cents);
@@ -502,10 +501,10 @@ export function PlayAlongPage() {
                 const cue = t(verdict.direction === 'sharp' ? 'tuning.easeDown' : verdict.direction === 'flat' ? 'tuning.liftUp' : 'tuning.holdIt');
                 const detail = t(verdict.direction === 'sharp' ? 'tuning.centsSharp' : 'tuning.centsFlat', { cents: formatNumber(Math.abs(Math.round(cents))) });
                 return (
-                  <span className={`pa-live-verdict tone-${verdict.tone}`}>
+                  <output className={`pa-live-verdict tone-${verdict.tone}`} aria-live="off">
                     {label} — {cue}
                     {verdict.tone !== 'green' ? <em className="pa-live-cents"> (<bdi>{detail}</bdi>)</em> : null}
-                  </span>
+                  </output>
                 );
               })()}
             </div>
@@ -514,12 +513,12 @@ export function PlayAlongPage() {
             <Mic size={15} />
             {t('playAlong.holdHelp', { seconds: formatNumber(DEFAULT_PLAY_ALONG_HOLD_MS / 1_000) })}
           </p>
-          <div className="playalong-sequence">
+          <ol className="playalong-sequence" aria-label={t('playAlong.noteByNote')}>
             {exercise.notes.map((note, index) => {
               const status = noteStatus(index);
               const graded = results[index];
               return (
-                <span
+                <li
                   key={index}
                   className={`playalong-note ${status} ${graded ? GRADE_TONE[graded.grade] : ''}`}
                   aria-label={t('playAlong.a11yNoteState', {
@@ -528,10 +527,10 @@ export function PlayAlongPage() {
                   })}
                 >
                   <bdi dir="ltr">{note}</bdi>
-                </span>
+                </li>
               );
             })}
-          </div>
+          </ol>
           <div className="settings-actions">
             <button className="ghost-button" type="button" disabled aria-disabled="true">
               <Volume2 size={17} />
@@ -552,7 +551,7 @@ export function PlayAlongPage() {
       {phase === 'done' && summary && percentVerdict && (
         <>
         <SectionCard title={t('playAlong.score')}>
-          <div
+          <section
             className="pa-verdict"
             ref={scoreFocusRef}
             tabIndex={-1}
@@ -575,7 +574,7 @@ export function PlayAlongPage() {
                 {bestLine}
               </p>
             )}
-          </div>
+          </section>
 
           <div className="settings-actions">
             <button className="primary-button" type="button" onClick={start}>

@@ -69,6 +69,11 @@ function classCode(group: any): string | null {
   return typeof existing === 'string' && existing.trim() ? existing.trim().toUpperCase() : null;
 }
 
+export function classShareScope(group: any): string | null {
+  const code = classCode(group);
+  return Number.isInteger(group?.id) && code ? `${group.id}:${code}` : null;
+}
+
 function invitationRoleLabel(role: string, t: ReturnType<typeof useI18n>['t']): string {
   if (role === 'assistant' || role === 'director') return t('class.roleAssistant');
   return t('class.student');
@@ -109,7 +114,7 @@ export function EnsemblePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [copied, setCopied] = useState('');
-  const [manualCopy, setManualCopy] = useState<{ key: string; text: string } | null>(null);
+  const [manualCopy, setManualCopy] = useState<{ scope: string; key: string; text: string } | null>(null);
   const [summaryState, setSummaryState] = useState<ClassResourceState>('idle');
   const [reportState, setReportState] = useState<ClassResourceState>('idle');
   const [rosterState, setRosterState] = useState<ClassResourceState>('idle');
@@ -153,6 +158,14 @@ export function EnsemblePage() {
     : null;
   const verifiedAccountKeyRef = useRef<string | null>(verifiedAccountKey);
   verifiedAccountKeyRef.current = verifiedAccountKey;
+  const activeShareScope = classShareScope(selectedGroup);
+  const activeShareScopeRef = useRef<string | null>(activeShareScope);
+  activeShareScopeRef.current = activeShareScope;
+
+  useEffect(() => {
+    setCopied('');
+    setManualCopy(null);
+  }, [activeShareScope]);
 
   const managesGroup = (group: any): boolean => {
     if (typeof group?.viewer_can_manage === 'boolean') return group.viewer_can_manage;
@@ -201,7 +214,11 @@ export function EnsemblePage() {
 
   const selectGroup = async (groupId: number, requestedGeneration?: number) => {
     const generation = requestedGeneration ?? ++classLoadGenerationRef.current;
-    if (isCurrentClassLoad(generation)) setLoading(true);
+    if (isCurrentClassLoad(generation)) {
+      setLoading(true);
+      setCopied('');
+      setManualCopy(null);
+    }
     try {
       const group = await getEnsembleGroup(groupId);
       if (!isCurrentClassLoad(generation)) return;
@@ -643,6 +660,8 @@ export function EnsemblePage() {
     if (!selectedGroup?.id || !managesSelected || rotatingCode) return;
     const token = captureMutationToken();
     if (!token) return;
+    setCopied('');
+    setManualCopy(null);
     setRotatingCode(true);
     try {
       const result = await rotateEnsembleJoinCode(selectedGroup.id);
@@ -650,9 +669,12 @@ export function EnsemblePage() {
       setSelectedGroup((current: any) => current?.id === result.group_id ? { ...current, join_code: result.join_code } : current);
       setGroups((current) => current.map((group) => group.id === result.group_id ? { ...group, join_code: result.join_code } : group));
       setCopied('');
+      setManualCopy(null);
       setEnsembleStatus(t('class.codeRotated'));
     } catch (error) {
       if (isCurrentMutation(token)) {
+        setCopied('');
+        setManualCopy(null);
         setEnsembleStatus(localizedError(error, 'class.errorRotate'));
       }
     } finally {
@@ -660,14 +682,18 @@ export function EnsemblePage() {
     }
   };
   const copyText = async (text: string, key: string) => {
+    const scope = activeShareScopeRef.current;
+    if (!scope) return;
     setManualCopy(null);
     if (await copyClassShareText(navigator.clipboard, text)) {
+      if (activeShareScopeRef.current !== scope) return;
       setCopied(key);
       window.setTimeout(() => setCopied((current) => (current === key ? '' : current)), 1600);
       return;
     }
+    if (activeShareScopeRef.current !== scope) return;
     setCopied('');
-    setManualCopy({ key, text });
+    setManualCopy({ scope, key, text });
   };
 
   const handlePrint = () => {
@@ -1040,7 +1066,7 @@ export function EnsemblePage() {
                       {rotatingCode ? t('class.rotating') : t(code ? 'class.rotateCode' : 'class.createCode')}
                     </button>
                   </div>
-                  {manualCopy && (
+                  {manualCopy?.scope === activeShareScope && (
                     <label className="ec-field ec-manual-copy">
                       <span>{t('class.copyManually')}</span>
                       <input

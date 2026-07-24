@@ -26,6 +26,30 @@ export const supabase = { auth: {
 } };
 `;
 
+const oauthAuthModule = `
+export const supabaseConfigured = true;
+export const authProviders = { google: true, apple: true };
+export const supabase = { auth: {
+  getSession: async () => ({ data: { session: null } }),
+  onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+  signOut: async () => ({ error: null }),
+  signInWithPassword: async () => ({ data: { session: null }, error: null }),
+  signInWithOAuth: async (credentials) => {
+    localStorage.setItem('e2e.oauthCredentials', JSON.stringify(credentials));
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    return localStorage.getItem('e2e.oauthFailure') === 'true'
+      ? { data: {}, error: new Error('network request failed') }
+      : { data: { url: 'https://provider.example/authorize' }, error: null };
+  },
+} };
+`;
+
+const unconfiguredAuthModule = `
+export const supabaseConfigured = false;
+export const authProviders = { google: false, apple: false };
+export const supabase = null;
+`;
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
@@ -125,6 +149,48 @@ test('focused pack completion stops elapsed time and records weekly activity onc
   expect(after.workspace.elapsedSecondsByStep).toEqual(elapsedAtCompletion);
 });
 
+test('a real Play-Along pack step owns weekly activity so final pack completion does not double-count', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('brasstune.guestAccess', 'true'));
+  await page.route('**/src/hooks/usePitchStream.ts*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: `
+export function usePitchStream() {
+  return {
+    micActive: true,
+    statusMessage: '',
+    streamInfo: { audioContextState: 'running' },
+    startMicrophone: async () => true,
+    stopMicrophone() {},
+  };
+}
+`,
+  }));
+
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Start pack' }).first().click();
+  await page.getByRole('button', { name: /Next/ }).click();
+  await page.getByRole('button', { name: /Next/ }).click();
+  await expect(page).toHaveURL(/\/practice\/scorer\?exercise=cmaj/);
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  const skip = page.getByRole('button', { name: 'Skip note' });
+  for (let index = 0; index < 8; index += 1) await skip.click();
+
+  await expect.poll(() => page.evaluate(() => {
+    const library = JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}');
+    return library.weeklyGoal;
+  })).toMatchObject({ completedMinutes: 1, completedSessions: 1 });
+  await page.getByRole('button', { name: 'Complete step' }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const library = JSON.parse(localStorage.getItem('brasstune.practiceLibrary.v1.guest') ?? '{}');
+    return library.weeklyGoal;
+  })).toMatchObject({ completedMinutes: 1, completedSessions: 1 });
+  await expect.poll(() => page.evaluate(() => {
+    const workspace = JSON.parse(sessionStorage.getItem('brasstune.practiceWorkspace.v1.guest') ?? '{}');
+    return workspace.activityRecordedStepIds;
+  })).toEqual(['cmaj']);
+});
+
 test('session review filters reflections and guest deletion detaches only the matching note', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.guestAccess', 'true');
@@ -195,10 +261,81 @@ test('join return and privacy disclosure survive the auth gateway', async ({ pag
   await page.goto('/ensemble?join=BRASS7');
   const disclosure = page.getByText(/aggregate cloud practice totals/i);
   await expect(disclosure).toBeVisible();
+  await expect(disclosure).toContainText('class directors and BrassTune administrators');
   const signIn = page.getByRole('link', { name: 'Sign in or create an account' });
   await expect(signIn).toHaveAttribute('href', '/?next=%2Fensemble%3Fjoin%3DBRASS7');
   await signIn.click();
   await expect(page).toHaveURL(/\/\?next=%2Fensemble%3Fjoin%3DBRASS7$/);
+});
+
+test('Google and Apple launch real OAuth actions with an exact callback and recoverable provider states', async ({ page }) => {
+  await routeAuthModule(page, oauthAuthModule);
+  await page.goto('/auth/sign-in?next=%2Fensemble%3Fjoin%3DBRASS7');
+
+  const google = page.getByRole('button', { name: 'Continue with Google' });
+  const apple = page.getByRole('button', { name: 'Continue with Apple' });
+  await expect(google).toBeEnabled();
+  await expect(apple).toBeEnabled();
+  await expect(google.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+  await expect(google.locator('svg')).toHaveCount(0);
+  await expect(apple.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+
+  await google.click();
+  await expect(page.getByRole('button', { name: 'Continuing to Google…' })).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('e2e.oauthCredentials') ?? '{}')))
+    .toMatchObject({
+      provider: 'google',
+      options: {
+        redirectTo: `${new URL(page.url()).origin}/auth/callback`,
+        scopes: 'openid email profile',
+        queryParams: { prompt: 'select_account' },
+      },
+    });
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('brasstune.pendingAuthNext')))
+    .toBe('/ensemble?join=BRASS7');
+  await expect(google).toBeEnabled();
+
+  await apple.click();
+  await expect(page.getByRole('button', { name: 'Continuing to Apple…' })).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('e2e.oauthCredentials') ?? '{}')))
+    .toEqual({
+      provider: 'apple',
+      options: { redirectTo: `${new URL(page.url()).origin}/auth/callback` },
+    });
+  await expect(apple).toBeEnabled();
+
+  await page.evaluate(() => localStorage.setItem('e2e.oauthFailure', 'true'));
+  await google.click();
+  await expect(page.getByRole('alert')).toContainText('Account access could not reach the server');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('brasstune.pendingAuthNext'))).toBeNull();
+  await expect(page.getByRole('button', { name: 'Keep practicing as a guest' })).toBeEnabled();
+
+  await page.evaluate(() => {
+    sessionStorage.setItem('brasstune.pendingAuthNext', '/ensemble?join=STALE7');
+    localStorage.removeItem('e2e.oauthFailure');
+  });
+  await page.goto('/auth/callback#error=access_denied&error_description=User+canceled');
+  await expect(page.getByRole('heading', { name: 'Sign-in did not finish' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('brasstune.pendingAuthNext'))).toBeNull();
+});
+
+test('disabled OAuth providers stay visibly unavailable and RTL auth callback arrows follow reading direction', async ({ page }) => {
+  await routeAuthModule(page, signedOutAuthModule);
+  await page.goto('/auth/sign-in?next=https%3A%2F%2Fevil.example%2Fsteal');
+  await expect(page.getByRole('button', { name: 'Google sign-in unavailable' })).toBeDisabled();
+  const unavailableApple = page.getByRole('button', { name: 'Apple sign-in unavailable' });
+  await expect(unavailableApple).toBeDisabled();
+  await expect(unavailableApple.locator('img, svg')).toHaveCount(0);
+
+  await page.unroute('**/src/lib/supabase.ts*');
+  await routeAuthModule(page, unconfiguredAuthModule);
+  await page.addInitScript(() => localStorage.setItem('brasstune.locale', 'ar'));
+  await page.goto('/auth/callback');
+  await expect(page.locator('.au-callback .lucide-arrow-left')).toBeVisible();
+  await page.goto('/auth/sign-in');
+  await expect(page.getByRole('button', { name: 'استمر كضيف' }).locator('.lucide-arrow-left')).toBeVisible();
+  const results = await new AxeBuilder({ page }).include('main').analyze();
+  expect(results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
 });
 
 test('Arabic auth and class surfaces preserve RTL semantics, mixed-direction tokens, and axe gates', async ({ page }) => {
@@ -236,6 +373,7 @@ test('Arabic auth and class surfaces preserve RTL semantics, mixed-direction tok
 });
 
 test('partial class failures stay unavailable, clipboard failure is manual, and Play-Along exposes a focused score', async ({ page }) => {
+  let rotationRequests = 0;
   await routeAuthModule(page, accountAuthModule);
   await page.addInitScript(() => {
     localStorage.setItem('e2e.authSubject', 'verified-subject');
@@ -256,10 +394,20 @@ test('partial class failures stay unavailable, clipboard failure is manual, and 
       primary_instrument_id: 'trumpet',
       onboarding_completed_at: '2026-07-23T12:00:00Z',
     });
-    if (path === '/api/ensemble/groups') return json(route, [{ id: 1, name: 'Concert Band', join_code: 'BRASS7', viewer_can_manage: true, viewer_role: 'owner' }]);
+    if (path === '/api/ensemble/groups') return json(route, [
+      { id: 1, name: 'Concert Band', join_code: 'BRASS7', viewer_can_manage: true, viewer_role: 'owner' },
+      { id: 2, name: 'Second Band', join_code: 'SECOND8', viewer_can_manage: true, viewer_role: 'owner' },
+    ]);
     if (path === '/api/ensemble/groups/1') return json(route, { id: 1, name: 'Concert Band', join_code: 'BRASS7', viewer_can_manage: true, viewer_role: 'owner', members: [] });
+    if (path === '/api/ensemble/groups/2') return json(route, { id: 2, name: 'Second Band', join_code: 'SECOND8', viewer_can_manage: true, viewer_role: 'owner', members: [] });
+    if (path === '/api/ensemble/groups/2/join-code/rotate') {
+      rotationRequests += 1;
+      return rotationRequests > 1
+        ? json(route, { detail: 'temporarily unavailable' }, 503)
+        : json(route, { group_id: 2, join_code: 'FRESH9' });
+    }
     if (path === '/api/instruments') return json(route, []);
-    if (path === '/api/ensemble/invitations' || path === '/api/ensemble/summary' || path === '/api/ensemble/report' || path === '/api/ensemble/groups/1/roster') {
+    if (path === '/api/ensemble/invitations' || path === '/api/ensemble/summary' || path === '/api/ensemble/report' || /\/roster$/.test(path)) {
       return json(route, { detail: 'temporarily unavailable' }, 503);
     }
     return json(route, { detail: 'not found' }, 404);
@@ -273,6 +421,28 @@ test('partial class failures stay unavailable, clipboard failure is manual, and 
   await page.getByRole('button', { name: 'Share link' }).click();
   await expect(page.getByText('Copied')).toHaveCount(0);
   await expect(page.getByLabel(/Clipboard access failed/)).toHaveValue(/ensemble\?join=BRASS7/);
+  await page.getByRole('button', { name: 'Second Band' }).click();
+  await expect(page.getByLabel(/Clipboard access failed/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Share link' }).click();
+  await expect(page.getByLabel(/Clipboard access failed/)).toHaveValue(/ensemble\?join=SECOND8/);
+
+  await page.getByRole('button', { name: 'Rotate code' }).click();
+  await expect(page.getByLabel(/Clipboard access failed/)).toHaveCount(0);
+  await expect(page.getByText('FRESH9')).toBeVisible();
+  await page.getByRole('button', { name: 'Share link' }).click();
+  await expect(page.getByLabel(/Clipboard access failed/)).toHaveValue(/ensemble\?join=FRESH9/);
+
+  await page.getByRole('button', { name: 'Rotate code' }).click();
+  await expect(page.getByLabel(/Clipboard access failed/)).toHaveCount(0);
+  await expect(page.getByText('Cloud practice is unavailable right now. Guest practice still works on this device.')).toBeVisible();
+
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async () => undefined },
+  }));
+  await page.getByRole('button', { name: 'Share link' }).click();
+  await expect(page.getByText('Copied')).toBeVisible();
+  await expect(page.getByLabel(/Clipboard access failed/)).toHaveCount(0);
 
   await page.route('**/src/hooks/usePitchStream.ts*', (route) => route.fulfill({
     status: 200,
@@ -291,11 +461,21 @@ export function usePitchStream() {
   }));
   await page.goto('/practice/scorer');
   await page.getByRole('button', { name: 'Start', exact: true }).click();
-  await expect(page.getByRole('progressbar', { name: /Hold C steadily/ })).toHaveAttribute('aria-valuenow', '0');
+  const holdProgress = page.getByRole('progressbar', { name: /Hold C steadily/ });
+  await expect(holdProgress).toHaveAttribute('value', '0');
+  await expect(holdProgress).toHaveJSProperty('tagName', 'PROGRESS');
+  const targetStatus = page.getByRole('status').filter({ hasText: /Target C/ });
+  await expect(targetStatus).toHaveJSProperty('tagName', 'OUTPUT');
+  const noteList = page.getByRole('list', { name: 'Note by note' });
+  await expect(noteList).toHaveJSProperty('tagName', 'OL');
+  await expect(noteList.getByRole('listitem')).toHaveCount(8);
   await expect(page.locator('.playalong-note').first()).toHaveAttribute('aria-label', /C, current target/);
+  const liveAxe = await new AxeBuilder({ page }).include('main').analyze();
+  expect(liveAxe.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
   const skip = page.getByRole('button', { name: 'Skip note' });
   for (let index = 0; index < 8; index += 1) await skip.click();
   await expect(page.locator('.pa-verdict')).toBeFocused();
+  await expect(page.locator('.pa-verdict')).toHaveJSProperty('tagName', 'SECTION');
   const summaryHeight = await page.locator('.pa-details > summary').evaluate((element) => element.getBoundingClientRect().height);
   expect(summaryHeight).toBeGreaterThanOrEqual(44);
   await expect(page.getByText('Show', { exact: true })).toBeVisible();

@@ -2238,6 +2238,39 @@ td a {
   cursor: default;
 }
 
+.apple-button {
+  display: flex;
+  width: 100%;
+  min-height: var(--tap);
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 18px;
+  border: 1px solid #000;
+  border-radius: 999px;
+  background: #000;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease, box-shadow 0.15s ease;
+}
+
+.apple-button img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.apple-button:hover:not(:disabled) {
+  box-shadow: 0 1px 4px rgba(255, 255, 255, 0.22);
+}
+
+.apple-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .auth-divider {
   display: flex;
   align-items: center;

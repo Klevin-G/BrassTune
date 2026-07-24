@@ -129,7 +129,7 @@ export function GuidedWarmupPanel({ nowMilliseconds = systemWarmupClock }: { now
     if (elapsed >= GUIDED_WARMUP_SECONDS) {
       if (!completionRecordedRef.current) {
         completionRecordedRef.current = true;
-        recordActivity(5);
+        recordActivity(5, { kind: 'warmup', id: 'guided-5' });
       }
     }
   }, [elapsed, position.index, recordActivity, setWarmupProgress]);

@@ -22,10 +22,12 @@ import {
   parsePracticeWorkspace,
   reconcilePracticeLibraryWeek,
   recordPracticeActivity,
+  recordPracticeWorkspaceStepActivity,
   resolvePracticeOwner,
   removeCustomExercise,
   removeMetronomePreset,
   serializePracticeWorkspace,
+  shouldRecordPracticeWorkspaceCompletion,
   upsertCustomExercise,
   writePracticeLibrary,
 } from './practiceLibrary';
@@ -140,6 +142,7 @@ describe('practice library storage', () => {
       stepIndex: 1,
       elapsedSecondsByStep: { 'guided-5': 17, 'concert-bb': 8, cmaj: 0 },
       completedStepIds: ['guided-5', 'concert-bb'],
+      activityRecordedStepIds: [],
     });
     expect(stored).not.toHaveProperty('pack');
     expect(parsePracticeWorkspace(serialized)).toEqual(workspace);
@@ -154,8 +157,27 @@ describe('practice library storage', () => {
     expect(isPracticeWorkspaceComplete(workspace)).toBe(false);
     workspace = completePracticeWorkspaceStep(workspace);
     expect(isPracticeWorkspaceComplete(workspace)).toBe(true);
+    expect(shouldRecordPracticeWorkspaceCompletion(workspace)).toBe(true);
     expect(completedPracticeWorkspaceMinutes(workspace)).toBe(1);
     expect(completePracticeWorkspaceStep(workspace)).toBe(workspace);
+  });
+
+  it('attributes real warm-up and Play-Along activity once so pack completion cannot double-count it', () => {
+    let workspace = createPracticeWorkspace(BUILT_IN_PRACTICE_PACKS[0])!;
+    const unrelated = recordPracticeWorkspaceStepActivity(workspace, { kind: 'play-along', id: 'longtones' });
+    expect(unrelated).toBe(workspace);
+
+    workspace = recordPracticeWorkspaceStepActivity(workspace, { kind: 'warmup', id: 'guided-5' });
+    expect(workspace.activityRecordedStepIds).toEqual(['guided-5']);
+    expect(recordPracticeWorkspaceStepActivity(workspace, { kind: 'warmup', id: 'guided-5' })).toBe(workspace);
+
+    workspace = recordPracticeWorkspaceStepActivity(workspace, { kind: 'play-along', id: 'cmaj' });
+    workspace = movePracticeWorkspace(workspace, 1);
+    workspace = movePracticeWorkspace(workspace, 2);
+    workspace = completePracticeWorkspaceStep(workspace);
+    expect(workspace.activityRecordedStepIds).toEqual(['guided-5', 'cmaj']);
+    expect(isPracticeWorkspaceComplete(workspace)).toBe(true);
+    expect(shouldRecordPracticeWorkspaceCompletion(workspace)).toBe(false);
   });
 
   it('detaches only reflections for a deleted session while preserving their text', () => {
@@ -196,6 +218,11 @@ describe('practice library storage', () => {
     expect(parsePracticeWorkspace(JSON.stringify(tamperedPack))).toBeNull();
 
     const stored = JSON.parse(serializePracticeWorkspace(createPracticeWorkspace(pack)!)!);
+    const legacyStored = { ...stored };
+    delete legacyStored.activityRecordedStepIds;
+    expect(parsePracticeWorkspace(JSON.stringify(legacyStored))).toMatchObject({
+      activityRecordedStepIds: [],
+    });
     expect(parsePracticeWorkspace(JSON.stringify({ ...stored, stepIndex: 99 }))).toBeNull();
     expect(parsePracticeWorkspace(JSON.stringify({ ...stored, packVersion: 99 }))).toBeNull();
     expect(parsePracticeWorkspace(JSON.stringify({ ...stored, injectedRoute: '/admin' }))).toBeNull();
