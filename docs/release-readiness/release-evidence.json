@@ -1,7 +1,7 @@
 {
   "updated": "2026-07-24",
   "deployed_application_revision": "26683c82c42839016383fb9cab676c9a35d554ca",
-  "decision": "web_backend_production_gate_passed_pending_external_native_identity_and_outreach_gates",
+  "decision": "web_backend_and_outreach_draft_gates_passed_pending_external_native_identity_gates",
   "github_actions": {
     "status": "disabled",
     "release_gate": "must_not_be_used"
@@ -34,13 +34,20 @@
       "canonical_url": "https://brasstune.vercel.app"
     },
     "hosted_smoke": "8/8 passed",
-    "provider_error_scan": "no errors returned in checked post-deploy window"
+    "provider_error_scan": "no errors returned in checked post-deploy window",
+    "gmail_outreach": {
+      "sender": "brasstune1@gmail.com",
+      "drafts": 44,
+      "unique_recipients": 44,
+      "unique_subjects": 44,
+      "duplicates": 0,
+      "sent": 0
+    }
   },
   "pending": {
     "apple_provider_and_signing": "external",
     "physical_device_microphone": "external",
     "disposable_live_account_lifecycle": "not_completed",
-    "human_language_and_accessibility_review": "external",
-    "gmail_sender_identity": "incorrect_do_not_create_drafts"
+    "human_language_and_accessibility_review": "external"
   }
 }

@@ -26,12 +26,12 @@ The verified web/backend candidate is deployed at the exact merged revision abov
 3. Vercel deployment `dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v` is ready and owns `https://brasstune.vercel.app`.
 4. Hosted smoke passed web root, readiness, exact version, two CORS paths, WebSocket app response, query-token rejection, and bad-Origin rejection.
 5. Render and Vercel post-deploy error queries returned no errors for the checked window.
+6. Gmail outreach preparation completed in `brasstune1@gmail.com`: 44 drafts, 44 unique recipients, 44 unique subjects, and no duplicates. No message was sent.
 
 ## External blockers
 
 - Apple live provider configuration and signing remain external.
 - Google is enabled on the linked Supabase project; Apple remains disabled until its Apple Developer credentials are configured.
 - Physical-device microphone/audio validation remains external.
-- The connected Gmail sender identity is incorrect. Do not create outreach drafts until the designated sender is connected.
 
-No claim here establishes Apple live-provider enablement, signed native delivery, physical-device microphone quality, disposable live-account lifecycle completion, or sent/created Gmail drafts.
+No claim here establishes Apple live-provider enablement, signed native delivery, physical-device microphone quality, disposable live-account lifecycle completion, or sent Gmail messages.

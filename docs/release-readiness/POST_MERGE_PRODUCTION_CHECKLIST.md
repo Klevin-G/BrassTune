@@ -10,8 +10,8 @@ GitHub Actions is disabled. Do not wait for, trigger, or cite Actions checks for
 4. [x] Deploy Vercel: `dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v`; `https://brasstune.vercel.app` serves the production artifact.
 5. [x] Run hosted smoke: all 8 checks passed; provider error queries returned no errors for the checked window.
 6. Keep Apple live provider setup, signing, and physical-device microphone validation as separate external gates.
-7. Do not create Gmail outreach drafts: reconnect the designated BrassTune sender first.
+7. [x] Create the professor outreach set in `brasstune1@gmail.com`: 44 unique drafts verified; none sent.
 
 ## Completion record
 
-The web/backend production record is complete for the exact application revision above. Apple/provider signing, physical-device audio, disposable-account lifecycle, and the designated Gmail sender remain separate gates.
+The web/backend production record and Gmail drafting record are complete. Apple/provider signing, physical-device audio, and disposable-account lifecycle remain separate gates.

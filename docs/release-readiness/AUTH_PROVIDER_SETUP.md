@@ -1,6 +1,6 @@
 # Auth Provider Setup
 
-Updated: 2026-07-23.
+Updated: 2026-07-24.
 
 ## Required configuration
 
@@ -11,6 +11,8 @@ Updated: 2026-07-23.
 | Google | Google OAuth client configuration, Supabase Google provider, callback allowlist | Linked provider is enabled; complete live lifecycle verification remains pending. |
 | Apple | Apple Team/Key/Services ID, native App ID capability, Supabase Apple provider, callback allowlist | Code complete; provider disabled pending credentials/setup. |
 | Native callbacks | `com.brasstune.auth://oauth/google?state=*` allowlist and app URL scheme | The Supabase TOML glob escapes the literal query marker as `google\\?state=*`; push it before live iOS Google QA. |
+
+The Supabase CLI is already authenticated for project and migration reads; no Supabase account password or database password is required for those checks. Apple enablement still starts in Apple Developer because Supabase cannot generate the required Apple Team/App/Services/Key credentials. Do not give Codex an Apple login or password.
 
 ## Redirect URLs
 

@@ -4,7 +4,7 @@ Updated: 2026-07-24. Deployed application revision: `26683c82c42839016383fb9cab6
 
 ## Current decision
 
-The web/backend candidate is deployed and hosted smoke passes on the recorded application revision. Local web, backend, Swift, simulator, audit, and independent-review gates pass, and linked Supabase migrations match through `20260724072904`. GitHub Actions remained disabled and was not used. Apple/provider signing, physical-device audio, disposable-account lifecycle, human language QA, and the designated Gmail sender remain separate gates.
+The web/backend candidate is deployed and hosted smoke passes on the recorded application revision. Local web, backend, Swift, simulator, audit, and independent-review gates pass, linked Supabase migrations match through `20260724072904`, and 44 unique professor outreach drafts are prepared in the designated Gmail account. GitHub Actions remained disabled and was not used. Apple/provider signing, physical-device audio, disposable-account lifecycle, and human language QA remain separate gates.
 
 ## Primary documents
 

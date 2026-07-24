@@ -31,4 +31,4 @@ Stop the rollout for a failed migration, mismatched revision, failed readiness/h
 - Render: roll back only to a previously recorded known-good deployment compatible with the applied database migration state.
 - Supabase: do not reverse migrations without a reviewed data-compatibility plan; prefer a forward corrective migration when safe.
 
-Record the incident, affected surface, provider deployment IDs, revisions, data impact, and recovery verification. Apple provider/signing and physical-device microphone evidence are external and are not rollback proof. Gmail drafts remain prohibited until the designated sender identity is connected.
+Record the incident, affected surface, provider deployment IDs, revisions, data impact, and recovery verification. Apple provider/signing and physical-device microphone evidence are external and are not rollback proof. The 44 Gmail outreach drafts were created separately and were not sent.
