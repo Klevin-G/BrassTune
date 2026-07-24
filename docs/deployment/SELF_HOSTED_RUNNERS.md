@@ -108,9 +108,9 @@ were retired on 2026-07-24. The retry endpoint is now triggered by a private,
 zero-argument Supabase function scheduled with pg_cron. It consumes no GitHub
 Actions minutes and never routes its HMAC credentials through a runner.
 
-After the Supabase schedule has produced a successful request, remove the retired
-repository runner registration and its isolated container/volume according to the
-normal host change process. Do not remove the general Linux or macOS CI runners.
+After the first scheduled request returned `204`, the retired repository runner
+registration, isolated container, volume, and maintenance image tags were removed.
+The general Linux and macOS CI runners were intentionally preserved.
 The historical image under `scripts/ci/maintenance-runner/` is not an active
 production path and must not be started for account-deletion maintenance.
 
