@@ -4,6 +4,25 @@ The retry executor is scheduled inside Supabase with `pg_cron` and calls Render
 asynchronously with `pg_net`. It replaces the retired GitHub Actions workflow,
 uses zero GitHub Actions minutes, and keeps its credentials in Vault.
 
+## Production verification
+
+Verified on 2026-07-24 against merged revision
+`974271f963628fa6fb07374ce8ec04825230a577`:
+
+- Supabase migration `20260724053727` is recorded, and the named job is active
+  with schedule `*/15 * * * *`.
+- Render deploy `dep-d9hg17epbkes73a0d7cg` is live at the same revision; public
+  readiness reports every check healthy.
+- A manually generated valid signed request returned `204`; replaying the same
+  nonce and using the retired static-secret header each returned `403`.
+- A manual call through the private SQL signer produced pg_net request `1745`
+  with `204` and no error.
+- The first scheduled cron run, run `1748` at 06:15 UTC, succeeded; its pg_net
+  request `1747` returned `204` with no error.
+- The obsolete maintenance-only GitHub runner registration, container, volume,
+  and image tags were removed after the scheduled success. General Linux/macOS
+  runners were not changed, and every remaining workflow stays manually disabled.
+
 ## One-time preflight
 
 Before applying migration
@@ -89,7 +108,7 @@ select cron.unschedule('brasstune-account-deletion-retry');
 ```
 
 To restore it after the cause is resolved, reapply the reviewed migration through
-an explicit reviewed migration, or run the same safe scheduling function directly:
+a new explicit reviewed migration, or run the same safe scheduling function directly:
 
 ```sql
 select cron.schedule(
