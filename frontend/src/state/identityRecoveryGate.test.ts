@@ -21,6 +21,16 @@ describe('restored-session identity recovery gates', () => {
     })).toBe('recovery');
   });
 
+  it('allows an exact previously verified local owner while cloud identity is recovering', () => {
+    expect(practiceLibraryGateState({
+      loading: false,
+      hasAuthSession: true,
+      hasProfile: false,
+      hasLocalPracticeOwner: true,
+      ownerReady: true,
+    })).toBe('ready');
+  });
+
   it('keeps unresolved session restoration and ordinary anonymous access separate', () => {
     expect(appRouteAccessState({
       loading: true,

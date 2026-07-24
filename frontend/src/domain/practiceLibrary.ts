@@ -470,6 +470,30 @@ export function completePracticeWorkspaceStep(workspace: PracticeWorkspace): Pra
   return { ...workspace, completedStepIds: [...workspace.completedStepIds, stepId] };
 }
 
+export function isPracticeWorkspaceComplete(workspace: PracticeWorkspace): boolean {
+  return workspace.pack.steps.every((step) => workspace.completedStepIds.includes(step.id));
+}
+
+export function completedPracticeWorkspaceMinutes(workspace: PracticeWorkspace): number {
+  const elapsedSeconds = Object.values(workspace.elapsedSecondsByStep)
+    .reduce((total, seconds) => total + seconds, 0);
+  return Math.max(1, Math.round(elapsedSeconds / 60));
+}
+
+export function detachPracticeReflectionsForSession(
+  library: PracticeLibrary,
+  sessionId: string,
+): PracticeLibrary {
+  let changed = false;
+  const reflections = library.reflections.map((reflection) => {
+    if (reflection.sessionId !== sessionId) return reflection;
+    changed = true;
+    const { sessionId: _removed, ...detached } = reflection;
+    return detached;
+  });
+  return changed ? { ...library, reflections } : library;
+}
+
 export function movePracticeWorkspace(workspace: PracticeWorkspace, stepIndex: number): PracticeWorkspace {
   if (!Number.isInteger(stepIndex) || stepIndex < 0 || stepIndex >= workspace.pack.steps.length || stepIndex === workspace.stepIndex) {
     return workspace;
@@ -502,8 +526,10 @@ export function clearAccountPracticeState(
   return keys.length + streakKeys + 1;
 }
 
-export function resolvePracticeOwner(auth: { loading: boolean; hasAuthSession: boolean; isSignedIn: boolean; profileId?: string | number | null }): string | null {
-  if (auth.loading || (auth.hasAuthSession && auth.profileId == null)) return null;
+export function resolvePracticeOwner(auth: { loading: boolean; hasAuthSession: boolean; isSignedIn: boolean; profileId?: string | number | null; localPracticeOwnerId?: string | null }): string | null {
+  if (auth.loading) return null;
+  if (auth.hasAuthSession && /^account:[1-9]\d{0,18}$/.test(auth.localPracticeOwnerId ?? '')) return auth.localPracticeOwnerId!;
+  if (auth.hasAuthSession && auth.profileId == null) return null;
   if (auth.isSignedIn && auth.profileId != null) return `account:${auth.profileId}`;
   return 'guest';
 }

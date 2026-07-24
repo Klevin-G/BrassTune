@@ -3,8 +3,11 @@ import {
   PRACTICE_LIBRARY_VERSION,
   addPracticeWorkspaceElapsed,
   completePracticeWorkspaceStep,
+  completedPracticeWorkspaceMinutes,
   createPracticeWorkspace,
   emptyPracticeLibrary,
+  detachPracticeReflectionsForSession,
+  isPracticeWorkspaceComplete,
   movePracticeWorkspace,
   normalizeMetronomePreset,
   ownerWorkspaceKey,
@@ -54,6 +57,7 @@ interface PracticeLibraryState {
   saveReflection: (text: string, sessionId?: string) => PracticeReflection | null;
   updateReflection: (id: string, text: string) => boolean;
   deleteReflection: (id: string) => void;
+  detachReflectionsForSession: (sessionId: string) => void;
   setWarmupProgress: (progress: Pick<WarmupProgress, 'elapsedSeconds' | 'stepIndex'>) => void;
   startWorkspace: (pack: PracticePack) => void;
   moveWorkspace: (stepIndex: number) => void;
@@ -75,15 +79,17 @@ export function practiceLibraryGateState({
   loading,
   hasAuthSession,
   hasProfile,
+  hasLocalPracticeOwner = false,
   ownerReady,
 }: {
   loading: boolean;
   hasAuthSession: boolean;
   hasProfile: boolean;
+  hasLocalPracticeOwner?: boolean;
   ownerReady: boolean;
 }): 'loading' | 'recovery' | 'ready' {
   if (loading) return 'loading';
-  if (hasAuthSession && !hasProfile) return 'recovery';
+  if (hasAuthSession && !hasProfile && !hasLocalPracticeOwner) return 'recovery';
   if (!ownerReady) return 'loading';
   return 'ready';
 }
@@ -198,7 +204,13 @@ export function PracticeLibraryProvider({
 }) {
   const auth = useAuth();
   const { t } = useI18n();
-  const ownerId = resolvePracticeOwner({ loading: auth.loading, hasAuthSession: auth.hasAuthSession, isSignedIn: auth.isSignedIn, profileId: auth.profile?.id });
+  const ownerId = resolvePracticeOwner({
+    loading: auth.loading,
+    hasAuthSession: auth.hasAuthSession,
+    isSignedIn: auth.isSignedIn,
+    profileId: auth.profile?.id,
+    localPracticeOwnerId: auth.localPracticeOwnerId,
+  });
   const [loadedState, setLoadedState] = useState<LoadedPracticeState>(() => ({
     ownerId,
     library: ownerId ? readPracticeLibrary(localStorage, ownerId, now()) : emptyPracticeLibrary(now()),
@@ -401,6 +413,10 @@ export function PracticeLibraryProvider({
     updateLibrary((current) => ({ ...current, reflections: current.reflections.filter((item) => item.id !== id) }));
   }, [updateLibrary]);
 
+  const detachReflectionsForSession = useCallback((sessionId: string) => {
+    updateLibrary((current) => detachPracticeReflectionsForSession(current, sessionId));
+  }, [updateLibrary]);
+
   const setWarmupProgress = useCallback((progress: Pick<WarmupProgress, 'elapsedSeconds' | 'stepIndex'>) => {
     const elapsedSeconds = Math.max(0, Math.min(300, Math.round(progress.elapsedSeconds)));
     const stepIndex = Math.max(0, Math.min(4, Math.round(progress.stepIndex)));
@@ -458,15 +474,20 @@ export function PracticeLibraryProvider({
 
   const addWorkspaceElapsed = useCallback((seconds = 1) => {
     const current = loadedStateRef.current.workspace;
-    if (!current) return;
+    if (!current || isPracticeWorkspaceComplete(current)) return;
     persistWorkspace(addPracticeWorkspaceElapsed(current, seconds));
   }, [persistWorkspace]);
 
   const completeWorkspaceStep = useCallback(() => {
     const current = loadedStateRef.current.workspace;
     if (!current) return;
-    persistWorkspace(completePracticeWorkspaceStep(current));
-  }, [persistWorkspace]);
+    const wasComplete = isPracticeWorkspaceComplete(current);
+    const next = completePracticeWorkspaceStep(current);
+    persistWorkspace(next);
+    if (!wasComplete && isPracticeWorkspaceComplete(next)) {
+      recordActivity(completedPracticeWorkspaceMinutes(next));
+    }
+  }, [persistWorkspace, recordActivity]);
 
   const exitWorkspace = useCallback(() => persistWorkspace(null), [persistWorkspace]);
 
@@ -488,18 +509,20 @@ export function PracticeLibraryProvider({
     saveReflection,
     updateReflection,
     deleteReflection,
+    detachReflectionsForSession,
     setWarmupProgress,
     startWorkspace,
     moveWorkspace,
     addWorkspaceElapsed,
     completeWorkspaceStep,
     exitWorkspace,
-  }), [addWorkspaceElapsed, completeWorkspaceStep, deleteExercise, deleteMetronomePreset, deleteReflection, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, recordSavedSession, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
+  }), [addWorkspaceElapsed, completeWorkspaceStep, deleteExercise, deleteMetronomePreset, deleteReflection, detachReflectionsForSession, exitWorkspace, isFavorite, library, moveWorkspace, ownerId, recordActivity, recordRecent, recordSavedSession, saveExercise, saveMetronomePreset, saveReflection, setWarmupProgress, setWeeklyGoal, startWorkspace, storageError, toggleFavorite, updateReflection, workspace]);
 
   const gateState = practiceLibraryGateState({
     loading: auth.loading,
     hasAuthSession: auth.hasAuthSession,
     hasProfile: auth.profile != null,
+    hasLocalPracticeOwner: auth.localPracticeOwnerId != null,
     ownerReady,
   });
   if (gateState === 'recovery' || guestRecoveryState !== 'idle') {

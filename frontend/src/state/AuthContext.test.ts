@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { transitionToGuest } from './AuthContext';
+import {
+  readVerifiedPracticeNamespace,
+  transitionToGuest,
+  verifiedPracticeNamespaceKey,
+  writeVerifiedPracticeNamespace,
+} from './AuthContext';
 import { practiceLibraryGateState } from './PracticeLibraryContext';
 
 describe('guest session transition', () => {
@@ -99,5 +104,34 @@ describe('guest session transition', () => {
     expect(clearInMemoryAccount).not.toHaveBeenCalled();
     expect(signOutLocal).not.toHaveBeenCalled();
     expect(activateGuest).toHaveBeenCalledOnce();
+  });
+});
+
+describe('verified local practice namespace cache', () => {
+  it('restores only the namespace stored for the exact verified auth subject', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+
+    expect(writeVerifiedPracticeNamespace(storage, 'subject-a', 42)).toBe('account:42');
+    expect(readVerifiedPracticeNamespace(storage, 'subject-a')).toBe('account:42');
+    expect(readVerifiedPracticeNamespace(storage, 'subject-b')).toBeNull();
+    expect(values.has(verifiedPracticeNamespaceKey('subject-a'))).toBe(true);
+  });
+
+  it('rejects malformed, cross-subject, oversized, and extra-field cache values', () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null };
+    const key = verifiedPracticeNamespaceKey('subject-a');
+
+    values.set(key, JSON.stringify({ version: 1, subject: 'subject-b', ownerId: 'account:42' }));
+    expect(readVerifiedPracticeNamespace(storage, 'subject-a')).toBeNull();
+    values.set(key, JSON.stringify({ version: 1, subject: 'subject-a', ownerId: 'guest' }));
+    expect(readVerifiedPracticeNamespace(storage, 'subject-a')).toBeNull();
+    values.set(key, JSON.stringify({ version: 1, subject: 'subject-a', ownerId: 'account:42', injected: true }));
+    expect(readVerifiedPracticeNamespace(storage, 'subject-a')).toBeNull();
+    expect(readVerifiedPracticeNamespace(storage, 'x'.repeat(201))).toBeNull();
   });
 });

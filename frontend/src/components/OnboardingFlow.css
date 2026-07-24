@@ -40,7 +40,7 @@
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   gap: 8px;
-  padding-right: 48px;
+  padding-inline-end: 48px;
 }
 
 .ob-progress span {
@@ -141,7 +141,8 @@
 
 .ob-feature-list li {
   position: relative;
-  padding: 11px 12px 11px 32px;
+  padding-block: 11px;
+  padding-inline: 32px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-sunken);
@@ -153,7 +154,7 @@
 .ob-feature-list li::before {
   position: absolute;
   top: 16px;
-  left: 14px;
+  inset-inline-start: 14px;
   width: 7px;
   height: 7px;
   border-radius: 999px;

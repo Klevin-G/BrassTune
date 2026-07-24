@@ -1,4 +1,4 @@
-import { ArrowLeft, Gauge, Music2, Percent, SlidersHorizontal, Timer } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Gauge, Music2, Percent, SlidersHorizontal, Timer } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useParams } from 'react-router-dom';
@@ -31,7 +31,7 @@ export function classifySessionReviewError(error: unknown): Exclude<ReviewLoadEr
 }
 
 export function SessionReviewPage() {
-  const { t, formatDate, formatNumber } = useI18n();
+  const { dir, t, formatDate, formatNumber } = useI18n();
   const { id } = useParams();
   const auth = useAuth();
   const guestAccess = !auth.loading && !auth.isSignedIn && auth.guestMode ? GUEST_WORKSPACE_ACCESS : undefined;
@@ -188,7 +188,7 @@ export function SessionReviewPage() {
         }
         action={
           <Link className="ghost-button" to="/sessions">
-            <ArrowLeft size={16} />
+            {dir === 'rtl' ? <ArrowRight size={16} /> : <ArrowLeft size={16} />}
             {t('sessionReview.all')}
           </Link>
         }

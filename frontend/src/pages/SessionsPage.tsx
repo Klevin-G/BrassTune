@@ -9,6 +9,7 @@ import { describeInTunePercent } from '../domain/tuningLanguage';
 import { deleteGuestSession, GUEST_WORKSPACE_ACCESS, listGuestSessions, type GuestSessionDetail } from '../domain/guestSessions';
 import type { PracticeSession } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import { useI18n } from '../i18n/LocaleContext';
 import type { MessageId } from '../i18n/messages.base';
 import './SessionsPage.css';
@@ -37,6 +38,7 @@ export function resolvePostDeleteFocusTarget(savedTarget: HTMLElement | null, ro
 export function SessionsPage() {
   const { t, formatDate } = useI18n();
   const auth = useAuth();
+  const { detachReflectionsForSession } = usePracticeLibrary();
   const guestAccess = !auth.loading && !auth.isSignedIn && auth.guestMode ? GUEST_WORKSPACE_ACCESS : undefined;
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   const [filter, setFilter] = useState<SessionFilter>('all');
@@ -110,6 +112,7 @@ export function SessionsPage() {
     try {
       const deleted = deleteGuestSession(session.id, guestAccess);
       if (!deleted) throw new Error('Guest workspace access is unavailable.');
+      detachReflectionsForSession(String(session.id));
       setSessions((current) => current.filter((item) => item.id !== session.id));
       setStatus(t('sessions.deleted'));
       setPendingDelete(null);

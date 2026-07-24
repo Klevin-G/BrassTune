@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, Clock, Flame, Gauge, LineChart, Target, TrendingUp, Waves } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ChevronLeft, ChevronRight, Clock, Flame, Gauge, LineChart, Target, TrendingUp, Waves } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -117,7 +117,7 @@ export function ProgressRangeControls({
 }
 
 export function ProgressPage() {
-  const { locale, t, formatNumber } = useI18n();
+  const { dir, locale, t, formatNumber } = useI18n();
   const { instrumentId } = useAppSettings();
   const auth = useAuth();
   const [stats, setStats] = useState<NoteStats[]>([]);
@@ -328,7 +328,7 @@ export function ProgressPage() {
               action={
                 <Link to="/practice" className="primary-button">
                   {t('progress.recordFirst')}
-                  <ArrowRight size={18} />
+                  <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
                 </Link>
               }
             />
@@ -350,7 +350,7 @@ export function ProgressPage() {
         action={
           <Link to="/practice" className="primary-button">
             {t('progress.keepPracticing')}
-            <ArrowRight size={18} />
+            <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
           </Link>
         }
       />
@@ -535,7 +535,10 @@ export function ProgressPage() {
       )}
 
       <details className="pg-advanced">
-        <summary>{t('progress.advanced')}</summary>
+        <summary>
+          {dir === 'rtl' ? <ChevronLeft className="pg-advanced-caret rtl" size={18} /> : <ChevronRight className="pg-advanced-caret" size={18} />}
+          <span>{t('progress.advanced')}</span>
+        </summary>
         <div className="pg-advanced-body">
           <ProgressRangeControls
             period={period}

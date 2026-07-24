@@ -283,6 +283,11 @@
 }
 
 .pa-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
   cursor: pointer;
   list-style: none;
   color: var(--muted);
@@ -295,15 +300,14 @@
   display: none;
 }
 
-.pa-details > summary::after {
-  content: 'Show';
-  float: right;
+.pa-details-toggle {
   color: var(--muted-2);
   font-weight: 600;
 }
 
-.pa-details[open] > summary::after {
-  content: 'Hide';
+.pa-verdict:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
 }
 
 .pa-details .playalong-results {

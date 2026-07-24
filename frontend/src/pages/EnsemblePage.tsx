@@ -46,6 +46,7 @@ function relativeWhen(value: string | null, t: ReturnType<typeof useI18n>['t'], 
 }
 
 type Tone = 'green' | 'amber' | 'red' | 'muted';
+type ClassResourceState = 'idle' | 'ready' | 'error';
 
 type ClassMutationToken = {
   accountKey: string;
@@ -79,6 +80,19 @@ const SAMPLE_ROSTER = [
   { name: 'Priya S.', instrument: 'horn', last: '2d ago', minutes: 25 },
 ];
 
+export async function copyClassShareText(
+  clipboard: Pick<Clipboard, 'writeText'> | null | undefined,
+  text: string,
+): Promise<boolean> {
+  if (!clipboard || typeof clipboard.writeText !== 'function') return false;
+  try {
+    await clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function EnsemblePage() {
   const { locale, t, formatDate, formatNumber } = useI18n();
   const localizedError = (error: unknown, id: MessageId) => locale === 'en' ? friendlyUserFacingError(error, t(id)) : t(id);
@@ -95,6 +109,11 @@ export function EnsemblePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [copied, setCopied] = useState('');
+  const [manualCopy, setManualCopy] = useState<{ key: string; text: string } | null>(null);
+  const [summaryState, setSummaryState] = useState<ClassResourceState>('idle');
+  const [reportState, setReportState] = useState<ClassResourceState>('idle');
+  const [rosterState, setRosterState] = useState<ClassResourceState>('idle');
+  const [invitationsState, setInvitationsState] = useState<ClassResourceState>('idle');
   const [acceptInstruments, setAcceptInstruments] = useState<Record<number, string>>({});
   const [pendingRemove, setPendingRemove] = useState<{ memberId: number; label: string } | null>(null);
   const [pendingLeave, setPendingLeave] = useState<{ groupId: number; label: string } | null>(null);
@@ -190,16 +209,22 @@ export function EnsemblePage() {
       setSummary(null);
       setReport(null);
       setRoster(null);
+      setSummaryState('idle');
+      setReportState('idle');
+      setRosterState('idle');
       if (managesGroup(group)) {
-        const [summaryData, reportData, rosterData] = await Promise.all([
-          getEnsembleSummary(groupId).catch(() => null),
-          getEnsembleReport(groupId).catch(() => null),
-          getEnsembleRoster(groupId).catch(() => null),
+        const [summaryResult, reportResult, rosterResult] = await Promise.allSettled([
+          getEnsembleSummary(groupId),
+          getEnsembleReport(groupId),
+          getEnsembleRoster(groupId),
         ]);
         if (!isCurrentClassLoad(generation)) return;
-        setSummary(summaryData);
-        setReport(reportData);
-        setRoster(rosterData?.students ?? null);
+        setSummary(summaryResult.status === 'fulfilled' ? summaryResult.value : null);
+        setSummaryState(summaryResult.status === 'fulfilled' ? 'ready' : 'error');
+        setReport(reportResult.status === 'fulfilled' ? reportResult.value : null);
+        setReportState(reportResult.status === 'fulfilled' ? 'ready' : 'error');
+        setRoster(rosterResult.status === 'fulfilled' ? rosterResult.value.students ?? [] : null);
+        setRosterState(rosterResult.status === 'fulfilled' ? 'ready' : 'error');
       }
     } catch (error) {
       if (isCurrentClassLoad(generation)) {
@@ -214,13 +239,17 @@ export function EnsemblePage() {
     const generation = ++classLoadGenerationRef.current;
     if (isCurrentClassLoad(generation)) setLoading(true);
     try {
-      const [groupsData, invitesData] = await Promise.all([
+      const [groupsResult, invitesResult] = await Promise.allSettled([
         getEnsembleGroups(),
-        getEnsembleInvitations().catch(() => ({ invitations: [] })),
+        getEnsembleInvitations(),
       ]);
       if (!isCurrentClassLoad(generation)) return;
+      if (groupsResult.status === 'rejected') throw groupsResult.reason;
+      const groupsData = groupsResult.value;
+      const invitesData = invitesResult.status === 'fulfilled' ? invitesResult.value : null;
       setGroups(groupsData);
-      setInvitations(invitesData.invitations ?? []);
+      setInvitations(invitesData?.invitations ?? []);
+      setInvitationsState(invitesResult.status === 'fulfilled' ? 'ready' : 'error');
       const nextGroup = groupsData.find((group) => group.id === preferredGroupId)
         ?? groupsData.find((group) => group.id === selectedGroup?.id)
         ?? groupsData[0];
@@ -231,6 +260,9 @@ export function EnsemblePage() {
         setSummary(null);
         setReport(null);
         setRoster(null);
+        setSummaryState('idle');
+        setReportState('idle');
+        setRosterState('idle');
       }
     } catch (error) {
       if (isCurrentClassLoad(generation)) {
@@ -284,6 +316,11 @@ export function EnsemblePage() {
     setReport(null);
     setRoster(null);
     setInvitations([]);
+    setSummaryState('idle');
+    setReportState('idle');
+    setRosterState('idle');
+    setInvitationsState('idle');
+    setManualCopy(null);
     setAcceptInstruments({});
     setPendingRemove(null);
     setPendingLeave(null);
@@ -623,13 +660,14 @@ export function EnsemblePage() {
     }
   };
   const copyText = async (text: string, key: string) => {
-    try {
-      await navigator.clipboard?.writeText(text);
-    } catch {
-      /* clipboard may be unavailable; the code stays visible on screen */
+    setManualCopy(null);
+    if (await copyClassShareText(navigator.clipboard, text)) {
+      setCopied(key);
+      window.setTimeout(() => setCopied((current) => (current === key ? '' : current)), 1600);
+      return;
     }
-    setCopied(key);
-    window.setTimeout(() => setCopied((current) => (current === key ? '' : current)), 1600);
+    setCopied('');
+    setManualCopy({ key, text });
   };
 
   const handlePrint = () => {
@@ -645,13 +683,15 @@ export function EnsemblePage() {
 
   // ---- Signed out ---------------------------------------------------------
   if (!verifiedAccountKey) {
+    const returnPath = `/ensemble${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
     return (
       <ScreenContainer>
         <PageHeader title={t('nav.class')} description={t('class.description')} />
         <SectionCard title={t('class.signInTitle')}>
           <p className="muted-copy">{t('class.signInBody')}</p>
+          {searchParams.get('join') && <p className="muted-copy">{t('class.practiceDisclosure')}</p>}
           {auth.configured ? (
-            <Link to={gatewayPathWithReturn('/ensemble')} className="primary-button ec-signin-btn" onClick={auth.exitGuest}>{t('auth.signInOrCreate')}</Link>
+            <Link to={gatewayPathWithReturn(returnPath)} className="primary-button ec-signin-btn" onClick={auth.exitGuest}>{t('auth.signInOrCreate')}</Link>
           ) : (
             <p className="settings-status" role="status">{t('class.cloudUnavailable')}</p>
           )}
@@ -789,6 +829,7 @@ export function EnsemblePage() {
                     <strong>{invitation.group_name}</strong>
                     <em>{invitation.director_name ? t('class.invitedBy', { name: invitation.director_name }) : t('class.invitedJoin')}</em>
                     <span className="ec-invite-role">{t('class.role', { role: invitationRoleLabel(invitation.role_in_group, t) })}</span>
+                    <span className="ec-invite-role">{t('class.practiceDisclosure')}</span>
                   </div>
                   <label className="ec-select ec-accept-select">
                     <span>{t('class.yourInstrument')}</span>
@@ -820,6 +861,9 @@ export function EnsemblePage() {
             })}
           </div>
         </SectionCard>
+      )}
+      {invitationsState === 'error' && (
+        <p className="settings-status" role="status">{t('class.invitationsUnavailable')}</p>
       )}
 
       {ensembleStatus && <p className="settings-status" role="status" aria-live="polite">{ensembleStatus}</p>}
@@ -854,6 +898,7 @@ export function EnsemblePage() {
                   {joining ? t('class.joining') : t('class.join')}
                 </button>
               </div>
+              <p className="muted-copy">{t('class.practiceDisclosure')}</p>
               {auth.profile?.username && (
                 <p className="ec-username-hint">
                   {t('class.noCodeUsername')} <strong><bdi dir="ltr">@{auth.profile.username}</bdi></strong>
@@ -936,6 +981,7 @@ export function EnsemblePage() {
                   {joining ? t('class.joining') : t('class.join')}
                 </button>
               </div>
+              <p className="muted-copy">{t('class.practiceDisclosure')}</p>
             </SectionCard>
           )}
 
@@ -994,6 +1040,18 @@ export function EnsemblePage() {
                       {rotatingCode ? t('class.rotating') : t(code ? 'class.rotateCode' : 'class.createCode')}
                     </button>
                   </div>
+                  {manualCopy && (
+                    <label className="ec-field ec-manual-copy">
+                      <span>{t('class.copyManually')}</span>
+                      <input
+                        dir="ltr"
+                        readOnly
+                        value={manualCopy.text}
+                        onFocus={(event) => event.currentTarget.select()}
+                        aria-label={t('class.copyManually')}
+                      />
+                    </label>
+                  )}
                 </div>
 
                 <div className="ec-invite-row ec-no-print">
@@ -1024,7 +1082,9 @@ export function EnsemblePage() {
                   </button>
                 </div>
 
-                {roster && roster.length > 0 ? (
+                {rosterState === 'error' ? (
+                  <p className="muted-copy" role="status">{t('class.rosterUnavailable')}</p>
+                ) : rosterState === 'ready' && roster && roster.length > 0 ? (
                   <>
                     <div className="ec-roster-head">
                       <span className="ec-roster-count">{t('class.studentCount', { count: roster.length })}</span>
@@ -1046,15 +1106,17 @@ export function EnsemblePage() {
                       <p className="ec-cents-note">{t('class.centsHelp')}</p>
                     )}
                   </>
-                ) : (
+                ) : rosterState === 'ready' ? (
                   <p className="muted-copy">{t('class.noStudents')}</p>
-                )}
+                ) : null}
               </SectionCard>
 
-              {hasDirectorReport && (
+              {(summaryState !== 'idle' || reportState !== 'idle') && (
                 <>
                   <SectionCard title={t('class.sections')}>
-                    <div className="ec-sections">
+                    {summaryState === 'error' ? (
+                      <p className="muted-copy" role="status">{t('class.summaryUnavailable')}</p>
+                    ) : <div className="ec-sections">
                       {(summary?.sections ?? []).map((section: any) => {
                         const tuning = describeAverageOff(section.average_abs_cents);
                         return (
@@ -1068,10 +1130,16 @@ export function EnsemblePage() {
                       {(summary?.sections ?? []).length === 0 && (
                         <p className="muted-copy">{t('class.sectionEmpty')}</p>
                       )}
-                    </div>
+                    </div>}
                   </SectionCard>
 
-                  {report?.recommended_rehearsal_focus && (
+                  {reportState === 'error' && (
+                    <SectionCard title={t('sessionReview.nextWork')}>
+                      <p className="muted-copy" role="status">{t('class.reportUnavailable')}</p>
+                    </SectionCard>
+                  )}
+
+                  {reportState === 'ready' && report?.recommended_rehearsal_focus && (
                     <SectionCard title={t('sessionReview.nextWork')}>
                       <p>{report.recommended_rehearsal_focus}</p>
                       <div className="ec-focus-steps">
@@ -1085,7 +1153,7 @@ export function EnsemblePage() {
                     </SectionCard>
                   )}
 
-                  {(report?.top_problem_notes ?? []).length > 0 && (
+                  {reportState === 'ready' && (report?.top_problem_notes ?? []).length > 0 && (
                     <SectionCard title={t('class.notesFocus')}>
                       <NoteStatsTable rows={report.top_problem_notes ?? []} />
                     </SectionCard>

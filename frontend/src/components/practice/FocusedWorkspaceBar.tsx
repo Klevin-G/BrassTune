@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, X } from 'lucide-react';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PRACTICE_AUDIO_PAUSE_EVENT } from '../../domain/practiceLibrary';
+import { isPracticeWorkspaceComplete } from '../../domain/practiceLibrary';
 import { usePracticeLibrary } from '../../state/PracticeLibraryContext';
 import { useI18n } from '../../i18n/LocaleContext';
 import type { MessageId } from '../../i18n/messages.base';
@@ -28,10 +29,9 @@ export function FocusedWorkspaceBar() {
     completeWorkspaceStep,
     exitWorkspace,
   } = usePracticeLibrary();
-  const { formatNumber, t } = useI18n();
-
+  const { dir, formatNumber, t } = useI18n();
   useEffect(() => {
-    if (!workspace) return undefined;
+    if (!workspace || isPracticeWorkspaceComplete(workspace)) return undefined;
     let timer: number | null = null;
     const stopTimer = () => {
       if (timer != null) window.clearInterval(timer);
@@ -60,7 +60,7 @@ export function FocusedWorkspaceBar() {
       window.removeEventListener('pagehide', pauseForBackground);
       window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [addWorkspaceElapsed, workspace?.pack.id, workspace?.stepIndex]);
+  }, [addWorkspaceElapsed, workspace?.completedStepIds.length, workspace?.pack.id, workspace?.stepIndex]);
 
   if (!workspace) return null;
   const step = workspace.pack.steps[workspace.stepIndex];
@@ -90,13 +90,13 @@ export function FocusedWorkspaceBar() {
         <progress aria-label={progressLabel} max={workspace.pack.steps.length} value={completed} />
       </div>
       <div className="focus-workspace-actions">
-        <button className="ghost-button" type="button" disabled={workspace.stepIndex === 0} onClick={() => go(workspace.stepIndex - 1)} aria-label={t('workspace.previous')}><ArrowLeft size={17} /></button>
+        <button className="ghost-button" type="button" disabled={workspace.stepIndex === 0} onClick={() => go(workspace.stepIndex - 1)} aria-label={t('workspace.previous')}>{dir === 'rtl' ? <ArrowRight size={17} /> : <ArrowLeft size={17} />}</button>
         {workspace.stepIndex === workspace.pack.steps.length - 1 ? (
           <button className="primary-button" type="button" disabled={currentCompleted} onClick={completeWorkspaceStep}>
             {t(currentCompleted ? 'workspace.completed' : 'workspace.complete')}
           </button>
         ) : (
-          <button className="primary-button" type="button" onClick={() => go(workspace.stepIndex + 1)}>{t('workspace.next')} <ArrowRight size={17} /></button>
+          <button className="primary-button" type="button" onClick={() => go(workspace.stepIndex + 1)}>{t('workspace.next')} {dir === 'rtl' ? <ArrowLeft size={17} /> : <ArrowRight size={17} />}</button>
         )}
         <button className="ghost-button" type="button" onClick={exitWorkspace}><X size={17} /> {t('workspace.exit')}</button>
       </div>

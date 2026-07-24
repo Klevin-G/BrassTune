@@ -11,6 +11,9 @@ export function PracticeReflectionCard({ sessionId }: { sessionId?: string }) {
   const [saved, setSaved] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const reflections = sessionId == null
+    ? library.reflections
+    : library.reflections.filter((reflection) => reflection.sessionId === sessionId);
   return (
     <SectionCard title={t('reflection.title')} eyebrow={t('reflection.eyebrow')}>
       <form className="practice-feature-stack" onSubmit={(event) => {
@@ -24,10 +27,10 @@ export function PracticeReflectionCard({ sessionId }: { sessionId?: string }) {
         <div className="practice-actions"><button className="ghost-button" type="submit" disabled={!text.trim()}>{t('reflection.save')}</button><span className="muted-copy">{text.length}/280</span></div>
         {saved && <p role="status" className="practice-success">{t('reflection.saved')}</p>}
       </form>
-      {library.reflections.length > 0 && (
+      {reflections.length > 0 && (
         <div className="practice-reflection-list" aria-label={t('reflection.list')}>
           <h3>{t('reflection.list')}</h3>
-          {library.reflections.map((reflection) => {
+          {reflections.map((reflection) => {
             const editing = editingId === reflection.id;
             return (
               <article className="practice-reflection" key={reflection.id}>

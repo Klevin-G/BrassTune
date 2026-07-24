@@ -35,6 +35,7 @@ interface AuthState {
   hasAuthSession: boolean;
   isSignedIn: boolean;
   cloudReady: boolean;
+  localPracticeOwnerId: string | null;
   guestMode: boolean;
   guestEntrySequence: number;
   providers: typeof authProviders;
@@ -54,6 +55,65 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 const accountsDisabledMessage = 'Accounts are not enabled in this build yet. You can still use guest practice.';
 const guestAccessKey = 'brasstune.guestAccess';
+const verifiedPracticeNamespacePrefix = 'brasstune.verifiedPracticeNamespace.v1.';
+
+interface VerifiedPracticeNamespace {
+  version: 1;
+  subject: string;
+  ownerId: string;
+}
+
+export function verifiedPracticeNamespaceKey(subject: string): string {
+  return `${verifiedPracticeNamespacePrefix}${encodeURIComponent(subject)}`;
+}
+
+export function readVerifiedPracticeNamespace(
+  storage: Pick<Storage, 'getItem'>,
+  subject: string | null | undefined,
+): string | null {
+  if (!subject || subject.length > 200 || /[\u0000-\u001f\u007f]/.test(subject)) return null;
+  try {
+    const raw = storage.getItem(verifiedPracticeNamespaceKey(subject));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<VerifiedPracticeNamespace>;
+    if (
+      value.version !== 1
+      || value.subject !== subject
+      || typeof value.ownerId !== 'string'
+      || !/^account:[1-9]\d{0,18}$/.test(value.ownerId)
+      || Object.keys(value).sort().join(',') !== 'ownerId,subject,version'
+    ) {
+      return null;
+    }
+    return value.ownerId;
+  } catch {
+    return null;
+  }
+}
+
+export function writeVerifiedPracticeNamespace(
+  storage: Pick<Storage, 'setItem'>,
+  subject: string,
+  profileId: string | number,
+): string | null {
+  const numericProfileId = String(profileId);
+  if (
+    !subject
+    || subject.length > 200
+    || /[\u0000-\u001f\u007f]/.test(subject)
+    || !/^[1-9]\d{0,18}$/.test(numericProfileId)
+  ) {
+    return null;
+  }
+  const ownerId = `account:${numericProfileId}`;
+  const value: VerifiedPracticeNamespace = { version: 1, subject, ownerId };
+  try {
+    storage.setItem(verifiedPracticeNamespaceKey(subject), JSON.stringify(value));
+    return ownerId;
+  } catch {
+    return null;
+  }
+}
 
 interface GuestSessionTransition {
   hasAuthSession: boolean;
@@ -161,6 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<BackendProfile | null>(null);
+  const [localPracticeOwnerId, setLocalPracticeOwnerId] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [guestMode, setGuestMode] = useState(() => localStorage.getItem(guestAccessKey) === 'true');
@@ -169,6 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const profileRef = useRef(profile);
   const profileUserIdRef = useRef<string | null>(null);
   const sessionUserIdRef = useRef<string | null>(null);
+  const localPracticeSubjectRef = useRef<string | null>(null);
 
   const clearProfileState = useCallback((clearError = true) => {
     profileRef.current = null;
@@ -182,6 +244,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionUserIdRef.current = null;
     setSession(null);
     setUser(null);
+    localPracticeSubjectRef.current = null;
+    setLocalPracticeOwnerId(null);
     clearProfileState();
   }, [clearProfileState]);
 
@@ -191,6 +255,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileRequestId.current += 1;
       clearProfileState();
       sessionUserIdRef.current = nextUserId;
+      localPracticeSubjectRef.current = nextUserId;
+      setLocalPracticeOwnerId(readVerifiedPracticeNamespace(localStorage, nextUserId));
     }
     setSession(nextSession);
     setUser(nextSession?.user ?? null);
@@ -225,6 +291,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       profileRef.current = current;
       profileUserIdRef.current = activeSession?.user.id ?? null;
+      const verifiedOwnerId = activeSession?.user.id
+        ? writeVerifiedPracticeNamespace(localStorage, activeSession.user.id, current.id) ?? `account:${current.id}`
+        : `account:${current.id}`;
+      localPracticeSubjectRef.current = activeSession?.user.id ?? null;
+      setLocalPracticeOwnerId(verifiedOwnerId);
       setProfile(current);
       setProfileError(null);
       return current;
@@ -403,8 +474,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const deleteAccount = useCallback(async (confirmation: string) => {
     const ownerId = profileRef.current?.id != null ? `account:${profileRef.current.id}` : null;
+    const subject = sessionUserIdRef.current;
     const result = await deleteMyAccount(confirmation);
     if (ownerId) clearAccountPracticeState(localStorage, sessionStorage, ownerId);
+    if (subject) localStorage.removeItem(verifiedPracticeNamespaceKey(subject));
     if (supabase) {
       await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
     }
@@ -457,6 +530,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasAuthSession: Boolean(session),
       isSignedIn: Boolean(session && profile),
       cloudReady: Boolean(session && profile),
+      localPracticeOwnerId: session && localPracticeSubjectRef.current === session.user.id
+        ? localPracticeOwnerId
+        : null,
       guestMode,
       guestEntrySequence,
       providers: authProviders,
@@ -472,7 +548,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       refreshProfile,
     }),
-    [continueAsGuest, deleteAccount, exitGuest, guestEntrySequence, guestMode, loading, profile, profileError, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
+    [continueAsGuest, deleteAccount, exitGuest, guestEntrySequence, guestMode, loading, localPracticeOwnerId, profile, profileError, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

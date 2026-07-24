@@ -15,7 +15,7 @@ function consumePendingAuthNext() {
 
 export function AuthGatewayPage() {
   const auth = useAuth();
-  const { t } = useI18n();
+  const { dir, t } = useI18n();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = useMemo(() => safeReturnPath(params.get('next')), [params]);
@@ -112,7 +112,7 @@ export function AuthGatewayPage() {
                 />
                 <button className="primary-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                   {t('auth.start')}
-                  <ArrowRight size={18} />
+                  <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
                 </button>
               </>
             )}
@@ -141,7 +141,7 @@ export function AuthGatewayPage() {
 
                 <button className="primary-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
                   {t('auth.start')}
-                  <ArrowRight size={18} />
+                  <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
                 </button>
                 <p className="ag-nudge">{t('auth.newHere')}</p>
 
@@ -164,7 +164,7 @@ export function AuthGatewayPage() {
                     <form className="auth-form" onSubmit={signIn}>
                       <label>
                         {t('auth.email')}
-                        <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder={t('auth.emailPlaceholder')} />
+                        <input dir="ltr" value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder={t('auth.emailPlaceholder')} />
                       </label>
                       <label>
                         {t('auth.password')}

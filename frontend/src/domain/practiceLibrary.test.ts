@@ -5,11 +5,14 @@ import {
   addPracticeWorkspaceElapsed,
   clearAccountPracticeState,
   completePracticeWorkspaceStep,
+  completedPracticeWorkspaceMinutes,
   createPracticeWorkspace,
   currentWeekKey,
+  detachPracticeReflectionsForSession,
   emptyPracticeLibrary,
   normalizeMetronomePreset,
   isExecutablePracticePack,
+  isPracticeWorkspaceComplete,
   millisecondsUntilNextPracticeWeek,
   movePracticeWorkspace,
   ownerPracticeKey,
@@ -32,6 +35,8 @@ describe('practice library storage', () => {
     expect(ownerPracticeKey('guest')).not.toBe(ownerPracticeKey('account:42'));
     expect(resolvePracticeOwner({ loading: true, hasAuthSession: false, isSignedIn: false })).toBeNull();
     expect(resolvePracticeOwner({ loading: false, hasAuthSession: true, isSignedIn: false })).toBeNull();
+    expect(resolvePracticeOwner({ loading: false, hasAuthSession: true, isSignedIn: false, localPracticeOwnerId: 'account:42' })).toBe('account:42');
+    expect(resolvePracticeOwner({ loading: false, hasAuthSession: true, isSignedIn: false, localPracticeOwnerId: 'account:../guest' })).toBeNull();
     expect(resolvePracticeOwner({ loading: false, hasAuthSession: true, isSignedIn: true, profileId: 42 })).toBe('account:42');
     expect(resolvePracticeOwner({ loading: false, hasAuthSession: false, isSignedIn: false })).toBe('guest');
   });
@@ -138,6 +143,35 @@ describe('practice library storage', () => {
     });
     expect(stored).not.toHaveProperty('pack');
     expect(parsePracticeWorkspace(serialized)).toEqual(workspace);
+  });
+
+  it('recognizes pack completion and derives one bounded goal activity duration', () => {
+    let workspace = createPracticeWorkspace(BUILT_IN_PRACTICE_PACKS[0])!;
+    workspace = addPracticeWorkspaceElapsed(workspace, 31);
+    workspace = movePracticeWorkspace(workspace, 1);
+    workspace = addPracticeWorkspaceElapsed(workspace, 30);
+    workspace = movePracticeWorkspace(workspace, 2);
+    expect(isPracticeWorkspaceComplete(workspace)).toBe(false);
+    workspace = completePracticeWorkspaceStep(workspace);
+    expect(isPracticeWorkspaceComplete(workspace)).toBe(true);
+    expect(completedPracticeWorkspaceMinutes(workspace)).toBe(1);
+    expect(completePracticeWorkspaceStep(workspace)).toBe(workspace);
+  });
+
+  it('detaches only reflections for a deleted session while preserving their text', () => {
+    const library = emptyPracticeLibrary();
+    library.reflections = [
+      { id: 'session-note', text: 'Keep the attack light.', createdAt: '2026-07-23T12:00:00Z', sessionId: '-42' },
+      { id: 'other-note', text: 'Use more air.', createdAt: '2026-07-23T12:01:00Z', sessionId: '-43' },
+      { id: 'general-note', text: 'Practice slowly.', createdAt: '2026-07-23T12:02:00Z' },
+    ];
+    const detached = detachPracticeReflectionsForSession(library, '-42');
+    expect(detached.reflections).toEqual([
+      { id: 'session-note', text: 'Keep the attack light.', createdAt: '2026-07-23T12:00:00Z' },
+      library.reflections[1],
+      library.reflections[2],
+    ]);
+    expect(detachPracticeReflectionsForSession(detached, '-42')).toBe(detached);
   });
 
   it('migrates only the exact legacy pack snapshot and rejects altered workspace storage', () => {

@@ -76,6 +76,7 @@ describe('web localization', () => {
       'sessionReview.secondsShort', 'settings.actionProgress', 'settings.admin',
       'class.minutesShort', 'class.student', 'locale.pseudo', 'drone.interval.octave',
       'playAlong.title', 'exercise.noteCount', 'playAlong.noteCount', 'onboarding.cents',
+      'playAlong.a11yNoteState',
     ]);
     for (const locale of productionLocales.filter((value) => value !== 'en')) {
       const messages = await loadMessagesForLocale(locale);
@@ -95,6 +96,16 @@ describe('web localization', () => {
 
   it('keeps reviewed Arabic music terms distinct from literal non-music meanings', async () => {
     const messages = await loadMessagesForLocale('ar');
+    const intl = createIntl({ locale: 'ar', messages }, createIntlCache());
+    expect(intl.formatMessage({ id: 'playAlong.majorLabel' }, { note: 'C' })).toContain('C');
+    expect(intl.formatMessage({ id: 'playAlong.minorLabel' }, { note: 'C' })).toContain('C');
+    expect(messages['playAlong.majorLabel']).toBe('سلم {note} الكبير');
+    expect(messages['playAlong.minorLabel']).toBe('سلم {note} الصغير');
+    expect(messages['warmup.buzz.title']).toContain('الشفتين');
+    expect(messages['warmup.buzz.title']).not.toContain('ضجيج');
+    expect(messages['practice.droneIntervals']).toContain('المرجعية');
+    expect(messages['playAlong.notesOnPitch']).toContain('نغمات مضبوطة');
+    expect(messages['reflection.title']).toContain('مراجعة');
     expect(messages['progress.centsHelp']).toContain('السنتات الموسيقية');
     expect(messages['metronome.timeSignature']).toBe('الميزان الموسيقي');
     expect(messages['metronome.subdivision']).toBe('تقسيم الإيقاع');
@@ -102,6 +113,9 @@ describe('web localization', () => {
     expect(messages['noteStats.avgAbs']).toBe('متوسط الانحراف المطلق');
     expect(messages['signal.confidence']).toBe('نسبة الثقة في اكتشاف طبقة الصوت');
     expect(messages['score.captureFailed']).toBe('تعذّر التقاط الصفحة. حاول مرة أخرى.');
+    expect(messages['class.practiceDisclosure']).toContain('إجمالي تدريبك السحابي');
+    expect(messages['class.practiceDisclosure']).toContain('نص مراجعاتك');
+    expect(messages['class.practiceDisclosure']).toContain('تسجيلاتك الصوتية');
   });
 
   it('guards confirmed musical false friends across production catalogs', async () => {
@@ -312,7 +326,7 @@ describe('web localization', () => {
       es: ['Ligaduras relajadas', 'Nota pedal e intervalos', 'Partituras'],
       'zh-Hans': ['放松的连音练习', '持续音与音程', '乐谱'],
       'zh-Hant': ['輕鬆的圓滑奏練習', '持續音與音程', '樂譜'],
-      ar: ['تمرين وصلات بالشفاه', 'النغمة المستمرة والمسافات الموسيقية', 'صفحات النوتة الموسيقية'],
+      ar: ['تمرين وصلات بالشفاه', 'النغمة المرجعية المستمرة والفاصل الموسيقي', 'صفحات النوتة الموسيقية'],
       fr: ['Liaisons détendues', 'Bourdon et intervalles', 'Partitions'],
       de: ['Lockere Lippenbindungen', 'Bordun und Intervalle', 'Noten'],
       ru: ['Расслабленное легато', 'Бурдон и интервалы', 'Партитуры'],
@@ -378,6 +392,7 @@ describe('web localization', () => {
       limit: 64,
       detail: 'A little sharp',
       cue: 'ease down',
+      state: 'complete',
     };
     for (const locale of productionLocales) {
       const messages = await loadMessagesForLocale(locale);

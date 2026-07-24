@@ -9,7 +9,7 @@ import './OnboardingFlow.css';
 
 export function OnboardingFlow() {
   const auth = useAuth();
-  const { t } = useI18n();
+  const { dir, t } = useI18n();
   const {
     instrumentId,
     setInstrumentId,
@@ -121,7 +121,8 @@ export function OnboardingFlow() {
         <div className="ob-actions">
           <button className="ghost-button" type="button" onClick={closeOnboarding} disabled={onboardingSaving}>{t('onboarding.dismiss')}</button>
           <button className="primary-button" type="button" onClick={() => void finish()} disabled={onboardingSaving}>
-            {onboardingSaving ? t('onboarding.saving') : t('onboarding.openTuner')}<ArrowRight size={18} />
+            {onboardingSaving ? t('onboarding.saving') : t('onboarding.openTuner')}
+            <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
           </button>
         </div>
       </section>

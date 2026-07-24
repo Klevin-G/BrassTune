@@ -7,12 +7,14 @@ const startLocalServers = process.env.E2E_START_LOCAL_SERVERS !== '0';
 const baseURL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5173';
 const apiBaseURL = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:8000';
 const wsBaseURL = process.env.E2E_WS_BASE_URL ?? apiBaseURL.replace(/^http/, 'ws');
+const frontendPort = new URL(baseURL).port || '5173';
+const backendPort = new URL(apiBaseURL).port || '8000';
 const ci = !!process.env.CI;
 const defaultBackendPython = process.platform === 'win32'
   ? (existsSync('../backend/.venv/Scripts/python.exe') ? '.venv\\Scripts\\python.exe' : 'py -3')
   : (existsSync('../backend/.venv/bin/python') ? '.venv/bin/python' : 'python3');
 const backendPython = process.env.E2E_BACKEND_PYTHON ?? defaultBackendPython;
-const backendCommand = `cd ../backend && ${backendPython} -m uvicorn app.main:app --host 127.0.0.1 --port 8000`;
+const backendCommand = `cd ../backend && ${backendPython} -m uvicorn app.main:app --host 127.0.0.1 --port ${backendPort}`;
 const backendDatabaseURL = process.env.E2E_BACKEND_DATABASE_URL ?? `sqlite:///${join(tmpdir(), `brasstune-e2e-${process.pid}.db`)}`;
 export const CI_E2E_GLOBAL_TIMEOUT_MS = 30 * 60_000;
 
@@ -51,7 +53,7 @@ export default defineConfig({
       },
     },
     {
-      command: 'npm run dev -- --host 127.0.0.1 --port 5173',
+      command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,
       url: baseURL,
       reuseExistingServer: !ci,
       timeout: 30_000,

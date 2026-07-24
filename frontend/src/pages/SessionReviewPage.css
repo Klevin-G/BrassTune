@@ -11,23 +11,23 @@
   gap: 1.25rem;
   padding: 1.25rem 1.35rem;
   border: 1px solid var(--line);
-  border-left-width: 4px;
+  border-inline-start-width: 4px;
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
   box-shadow: var(--shadow-soft);
 }
 
 .sr-hero.tone-green {
-  border-left-color: var(--green);
+  border-inline-start-color: var(--green);
 }
 .sr-hero.tone-amber {
-  border-left-color: var(--amber);
+  border-inline-start-color: var(--amber);
 }
 .sr-hero.tone-red {
-  border-left-color: var(--red);
+  border-inline-start-color: var(--red);
 }
 .sr-hero.tone-muted {
-  border-left-color: var(--line-strong);
+  border-inline-start-color: var(--line-strong);
 }
 
 .sr-hero-score {

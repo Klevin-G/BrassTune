@@ -41,6 +41,11 @@ export function shouldShowPitchRecovery(micActive: boolean, audioContextState: s
   return !micActive && audioContextState !== 'starting' && audioContextState !== 'demo';
 }
 
+export function playAlongAnnouncementBucket(snapshot: Pick<GraderSnapshot, 'index' | 'currentName' | 'heldFraction'>): string {
+  const heldPercent = Math.min(100, Math.max(0, Math.floor(snapshot.heldFraction * 4) * 25));
+  return `${snapshot.index}:${snapshot.currentName ?? ''}:${heldPercent}`;
+}
+
 const GRADE_TONE: Record<string, string> = {
   excellent: 'tone-green',
   good: 'tone-teal',
@@ -109,6 +114,7 @@ export function PlayAlongPage() {
   const [error, setError] = useState('');
   const [prevBest, setPrevBest] = useState<number | null>(null);
   const [isNewBest, setIsNewBest] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const graderRef = useRef<PlayAlongGrader | null>(null);
   const phaseRef = useRef<Phase>('idle');
@@ -122,6 +128,7 @@ export function PlayAlongPage() {
   const referenceToneActiveRef = useRef(false);
   const [referenceToneActive, setReferenceToneActive] = useState(false);
   const completionRecordedRef = useRef(false);
+  const scoreFocusRef = useRef<HTMLDivElement | null>(null);
   phaseRef.current = phase;
   exerciseIdRef.current = exerciseId;
 
@@ -318,6 +325,7 @@ export function PlayAlongPage() {
   const summary = phase === 'done' ? summarizeGrades(results) : null;
   const stars = summary ? starsForPercent(summary.inTunePercent) : 0;
   const percentVerdict = summary ? describeInTunePercent(summary.inTunePercent) : null;
+  const announcementBucket = snapshot ? playAlongAnnouncementBucket(snapshot) : '';
 
   const noteStatus = (index: number): 'done' | 'current' | 'upcoming' => {
     if (index < (snapshot?.index ?? 0)) return 'done';
@@ -342,6 +350,12 @@ export function PlayAlongPage() {
     setExerciseId(id);
     setSearchParams({ exercise: id }, { replace: true });
   };
+
+  useEffect(() => {
+    if (phase !== 'done') return undefined;
+    const frame = window.requestAnimationFrame(() => scoreFocusRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase]);
 
   return (
       <ScreenContainer>
@@ -433,6 +447,16 @@ export function PlayAlongPage() {
 
       {phase === 'running' && snapshot && (
         <SectionCard title={t('playAlong.play')} eyebrow={t('playAlong.noteProgress', { current: formatNumber(Math.min(snapshot.index + 1, exercise.notes.length)), total: formatNumber(exercise.notes.length) })}>
+          <span className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+            {announcementBucket
+              ? t('playAlong.a11yTargetProgress', {
+                note: snapshot.currentName ?? '—',
+                current: formatNumber(Math.min(snapshot.index + 1, exercise.notes.length)),
+                total: formatNumber(exercise.notes.length),
+                percent: formatNumber(Math.min(100, Math.max(0, Math.floor(snapshot.heldFraction * 4) * 25))),
+              })
+              : ''}
+          </span>
           {!stream.micActive && (
             <div className="pa-error" role="status" aria-live="polite">
               <AlertCircle size={16} />
@@ -446,7 +470,14 @@ export function PlayAlongPage() {
             </div>
           )}
           <div className="playalong-live">
-            <div className="playalong-target">
+            <div
+              className="playalong-target"
+              role="progressbar"
+              aria-label={t('playAlong.a11yHoldProgress', { note: snapshot.currentName ?? '—' })}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(snapshot.heldFraction * 100)}
+            >
               <HoldRing fraction={snapshot.heldFraction} />
               <div className="playalong-target-note">
                 <span className="playalong-target-label">{t('playAlong.playNote')}</span>
@@ -488,8 +519,15 @@ export function PlayAlongPage() {
               const status = noteStatus(index);
               const graded = results[index];
               return (
-                <span key={index} className={`playalong-note ${status} ${graded ? GRADE_TONE[graded.grade] : ''}`}>
-                  {note}
+                <span
+                  key={index}
+                  className={`playalong-note ${status} ${graded ? GRADE_TONE[graded.grade] : ''}`}
+                  aria-label={t('playAlong.a11yNoteState', {
+                    note,
+                    state: t(status === 'done' ? 'playAlong.stateComplete' : status === 'current' ? 'playAlong.stateCurrent' : 'playAlong.stateUpcoming'),
+                  })}
+                >
+                  <bdi dir="ltr">{note}</bdi>
                 </span>
               );
             })}
@@ -514,7 +552,16 @@ export function PlayAlongPage() {
       {phase === 'done' && summary && percentVerdict && (
         <>
         <SectionCard title={t('playAlong.score')}>
-          <div className="pa-verdict">
+          <div
+            className="pa-verdict"
+            ref={scoreFocusRef}
+            tabIndex={-1}
+            aria-label={t('playAlong.a11yScoreSummary', {
+              percent: formatNumber(summary.inTunePercent),
+              inTune: formatNumber(summary.inTune),
+              total: formatNumber(summary.total),
+            })}
+          >
             <div className="pa-stars" role="img" aria-label={t('playAlong.stars', { count: formatNumber(stars), total: formatNumber(3) })}>
               {[0, 1, 2].map((i) => (
                 <Star key={i} size={36} className={i < stars ? 'pa-star on' : 'pa-star'} fill={i < stars ? 'currentColor' : 'none'} />
@@ -541,8 +588,11 @@ export function PlayAlongPage() {
             </button>
           </div>
 
-          <details className="pa-details">
-            <summary>{t('playAlong.noteByNote')}</summary>
+          <details className="pa-details" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+            <summary>
+              <span>{t('playAlong.noteByNote')}</span>
+              <span className="pa-details-toggle">{t(detailsOpen ? 'common.hide' : 'common.show')}</span>
+            </summary>
             <div className="playalong-results">
               {results.map((grade: NoteGrade, index: number) => (
                 <div className={`playalong-result-row ${GRADE_TONE[grade.grade]}`} key={index}>
