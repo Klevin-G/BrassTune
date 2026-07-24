@@ -423,7 +423,6 @@ final class AuthService: NSObject {
                 )
             }
             authenticationSession.presentationContextProvider = self
-            authenticationSession.prefersEphemeralWebBrowserSession = true
             webAuthenticationSession = authenticationSession
             guard authenticationSession.start() else {
                 webAuthenticationSession = nil

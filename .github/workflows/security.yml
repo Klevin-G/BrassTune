@@ -2,20 +2,10 @@ name: Security
 
 on:
   # Persistent self-hosted runners are reserved for trusted revisions. Pull
-  # requests are validated locally, then these gates run after merge to main.
+  # requests are validated locally, then these gates run after every merge to
+  # main so secret scanning cannot be bypassed by changing an excluded path.
   push:
     branches: [main]
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "fixtures/**"
-      - "supabase/**"
-      - "render.yaml"
-      - "vercel.json"
-      - "frontend/vercel.json"
-      - ".github/workflows/deploy.yml"
-      - ".github/tools/vercel-cli/**"
-      - ".github/workflows/security.yml"
 permissions:
   contents: read
 
@@ -53,7 +43,62 @@ jobs:
         working-directory: backend
         run: |
           bandit -r app -x app/tests
-      - name: Gitleaks secret scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+      - name: Gitleaks trusted-main merge scan
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          case "$(uname -m)" in
+            aarch64|arm64)
+              asset="gitleaks_8.24.3_linux_arm64.tar.gz"
+              expected_sha="5f2edbe1f49f7b920f9e06e90759947d3c5dfc16f752fb93aaafc17e9d14cf07"
+              ;;
+            x86_64|amd64)
+              asset="gitleaks_8.24.3_linux_x64.tar.gz"
+              expected_sha="9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c"
+              ;;
+            *)
+              echo "Unsupported runner architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+
+          zero_sha="0000000000000000000000000000000000000000"
+          if [[ ! "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] \
+            || [[ "$BEFORE_SHA" == "$zero_sha" ]] \
+            || [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Refusing to run Gitleaks without a complete push range." >&2
+            exit 1
+          fi
+          git cat-file -e "${BEFORE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          git merge-base --is-ancestor "$BEFORE_SHA" "$HEAD_SHA"
+          test "$(git rev-list --count "${BEFORE_SHA}..${HEAD_SHA}")" -gt 0
+
+          archive="$RUNNER_TEMP/$asset"
+          bin_dir="$RUNNER_TEMP/gitleaks-8.24.3"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --output "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/$asset"
+          printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum --check --strict -
+          mkdir -p "$bin_dir"
+          tar --extract --gzip --file "$archive" --directory "$bin_dir" gitleaks
+          "$bin_dir/gitleaks" git \
+            --redact \
+            --exit-code 1 \
+            --report-format sarif \
+            --report-path "$RUNNER_TEMP/gitleaks-results.sarif" \
+            --verbose \
+            --log-opts="--full-history --diff-merges=first-parent ${BEFORE_SHA}..${HEAD_SHA}" \
+            "$GITHUB_WORKSPACE"
+      - name: Upload redacted Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gitleaks-results-${{ github.sha }}
+          path: ${{ runner.temp }}/gitleaks-results.sarif
+          if-no-files-found: error
+          retention-days: 7

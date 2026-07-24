@@ -2209,7 +2209,15 @@ td a {
   white-space: nowrap;
 }
 
-/* Google sign-in — familiar white button per Google identity guidelines. */
+@font-face {
+  font-family: "Google Sans";
+  src: url("../assets/fonts/GoogleSans-Medium.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+/* Google sign-in — exact light-button typography, spacing, and stroke. */
 .google-button {
   display: flex;
   width: 100%;
@@ -2217,13 +2225,15 @@ td a {
   justify-content: center;
   gap: 10px;
   min-height: var(--tap);
-  padding: 0 18px;
-  border: 1px solid #dadce0;
+  padding: 0 12px;
+  border: 1px solid #747775;
   border-radius: 999px;
   background: #ffffff;
   color: #3c4043;
-  font-weight: 700;
-  font-size: 0.95rem;
+  font-family: "Google Sans", Roboto, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   cursor: pointer;
   transition: box-shadow 0.15s ease, background 0.15s ease;
 }
