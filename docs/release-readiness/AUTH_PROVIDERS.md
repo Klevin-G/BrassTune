@@ -1,6 +1,6 @@
 # Google and Apple Sign-in
 
-Updated: 2026-07-23. Do not put credentials in Git, logs, screenshots, or this document.
+Updated: 2026-07-24. Do not put credentials in Git, logs, screenshots, or this document.
 
 ## Current state
 
@@ -10,6 +10,12 @@ Updated: 2026-07-23. Do not put credentials in Git, logs, screenshots, or this d
 | Apple | Supabase OAuth button and unavailable state | `SignInWithAppleButton`, hashed nonce, ID-token exchange | Disabled; Apple Developer credentials and Supabase provider configuration are still required. |
 
 Provider buttons are intentionally visible even when unavailable. They explain the unavailable state instead of disappearing. The production deployment workflow synchronizes Google enabled and `VITE_AUTH_APPLE_ENABLED=false` until Apple setup and a live authorize flow are verified.
+
+## Credential and CLI boundary
+
+The existing Supabase CLI session can read the linked project and verify migrations without another Supabase login or database password. It cannot create Apple Developer resources or Apple-issued credentials. Never share an Apple password with Supabase, Codex, or this repository.
+
+`supabase config push` applies the complete local Auth configuration; it is not a provider-only mutation and has no dry-run flag. Do not use it for Apple until the entire TOML is reviewed and the Google and Apple secret environment variables are securely available. After an authorized Apple owner creates the Team ID, Services ID, Key ID, `.p8` key, and client-secret JWT, prefer the targeted Supabase Management API Auth-config update or a fully reviewed CLI config push.
 
 ## Google verification checklist
 
