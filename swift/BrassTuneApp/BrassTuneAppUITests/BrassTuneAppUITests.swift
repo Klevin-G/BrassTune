@@ -591,7 +591,7 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authAppleSignIn"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.passwordReset"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
+        XCTAssertTrue(app.buttons["Not now"].exists)
         app.buttons["Not now"].tap()
 
         let guestEntry = app.descendants(matching: .any)["gateway.continueAsGuest"]
@@ -640,7 +640,7 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["gateway.email"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.password"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
+        XCTAssertTrue(app.buttons["Not now"].exists)
         keepScreenshot(named: "Native auth providers - Google available Apple recovery", from: app)
     }
 
