@@ -1,6 +1,6 @@
 {
   "updated": "2026-07-23",
-  "candidate_revision": "7c12b15",
+  "candidate_revision": "a3f436ea7442c471760e06ed1422ec3ddbbf1217",
   "decision": "pending_exact_sha_ci_and_release_gates",
   "local": {
     "backend": "246 passed, 4 skipped after the 428a123 duplicate-identity PII race correction",
@@ -9,20 +9,36 @@
     "frontend_audit": "0 findings",
     "frontend_e2e": "443 passed, 7 skipped, 0 failed",
     "swift_core": "3/3",
-    "native_units": "139/139",
-    "native_ui": "15/15; affected welcome/auth follow-up checks 4/4 after 7c12b15",
-    "native_builds": "Debug iPhone/iPad and Release iPhone passed with zero warnings; 7c12b15 follow-up build also zero warnings"
+    "native_units": "140/140",
+    "native_ui": "17/17 in one invocation; result bundle /tmp/brasstune-final-a3f436e-all-ui.xcresult",
+    "native_builds": "Debug iPhone/iPad and Release iPhone passed with zero warnings",
+    "google_branding": "independent review approved"
   },
   "provider_state": {
     "google": "enabled; authorize-start verified",
     "apple": "client implementation complete; linked provider disabled pending Apple Developer and Supabase setup"
   },
+  "locales": [
+    "English",
+    "Spanish",
+    "Simplified Chinese",
+    "Traditional Chinese",
+    "Arabic",
+    "French",
+    "German",
+    "Russian",
+    "Portuguese (Brazil)",
+    "Japanese",
+    "Korean",
+    "Vietnamese"
+  ],
   "pending": [
     "independent review",
-    "exact-SHA self-hosted CI",
+    "exact-SHA self-hosted CI, including live confirmation of c66be02 SQLite runner fix",
     "three Supabase expand migrations and config push",
     "same-SHA Render/Vercel deployment and hosted smoke",
     "terminal privacy contract after expand cleanup",
-    "physical-device, signing, TestFlight, and App Store gates"
+    "physical-device, signing, TestFlight, and App Store gates",
+    "Gmail reconnect as brasstune1@gmail.com before professor drafts"
   ]
 }
