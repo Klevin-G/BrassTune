@@ -58,6 +58,10 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_AUTH_GOOGLE_ENABLED: "true"
+          # Keep Apple visible-but-disabled until the Apple Developer and
+          # Supabase provider setup is complete. Flip this repository variable
+          # to "true" only after the live authorize flow is verified.
+          VITE_AUTH_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED }}
         run: |
           set -euo pipefail
 
@@ -82,6 +86,7 @@ jobs:
           sync_variable VITE_SUPABASE_URL "$VITE_SUPABASE_URL"
           sync_variable VITE_SUPABASE_PUBLISHABLE_KEY "$VITE_SUPABASE_PUBLISHABLE_KEY"
           sync_variable VITE_AUTH_GOOGLE_ENABLED "$VITE_AUTH_GOOGLE_ENABLED"
+          sync_variable VITE_AUTH_APPLE_ENABLED "$VITE_AUTH_APPLE_ENABLED"
       - name: Refresh Vercel production environment
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -119,6 +124,7 @@ jobs:
             'VITE_SUPABASE_URL',
             'VITE_SUPABASE_PUBLISHABLE_KEY',
             'VITE_AUTH_GOOGLE_ENABLED',
+            'VITE_AUTH_APPLE_ENABLED',
           ];
           const missingOrEmpty = required.filter((name) => !values.get(name));
           let failed = false;
@@ -133,6 +139,16 @@ jobs:
           if (values.has('VITE_AUTH_GOOGLE_ENABLED') && values.get('VITE_AUTH_GOOGLE_ENABLED') !== 'true') {
             console.error(
               `::error file=${envPath}::VITE_AUTH_GOOGLE_ENABLED must equal true in Vercel Production.`,
+            );
+            failed = true;
+          }
+
+          if (
+            values.has('VITE_AUTH_APPLE_ENABLED')
+            && !['true', 'false'].includes(values.get('VITE_AUTH_APPLE_ENABLED'))
+          ) {
+            console.error(
+              `::error file=${envPath}::VITE_AUTH_APPLE_ENABLED must equal true or false in Vercel Production.`,
             );
             failed = true;
           }

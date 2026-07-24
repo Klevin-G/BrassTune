@@ -344,6 +344,10 @@ def test_deploy_uses_an_audited_locked_local_vercel_cli_and_disallows_all_target
     assert "cache-dependency-path: .github/tools/vercel-cli/package-lock.json" in deploy
     assert "npm install -g vercel" not in deploy
     assert ".github/tools/vercel-cli/node_modules/.bin/vercel" in deploy
+    assert "VITE_AUTH_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED }}" in deploy
+    assert 'sync_variable VITE_AUTH_APPLE_ENABLED "$VITE_AUTH_APPLE_ENABLED"' in deploy
+    assert "'VITE_AUTH_APPLE_ENABLED'," in deploy
+    assert "VITE_AUTH_APPLE_ENABLED must equal true or false in Vercel Production." in deploy
     assert "default: all" not in deploy
     assert "- all" not in deploy
     assert "target == 'all'" not in deploy
