@@ -42,12 +42,15 @@ final class BrassTuneAppUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
         assertAppFillsScreen(app)
-        for identifier in ["gateway.continueAsGuest", "gateway.classCode"] {
+        for identifier in [
+            "gateway.continueAsGuest",
+            "gateway.signIn",
+            "gateway.createAccount",
+            "gateway.classCode",
+        ] {
             assertVisibleAndHittable(app.descendants(matching: .any)[identifier], in: app)
         }
         XCTAssertTrue(app.descendants(matching: .any)["gateway.accountConfigurationUnavailable"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["gateway.signIn"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["gateway.createAccount"].exists)
         keepScreenshot(named: "First run - account gateway", from: app)
         app.buttons["gateway.continueAsGuest"].tap()
 
@@ -80,6 +83,34 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
+    func testUnconfiguredGatewayExposesBothRecoverableAccountActions() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
+        for identifier in ["gateway.signIn", "gateway.createAccount"] {
+            let action = app.descendants(matching: .any)[identifier]
+            assertVisibleAndHittable(action, in: app)
+            action.tap()
+
+            let apple = app.descendants(matching: .any)["gateway.authAppleSignIn"]
+            let google = app.descendants(matching: .any)["gateway.authGoogleSignIn"]
+            XCTAssertTrue(apple.waitForExistence(timeout: 5))
+            XCTAssertFalse(apple.isEnabled)
+            XCTAssertTrue(google.exists)
+            XCTAssertFalse(google.isEnabled)
+            XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.descendants(matching: .any)["gateway.authUnavailable"].exists)
+            XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
+            XCTAssertTrue(app.buttons["Not now"].exists)
+            app.buttons["Not now"].tap()
+
+            XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 5))
+        }
+    }
+
+    @MainActor
     func testAuthUnavailableClassIntentShowsRecoveryInsteadOfDeadForm() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"]
@@ -102,6 +133,34 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["gateway.passwordReset"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
         XCTAssertTrue(app.buttons["Not now"].exists)
+    }
+
+    @MainActor
+    func testSignedOutClassesRoutesToCompleteRecoverableAuthSheet() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.continueAsGuest"].waitForExistence(timeout: 8))
+        app.descendants(matching: .any)["gateway.continueAsGuest"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.startPractice"].waitForExistence(timeout: 8))
+        app.descendants(matching: .any)["onboarding.startPractice"].tap()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 8))
+
+        openTab("Class", in: app)
+        let signIn = app.descendants(matching: .any)["classes.signIn"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["classes.appleSignIn"].exists)
+        signIn.tap()
+
+        let apple = app.descendants(matching: .any)["gateway.authAppleSignIn"]
+        let google = app.descendants(matching: .any)["gateway.authGoogleSignIn"]
+        XCTAssertTrue(apple.waitForExistence(timeout: 5))
+        XCTAssertFalse(apple.isEnabled)
+        XCTAssertTrue(google.exists)
+        XCTAssertFalse(google.isEnabled)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
     }
 
     @MainActor

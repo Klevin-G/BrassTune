@@ -733,6 +733,13 @@ final class BrassTuneAppTests: XCTestCase {
             let unit = try XCTUnwrap(localization["stringUnit"] as? [String: Any], "\(locale): \(key)")
             return try XCTUnwrap(unit["value"] as? String, "\(locale): \(key)")
         }
+        let englishGoogleCTA = try value("Sign in with Google", "en")
+        XCTAssertEqual(englishGoogleCTA, "Sign in with Google")
+        for locale in expectedLocales.subtracting(["en"]) {
+            let localizedGoogleCTA = try value("Sign in with Google", locale)
+            XCTAssertFalse(localizedGoogleCTA.isEmpty, "Google CTA is empty for \(locale)")
+            XCTAssertNotEqual(localizedGoogleCTA, englishGoogleCTA, "Google CTA is not localized for \(locale)")
+        }
         XCTAssertEqual(try value("Class", "zh-Hans"), "班级")
         XCTAssertEqual(try value("Class", "zh-Hant"), "班級")
         XCTAssertEqual(try value("Class", "ko"), "클래스")
@@ -1002,8 +1009,12 @@ final class BrassTuneAppTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(
+            supabaseConfig.contains(#""com.brasstune.auth://oauth/google\\?state=*""#),
+            "The bounded native callback must escape the literal question mark before a dashboard config push."
+        )
+        XCTAssertFalse(
             supabaseConfig.contains(#""com.brasstune.auth://oauth/google?state=*""#),
-            "The bounded native callback must be present locally before a dashboard config push."
+            "An unescaped question mark is a one-character Supabase glob wildcard."
         )
     }
 

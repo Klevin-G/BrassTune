@@ -379,26 +379,66 @@ struct NativeAppleSignInButton: View {
 
 struct NativeGoogleSignInButton: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     let identifier: String
 
     var body: some View {
         Button {
             Task { await model.completeGoogleSignIn() }
         } label: {
-            // Complete official iOS button asset downloaded from Google's
-            // branding bundle on 2026-07-23:
-            // developers.google.com/static/identity/images/signin-assets.zip
-            Image("GoogleSignInIcon")
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: 188, height: 44)
-                .frame(maxWidth: .infinity, minHeight: 50)
+            ZStack {
+                Text("Sign in with Google")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(googleTextColor)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 44)
+
+                HStack {
+                    // Standard-color G pixels cropped without recoloring or
+                    // redrawing from Google's official pre-approved iOS
+                    // "Show text=No" assets, downloaded on 2026-07-23:
+                    // developers.google.com/static/identity/images/signin-assets.zip
+                    Image("GoogleSignInIcon")
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 18, height: 18)
+                        .accessibilityHidden(true)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+            }
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(googleBackgroundColor)
+            .overlay {
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(googleBorderColor, lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
         .disabled(model.authOperationInProgress || !model.googleSignInAvailable)
+        .opacity(model.authOperationInProgress || !model.googleSignInAvailable ? 0.45 : 1)
         .accessibilityLabel(Text("Sign in with Google"))
         .accessibilityIdentifier(identifier)
+    }
+
+    private var googleBackgroundColor: Color {
+        colorScheme == .dark
+            ? Color(red: 19.0 / 255.0, green: 19.0 / 255.0, blue: 20.0 / 255.0)
+            : .white
+    }
+
+    private var googleTextColor: Color {
+        colorScheme == .dark
+            ? Color(red: 227.0 / 255.0, green: 227.0 / 255.0, blue: 227.0 / 255.0)
+            : Color(red: 31.0 / 255.0, green: 31.0 / 255.0, blue: 31.0 / 255.0)
+    }
+
+    private var googleBorderColor: Color {
+        colorScheme == .dark
+            ? Color(red: 142.0 / 255.0, green: 145.0 / 255.0, blue: 143.0 / 255.0)
+            : Color(red: 116.0 / 255.0, green: 119.0 / 255.0, blue: 117.0 / 255.0)
     }
 }
 
@@ -442,10 +482,7 @@ struct ClassesView: View {
                     }
                     .buttonStyle(BTPrimaryButtonStyle())
                     .accessibilityIdentifier("classes.signIn")
-
-                    NativeAppleSignInButton(identifier: "classes.appleSignIn")
                 }
-                .accessibilityIdentifier("classes.signInRequired")
             }
 
             if let message = model.ensembleStatusMessage {

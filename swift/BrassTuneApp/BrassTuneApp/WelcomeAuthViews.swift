@@ -186,18 +186,18 @@ private struct GatewayActions: View {
             .accessibilityHint("Starts local practice without an online account")
             .accessibilityIdentifier("gateway.continueAsGuest")
 
-            if model.accountFeaturesEnabled {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: BTSpacing.sm) {
-                        accountButton(mode: .createAccount)
-                        accountButton(mode: .signIn)
-                    }
-                    VStack(spacing: BTSpacing.sm) {
-                        accountButton(mode: .createAccount)
-                        accountButton(mode: .signIn)
-                    }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: BTSpacing.sm) {
+                    accountButton(mode: .createAccount)
+                    accountButton(mode: .signIn)
                 }
-            } else {
+                VStack(spacing: BTSpacing.sm) {
+                    accountButton(mode: .createAccount)
+                    accountButton(mode: .signIn)
+                }
+            }
+
+            if !model.accountFeaturesEnabled {
                 Label {
                     Text(verbatim: model.accountUnavailableMessage ?? NativeLocalization.string("Practice as a guest today. Online backup and Classes will appear when account access is available."))
                 } icon: {

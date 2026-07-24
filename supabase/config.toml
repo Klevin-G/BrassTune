@@ -19,7 +19,7 @@ additional_redirect_urls = [
   # Native Google OAuth returns only to this reverse-domain scheme and path.
   # The bounded state wildcard lets each ASWebAuthenticationSession validate
   # its own cryptographic state before exchanging the PKCE authorization code.
-  "com.brasstune.auth://oauth/google?state=*",
+  "com.brasstune.auth://oauth/google\\?state=*",
 ]
 jwt_expiry = 3600
 
