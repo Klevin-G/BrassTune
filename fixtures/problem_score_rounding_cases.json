@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Rounds 2.675 up to the next hundredth",
+    "note_stats": {
+      "avg_abs_cents": 1.3375,
+      "stddev_cents": 0,
+      "in_tune_percentage": 80
+    },
+    "expected_problem_severity": 2.68
+  },
+  {
+    "name": "Rounds 20.005 up to the next hundredth",
+    "note_stats": {
+      "avg_abs_cents": 10.0025,
+      "stddev_cents": 0,
+      "in_tune_percentage": 80
+    },
+    "expected_problem_severity": 20.01
+  }
+]

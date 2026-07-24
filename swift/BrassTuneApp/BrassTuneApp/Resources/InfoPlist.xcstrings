@@ -1,0 +1,184 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Bundle display name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "BrassTune"
+          }
+        }
+      }
+    },
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "BrassTuneApp"
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Shown by iOS before BrassTune first accesses the microphone.",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "يستخدم BrassTune الميكروفون لتحليل طبقة صوت آلة النفخ أثناء الضبط أو التسجيل فقط."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune verwendet das Mikrofon nur beim Stimmen oder Aufnehmen, um die Tonhöhe deines Blechblasinstruments zu analysieren."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune uses the microphone to analyze brass pitch only while you are actively tuning or recording."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune usa el micrófono para analizar la afinación del instrumento de metal solo mientras afinas o grabas."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune utilise le microphone pour analyser la justesse des cuivres uniquement pendant l’accordage ou l’enregistrement."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTuneは、チューニング中または録音中に限り、金管楽器の音程分析にマイクを使用します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune은 조율하거나 녹음하는 동안에만 금관악기의 음정을 분석하기 위해 마이크를 사용합니다."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O BrassTune usa o microfone para analisar a afinação do instrumento de metal somente enquanto você afina ou grava."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune использует микрофон для анализа высоты звука медного духового инструмента только во время настройки или записи."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune chỉ dùng micrô để phân tích cao độ kèn đồng khi bạn đang lên dây hoặc ghi âm."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune 仅在你主动调音或录音时使用麦克风分析铜管乐器音高。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune 僅在你主動調音或錄音時使用麥克風分析銅管樂器音高。"
+          }
+        }
+      }
+    },
+    "NSPhotoLibraryUsageDescription" : {
+      "comment" : "Shown by iOS before BrassTune imports a score image from the photo library.",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "يستخدم BrassTune مكتبة الصور فقط لاختيار صورة نوتة موسيقية لاستيرادها إلى ممارستك."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune verwendet deine Fotomediathek nur, um ein Notenbild für deine Übung zu importieren."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune uses your photo library only to choose a sheet music image to import into your practice."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune usa tu fototeca solo para elegir una imagen de partitura e importarla a tu práctica."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune utilise votre photothèque uniquement pour choisir une image de partition à importer dans votre pratique."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTuneは、練習に読み込む楽譜画像を選ぶためにのみ写真ライブラリを使用します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune은 연습에 가져올 악보 이미지를 선택할 때만 사진 보관함을 사용합니다."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O BrassTune usa sua fototeca apenas para escolher uma imagem de partitura para importar para sua prática."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune использует медиатеку только для выбора изображения нот, которое вы хотите импортировать для занятий."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune chỉ dùng thư viện ảnh để chọn hình ảnh bản nhạc và nhập vào buổi luyện tập của bạn."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune 仅使用你的照片图库来选择要导入练习的乐谱图片。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrassTune 僅使用你的照片圖庫來選擇要匯入練習的樂譜圖片。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

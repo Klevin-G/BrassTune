@@ -1,10 +1,13 @@
 import datetime as dt
 import statistics
 from collections import defaultdict
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from app.core.instruments.profiles import InstrumentProfile
 from app.core.music.theory import midi_range_from_labels, midi_to_note_name
+
+CENTERED_CENTS_LIMIT = 5.0
 
 
 def _value(row, key, default=None):
@@ -17,6 +20,37 @@ def _note_key(event) -> Tuple[str, int]:
     return (str(_value(event, "written_note")), int(_value(event, "written_octave")))
 
 
+def duration_weighted_mean(
+    rows: Iterable[object],
+    value_key: str,
+    duration_key: str,
+) -> Optional[float]:
+    """Return one consistent aggregate for session-derived tuning metrics.
+
+    Positive measured duration is the canonical weight. Rows without positive
+    duration never dilute rows that have measured time. If every row predates
+    duration tracking, fall back to an even mean so legacy data stays usable.
+    """
+    values = []
+    weighted_values = []
+    total_duration = 0.0
+    for row in rows:
+        raw_value = _value(row, value_key)
+        if raw_value is None:
+            continue
+        value = float(raw_value)
+        duration = max(0.0, float(_value(row, duration_key, 0) or 0))
+        values.append(value)
+        if duration > 0:
+            weighted_values.append(value * duration)
+            total_duration += duration
+    if total_duration > 0:
+        return sum(weighted_values) / total_duration
+    if values:
+        return statistics.fmean(values)
+    return None
+
+
 def calculate_note_stats(events: Iterable[object]) -> List[Dict[str, object]]:
     grouped: Dict[Tuple[str, int], List[object]] = defaultdict(list)
     for event in events:
@@ -25,17 +59,13 @@ def calculate_note_stats(events: Iterable[object]) -> List[Dict[str, object]]:
 
     stats: List[Dict[str, object]] = []
     for (note, octave), rows in grouped.items():
-        duration = sum(float(_value(row, "duration_ms", 0)) for row in rows)
-        if duration <= 0:
-            duration = float(len(rows))
-        signed = sum(float(_value(row, "avg_signed_cents", 0)) * float(_value(row, "duration_ms", 1)) for row in rows)
-        absolute = sum(float(_value(row, "avg_abs_cents", 0)) * float(_value(row, "duration_ms", 1)) for row in rows)
-        in_tune = sum(float(_value(row, "in_tune_percentage", 0)) * float(_value(row, "duration_ms", 1)) for row in rows)
+        duration = sum(max(0.0, float(_value(row, "duration_ms", 0) or 0)) for row in rows)
         all_cents = [float(_value(row, "avg_signed_cents", 0)) for row in rows]
         sample_count = sum(int(_value(row, "sample_count", 0)) for row in rows)
-        stability = sum(float(_value(row, "stability_score", 0)) * float(_value(row, "duration_ms", 1)) for row in rows)
-        avg_signed = signed / duration
-        avg_abs = absolute / duration
+        avg_signed = duration_weighted_mean(rows, "avg_signed_cents", "duration_ms") or 0.0
+        avg_abs = duration_weighted_mean(rows, "avg_abs_cents", "duration_ms") or 0.0
+        in_tune = duration_weighted_mean(rows, "in_tune_percentage", "duration_ms") or 0.0
+        stability = duration_weighted_mean(rows, "stability_score", "duration_ms") or 0.0
         stddev = statistics.pstdev(all_cents) if len(all_cents) > 1 else float(_value(rows[0], "stddev_cents", 0))
         row = {
             "written_note": note,
@@ -45,12 +75,12 @@ def calculate_note_stats(events: Iterable[object]) -> List[Dict[str, object]]:
             "avg_abs_cents": avg_abs,
             "median_cents": statistics.median(all_cents),
             "stddev_cents": stddev,
-            "in_tune_percentage": in_tune / duration,
+            "in_tune_percentage": in_tune,
             "duration_ms": duration,
             "duration_seconds": duration / 1000.0,
             "sample_count": sample_count,
             "event_count": len(rows),
-            "stability_score": stability / duration,
+            "stability_score": stability,
         }
         row["trend"] = classify_note_trend(row)
         row["severity"] = classify_note_problem(row)
@@ -78,18 +108,20 @@ def classify_note_trend(note_stats: Dict[str, object]) -> str:
     stability = float(note_stats.get("stability_score", 100))
     if stddev >= 12 or stability < 50:
         return "Unstable"
-    if signed >= 6:
+    if signed > CENTERED_CENTS_LIMIT:
         return "Mostly sharp"
-    if signed <= -6:
+    if signed < -CENTERED_CENTS_LIMIT:
         return "Mostly flat"
     return "Centered"
 
 
 def problem_score(note_stats: Dict[str, object]) -> float:
+    """Return nonnegative severity rounded to cents-style hundredths, half up."""
     avg_abs = float(note_stats.get("avg_abs_cents", 0))
     stddev = float(note_stats.get("stddev_cents", 0))
     in_tune = float(note_stats.get("in_tune_percentage", 0))
-    return round(avg_abs * 2 + stddev + max(0.0, 80 - in_tune) * 0.25, 2)
+    value = avg_abs * 2 + stddev + max(0.0, 80 - in_tune) * 0.25
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def heatmap_severity(note_stats: Optional[Dict[str, object]]) -> str:
@@ -208,8 +240,13 @@ def calculate_progress_timeseries(sessions: Iterable[object], interval: str = "d
     for key, rows in sorted(grouped.items()):
         duration = sum(float(_value(row, "duration_seconds", 0) or 0) for row in rows)
         count = len(rows)
-        avg_abs = statistics.fmean([float(_value(row, "average_abs_cents", 0) or 0) for row in rows])
-        in_tune = statistics.fmean([float(_value(row, "in_tune_percentage", 0) or 0) for row in rows])
+        tuning_rows = [
+            row
+            for row in rows
+            if _value(row, "notes_count") is None or int(_value(row, "notes_count", 0) or 0) > 0
+        ]
+        avg_abs = duration_weighted_mean(tuning_rows, "average_abs_cents", "duration_seconds") or 0.0
+        in_tune = duration_weighted_mean(tuning_rows, "in_tune_percentage", "duration_seconds") or 0.0
         series.append(
             {
                 "period": key,

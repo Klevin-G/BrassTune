@@ -1,3 +1,5 @@
+import { MIN_RECORDING_CONFIDENCE } from './music';
+import { isReliableTunerFrame } from './pitchFrameStatus';
 import type { PitchFrame } from './types';
 
 // A play-along exercise is a sequence of *written* pitch-class names (what the
@@ -72,13 +74,25 @@ export const EXERCISES: Exercise[] = [...MAJOR_SCALES, ...MINOR_SCALES, ...OTHER
 
 export type CentsGrade = 'excellent' | 'good' | 'close' | 'off' | 'missed';
 
+/** Portable Play-Along contract; mirrored in fixtures/play_along_contract.json. */
+export const PLAY_ALONG_CENTERED_CENTS = 5;
+export const PLAY_ALONG_ACCEPTED_CENTS = 15;
+export const DEFAULT_PLAY_ALONG_HOLD_MS = 2_000;
+export const DEFAULT_PLAY_ALONG_MIN_CONFIDENCE = MIN_RECORDING_CONFIDENCE;
+export const DEFAULT_PLAY_ALONG_MIN_SAMPLES = 5;
+export const DEFAULT_PLAY_ALONG_ATTACK_TRIM_MS = 120;
+export const DEFAULT_PLAY_ALONG_MAX_DROPOUT_MS = 250;
+
 export function centsGrade(avgCents: number | null): CentsGrade {
   if (avgCents == null || Number.isNaN(avgCents)) return 'missed';
   const abs = Math.abs(avgCents);
-  if (abs <= 5) return 'excellent';
-  if (abs <= 15) return 'good';
-  if (abs <= 30) return 'close';
+  if (abs <= PLAY_ALONG_CENTERED_CENTS) return 'excellent';
+  if (abs <= PLAY_ALONG_ACCEPTED_CENTS) return 'close';
   return 'off';
+}
+
+export function isAcceptedPlayAlongCents(cents: number | null | undefined): boolean {
+  return cents != null && Number.isFinite(cents) && Math.abs(cents) <= PLAY_ALONG_ACCEPTED_CENTS;
 }
 
 export interface NoteGrade {
@@ -109,7 +123,9 @@ export interface GradeSummary {
 export function summarizeGrades(results: NoteGrade[]): GradeSummary {
   const total = results.length;
   const played = results.filter((r) => r.avgCents != null);
-  const inTune = played.filter((r) => r.grade === 'excellent' || r.grade === 'good').length;
+  // "In tune" means centered within +/-5 cents. A close note is accepted so
+  // practice can continue, but it is not promoted into the centered metric.
+  const inTune = played.filter((r) => r.grade === 'excellent').length;
   const absSum = played.reduce((sum, r) => sum + Math.abs(r.avgCents as number), 0);
   return {
     total,
@@ -147,17 +163,19 @@ export class PlayAlongGrader {
   private idx = 0;
   private firstMatchTs: number | null = null;
   private lastMatchTs: number | null = null;
-  private lastNow = 0;
+  private previousFrameTs: number | null = null;
+  private previousFrameMatched = false;
+  private heldMs = 0;
   private centsBuf: { ts: number; cents: number }[] = [];
   results: NoteGrade[] = [];
 
   constructor(notes: string[], options: { holdMs?: number; minConfidence?: number; minSamples?: number; attackTrimMs?: number; maximumDropoutMs?: number } = {}) {
     this.notes = notes;
-    this.holdMs = options.holdMs ?? 450;
-    this.minConfidence = options.minConfidence ?? 0.65;
-    this.minSamples = options.minSamples ?? 5;
-    this.attackTrimMs = options.attackTrimMs ?? 120;
-    this.maximumDropoutMs = Math.max(0, options.maximumDropoutMs ?? 250);
+    this.holdMs = options.holdMs ?? DEFAULT_PLAY_ALONG_HOLD_MS;
+    this.minConfidence = options.minConfidence ?? DEFAULT_PLAY_ALONG_MIN_CONFIDENCE;
+    this.minSamples = options.minSamples ?? DEFAULT_PLAY_ALONG_MIN_SAMPLES;
+    this.attackTrimMs = options.attackTrimMs ?? DEFAULT_PLAY_ALONG_ATTACK_TRIM_MS;
+    this.maximumDropoutMs = Math.max(0, options.maximumDropoutMs ?? DEFAULT_PLAY_ALONG_MAX_DROPOUT_MS);
   }
 
   get done(): boolean {
@@ -179,6 +197,13 @@ export class PlayAlongGrader {
       scored = median(source.map((entry) => entry.cents));
     }
     const rounded = scored == null ? null : Math.round(scored * 10) / 10;
+    if (hit && !isAcceptedPlayAlongCents(scored)) {
+      // The correct written note was held, but its stable post-attack median
+      // never entered the accepted window. Keep the same target and require a
+      // fresh two-second centered/close sustain.
+      this.resetHold();
+      return;
+    }
     this.results.push({ name: this.notes[this.idx], avgCents: rounded, samples: this.centsBuf.length, grade: centsGrade(rounded) });
     this.idx += 1;
     this.resetHold();
@@ -187,6 +212,9 @@ export class PlayAlongGrader {
   private resetHold(): void {
     this.firstMatchTs = null;
     this.lastMatchTs = null;
+    this.previousFrameTs = null;
+    this.previousFrameMatched = false;
+    this.heldMs = 0;
     this.centsBuf = [];
   }
 
@@ -196,41 +224,65 @@ export class PlayAlongGrader {
   }
 
   feed(frame: PitchFrame, nowMs: number): GraderSnapshot {
-    this.lastNow = nowMs;
     if (!this.done) {
       const target = this.notes[this.idx];
-      const confident = frame.confidence >= this.minConfidence && frame.frequency_hz != null;
-      const matches = confident && samePitchClass(frame.written_note_name, target) && frame.cents_deviation != null;
+      // Play-Along is a scoring surface, so it must use the same recording-
+      // quality lock as saved analytics. Provisional unstable/silence frames
+      // may carry plausible note/cents values but are detector dropouts, not
+      // evidence that a target was held.
+      const confident = isReliableTunerFrame(frame) && frame.confidence >= this.minConfidence;
+      const matchesPitchClass = samePitchClass(frame.written_note_name, target);
+      const matches = confident && matchesPitchClass && frame.cents_deviation != null && Number.isFinite(frame.cents_deviation);
       if (matches) {
         if (this.lastMatchTs != null && nowMs - this.lastMatchTs > this.maximumDropoutMs) {
           this.resetHold();
         }
         if (this.firstMatchTs == null) this.firstMatchTs = nowMs;
+        if (this.previousFrameMatched && this.previousFrameTs != null) {
+          this.heldMs += Math.max(0, nowMs - this.previousFrameTs);
+        }
         this.lastMatchTs = nowMs;
+        this.previousFrameTs = nowMs;
+        this.previousFrameMatched = true;
         this.centsBuf.push({ ts: nowMs, cents: frame.cents_deviation as number });
-        if (nowMs - this.firstMatchTs >= this.holdMs && this.centsBuf.length >= this.minSamples) {
+        if (this.heldMs >= this.holdMs && this.centsBuf.length >= this.minSamples) {
           this.finalize(true);
         }
-      } else if (confident && frame.written_note_name && !samePitchClass(frame.written_note_name, target)) {
-        // Player is sustaining a different note — reset the current hold.
+      } else if (confident && frame.written_note_name && !matchesPitchClass) {
+        // A different confident note is contrary evidence. A same-note attack
+        // may begin outside the window; its post-attack median is validated
+        // before advancement.
         this.resetHold();
-      } else if (!confident && this.lastMatchTs != null && nowMs - this.lastMatchTs > this.maximumDropoutMs) {
-        // Match native behavior: tolerate a short detector dropout, but never
-        // let a stale hold bridge more than 250 ms of silence/low confidence.
-        this.resetHold();
+      } else {
+        // A brief detector dropout pauses confirmed hold time. It does not fill
+        // the ring, but it also does not erase progress unless the grace period
+        // is exceeded.
+        this.previousFrameTs = nowMs;
+        this.previousFrameMatched = false;
+        if (this.lastMatchTs != null && nowMs - this.lastMatchTs > this.maximumDropoutMs) {
+          // Match native behavior: never let a stale hold bridge more than the
+          // configured grace period of silence, low confidence, or missing cents.
+          this.resetHold();
+        }
       }
     }
     return this.snapshot(frame);
   }
 
   snapshot(frame?: PitchFrame): GraderSnapshot {
-    const heldFraction = this.firstMatchTs == null ? 0 : Math.min(1, (this.lastNow - this.firstMatchTs) / this.holdMs);
+    const heldFraction = this.firstMatchTs == null ? 0 : Math.min(1, this.heldMs / this.holdMs);
+    const confidentDetection = Boolean(
+      frame
+      && isReliableTunerFrame(frame)
+      && frame.confidence >= this.minConfidence
+      && Number.isFinite(frame.cents_deviation),
+    );
     return {
       index: this.idx,
       currentName: this.currentName,
       heldFraction,
-      detectedName: frame?.written_note_name ?? null,
-      detectedCents: frame?.cents_deviation ?? null,
+      detectedName: confidentDetection ? frame?.written_note_name ?? null : null,
+      detectedCents: confidentDetection ? frame?.cents_deviation ?? null : null,
       done: this.done,
       results: this.results,
     };

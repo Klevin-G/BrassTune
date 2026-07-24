@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Concert pitch A4",
+    "written_note": "A4",
+    "instrument_id": "trombone",
+    "reference_pitch_hz": 440,
+    "interval_semitones": 0,
+    "expected_frequency_hz": 440,
+    "expected_interval_note": "A",
+    "expected_detune_cents": 0
+  },
+  {
+    "name": "Trumpet written A4 sounds concert G4",
+    "written_note": "A4",
+    "instrument_id": "trumpet",
+    "reference_pitch_hz": 440,
+    "interval_semitones": 0,
+    "expected_frequency_hz": 391.99543598174927,
+    "expected_interval_note": "A",
+    "expected_detune_cents": 0
+  },
+  {
+    "name": "Horn written C4 sounds concert F3",
+    "written_note": "C4",
+    "instrument_id": "horn",
+    "reference_pitch_hz": 440,
+    "interval_semitones": 0,
+    "expected_frequency_hz": 174.61411571650194,
+    "expected_interval_note": "C",
+    "expected_detune_cents": 0
+  },
+  {
+    "name": "Trumpet written C4 plus a perfect fifth sounds concert F4",
+    "written_note": "C4",
+    "instrument_id": "trumpet",
+    "reference_pitch_hz": 440,
+    "interval_semitones": 7,
+    "expected_frequency_hz": 349.2282314330039,
+    "expected_interval_note": "G",
+    "expected_detune_cents": 0
+  }
+]

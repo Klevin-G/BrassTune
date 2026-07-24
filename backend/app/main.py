@@ -5,12 +5,15 @@ import logging
 import os
 import re
 import time
+import uuid
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.auth import assert_auth_configured
+from app.api.errors import client_error_response
 from app.api.routes import router as api_router
 from app.api.websocket import router as websocket_router
 from app.core.security import LOCAL_ENVIRONMENTS, allowed_origins, app_environment, cors_allowed_origin_regex
@@ -22,6 +25,8 @@ _RATE_LIMIT_BUCKETS = defaultdict(deque)
 _GLOBAL_RATE_LIMIT_BUCKETS = defaultdict(deque)
 _EXPENSIVE_RATE_LIMIT_BUCKETS = defaultdict(deque)
 _RATE_LIMIT_WINDOW_SECONDS = 60
+_DEFAULT_MAX_JSON_BODY_BYTES = 1_000_000
+_ABSOLUTE_MAX_JSON_BODY_BYTES = 2_000_000
 logger = logging.getLogger("brasstune.api")
 
 _NUMERIC_PATH_SEGMENT = re.compile(r"^\d+$")
@@ -66,6 +71,18 @@ def _positive_int_env(name: str, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return value if value >= 0 else default
+
+
+def _bounded_json_body_limit() -> int:
+    configured = _positive_int_env("BRASSTUNE_MAX_JSON_BODY_BYTES", _DEFAULT_MAX_JSON_BODY_BYTES)
+    if configured <= 0:
+        return _DEFAULT_MAX_JSON_BODY_BYTES
+    return min(configured, _ABSOLUTE_MAX_JSON_BODY_BYTES)
+
+
+def _is_json_media_type(content_type: str) -> bool:
+    media_type = (content_type or "").split(";", 1)[0].strip().lower()
+    return media_type == "application/json" or media_type.endswith("+json")
 
 
 def _prune_rate_limit_store(store, now: float | None = None) -> None:
@@ -122,6 +139,15 @@ def _canonical_rate_limit_path(path: str) -> str:
         else:
             segments.append(segment)
     return "/".join(segments) or "/"
+
+
+def _safe_log_route(request: Request) -> str:
+    """Return only an application-owned route template, never raw user input."""
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path.startswith("/") and len(route_path) <= 200:
+        return route_path
+    return "unmatched"
 
 
 def _trusted_forwarded_client(request: Request) -> str | None:
@@ -188,8 +214,8 @@ class JSONBodyLimitMiddleware:
 
         headers = {key.decode("latin1").lower(): value.decode("latin1") for key, value in scope.get("headers", [])}
         content_type = headers.get("content-type", "")
-        max_json_bytes = _positive_int_env("BRASSTUNE_MAX_JSON_BODY_BYTES", 1_000_000)
-        if not max_json_bytes or "application/json" not in content_type.lower():
+        max_json_bytes = _bounded_json_body_limit()
+        if not _is_json_media_type(content_type):
             await self.app(scope, receive, send)
             return
 
@@ -201,7 +227,7 @@ class JSONBodyLimitMiddleware:
                 continue
             body.extend(message.get("body", b""))
             if len(body) > max_json_bytes:
-                response = JSONResponse({"detail": "Request body is too large."}, status_code=413)
+                response = client_error_response(413, "Request body is too large.")
                 await response(scope, receive, send)
                 return
             more_body = message.get("more_body", False)
@@ -235,19 +261,37 @@ app.add_middleware(
     allow_origins=_CORS_ALLOWED_ORIGINS,
     allow_origin_regex=_CORS_ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Audio-Duration-Seconds"],
 )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def stable_http_error(_request: Request, exc: StarletteHTTPException):
+    return client_error_response(
+        exc.status_code,
+        exc.detail,
+        headers=dict(exc.headers or {}),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def stable_validation_error(_request: Request, exc: RequestValidationError):
+    return client_error_response(422, exc.errors(), code="request_validation_failed")
 
 
 @app.middleware("http")
 async def request_abuse_limits(request: Request, call_next):
+    request_id = uuid.uuid4().hex
+
     def harden_response(response):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), browsing-topics=()")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Request-ID", request_id)
         if request.url.scheme == "https" or app_environment() in {"production", "staging", "preview"}:
             response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
         # Guard responses (413/429/500) short-circuit before CORSMiddleware, so mirror the CORS
@@ -259,18 +303,25 @@ async def request_abuse_limits(request: Request, call_next):
             response.headers.setdefault("Vary", "Origin")
         return response
 
+    origin = request.headers.get("origin")
+    if origin and len(origin) > 512:
+        return harden_response(client_error_response(400, "Origin header is too large."))
+
     if request.method.upper() == "OPTIONS":
         return harden_response(await call_next(request))
 
     content_type = request.headers.get("content-type", "")
-    max_json_bytes = _positive_int_env("BRASSTUNE_MAX_JSON_BODY_BYTES", 1_000_000)
+    max_json_bytes = _bounded_json_body_limit()
     content_length = request.headers.get("content-length")
-    if max_json_bytes and "application/json" in content_type.lower() and content_length:
+    if _is_json_media_type(content_type) and content_length:
         try:
-            if int(content_length) > max_json_bytes:
-                return harden_response(JSONResponse({"detail": "Request body is too large."}, status_code=413))
+            parsed_content_length = int(content_length)
+            if parsed_content_length < 0:
+                return harden_response(client_error_response(400, "Invalid request size."))
+            if parsed_content_length > max_json_bytes:
+                return harden_response(client_error_response(413, "Request body is too large."))
         except ValueError:
-            return harden_response(JSONResponse({"detail": "Invalid request size."}, status_code=400))
+            return harden_response(client_error_response(400, "Invalid request size."))
 
     if request.url.path not in {"/api/health", "/api/live"}:
         client_host = _request_client_host(request)
@@ -287,7 +338,7 @@ async def request_abuse_limits(request: Request, call_next):
             max_clients,
             now,
         ):
-            return harden_response(JSONResponse({"detail": "Too many requests. Try again soon."}, status_code=429))
+            return harden_response(client_error_response(429, "Too many requests. Try again soon."))
 
         route_limit = _positive_int_env("BRASSTUNE_RATE_LIMIT_PER_MINUTE", 900)
         if not _consume_rate_limit(
@@ -297,7 +348,7 @@ async def request_abuse_limits(request: Request, call_next):
             max_buckets,
             now,
         ):
-            return harden_response(JSONResponse({"detail": "Too many requests. Try again soon."}, status_code=429))
+            return harden_response(client_error_response(429, "Too many requests. Try again soon."))
 
         expensive = _expensive_operation_family(request, canonical_path)
         if expensive is not None:
@@ -309,13 +360,22 @@ async def request_abuse_limits(request: Request, call_next):
                 max_buckets,
                 now,
             ):
-                return harden_response(JSONResponse({"detail": "Too many requests for this operation. Try again soon."}, status_code=429))
+                return harden_response(client_error_response(429, "Too many requests for this operation. Try again soon."))
 
     try:
         response = await call_next(request)
-    except Exception:
-        logger.exception("Unhandled backend request failure")
-        response = JSONResponse({"detail": "The server could not complete this request."}, status_code=500)
+    except Exception as exc:
+        # Do not interpolate exception messages: SQL/HTTP exceptions can embed
+        # credentials, identifiers, or request data. The request id preserves
+        # operational correlation without disclosing sensitive values.
+        logger.error(
+            "Unhandled backend request failure request_id=%s method=%s path=%s error_type=%s",
+            request_id,
+            request.method.upper(),
+            _safe_log_route(request),
+            type(exc).__name__,
+        )
+        response = client_error_response(500, "The server could not complete this request.")
     return harden_response(response)
 
 

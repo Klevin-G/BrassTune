@@ -1238,6 +1238,40 @@ meter {
   border: 0;
 }
 
+.skip-link {
+  position: fixed;
+  z-index: 1000;
+  top: 8px;
+  left: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: var(--bg-deep);
+  background: var(--gold-soft);
+  font-weight: 700;
+  transform: translateY(calc(-100% - 16px));
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Musical pitch increases left-to-right even when surrounding copy is RTL. */
+.tuning-meter-track,
+.tuning-meter-labels,
+.playalong-ring {
+  direction: ltr;
+}
+
+.note-display-note,
+.playalong-target-note strong,
+.playalong-detected strong,
+.playalong-result-note,
+.playalong-note {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 .heatmap {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
@@ -2204,6 +2238,39 @@ td a {
   cursor: default;
 }
 
+.apple-button {
+  display: flex;
+  width: 100%;
+  min-height: var(--tap);
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 18px;
+  border: 1px solid #000;
+  border-radius: 999px;
+  background: #000;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease, box-shadow 0.15s ease;
+}
+
+.apple-button img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.apple-button:hover:not(:disabled) {
+  box-shadow: 0 1px 4px rgba(255, 255, 255, 0.22);
+}
+
+.apple-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .auth-divider {
   display: flex;
   align-items: center;
@@ -2359,6 +2426,7 @@ td a {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 16px;
+  direction: ltr;
 }
 
 .playalong-note {

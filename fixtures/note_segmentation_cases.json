@@ -9,8 +9,21 @@
       { "timestamp_ms": 630, "written_note_name": "G", "written_octave": 4, "concert_note_name": "F", "concert_octave": 4, "cents_deviation": -4.0, "tuning_status": "in_tune" }
     ],
     "expected_events": [
-      { "written_note": "D", "written_octave": 5, "avg_signed_cents": 10.0 },
-      { "written_note": "G", "written_octave": 4, "avg_signed_cents": -5.0 }
+      { "written_note": "D", "written_octave": 5, "duration_ms": 330, "sample_count": 3, "avg_signed_cents": 10.0, "median_cents": 10.0, "stddev_cents": 1.632993161855452, "in_tune_percentage": 0.0, "stability_score": 91.83503419072274 },
+      { "written_note": "G", "written_octave": 4, "duration_ms": 220, "sample_count": 2, "avg_signed_cents": -5.0, "median_cents": -5.0, "stddev_cents": 1.0, "in_tune_percentage": 50.0, "stability_score": 95.0 }
+    ]
+  },
+  {
+    "name": "Brief invalid frame preserves same-note segment",
+    "frames": [
+      { "timestamp_ms": 0, "written_note_name": "C", "written_octave": 4, "concert_note_name": "Bb", "concert_octave": 3, "cents_deviation": -10.0, "tuning_status": "flat" },
+      { "timestamp_ms": 150, "written_note_name": "C", "written_octave": 4, "concert_note_name": "Bb", "concert_octave": 3, "cents_deviation": 0.0, "tuning_status": "in_tune" },
+      { "timestamp_ms": 300, "written_note_name": "C", "written_octave": 4, "concert_note_name": "Bb", "concert_octave": 3, "cents_deviation": 10.0, "tuning_status": "sharp" },
+      { "timestamp_ms": 500, "written_note_name": null, "written_octave": null, "concert_note_name": null, "concert_octave": null, "cents_deviation": null, "tuning_status": "unstable", "is_valid_for_recording": false },
+      { "timestamp_ms": 600, "written_note_name": "C", "written_octave": 4, "concert_note_name": "Bb", "concert_octave": 3, "cents_deviation": 0.0, "tuning_status": "in_tune" }
+    ],
+    "expected_events": [
+      { "written_note": "C", "written_octave": 4, "duration_ms": 750, "sample_count": 4, "avg_signed_cents": 0.0, "median_cents": 0.0, "stddev_cents": 7.0710678118654755, "in_tune_percentage": 50.0, "stability_score": 64.64466094067262 }
     ]
   }
 ]

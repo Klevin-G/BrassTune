@@ -1,0 +1,29 @@
+[
+  {
+    "name": "Trumpet written C and G drone",
+    "written_note": "C4",
+    "instrument_id": "trumpet",
+    "reference_pitch_hz": 440,
+    "interval_semitones": 7,
+    "expected_frequencies_hz": [233.08188075904496, 349.2282314330039],
+    "expected_detune_cents": [0, 0]
+  },
+  {
+    "name": "Concert-pitch A and major-third drone",
+    "written_note": "A4",
+    "instrument_id": "trombone",
+    "reference_pitch_hz": 440,
+    "interval_semitones": 4,
+    "expected_frequencies_hz": [440, 554.3652619537442],
+    "expected_detune_cents": [0, 0]
+  },
+  {
+    "name": "Concert-pitch B-flat and major-second drone",
+    "written_note": "Bb4",
+    "instrument_id": "trombone",
+    "reference_pitch_hz": 440,
+    "interval_semitones": 2,
+    "expected_frequencies_hz": [466.1637615180899, 523.2511306011972],
+    "expected_detune_cents": [0, 0]
+  }
+]

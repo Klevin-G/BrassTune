@@ -4,8 +4,11 @@ import { expect, test } from 'playwright/test';
 const routes = [
   '/',
   '/practice',
+  '/practice/play-along',
+  '/practice/scorer',
+  '/progress',
   '/metronome',
-  '/practice/score',
+  '/practice/sheet-music',
   '/auth/sign-in',
   '/settings',
   '/sessions/-12345',
@@ -16,6 +19,7 @@ const routes = [
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.demoMode', 'true');
     localStorage.setItem('brasstune.guestAccess', 'true');
     localStorage.setItem('brasstune.guestSessions.v1', JSON.stringify([
@@ -110,10 +114,44 @@ test('tablet shell navigation remains accessible when labels are visually compac
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto('/practice');
   await expect(page.getByRole('link', { name: 'Tuner' }).first()).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Play-Along' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Practice Scorer' }).first()).toBeVisible();
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
   const serious = results.violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical');
   expect(serious, JSON.stringify(serious, null, 2)).toEqual([]);
+});
+
+test('skip navigation, radio arrows, and throttled tuner announcements work from the keyboard', async ({ page, browserName }) => {
+  await page.goto('/practice');
+  const source = page.getByRole('radiogroup', { name: 'Sound source' });
+  await expect(source).toBeVisible();
+  // WebKit follows Safari's macOS convention: Option/Alt+Tab includes links
+  // in keyboard focus order when full keyboard access is not enabled.
+  await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
+  const skipLink = page.getByRole('link', { name: 'Skip to main content' });
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('main')).toBeFocused();
+
+  const demo = source.getByRole('radio', { name: 'Demo' });
+  await demo.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(source.getByRole('radio', { name: 'Live mic' })).toBeChecked();
+  await page.keyboard.press('ArrowRight');
+  await expect(demo).toBeChecked();
+
+  const noteDisplay = page.locator('.note-display');
+  await expect(noteDisplay).not.toHaveAttribute('aria-live');
+  const liveStatus = noteDisplay.getByRole('status');
+  const announcementChanges = await liveStatus.evaluate((status) => new Promise<number>((resolve) => {
+    let changes = 0;
+    const observer = new MutationObserver(() => { changes += 1; });
+    observer.observe(status, { characterData: true, childList: true, subtree: true });
+    window.setTimeout(() => {
+      observer.disconnect();
+      resolve(changes);
+    }, 1_100);
+  }));
+  expect(announcementChanges).toBeLessThanOrEqual(1);
 });

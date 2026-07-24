@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import net from 'node:net';
 import tls from 'node:tls';
+import { fetchApprovedVercelURL } from './scoped-vercel-fetch.mjs';
 
 const DEFAULT_WEB_BASE_URL = 'https://brasstune.vercel.app';
 const DEFAULT_API_BASE_URL = 'https://brasstune-u8qj.onrender.com';
@@ -75,8 +76,10 @@ async function checkWebRoot() {
   if (vercelBypassSecret) {
     assertApprovedSecretDestination('BRASSTUNE_WEB_ACCESS_URL', webAccessURL, 'vercel');
   }
-  const headers = vercelBypassSecret ? { 'x-vercel-protection-bypass': vercelBypassSecret } : {};
-  const response = await fetch(webAccessURL, { redirect: 'follow', headers });
+  const response = await fetchApprovedVercelURL(webAccessURL, {
+    bypassSecret: vercelBypassSecret,
+    isApprovedURL: (url) => isApprovedVercelHost(url.hostname),
+  });
   const text = await response.text();
   const finalURL = new URL(response.url);
   if (

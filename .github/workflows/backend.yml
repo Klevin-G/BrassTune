@@ -1,21 +1,16 @@
 name: Backend
 
 on:
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - "backend/**"
-      - "fixtures/**"
-      - "supabase/**"
-      - "render.yaml"
-      - ".github/workflows/backend.yml"
+  # Persistent self-hosted runners are reserved for trusted revisions. Pull
+  # requests are validated locally, then these gates run after merge to main.
   push:
-    branches: [main, swift-migration]
+    branches: [main]
     paths:
       - "backend/**"
       - "fixtures/**"
       - "supabase/**"
       - "render.yaml"
+      - "scripts/ci/setup-self-hosted-linux.sh"
       - ".github/workflows/backend.yml"
 
 permissions:
@@ -33,53 +28,75 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
+      - name: Verify selected Python SQLite support
+        run: python -c 'import sqlite3; print(sqlite3.sqlite_version)'
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt -c constraints.txt
+        run: python -m pip install --require-hashes -r requirements-dev.lock
       - name: Run pytest
         run: python -m pytest
 
   postgresql-integration:
     runs-on: ${{ fromJSON(vars.BRASSTUNE_POSTGRES_RUNNER || vars.BRASSTUNE_BACKEND_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 25
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: brasstune_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     defaults:
       run:
         working-directory: backend
     env:
       APP_ENV: local
       BRASSTUNE_AUTH_MODE: disabled
-      BRASSTUNE_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/brasstune_test
+      BRASSTUNE_TEST_DATABASE_URL: postgresql+psycopg://postgres@127.0.0.1:55432/brasstune_test
+      # Deliberately stable test-only material: the readiness scrub initializes
+      # durable tombstone-key state in this disposable PostgreSQL service.
+      BRASSTUNE_DELETION_TOMBSTONE_SECRET: ci-test-only-deletion-tombstone-secret-20260723
       BRASSTUNE_SEED_DEMO_DATA: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
+      - name: Verify selected Python SQLite support
+        run: python -c 'import sqlite3; print(sqlite3.sqlite_version)'
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt -c constraints.txt
+        run: python -m pip install --require-hashes -r requirements-dev.lock
+      - name: Start isolated PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          pg_bin="$(pg_config --bindir)"
+          pg_data="$RUNNER_TEMP/brasstune-pg-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          pg_log="$RUNNER_TEMP/brasstune-pg-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log"
+          "$pg_bin/initdb" \
+            --pgdata="$pg_data" \
+            --auth=trust \
+            --username=postgres \
+            --encoding=UTF8 \
+            --no-locale
+          "$pg_bin/pg_ctl" \
+            --pgdata="$pg_data" \
+            --log="$pg_log" \
+            --options="-h 127.0.0.1 -p 55432 -k $pg_data" \
+            start
+          "$pg_bin/pg_isready" --host=127.0.0.1 --port=55432 --username=postgres
+          "$pg_bin/createdb" --host=127.0.0.1 --port=55432 --username=postgres brasstune_test
+          echo "BRASSTUNE_PG_BIN=$pg_bin" >> "$GITHUB_ENV"
+          echo "BRASSTUNE_PG_DATA=$pg_data" >> "$GITHUB_ENV"
       - name: Apply Supabase migrations
         run: |
           python - <<'PY'
           from pathlib import Path
           import psycopg
+          from psycopg import sql
 
           migrations_dir = Path("../supabase/migrations")
-          with psycopg.connect("postgresql://postgres:postgres@localhost:5432/brasstune_test", autocommit=True) as conn:
+          with psycopg.connect("postgresql://postgres@127.0.0.1:55432/brasstune_test", autocommit=True) as conn:
               with conn.cursor() as cur:
+                  for role in ("anon", "authenticated", "service_role"):
+                      cur.execute(
+                          "select 1 from pg_roles where rolname = %s",
+                          (role,),
+                      )
+                      if cur.fetchone() is None:
+                          cur.execute(sql.SQL("create role {} nologin").format(sql.Identifier(role)))
                   cur.execute("create schema if not exists storage")
                   cur.execute(
                       "create table if not exists storage.buckets "
@@ -90,6 +107,16 @@ jobs:
                       cur.execute(path.read_text())
           PY
       - name: Validate PostgreSQL readiness
-        run: python -m app.db.check_ready
+        env:
+          BRASSTUNE_DATABASE_URL: postgresql+psycopg://postgres@127.0.0.1:55432/brasstune_test
+        run: python -m app.db.scrub_deletion_privacy && python -m app.db.check_ready
       - name: Run pytest against PostgreSQL
         run: python -m pytest
+      - name: Stop isolated PostgreSQL
+        if: always() && env.BRASSTUNE_PG_BIN != ''
+        shell: bash
+        run: |
+          "$BRASSTUNE_PG_BIN/pg_ctl" \
+            --pgdata="$BRASSTUNE_PG_DATA" \
+            --mode=fast \
+            stop

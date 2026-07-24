@@ -1,6 +1,32 @@
 import SwiftUI
 import UIKit
 
+/// Makes the localization intent of design-system copy explicit. String
+/// literals are catalog keys; dynamic or user-authored values must opt into
+/// `.verbatim(...)` at the call site. This prevents `Text(variable)` from
+/// silently bypassing the selected in-app language.
+enum BTCopy: ExpressibleByStringLiteral, Equatable, Hashable {
+    case localized(String)
+    case verbatim(String)
+
+    init(stringLiteral value: String) {
+        self = .localized(value)
+    }
+
+    var resolved: String {
+        switch self {
+        case .localized(let key): return NativeLocalization.string(key)
+        case .verbatim(let value): return value
+        }
+    }
+}
+
+private extension Text {
+    init(_ copy: BTCopy) {
+        self.init(verbatim: copy.resolved)
+    }
+}
+
 enum BTSpacing {
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
@@ -73,8 +99,15 @@ struct BTScreen<Content: View>: View {
                 content
             }
             .padding(BTSpacing.lg)
-            .safeAreaPadding(.bottom, 96)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // Let the containing TabView contribute its real safe area instead of
+        // guessing a tab-bar height. The small inset gives the final row
+        // breathing room after it scrolls above floating iOS 26 chrome.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear
+                .frame(height: BTSpacing.lg)
+                .accessibilityHidden(true)
         }
         .background(BTTheme.background.ignoresSafeArea())
         .scrollContentBackground(.hidden)
@@ -140,6 +173,11 @@ private struct BrassGlassModifier<GlassShape: Shape>: ViewModifier {
 }
 
 extension View {
+    func btMinimumInteractiveSize(alignment: Alignment = .center) -> some View {
+        frame(minWidth: 44, minHeight: 44, alignment: alignment)
+            .contentShape(Rectangle())
+    }
+
     func btContentSurface(
         cornerRadius: CGFloat = BTTheme.radius,
         tint: Color = BTTheme.surface,
@@ -196,45 +234,46 @@ struct BTCard<Content: View>: View {
 }
 
 struct BTPageHeader: View {
-    let eyebrow: String
-    let title: String
-    let subtitle: String
-    var trailing: String?
+    let eyebrow: BTCopy
+    let title: BTCopy
+    let subtitle: BTCopy
+    var trailing: BTCopy?
 
     var body: some View {
-        BTCard(tint: BTTheme.surfaceWarm) {
-            HStack(alignment: .top, spacing: BTSpacing.lg) {
-                VStack(alignment: .leading, spacing: BTSpacing.sm) {
-                    Text(eyebrow.uppercased())
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(BTTheme.accentSoft)
-                    Text(title)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                        .foregroundStyle(BTTheme.text)
-                        .minimumScaleFactor(0.72)
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(BTTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: BTSpacing.md)
-                if let trailing {
-                    BTStatusPill(text: trailing, tint: BTTheme.secondaryAccent)
-                }
+        HStack(alignment: .top, spacing: BTSpacing.lg) {
+            VStack(alignment: .leading, spacing: BTSpacing.sm) {
+                Text(verbatim: eyebrow.resolved.uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(BTTheme.accentSoft)
+                Text(title)
+                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                    .foregroundStyle(BTTheme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: BTSpacing.md)
+            if let trailing {
+                BTStatusPill(text: trailing, tint: BTTheme.secondaryAccent)
             }
         }
+        .padding(.horizontal, BTSpacing.xs)
     }
 }
 
 struct BTSectionHeader: View {
-    let title: String
-    var subtitle: String?
+    let title: BTCopy
+    var subtitle: BTCopy?
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.xs) {
             Text(title)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(BTTheme.text)
+                .accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(subtitle)
                     .font(.subheadline)
@@ -242,14 +281,13 @@ struct BTSectionHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .accessibilityElement(children: .combine)
     }
 }
 
 struct BTMetricTile: View {
-    let title: String
-    let value: String
-    var detail: String?
+    let title: BTCopy
+    let value: BTCopy
+    var detail: BTCopy?
     var tint: Color = BTTheme.accent
     var interactive: Bool = false
 
@@ -278,7 +316,7 @@ struct BTMetricTile: View {
 }
 
 struct BTStatusPill: View {
-    let text: String
+    let text: BTCopy
     var tint: Color = BTTheme.accent
 
     var body: some View {
@@ -292,20 +330,24 @@ struct BTStatusPill: View {
                 Capsule().stroke(tint.opacity(0.28), lineWidth: 1)
             }
             .clipShape(Capsule())
-            .accessibilityLabel(text)
+            .accessibilityLabel(Text(text))
     }
 }
 
 struct BTEmptyState: View {
-    let title: String
-    let message: String
+    let title: BTCopy
+    let message: BTCopy
     var systemImage: String = "music.note"
 
     var body: some View {
         BTCard {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-                .foregroundStyle(BTTheme.accent)
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: systemImage)
+            }
+            .font(.headline)
+            .foregroundStyle(BTTheme.accent)
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(BTTheme.muted)
@@ -355,6 +397,7 @@ struct BrassGlassButtonStyle: PrimitiveButtonStyle {
             configuration.label
                 .font(.headline)
                 .frame(maxWidth: .infinity)
+                .frame(minHeight: 44)
                 .padding(.vertical, BTSpacing.xs)
                 .contentShape(Rectangle())
         }
@@ -371,6 +414,7 @@ struct BTPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.headline)
             .frame(maxWidth: .infinity)
+            .frame(minHeight: 44)
             .padding(.vertical, BTSpacing.md)
             .foregroundStyle(isEnabled ? BTTheme.onAccent : BTTheme.muted)
             .background(shape.fill(isEnabled ? BTTheme.accent : BTTheme.surfaceAlt))
@@ -387,6 +431,7 @@ struct BTSecondaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.headline)
             .frame(maxWidth: .infinity)
+            .frame(minHeight: 44)
             .padding(.vertical, BTSpacing.md)
             .foregroundStyle(isEnabled ? BTTheme.text : BTTheme.muted)
             .background(shape.fill(BTTheme.surfaceAlt))
@@ -399,8 +444,8 @@ struct BTSecondaryButtonStyle: ButtonStyle {
 }
 
 struct BTInsightTile: View {
-    let title: String
-    let detail: String
+    let title: BTCopy
+    let detail: BTCopy
     let systemImage: String
     var tint: Color = BTTheme.accent
     var interactive: Bool = false

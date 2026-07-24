@@ -26,5 +26,20 @@
     },
     "expected_category": "Inconsistent pitch",
     "expected_related_note": "E5"
+  },
+  {
+    "name": "Low stability cannot be described as centered",
+    "instrument_id": "trombone",
+    "note_stats": {
+      "note_label": "Bb3",
+      "avg_signed_cents": 1,
+      "avg_abs_cents": 4,
+      "stddev_cents": 4,
+      "stability_score": 30,
+      "duration_seconds": 8,
+      "in_tune_percentage": 88
+    },
+    "expected_category": "Inconsistent pitch",
+    "expected_related_note": "Bb3"
   }
 ]

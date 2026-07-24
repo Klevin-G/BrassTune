@@ -1,55 +1,35 @@
-# BrassTune Final Web-First Report
+# BrassTune Release Candidate Evidence
 
-2026-07-08 notice: this report is historical June web-beta evidence, not the current release decision. Current PR #7 web/backend release status is blocked and tracked in `WEB_RECOVERY_FINDINGS.md`; current PR #8/native status is simulator/sample-mode only and tracked in the native `TEST_MATRIX.md`.
+Updated: 2026-07-23. Pre-push code/test revision: `a3f436ea7442c471760e06ed1422ec3ddbbf1217`.
 
-Updated: 2026-06-21T05:51:09Z
+## Decision
 
-## Current State
+Ready for review and merge; not deployed or merged. Web, native, shared-domain, accessibility, and privacy work has current local evidence. `428a123` fixes the duplicate-identity PII race and the full backend suite passes `246 passed, 4 skipped`. Persistent self-hosted runners are restricted to trusted `push` and manual events, so exact-SHA CI runs after merge rather than on pull-request code.
 
-Phase 1 web/backend production certification was complete for the June guest-first beta release. The final web main SHA for that historical release was `6acb91d54a734e722ed937590aecb51dec53543c`.
+## Verified local evidence
 
-`WEB_PRODUCTION_COMPLETION_GATE.md` contains the required pass line, so Phase 2 Swift work may begin from `main` after this evidence commit and tag are published.
+| Surface | Result | Boundary |
+|---|---|---|
+| Backend | `246 passed, 4 skipped` after the `428a123` duplicate-identity PII race correction | Local result; exact-SHA self-hosted CI remains required. |
+| Web unit/build/dependency audit | `251/251`, production build, `11` lazy non-English locale chunks, `npm audit --omit=dev` with `0` findings | Local only. |
+| Web browser journeys | `443 passed, 7 skipped, 0 failed` | Local automation only. |
+| Shared pitch domain | Swift Core `3/3` | Does not prove physical audio capture. |
+| Native unit/UI | `140/140` units; `17/17` UI tests in one invocation, result bundle `/tmp/brasstune-final-a3f436e-all-ui.xcresult` | Unsigned simulator only. |
+| Native builds | Debug iPhone/iPad and Release iPhone passed with zero warnings | Not an archive, signing, or device result. |
 
-## Implemented
+## Product scope represented in the candidate
 
-- `/` is the authentication gateway; `/home` is the dashboard.
-- Unsigned private deep links redirect to `/` with a safe `next` value; Continue as guest enters the intended route or `/home`.
-- Returning signed-in users are held in a neutral restoration state before private routes render.
-- Account-disabled builds show guest-first copy and hide account/provider controls unless configured.
-- Provider buttons are gated by explicit provider env flags.
-- Shared `design/brasstune-tokens.json`, `ThemeProvider`, pre-paint theme initialization, CSS custom-property themes, and Settings/gateway theme selectors were added.
-- Visible dead/no-op controls were fixed across heat maps, microphone monitoring, guest session delete, export/copy status, ensemble forms, and score file inputs.
-- Vercel security headers and API security headers were added.
-- Backend JSON body limits, audio upload format validation, WebSocket deployed-origin behavior, unauthenticated socket limits, and production smoke defaults were hardened.
-- Device simulation and hosted smoke were updated for the auth-gateway route model.
+- A focused tuner-first practice workspace, five-minute guided warm-up, custom Play-Along builder, named metronome presets, favorites/recent shortcuts, weekly goals/reflections, weak-transition drills, drone/interval tuning, and offline packs.
+- Class creation, join/invite workflows, role-aware aggregate practice summaries, and an aggregate-only privacy contract.
+- Twelve production locales: English, Spanish, Simplified Chinese, Traditional Chinese, Arabic, French, German, Russian, Portuguese (Brazil), Japanese, Korean, and Vietnamese. The web loads eleven non-English catalogs lazily.
+- Web and iOS email/password auth plus Google and Apple sign-in surfaces. Google is live on the linked Supabase project; independent Google branding review approved the current native treatment. Apple implementation is complete but the live provider is disabled pending Apple Developer credentials and Supabase setup.
 
-## Evidence
+## Release blockers and order
 
-- Backend: `77 passed`.
-- Backend hardening: `61 passed`.
-- Frontend unit: `40 passed`.
-- Frontend build: passed.
-- Local E2E/accessibility: `80 passed`.
-- Device simulation: passed.
-- `npm audit --omit=dev`: 0 vulnerabilities.
-- Bandit: no issues.
-- Clean `uv` Python 3.12 `pip-audit`: no known vulnerabilities.
-- PR #3 CI: Backend, Frontend, Security, Vercel passed.
-- PR #4 CI: Frontend, Security, Vercel passed.
-- Final production `npm run smoke:hosted`: passed.
-- Final strict hosted Playwright: `7 passed`.
+1. Push and merge the locally verified candidate, then run required Backend, Frontend, Security, and Swift checks on the exact merged SHA using the configured self-hosted runners. Confirm the pre-baked SQLite runtime with the action-selected Python in live CI.
+2. Apply the three additive Supabase migrations, then deploy the privacy-aware backend and verify expand cleanup before creating or applying the terminal contract migration.
+3. Sync approved Supabase redirect URLs/configuration, deploy Render and Vercel from the same merged SHA, and pass hosted REST, WebSocket, auth, class, audio, and offline smoke.
+4. Complete human/device gates separately: Apple provider setup, signed archive/TestFlight, physical microphone/audio, accessibility, and localization checks.
+5. Reconnect the outreach Gmail integration as the designated BrassTune sender before creating professor drafts; the currently connected account is not the planned sender and must not receive duplicate drafts.
 
-## Deployments
-
-- Vercel production deployment: `dpl_6pScePaqbs8fYYD44wanhdgZkAPN`.
-- Vercel production SHA: `6acb91d54a734e722ed937590aecb51dec53543c`.
-- Render deployment ID: not exposed by available tooling; backend production was verified live by new security headers and hosted smoke.
-- Rollback target: Vercel `dpl_2T68p4MQo8VbbAst4f7gnbHKitnP`.
-- Release tag: `web-beta-2026.06.21.1`.
-
-## Still Gated
-
-- Live Supabase/Google/Apple account lifecycle without owner credentials.
-- Apple signing/TestFlight/App Store submission.
-- Physical-device brass/microphone validation.
-- Native SwiftUI repository completion, now allowed to start as Phase 2 but not yet complete.
+No claim in this report establishes production deployment, Apple provider enablement, signed native delivery, or physical-device microphone quality.

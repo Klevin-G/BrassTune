@@ -11,7 +11,7 @@ class StartSessionRequest(BaseModel):
     instrument_id: str = Field(default="trumpet", max_length=40)
     name: Optional[str] = Field(default=None, max_length=120)
     reference_pitch_hz: float = Field(default=440.0, ge=400.0, le=480.0)
-    user_id: int = 1
+    user_id: int = Field(default=1, ge=1)
 
 
 class PitchFrameIn(BaseModel):
@@ -53,9 +53,9 @@ class AudioFrameIn(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
-    username: Optional[str] = None
-    display_name: Optional[str] = None
-    primary_instrument_id: Optional[str] = None
+    username: Optional[str] = Field(default=None, max_length=32)
+    display_name: Optional[str] = Field(default=None, max_length=120)
+    primary_instrument_id: Optional[str] = Field(default=None, max_length=40)
     onboarding_completed: bool = False
 
     @field_validator("username")
@@ -81,7 +81,7 @@ class AddMemberByUsernameRequest(BaseModel):
     # Optional: the director may leave the instrument unset and the student
     # chooses it when they accept the invitation.
     instrument_id: Optional[str] = Field(default=None, max_length=40)
-    role_in_group: str = "student"
+    role_in_group: str = Field(default="student", max_length=24)
 
     @field_validator("username")
     @classmethod
@@ -105,13 +105,13 @@ class JoinByCodeRequest(BaseModel):
 
 
 class UpdateGroupMemberRequest(BaseModel):
-    instrument_id: Optional[str] = None
-    role_in_group: Optional[str] = None
-    status: Optional[str] = None
+    instrument_id: Optional[str] = Field(default=None, max_length=40)
+    role_in_group: Optional[str] = Field(default=None, max_length=24)
+    status: Optional[str] = Field(default=None, max_length=24)
 
 
 class AudioUploadMetadata(BaseModel):
-    duration_seconds: Optional[float] = None
+    duration_seconds: Optional[float] = Field(default=None, ge=0, le=86_400)
 
 
 class AccountDeletionRequest(BaseModel):

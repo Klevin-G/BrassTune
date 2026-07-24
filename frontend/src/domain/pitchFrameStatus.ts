@@ -11,6 +11,23 @@ export interface SaveEligibility {
   tone: 'green' | 'gold' | 'amber' | 'red' | 'muted';
 }
 
+/**
+ * Live tuner feedback is a recording-quality claim: an unstable frame must not
+ * look or sound "in tune" merely because its provisional cents value is near
+ * zero. Keep this gate aligned with the domain's save-quality contract.
+ */
+export function isReliableTunerFrame(frame: PitchFrame | null): frame is PitchFrame {
+  return Boolean(
+    frame
+    && frame.is_valid_for_recording
+    && frame.confidence >= MIN_RECORDING_CONFIDENCE
+    && frame.frequency_hz != null
+    && frame.cents_deviation != null
+    && frame.tuning_status !== 'silence'
+    && frame.tuning_status !== 'unstable',
+  );
+}
+
 export function describeSaveEligibility(frame: PitchFrame | null, profile?: InstrumentProfile | null): SaveEligibility {
   if (!frame) {
     return {

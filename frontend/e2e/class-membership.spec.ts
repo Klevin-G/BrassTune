@@ -20,11 +20,46 @@ type Invitation = {
   director_name: string | null;
 };
 
+type RosterStudent = {
+  member_id: number;
+  user_id: number;
+  username: string;
+  display_name: string;
+  instrument_id: string;
+  status: string;
+  role_in_group: string;
+  sessions_count: number;
+  practice_minutes: number;
+  average_abs_cents: number | null;
+  in_tune_percentage: number | null;
+  last_practice_at: string | null;
+  last_active_at: string | null;
+};
+
 type FixtureOptions = {
   groupDelaysMs?: Record<number, number>;
   mutationDelayMs?: number;
   invitations?: Invitation[];
   initialGroups?: Group[];
+  initialRoster?: RosterStudent[];
+  onboardingCompletedAt?: string | null;
+  onboardingUpdateFailures?: number;
+  onboardingUpdateDelayMs?: number;
+  initialProfileFailures?: number;
+  holdProfileUntilReleased?: boolean;
+};
+
+const hornProfile = {
+  id: 'horn',
+  display_name: 'French Horn in F',
+  transposition_semitones: 7,
+  min_frequency_hz: 80,
+  max_frequency_hz: 1200,
+  preferred_note_spellings: ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'],
+  typical_range_written: 'F3-C6',
+  common_tuning_tendencies: ['Hand position affects resonance and intonation.'],
+  recommendation_templates: { sharp: [], flat: [], unstable: [] },
+  future_swift_notes: 'Keep transposition and horn-specific coaching in plain data.',
 };
 
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -35,9 +70,26 @@ export const supabaseConfigured = true;
 export const authProviders = { google: false, apple: false };
 export const supabase = {
   auth: {
+    get storageKey() {
+      if (localStorage.getItem('brasstune.e2eAuthStorageFailure') === 'true') {
+        throw new Error('storage unavailable');
+      }
+      return 'sb-brasstune-e2e-auth-token';
+    },
     getSession: async () => ({ data: { session } }),
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
-    signOut: async () => ({ error: null }),
+    signOut: async () => {
+      const calls = Number(localStorage.getItem('brasstune.e2eSignOutCalls') || '0') + 1;
+      localStorage.setItem('brasstune.e2eSignOutCalls', String(calls));
+      localStorage.setItem('brasstune.e2eSignOutStarted', 'true');
+      const delayMs = Number(localStorage.getItem('brasstune.e2eSignOutDelayMs') || '0');
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (localStorage.getItem('brasstune.e2eSignOutFailure') === 'true') {
+        return { error: new Error('network request failed') };
+      }
+      localStorage.setItem('brasstune.e2eSignOutFinished', 'true');
+      return { error: null };
+    },
     signInWithPassword: async () => ({ data: { session }, error: null }),
     signUp: async () => ({ data: { session }, error: null }),
   },
@@ -45,6 +97,10 @@ export const supabase = {
 `;
 
 async function installSignedInClassFixture(page: Page, options: FixtureOptions = {}) {
+  let profileFailureReleased = false;
+  let onboardingCompletedAt = options.onboardingCompletedAt === undefined
+    ? '2026-07-16T12:00:00Z'
+    : options.onboardingCompletedAt;
   let groups: Group[] = options.initialGroups ? [...options.initialGroups] : [
     { id: 1, name: 'Concert Band', director_user_id: 12, viewer_role: 'student' },
     { id: 2, name: 'Jazz Band', viewer_role: 'assistant', viewer_can_leave: true, viewer_can_manage: false },
@@ -52,6 +108,7 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
     { id: 4, name: 'Legacy-owned Brass', join_code: 'LEGACY99', director_user_id: 99, viewer_role: 'owner' },
   ];
   let invitations = [...(options.invitations ?? [])];
+  let roster = [...(options.initialRoster ?? [])];
   const counters = {
     creates: 0,
     memberInvites: 0,
@@ -59,6 +116,12 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
     declines: 0,
     joins: 0,
     leaves: 0,
+    removes: 0,
+    onboardingUpdates: 0,
+    profileLoads: 0,
+    releaseProfileFailure: () => {
+      profileFailureReleased = true;
+    },
     joinPayload: null as { code?: string; instrument_id?: string } | null,
   };
 
@@ -76,8 +139,15 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
       body: JSON.stringify(body),
     });
 
-    if (path === '/api/instruments') return respond([]);
+    if (path === '/api/instruments') return respond([hornProfile]);
     if (path === '/api/users/current') {
+      counters.profileLoads += 1;
+      if (
+        (options.holdProfileUntilReleased && !profileFailureReleased) ||
+        counters.profileLoads <= (options.initialProfileFailures ?? 0)
+      ) {
+        return respond({ detail: 'Temporary profile failure.' }, 503);
+      }
       return respond({
         id: 99,
         supabase_user_id: 'class-user',
@@ -86,7 +156,17 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
         email: 'student@example.test',
         role: 'director',
         primary_instrument_id: 'horn',
+        onboarding_completed_at: onboardingCompletedAt,
       });
+    }
+    if (path === '/api/users/me' && request.method() === 'PATCH') {
+      counters.onboardingUpdates += 1;
+      if (options.onboardingUpdateDelayMs) await delay(options.onboardingUpdateDelayMs);
+      if (counters.onboardingUpdates <= (options.onboardingUpdateFailures ?? 0)) {
+        return respond({ detail: 'Temporary onboarding persistence failure.' }, 503);
+      }
+      onboardingCompletedAt = '2026-07-16T12:30:00Z';
+      return respond({ onboarding_completed_at: onboardingCompletedAt });
     }
     if (path === '/api/ensemble/invitations' && request.method() === 'GET') return respond({ invitations });
     if (path === '/api/ensemble/groups' && request.method() === 'GET') return respond(groups);
@@ -163,6 +243,15 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
       return respond({ left: true, group_id: groupID });
     }
 
+    const removeMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/members\/(\d+)$/);
+    if (removeMatch && request.method() === 'DELETE') {
+      counters.removes += 1;
+      const memberID = Number(removeMatch[2]);
+      if (options.mutationDelayMs) await delay(options.mutationDelayMs);
+      roster = roster.filter((member) => member.member_id !== memberID);
+      return respond({ removed: true });
+    }
+
     const groupMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)$/);
     if (groupMatch && request.method() === 'GET') {
       const groupID = Number(groupMatch[1]);
@@ -186,7 +275,7 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
       });
     }
 
-    if (/^\/api\/ensemble\/groups\/\d+\/roster$/.test(path)) return respond({ students: [] });
+    if (/^\/api\/ensemble\/groups\/\d+\/roster$/.test(path)) return respond({ students: roster });
     if (path === '/api/ensemble/summary') return respond({ sections: [] });
     if (path === '/api/ensemble/report') return respond({});
     return respond({ detail: 'Unexpected class fixture request' }, 500);
@@ -194,6 +283,7 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
 
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.instrument', 'horn');
     localStorage.setItem('brasstune.referencePitch', '442');
     localStorage.setItem('brasstune.guestSessions.v1', JSON.stringify([{ id: -901, name: 'Local warmup' }]));
@@ -201,6 +291,290 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
 
   return counters;
 }
+
+const switchingAuthModule = `
+let session = { access_token: 'token-a', user: { id: 'account-a' } };
+const listeners = new Set();
+globalThis.__brasstuneSwitchAccount = (userId) => {
+  session = { access_token: userId === 'account-b' ? 'token-b' : 'token-c', user: { id: userId } };
+  listeners.forEach((listener) => listener('SIGNED_IN', session));
+};
+export const supabaseConfigured = true;
+export const authProviders = { google: false, apple: false };
+export const supabase = {
+  auth: {
+    getSession: async () => ({ data: { session } }),
+    onAuthStateChange: (listener) => {
+      listeners.add(listener);
+      return { data: { subscription: { unsubscribe() { listeners.delete(listener); } } } };
+    },
+    signOut: async () => ({ error: null }),
+    signInWithPassword: async () => ({ data: { session }, error: null }),
+    signUp: async () => ({ data: { session }, error: null }),
+  },
+};
+`;
+
+async function installAccountSwitchFixture(
+  page: Page,
+  options: { failAccountBProfile?: boolean; delayAccountAJoin?: boolean } = {},
+) {
+  let releaseAccountAJoin: () => void = () => undefined;
+  const accountAJoinGate = new Promise<void>((resolve) => {
+    releaseAccountAJoin = resolve;
+  });
+  const counters = {
+    failedProfileLoads: 0,
+    failedAccountGroupLoads: 0,
+    accountAJoins: 0,
+    groupLoads: { 'token-a': 0, 'token-b': 0, 'token-c': 0 } as Record<string, number>,
+    releaseAccountAJoin: () => releaseAccountAJoin(),
+  };
+
+  await page.route('**/src/lib/supabase.ts*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/javascript', body: switchingAuthModule });
+  });
+
+  await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const token = request.headers().authorization?.replace(/^Bearer\s+/i, '') ?? '';
+    const respond = (body: unknown, status = 200) => route.fulfill({
+      status,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+
+    if (path === '/api/instruments') return respond([hornProfile]);
+    if (path === '/api/users/current') {
+      if (token === 'token-b' && options.failAccountBProfile !== false) {
+        counters.failedProfileLoads += 1;
+        return respond({ detail: 'Temporary profile failure.' }, 503);
+      }
+      const isAccountB = token === 'token-b';
+      const isAccountC = token === 'token-c';
+      return respond({
+        id: isAccountC ? 303 : isAccountB ? 202 : 101,
+        supabase_user_id: isAccountC ? 'account-c' : isAccountB ? 'account-b' : 'account-a',
+        username: isAccountC ? 'account-c' : isAccountB ? 'account-b' : 'account-a',
+        display_name: isAccountC ? 'Account C' : isAccountB ? 'Account B' : 'Account A',
+        email: isAccountC ? 'c@example.test' : isAccountB ? 'b@example.test' : 'a@example.test',
+        role: 'student',
+        primary_instrument_id: 'trumpet',
+        onboarding_completed_at: '2026-07-16T12:00:00Z',
+      });
+    }
+    if (path === '/api/ensemble/invitations') return respond({ invitations: [] });
+    if (path === '/api/ensemble/join' && request.method() === 'POST') {
+      if (token === 'token-a') {
+        counters.accountAJoins += 1;
+        if (options.delayAccountAJoin) await accountAJoinGate;
+        return respond({ joined: true, group_id: 111, group_name: 'Account A Late Class' });
+      }
+      return respond({ joined: true, group_id: 222, group_name: 'Account B Joined Class' });
+    }
+    if (path === '/api/ensemble/groups') {
+      if (token === 'token-b') counters.failedAccountGroupLoads += 1;
+      counters.groupLoads[token] = (counters.groupLoads[token] ?? 0) + 1;
+      const isAccountB = token === 'token-b';
+      const isAccountC = token === 'token-c';
+      return respond([{
+        id: isAccountC ? 303 : isAccountB ? 202 : 101,
+        name: isAccountC ? 'Account C Class' : isAccountB ? 'Account B Class' : 'Account A Class',
+        viewer_role: 'student',
+        viewer_can_leave: true,
+        viewer_can_manage: false,
+      }]);
+    }
+    const groupMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)$/);
+    if (groupMatch) {
+      const isAccountB = token === 'token-b';
+      const isAccountC = token === 'token-c';
+      return respond({
+        id: Number(groupMatch[1]),
+        name: isAccountC ? 'Account C Class' : isAccountB ? 'Account B Class' : 'Account A Class',
+        viewer_role: 'student',
+        viewer_can_leave: true,
+        viewer_can_manage: false,
+        members: [],
+      });
+    }
+    return respond({ detail: 'Unexpected account-switch fixture request.' }, 500);
+  });
+
+  await page.addInitScript(() => {
+    localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
+    localStorage.setItem('brasstune.instrument', 'trumpet');
+  });
+
+  return counters;
+}
+
+test('a restored session profile failure keeps recovery controls visible and retries without crossing practice owners', async ({ page }) => {
+  const counters = await installSignedInClassFixture(page, { holdProfileUntilReleased: true });
+  await page.addInitScript(() => {
+    const library = (label: string) => JSON.stringify({
+      version: 1,
+      customExercises: [],
+      metronomePresets: [],
+      favorites: [],
+      recents: [],
+      reflections: [],
+      warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-07-23T00:00:00.000Z' },
+      weeklyGoal: { week: '2026-07-20', targetMinutes: label === 'account' ? 91 : 37, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
+    });
+    localStorage.setItem('brasstune.practiceLibrary.v1.guest', library('guest'));
+    localStorage.setItem('brasstune.practiceLibrary.v1.account%3A99', library('account'));
+  });
+
+  await page.goto('/practice');
+  await expect(page.getByRole('heading', { name: 'We could not finish restoring your account' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue as guest' })).toBeVisible();
+  await expect(page.getByText('Live mic', { exact: true })).toHaveCount(0);
+  const beforeRetry = await page.evaluate(() => ({
+    guest: localStorage.getItem('brasstune.practiceLibrary.v1.guest'),
+    account: localStorage.getItem('brasstune.practiceLibrary.v1.account%3A99'),
+  }));
+
+  counters.releaseProfileFailure();
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText('Live mic', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Goal in minutes')).toHaveValue('91');
+  expect(counters.profileLoads).toBeGreaterThan(1);
+  const afterRetry = await page.evaluate(() => ({
+    guest: localStorage.getItem('brasstune.practiceLibrary.v1.guest'),
+    account: localStorage.getItem('brasstune.practiceLibrary.v1.account%3A99'),
+  }));
+  expect(afterRetry.guest).toBe(beforeRetry.guest);
+  expect(JSON.parse(afterRetry.guest ?? '{}').weeklyGoal.targetMinutes).toBe(37);
+  expect(JSON.parse(afterRetry.account ?? '{}').weeklyGoal.targetMinutes).toBe(91);
+});
+
+test('unresolved identity recovery awaits one guest transition and keeps failures visible', async ({ page }) => {
+  await installSignedInClassFixture(page, { holdProfileUntilReleased: true });
+  await page.addInitScript(() => {
+    localStorage.setItem('brasstune.e2eSignOutDelayMs', '1200');
+    localStorage.setItem('brasstune.e2eSignOutFailure', 'true');
+    localStorage.setItem('brasstune.e2eAuthStorageFailure', 'true');
+  });
+
+  await page.goto('/practice');
+  const recoveryHeading = page.getByRole('heading', { name: 'We could not finish restoring your account' });
+  const guestButton = page.getByRole('button', { name: 'Continue as guest' });
+  await expect(recoveryHeading).toBeVisible();
+
+  await guestButton.click();
+  await expect(guestButton).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutStarted'))).toBe('true');
+  await expect(recoveryHeading).toBeVisible();
+  await expect(page.getByText('Live mic', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveText('Sign-out could not complete. Try again.');
+  await expect(guestButton).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutCalls'))).toBe('1');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBeNull();
+
+  await page.evaluate(() => {
+    localStorage.removeItem('brasstune.e2eSignOutFailure');
+    localStorage.removeItem('brasstune.e2eAuthStorageFailure');
+  });
+  await guestButton.click();
+  await expect(page.getByText('Live mic', { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutCalls'))).toBe('2');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutFinished'))).toBe('true');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBe('true');
+  await expect(recoveryHeading).toHaveCount(0);
+});
+
+test('switching Supabase users clears the prior profile and class data before reloading', async ({ page }) => {
+  const counters = await installAccountSwitchFixture(page);
+  await page.goto('/ensemble');
+  await expect(page.getByRole('heading', { name: 'Account A Class' })).toBeVisible();
+
+  await page.evaluate(() => {
+    (globalThis as typeof globalThis & { __brasstuneSwitchAccount: (userId: string) => void })
+      .__brasstuneSwitchAccount('account-b');
+  });
+  await expect.poll(() => counters.failedProfileLoads).toBeGreaterThan(0);
+  await expect(page.getByRole('heading', { name: 'Account A Class' })).toHaveCount(0);
+  await expect(page.getByText('Account A', { exact: true })).toHaveCount(0);
+  expect(counters.failedAccountGroupLoads).toBe(0);
+
+  await page.evaluate(() => {
+    (globalThis as typeof globalThis & { __brasstuneSwitchAccount: (userId: string) => void })
+      .__brasstuneSwitchAccount('account-c');
+  });
+  await expect(page.getByRole('heading', { name: 'Account C Class' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Account A Class' })).toHaveCount(0);
+});
+
+test('a delayed join from account A cannot reload or label account B', async ({ page }) => {
+  const counters = await installAccountSwitchFixture(page, {
+    failAccountBProfile: false,
+    delayAccountAJoin: true,
+  });
+  await page.goto('/ensemble');
+  await expect(page.getByRole('heading', { name: 'Account A Class' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Join another class' }).click();
+  await page.getByLabel('Class code').fill('late-a1');
+  await page.getByRole('button', { name: 'Join', exact: true }).click();
+  await expect.poll(() => counters.accountAJoins).toBe(1);
+
+  await page.evaluate(() => {
+    (globalThis as typeof globalThis & { __brasstuneSwitchAccount: (userId: string) => void })
+      .__brasstuneSwitchAccount('account-b');
+  });
+  await expect(page.getByRole('heading', { name: 'Account B Class' })).toBeVisible();
+  await expect(page.getByLabel('Class code')).toHaveCount(0);
+  const accountBLoadsBeforeRelease = counters.groupLoads['token-b'];
+
+  const delayedJoinResponse = page.waitForResponse((response) => (
+    new URL(response.url()).pathname === '/api/ensemble/join'
+  ));
+  counters.releaseAccountAJoin();
+  await delayedJoinResponse;
+  await page.waitForTimeout(150);
+
+  await expect(page.getByRole('heading', { name: 'Account B Class' })).toBeVisible();
+  await expect(page.getByText(/Account A Late Class/)).toHaveCount(0);
+  await expect(page.getByText(/You joined/)).toHaveCount(0);
+  expect(counters.groupLoads['token-b']).toBe(accountBLoadsBeforeRelease);
+});
+
+test('a new signed-in account completes one-step instrument setup and retries persistence', async ({ page }) => {
+  const counters = await installSignedInClassFixture(page, {
+    onboardingCompletedAt: null,
+    onboardingUpdateFailures: 1,
+    // Keep the save pending while each browser verifies the no-enabled-control focus trap.
+    onboardingUpdateDelayMs: 3_000,
+  });
+  await page.goto('/practice');
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
+  await expect(dialog.getByText('Using an account')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /next|back|show me around/i })).toHaveCount(0);
+  await dialog.getByRole('combobox').selectOption('horn');
+  await dialog.getByRole('button', { name: 'Open the tuner' }).click();
+  await expect(dialog.getByRole('button', { name: 'Saving tour…' })).toBeDisabled();
+  await expect(dialog).toBeFocused();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Tab');
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
+  await expect(dialog.getByRole('alert')).toContainText(/couldn’t save/i);
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Try saving again' }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => counters.onboardingUpdates).toBe(2);
+
+  await page.reload();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText(/Live mic/i)).toBeVisible();
+});
 
 test('class UI stays stable across switching and leaving one of several classes', async ({ page }) => {
   await installSignedInClassFixture(page);
@@ -296,7 +670,7 @@ test('joins a second class and keeps prior memberships available', async ({ page
   await page.getByLabel('Your instrument').selectOption('tuba');
   const joinButton = page.getByRole('button', { name: 'Join', exact: true });
   await joinButton.click();
-  await expect(page.getByRole('button', { name: 'Joining…' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Joining class…' })).toBeDisabled();
 
   await expect(page.getByText(/You joined.*Chamber Winds/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Chamber Winds' })).toBeVisible();
@@ -341,6 +715,62 @@ test('a managing member can leave once while a slow request is in flight', async
   expect(counters.leaves).toBe(1);
 });
 
+test('remove-member confirmation is keyboard contained and submits once', async ({ page }) => {
+  const counters = await installSignedInClassFixture(page, {
+    mutationDelayMs: 200,
+    initialGroups: [{
+      id: 51,
+      name: 'Roster Test',
+      join_code: 'ROSTER51',
+      director_user_id: 99,
+      viewer_role: 'owner',
+      viewer_can_leave: false,
+      viewer_can_manage: true,
+    }],
+    initialRoster: [{
+      member_id: 801,
+      user_id: 801,
+      username: 'student-one',
+      display_name: 'Student One',
+      instrument_id: 'horn',
+      status: 'active',
+      role_in_group: 'student',
+      sessions_count: 2,
+      practice_minutes: 18,
+      average_abs_cents: 7,
+      in_tune_percentage: 82,
+      last_practice_at: '2026-07-16T12:00:00Z',
+      last_active_at: '2026-07-16T12:00:00Z',
+    }],
+  });
+  await page.goto('/ensemble');
+
+  const trigger = page.getByRole('button', { name: 'Remove' });
+  await trigger.click();
+  let dialog = page.getByRole('dialog', { name: 'Remove Student One?' });
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: 'Remove', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  dialog = page.getByRole('dialog', { name: 'Remove Student One?' });
+  await dialog.getByRole('button', { name: 'Remove', exact: true }).evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+  await expect(dialog).toHaveAttribute('aria-busy', 'true');
+  await expect(dialog.getByRole('button', { name: 'Removing…' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  await expect(page.getByText('Student One removed.')).toBeVisible();
+  await expect(dialog).toBeHidden();
+  expect(counters.removes).toBe(1);
+});
+
 test('class mutations ignore duplicate and competing activations', async ({ page }) => {
   const counters = await installSignedInClassFixture(page, {
     mutationDelayMs: 150,
@@ -348,7 +778,7 @@ test('class mutations ignore duplicate and competing activations', async ({ page
       member_id: 701,
       group_id: 1,
       group_name: 'Concert Band',
-      instrument_id: 'horn',
+      instrument_id: 'unassigned',
       role_in_group: 'student',
       invited_at: '2026-07-13T12:00:00Z',
       director_name: 'Ms. Rivera',
@@ -357,12 +787,16 @@ test('class mutations ignore duplicate and competing activations', async ({ page
   await page.goto('/ensemble');
   await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
 
+  await expect(page.getByRole('button', { name: 'Accept' })).toBeDisabled();
+  await expect(page.getByText('Choose your instrument before accepting.')).toBeVisible();
+  await page.getByLabel('Your instrument').first().selectOption('horn');
+
   await page.evaluate(() => {
     const buttons = Array.from(document.querySelectorAll('button'));
     buttons.find((button) => button.textContent?.trim() === 'Accept')?.click();
     buttons.find((button) => button.textContent?.trim() === 'Decline')?.click();
   });
-  await expect(page.getByRole('button', { name: 'Joining…' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Joining class…' })).toBeDisabled();
   await expect(page.getByText(/You joined.*Concert Band/)).toBeVisible();
   expect(counters.accepts + counters.declines).toBe(1);
   expect(counters.accepts).toBe(1);

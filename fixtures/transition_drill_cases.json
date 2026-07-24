@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Octave-bearing C to D observations",
+    "events": [
+      { "note_label": "C4", "avg_signed_cents": 0 },
+      { "note_label": "D5", "avg_signed_cents": 11 },
+      { "note_label": "C5", "avg_signed_cents": 0 },
+      { "note_label": "D4", "avg_signed_cents": 13 },
+      { "note_label": "C3", "avg_signed_cents": 0 },
+      { "note_label": "D6", "avg_signed_cents": 15 }
+    ],
+    "expected": {
+      "from": "C",
+      "to": "D",
+      "notes": ["C", "D", "C", "D", "C", "D"],
+      "evidence_count": 3,
+      "average_error": 13
+    }
+  },
+  {
+    "name": "Enharmonic destination observations",
+    "events": [
+      { "note_label": "D4", "avg_signed_cents": 0 },
+      { "note_label": "C♯5", "avg_signed_cents": 11 },
+      { "note_label": "D3", "avg_signed_cents": 0 },
+      { "note_label": "D♭6", "avg_signed_cents": 13 },
+      { "note_label": "D5", "avg_signed_cents": 0 },
+      { "note_label": "C#4", "avg_signed_cents": 15 }
+    ],
+    "expected": {
+      "from": "D",
+      "to": "C#",
+      "notes": ["D", "C#", "D", "C#", "D", "C#"],
+      "evidence_count": 3,
+      "average_error": 13
+    }
+  }
+]

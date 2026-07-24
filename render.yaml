@@ -5,22 +5,20 @@ services:
     plan: free
     autoDeployTrigger: off
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m app.db.check_ready && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-proxy-headers --ws-max-size 262144 --ws-max-queue 16 --limit-concurrency 100 --backlog 128
+    buildCommand: pip install --require-hashes -r requirements-prod.lock
+    startCommand: python -m app.db.scrub_deletion_privacy && python -m app.db.check_ready && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-proxy-headers --ws-max-size 262144 --ws-max-queue 16 --limit-concurrency 100 --backlog 128
     healthCheckPath: /api/live
     envVars:
       - key: APP_ENV
         value: production
+      - key: PYTHON_VERSION
+        value: "3.11.15"
       - key: BRASSTUNE_AUTH_MODE
         value: supabase
       - key: FRONTEND_ORIGIN
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
-      - key: CORS_ALLOWED_ORIGIN_REGEX
-        sync: false
-      - key: BRASSTUNE_ALLOW_CORS_REGEX
-        value: "1"
       - key: BRASSTUNE_TRUST_PROXY
         value: "1"
       - key: DATABASE_URL
@@ -32,6 +30,8 @@ services:
       - key: BRASSTUNE_RELEASE_SHA
         sync: false
       - key: BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET
+        sync: false
+      - key: BRASSTUNE_DELETION_TOMBSTONE_SECRET
         sync: false
       - key: SUPABASE_URL
         sync: false

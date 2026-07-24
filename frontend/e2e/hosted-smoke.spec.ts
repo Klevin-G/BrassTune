@@ -1,5 +1,10 @@
 import { expect, test } from 'playwright/test';
 import type { Page, Response } from 'playwright/test';
+import {
+  approvedBrassTuneVercelOrigins,
+  installScopedVercelBypass,
+  scopedVercelBypassHeaders,
+} from './vercel-bypass';
 
 const apiBaseURL = process.env.E2E_API_BASE_URL;
 const wsBaseURL = process.env.E2E_WS_BASE_URL;
@@ -8,6 +13,14 @@ const hostedMode = process.env.E2E_START_LOCAL_SERVERS === '0';
 const vercelShareURL = process.env.E2E_VERCEL_SHARE_URL;
 const vercelBypassSecret = process.env.E2E_VERCEL_AUTOMATION_BYPASS_SECRET || process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 const webBaseURL = process.env.E2E_BASE_URL;
+const expectedFrontendSha = process.env.BRASSTUNE_EXPECTED_FRONTEND_SHA?.trim().toLowerCase();
+const productionHostedAuth = hostedMode && webBaseURL
+  ? new URL(webBaseURL).hostname === 'brasstune.vercel.app'
+  : false;
+const harmlessBrowserErrors = new Set([
+  'ResizeObserver loop completed with undelivered notifications.',
+  'ResizeObserver loop limit exceeded',
+]);
 
 const routes = [
   '/',
@@ -57,13 +70,7 @@ function routeURL(route: string) {
   return destination.toString();
 }
 
-if (hostedMode && vercelBypassSecret) {
-  test.use({
-    extraHTTPHeaders: {
-      'x-vercel-protection-bypass': vercelBypassSecret,
-    },
-  });
-}
+const approvedVercelOrigins = approvedBrassTuneVercelOrigins(webBaseURL, vercelShareURL);
 
 async function assertNotProtectedPreview(response: Response | null, page: Page, route: string) {
   if (response?.status() !== 401 && response?.status() !== 403) return;
@@ -84,7 +91,97 @@ async function grantGuestAccess(page: Page) {
   });
 }
 
+async function startWithFreshAuthStorage(page: Page) {
+  await page.context().clearCookies();
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+}
+
 test.describe('hosted read-only smoke', () => {
+  test.beforeEach(async ({ page }) => {
+    if (hostedMode && vercelBypassSecret) {
+      await installScopedVercelBypass(page, vercelBypassSecret, approvedVercelOrigins);
+    }
+  });
+
+  test('Vercel bypass credential is scoped to approved BrassTune page origins', () => {
+    const secret = 'test-only-bypass';
+    const approved = approvedBrassTuneVercelOrigins(
+      'https://brass-tune-123-kelvis-prject.vercel.app/share',
+      'https://unrelated.example.test/not-approved',
+    );
+    const incomingHeaders = {
+      Accept: 'text/html',
+      'X-Vercel-Protection-Bypass': 'must-be-replaced-or-removed',
+    };
+
+    const protectedPage = scopedVercelBypassHeaders(
+      'https://brass-tune-123-kelvis-prject.vercel.app/practice',
+      incomingHeaders,
+      secret,
+      approved,
+    );
+    expect(protectedPage['x-vercel-protection-bypass']).toBe(secret);
+
+    for (const url of [
+      'https://brasstune-u8qj.onrender.com/api/ready',
+      'https://redirect-target.example.test/after-vercel-redirect',
+      'https://cdn.example.test/app.js',
+    ]) {
+      const headers = scopedVercelBypassHeaders(url, incomingHeaders, secret, approved);
+      expect(Object.keys(headers).map((name) => name.toLowerCase())).not.toContain('x-vercel-protection-bypass');
+    }
+  });
+
+  test('production exposes Google and email sign-in from fresh storage', async ({ page }) => {
+    test.skip(!productionHostedAuth, 'Canonical production auth is not required for local or preview smoke runs.');
+    await startWithFreshAuthStorage(page);
+
+    const rootResponse = await page.goto(routeURL('/'));
+    await assertNotProtectedPreview(rootResponse, page, '/');
+    expect(rootResponse?.status(), 'Production root should load without protection or routing errors.').toBeLessThan(400);
+
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+    const emailDisclosure = page.getByRole('button', { name: 'Sign in with email' });
+    await expect(emailDisclosure).toBeVisible();
+    await emailDisclosure.click();
+    await expect(page.getByLabel('Email')).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+
+    const signInResponse = await page.goto(routeURL('/auth/sign-in'));
+    await assertNotProtectedPreview(signInResponse, page, '/auth/sign-in');
+    expect(signInResponse?.status(), 'Production sign-in route should load without protection or routing errors.').toBeLessThan(400);
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
+    await expect(page.getByLabel('Email')).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Create account', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Forgot password?' })).toBeVisible();
+  });
+
+  test('deployed app exposes the expected immutable frontend build revision', async ({ page }) => {
+    test.skip(
+      !hostedMode && !expectedFrontendSha,
+      'Local smoke runs enforce frontend identity only when BRASSTUNE_EXPECTED_FRONTEND_SHA is set.',
+    );
+    const expectedRevision = expectedFrontendSha ?? '';
+    expect(
+      expectedRevision,
+      'Hosted smoke requires BRASSTUNE_EXPECTED_FRONTEND_SHA as a full 40-character Git commit SHA.',
+    ).toMatch(/^[0-9a-f]{40}$/);
+
+    const rootResponse = await page.goto(routeURL('/'));
+    await assertNotProtectedPreview(rootResponse, page, '/');
+    expect(rootResponse?.status(), 'Revision identity requires a loadable deployed root.').toBeLessThan(400);
+    await expect(
+      page.locator('meta[name="brasstune-build-revision"]'),
+      'The deployed page must expose its immutable build revision.',
+    ).toHaveAttribute('content', expectedRevision);
+  });
+
   test('deployed app loads root and deep links without mixed content', async ({ page }) => {
     await grantGuestAccess(page);
     const consoleErrors: string[] = [];
@@ -111,7 +208,7 @@ test.describe('hosted read-only smoke', () => {
       await expect(page.locator('body')).not.toContainText(/vercel authentication|log in to vercel|single sign-on|authentication required/i);
     }
 
-    expect(consoleErrors.filter((message) => !/favicon|ResizeObserver/i.test(message))).toEqual([]);
+    expect(consoleErrors.filter((message) => !harmlessBrowserErrors.has(message))).toEqual([]);
   });
 
   test('hosted runtime URLs do not fall back to localhost or Vercel same-origin API paths', async ({ page }) => {

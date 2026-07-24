@@ -5,9 +5,12 @@ import type { LucideIcon } from 'lucide-react';
 import { PageHeader, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
 import { SUPPORT_EMAIL, supportGmailComposeUrl } from '../domain/supportContact';
 import './LegalPage.css';
+import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 
 function BackButton() {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const goBack = () => {
     if (window.history.length > 1) navigate(-1);
     else navigate('/settings');
@@ -15,46 +18,47 @@ function BackButton() {
   return (
     <button type="button" className="ghost-button" onClick={goBack}>
       <ArrowLeft size={16} />
-      Back
+      {t('legal.back')}
     </button>
   );
 }
 
-type FaqItem = { icon: LucideIcon; question: string; answer: string; to: string; cta: string };
+type FaqItem = { icon: LucideIcon; question: MessageId; answer: MessageId; to: string; cta: MessageId };
 
 const FAQ: FaqItem[] = [
   {
     icon: Mic,
-    question: 'Allow microphone access',
-    answer: 'BrassTune needs your mic to hear you play. If the tuner stays quiet, run a quick mic check in Settings and allow access when your browser asks.',
+    question: 'legal.faq.mic.question',
+    answer: 'legal.faq.mic.answer',
     to: '/settings',
-    cta: 'Open Settings',
+    cta: 'legal.faq.mic.cta',
   },
   {
     icon: Users,
-    question: 'Join my class',
-    answer: 'Ask your director to invite you, then accept the invite on the Class page. You pick your own instrument when you join.',
+    question: 'legal.faq.class.question',
+    answer: 'legal.faq.class.answer',
     to: '/ensemble',
-    cta: 'Go to Class',
+    cta: 'legal.faq.class.cta',
   },
   {
     icon: Download,
-    question: 'Export a session',
-    answer: 'Open any saved recording and use the export options in its review to download your practice data.',
+    question: 'legal.faq.export.question',
+    answer: 'legal.faq.export.answer',
     to: '/sessions',
-    cta: 'Open your sessions',
+    cta: 'legal.faq.export.cta',
   },
   {
     icon: UserX,
-    question: 'Delete my account',
-    answer: 'You can export your data and delete your account any time from Settings.',
+    question: 'legal.faq.delete.question',
+    answer: 'legal.faq.delete.answer',
     to: '/settings',
-    cta: 'Open Settings',
+    cta: 'legal.faq.delete.cta',
   },
 ];
 
 function SupportContact() {
   const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
 
   const copyEmail = async () => {
     try {
@@ -74,14 +78,14 @@ function SupportContact() {
           href={supportGmailComposeUrl()}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="Email BrassTune support in Gmail (opens in a new tab)"
+          aria-label={t('legal.email')}
         >
           <Mail size={18} />
-          Email support
+          {t('legal.email')}
         </a>
         <button className="ghost-button" type="button" onClick={copyEmail} aria-live="polite">
           {copied ? <Check size={18} /> : <Copy size={18} />}
-          {copied ? 'Copied' : 'Copy address'}
+          {copied ? t('legal.copied') : t('legal.copy')}
         </button>
       </div>
       <p className="lg-address muted-copy">{SUPPORT_EMAIL}</p>
@@ -90,21 +94,22 @@ function SupportContact() {
 }
 
 export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
+  const { t } = useI18n();
   if (kind === 'terms') {
     return (
       <ScreenContainer>
         <PageHeader
-          title="Terms of Service"
-          description="Use BrassTune with permission from the account holder, and follow your school or studio's rules."
+          title={t('legal.termsTitle')}
+          description={t('legal.termsDescription')}
           action={<BackButton />}
         />
-        <SectionCard title="Using BrassTune">
-          <p>BrassTune gives you practice feedback and tuning help. It doesn't replace a teacher, medical advice, or hearing-safety guidance.</p>
-          <p>You choose when to record, and it's up to you to check exports before you share them and to follow your class or school rules for student data.</p>
+        <SectionCard title={t('legal.usingTitle')}>
+          <p>{t('legal.usingBody1')}</p>
+          <p>{t('legal.usingBody2')}</p>
         </SectionCard>
-        <SectionCard title="Accounts and data">
-          <p>You can export your data and delete your account from Settings. When a teacher deletes their account, their classes are deleted too.</p>
-          <Link className="primary-button" to="/settings">Open Settings</Link>
+        <SectionCard title={t('legal.accountsTitle')}>
+          <p>{t('legal.accountsBody')}</p>
+          <Link className="primary-button" to="/settings">{t('legal.openSettings')}</Link>
         </SectionCard>
       </ScreenContainer>
     );
@@ -113,24 +118,24 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
   if (kind === 'support') {
     return (
       <ScreenContainer>
-        <PageHeader title="Support" description="Need help? Here's how to reach us." action={<BackButton />} />
-        <SectionCard title="Common questions">
+        <PageHeader title={t('legal.supportTitle')} description={t('legal.supportDescription')} action={<BackButton />} />
+        <SectionCard title={t('legal.common')}>
           <div className="lg-faq-list">
             {FAQ.map(({ icon: Icon, question, answer, to, cta }) => (
               <div className="lg-faq" key={question}>
                 <span className="lg-faq-icon"><Icon size={18} /></span>
-                <h3>{question}</h3>
-                <p>{answer}</p>
+                <h3>{t(question)}</h3>
+                <p>{t(answer)}</p>
                 <Link className="lg-faq-link" to={to}>
-                  {cta}
+                  {t(cta)}
                   <ArrowRight size={14} />
                 </Link>
               </div>
             ))}
           </div>
         </SectionCard>
-        <SectionCard title="Still need help?">
-          <p className="lg-lead">Students: your teacher or director can usually help fastest. For anything else, email us — tell us which screen you were on and roughly when it happened.</p>
+        <SectionCard title={t('legal.moreHelp')}>
+          <p className="lg-lead">{t('legal.moreHelpBody')}</p>
           <SupportContact />
         </SectionCard>
       </ScreenContainer>
@@ -140,17 +145,17 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
   return (
     <ScreenContainer>
       <PageHeader
-        title="Privacy Policy"
-        description="We store practice data only to run the app's features."
+        title={t('legal.privacyTitle')}
+        description={t('legal.privacyDescription')}
         action={<BackButton />}
       />
-      <SectionCard title="Data BrassTune uses">
-        <p>Your profile, settings, practice sessions, and any recordings you choose to keep.</p>
-        <p>Media you import is analyzed in your browser. The file you pick is never uploaded or stored by BrassTune.</p>
+      <SectionCard title={t('legal.dataTitle')}>
+        <p>{t('legal.dataBody1')}</p>
+        <p>{t('legal.dataBody2')}</p>
       </SectionCard>
-      <SectionCard title="Your control">
-        <p>Settings lets you export your data, clear sessions, sign out, and delete your account. Recordings only happen when you tap record, and they're deleted along with their session.</p>
-        <Link className="primary-button" to="/settings">Manage data</Link>
+      <SectionCard title={t('legal.controlTitle')}>
+        <p>{t('legal.controlBody')}</p>
+        <Link className="primary-button" to="/settings">{t('legal.manage')}</Link>
       </SectionCard>
     </ScreenContainer>
   );

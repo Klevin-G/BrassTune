@@ -1,51 +1,33 @@
-# Sign in with Google / Apple — setup
+# Google and Apple Sign-in
 
-The code is fully wired on both platforms:
-- **Web** — `AuthContext.signInWithGoogle/signInWithApple` call `supabase.auth.signInWithOAuth(...)`,
-  gated by `VITE_AUTH_GOOGLE_ENABLED` / `VITE_AUTH_APPLE_ENABLED`; "Continue with Google/Apple"
-  buttons render when enabled. Redirect target: `<origin>/auth/callback`.
-- **Native (iOS)** — `SettingsViews.swift` uses `SignInWithAppleButton`; the
-  `com.apple.developer.applesignin` entitlement is now in the target.
+Updated: 2026-07-23. Do not put credentials in Git, logs, screenshots, or this document.
 
-What remains is provider configuration, which needs OAuth credentials that only the
-account owner can create (they are tied to your Google/Apple accounts).
+## Current state
 
-## Google (fastest — no paid account needed)
+| Provider | Web | iOS | Linked Supabase state |
+|---|---|---|---|
+| Google | Supabase OAuth with PKCE and a Google-branded button | Ephemeral `ASWebAuthenticationSession`, PKCE/state validation, exact callback, Keychain handoff | Enabled; an authorize-start redirect to Google was verified. |
+| Apple | Supabase OAuth button and unavailable state | `SignInWithAppleButton`, hashed nonce, ID-token exchange | Disabled; Apple Developer credentials and Supabase provider configuration are still required. |
 
-1. Google Cloud Console → **APIs & Services → Credentials → Create credentials → OAuth client ID**.
-   - Application type: **Web application**.
-   - **Authorized redirect URI:** `https://yznziwewxrlwnwiynlvl.supabase.co/auth/v1/callback`
-   - Copy the **Client ID** and **Client secret**.
-2. Supabase → **Authentication → Providers → Google** → enable → paste Client ID + Secret → Save.
-3. Supabase → **Authentication → URL Configuration**:
-   - Site URL: `https://brasstune.vercel.app`
-   - Redirect URLs: add `https://brasstune.vercel.app/auth/callback`,
-     `https://*-kelvis-prject.vercel.app/auth/callback`, and
-     `http://localhost:5173/auth/callback`.
-   - Do not allow blanket `*.vercel.app` callbacks. Preview patterns must include
-     the owner account suffix so another Vercel user cannot receive auth results.
-4. Enable the button: set `VITE_AUTH_GOOGLE_ENABLED=true` in Vercel (Production + Preview) and redeploy.
+Provider buttons are intentionally visible even when unavailable. They explain the unavailable state instead of disappearing. The production deployment workflow synchronizes Google enabled and `VITE_AUTH_APPLE_ENABLED=false` until Apple setup and a live authorize flow are verified.
 
-> Give me the Google **Client ID + Secret** and I'll do steps 2–4 for you (or paste them into
-> the dashboard yourself — it's ~4 clicks).
+## Google verification checklist
 
-## Apple (requires paid Apple Developer Program)
+1. Keep the Google provider enabled in Supabase and preserve the Supabase callback URL in Google Cloud.
+2. Keep production and owner-restricted preview callback URLs in Supabase Auth.
+3. After exact-SHA deploy, test success, cancel, callback error, session refresh, and sign-out with a disposable account on web and iOS.
+4. Confirm no provider token or secret appears in browser logs, native logs, or analytics.
 
-Web:
-1. Apple Developer → **Identifiers → Services IDs → +** (e.g. `com.brasstune.web`) →
-   enable **Sign in with Apple** → configure: primary App ID = the app's bundle id,
-   Return URL = `https://yznziwewxrlwnwiynlvl.supabase.co/auth/v1/callback`.
-2. Apple Developer → **Keys → +** → enable Sign in with Apple → download the `.p8`,
-   note the **Key ID** and **Team ID**.
-3. Supabase → **Authentication → Providers → Apple** → enable → Services ID as client id →
-   provide the key (Supabase generates the client secret JWT) → Save.
-4. Set `VITE_AUTH_APPLE_ENABLED=true` in Vercel and redeploy.
+## Apple enablement checklist
 
-Native (iOS): the entitlement is in place. In your Apple Developer account, enable the
-**Sign in with Apple** capability on the app's App ID (automatic signing + `-allowProvisioningUpdates`
-in the archive script will register it). The button then exchanges the Apple identity token with Supabase.
+1. In Apple Developer, create/configure the Services ID and return URL for the Supabase callback, enable Sign in with Apple for the native App ID, and generate the required key/team metadata.
+2. Configure and enable the Apple provider in Supabase; do not commit the `.p8` key or generated secret.
+3. Update the production Apple flag only after the live authorize flow succeeds; deploy the exact merged SHA.
+4. Test success, cancel, first-use email behavior, callback error, session refresh, sign-out, and account deletion with disposable identities on web and signed iOS hardware.
 
-## Notes
-- Leave `VITE_AUTH_*_ENABLED` **off** until the matching Supabase provider is configured,
-  otherwise the button appears but the OAuth attempt errors.
-- The current email/password auth is fully working and unaffected by any of the above.
+## References
+
+- [Supabase Google auth](https://supabase.com/docs/guides/auth/social-login/auth-google)
+- [Supabase Apple auth](https://supabase.com/docs/guides/auth/social-login/auth-apple)
+- [Apple Sign in with Apple](https://developer.apple.com/documentation/authenticationservices/)
+- [Google OAuth for installed apps](https://developers.google.com/identity/protocols/oauth2/native-app)

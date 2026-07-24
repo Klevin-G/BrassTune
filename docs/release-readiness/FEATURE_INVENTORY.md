@@ -1,18 +1,18 @@
 # Feature Inventory
 
-Date: 2026-06-18
+Updated: 2026-07-23. This is an implementation inventory, not a hosted-release claim.
 
-| Area | Current Status | Evidence | Remaining Gap |
-|---|---|---|---|
-| Guest practice tuner | Implemented on web; local browser journeys pass | `frontend/src/pages/PracticePage.tsx`, `npm run e2e:local` | Physical microphone quality requires device protocol |
-| Recording lifecycle | Web start/stop is guarded by explicit states and disabled controls while busy | `useSessionRecorder`, `SessionControls`, Playwright recording journey | More component-level rapid-click tests would improve coverage |
-| Playback | Web playback lazy-loads audio on user action and revokes object URLs | `SessionAudioPlayer.tsx` | Add component test for lazy fetch/revoke |
-| Local media import | Preflight size/type validation, cancel, and best-effort partial cleanup added | `LocalMediaImportPanel.tsx`, `localMediaAnalysis.test.ts` | Browser codec support still needs device/browser QA |
-| Account auth | Web/native surfaces exist for email/password, reset, Apple, sign-out, and deletion | `AuthPage.tsx`, `AuthContext.tsx`, Swift settings views | Live Supabase and Apple provider flows blocked by credentials/config |
-| Account export/deletion | Backend account export includes profile, sessions, memberships, invitations, recommendations; deletion preflights Supabase before local delete | `routes.py`, `test_hardening.py` | Needs live Supabase cleanup test and eventual deletion outbox/retry |
-| Teacher/director dashboard | Web supports group list/create/select/add and manager-only aggregate reports | `EnsemblePage.tsx`, backend tests | Rename/archive/delete/invite acceptance remain incomplete |
-| Student ensemble view | Active members can view group roster but not aggregate reports | `routes.py`, `EnsemblePage.tsx` | Student acceptance/invitation workflow not complete |
-| Shared domain parity | Backend/frontend/Swift fixture smoke passes | `swift test`, Vitest, pytest | Full cross-runtime fixture matrix still limited |
-| Native SwiftUI app | Native app target, sample-mode surfaces, local AVAudioEngine live-capture code, and unsigned simulator build evidence exist | `swift/BrassTuneApp`, xcodebuild results | Production config, signing, Apple capability, live account services, physical microphone validation, and current-head CI remain incomplete |
-| CI/security | Backend/frontend/security/Swift/device workflows exist with bounded timeouts and artifacts | `.github/workflows/*` | GitHub environment protection/reviewers require repo settings |
-| Hosted deployment | Render health/CORS/WebSocket pass and Vercel preview deploy exists for the PR branch | `npm run smoke:hosted`, Render deploy `dep-d8q7296gvqtc73a0djm0`, Vercel deploy `dpl_Gspk8kPcVCDcBX5G9WDUByxLrEpr` | Protected Vercel preview page automation still needs an automation bypass; production frontend was not deployed |
+| Area | Candidate capability | Evidence boundary |
+|---|---|---|
+| Tuner and focused practice | Tuner-first workspace, local-first practice paths, progress, favorites, recents, and offline packs | Local web/native tests and simulator evidence. |
+| Guided practice | Five-minute warm-up, custom Play-Along builder, named metronome presets, weekly goals/reflections, weak-transition drills, drone and interval tuning | Local feature and journey coverage. |
+| Scoring | Shared pitch-domain scoring and focused QA fixtures | No physical microphone or real brass performance claim. |
+| Classes | Create/join/invite/roster workflows and role-aware aggregate summaries | Aggregate scope intentionally excludes raw practice detail. |
+| Authentication | Email/password/reset plus Google and Apple affordances on web/iOS | Google live provider start is verified; Apple remains disabled live. |
+| Localization | 12 locales; web non-English catalogs are lazy-loaded | Professional linguistic review remains a human gate. |
+| Native | SwiftUI iPhone/iPad experience, auth/class/practice parity, Keychain, AVAudioEngine path | Simulator evidence only; no signing/device acceptance. |
+| Data lifecycle | Export/delete, privacy scrub/tombstone rollout support | Disposable live lifecycle testing and migration application remain pending. |
+
+## Explicit limits
+
+Audio recordings and score sources are local-first unless the user explicitly uses a supported cloud path. Class reporting is aggregate-only; it is not a surveillance or raw-recording review feature.

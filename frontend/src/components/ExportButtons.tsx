@@ -2,6 +2,7 @@ import { Download } from 'lucide-react';
 import { useState } from 'react';
 import { downloadExport } from '../api/client';
 import type { GuestSessionDetail } from '../domain/guestSessions';
+import { useI18n } from '../i18n/LocaleContext';
 
 function downloadBlob(content: string, filename: string, type = 'application/json') {
   const blob = new Blob([content], { type });
@@ -56,13 +57,26 @@ function audioExtension(mimeType?: string | null) {
   return 'audio';
 }
 
-export function ExportButtons({ sessionId, guestSession }: { sessionId: number; guestSession?: GuestSessionDetail | null }) {
+export function shouldShowCloudAudioExport(audioAvailable?: boolean) {
+  return audioAvailable === true;
+}
+
+export function ExportButtons({
+  sessionId,
+  guestSession,
+  audioAvailable,
+}: {
+  sessionId: number;
+  guestSession?: GuestSessionDetail | null;
+  audioAvailable?: boolean;
+}) {
+  const { t } = useI18n();
   const [status, setStatus] = useState<string | null>(null);
   const download = (path: string, filename: string) => {
     setStatus(null);
     downloadExport(path, filename)
-      .then(() => setStatus(`${filename} export started.`))
-      .catch(() => setStatus('Export is unavailable right now. Try again after reconnecting.'));
+      .then(() => setStatus(t('export.started', { filename })))
+      .catch(() => setStatus(t('export.unavailable')));
   };
 
   if (guestSession) {
@@ -70,20 +84,20 @@ export function ExportButtons({ sessionId, guestSession }: { sessionId: number; 
       <div className="export-buttons">
         <button className="ghost-button" type="button" onClick={() => downloadBlob(guestSamplesCsv(guestSession), `guest-session-${Math.abs(sessionId)}-samples.csv`, 'text/csv')}>
           <Download size={17} />
-          Pitch data (CSV)
+          {t('export.pitchCsv')}
         </button>
         <button className="ghost-button" type="button" onClick={() => downloadBlob(guestEventsCsv(guestSession), `guest-session-${Math.abs(sessionId)}-note-events.csv`, 'text/csv')}>
           <Download size={17} />
-          Notes (CSV)
+          {t('export.notesCsv')}
         </button>
         <button className="ghost-button" type="button" onClick={() => downloadBlob(JSON.stringify(guestSession, null, 2), `guest-session-${Math.abs(sessionId)}.json`)}>
           <Download size={17} />
-          All data (JSON)
+          {t('export.allJson')}
         </button>
         {guestSession.guest_audio_data_url && (
           <a className="ghost-button" href={guestSession.guest_audio_data_url} download={`guest-session-${Math.abs(sessionId)}-audio.${audioExtension(guestSession.audio_mime_type)}`}>
             <Download size={17} />
-            Audio file
+            {t('export.audio')}
           </a>
         )}
         {status && <p className="settings-status" aria-live="polite">{status}</p>}
@@ -95,24 +109,26 @@ export function ExportButtons({ sessionId, guestSession }: { sessionId: number; 
     <div className="export-buttons">
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}.csv`, `session-${sessionId}-samples.csv`)}>
         <Download size={17} />
-        Pitch data (CSV)
+        {t('export.pitchCsv')}
       </button>
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/note-events/${sessionId}.csv`, `session-${sessionId}-note-events.csv`)}>
         <Download size={17} />
-        Notes (CSV)
+        {t('export.notesCsv')}
       </button>
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}.json`, `session-${sessionId}.json`)}>
         <Download size={17} />
-        All data (JSON)
+        {t('export.allJson')}
       </button>
       <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}.zip`, `session-${sessionId}-export.zip`)}>
         <Download size={17} />
-        Everything (ZIP)
+        {t('export.everythingZip')}
       </button>
-      <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}/audio`, `session-${sessionId}-audio`)}>
-        <Download size={17} />
-        Audio file
-      </button>
+      {shouldShowCloudAudioExport(audioAvailable) && (
+        <button className="ghost-button" type="button" onClick={() => download(`/api/export/session/${sessionId}/audio`, `session-${sessionId}-audio`)}>
+          <Download size={17} />
+          {t('export.audio')}
+        </button>
+      )}
       {status && <p className="settings-status" aria-live="polite">{status}</p>}
     </div>
   );

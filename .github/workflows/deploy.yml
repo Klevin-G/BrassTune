@@ -4,12 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: Service to deploy
+        description: One service to deploy sequentially
         required: true
-        default: all
+        default: frontend
         type: choice
         options:
-          - all
           - frontend
           - backend
 
@@ -22,40 +21,299 @@ concurrency:
 
 jobs:
   deploy-frontend:
-    if: ${{ github.ref == 'refs/heads/main' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'frontend') }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event.inputs.target == 'frontend' }}
+    # Production credentials never run on the persistent CI runner pool.
     runs-on: ${{ fromJSON(vars.BRASSTUNE_DEPLOY_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 30
     environment: production
-    env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: .github/tools/vercel-cli/package-lock.json
       - name: Install Vercel CLI
-        run: npm install -g vercel@54.14.0
+        run: npm ci --prefix .github/tools/vercel-cli --ignore-scripts
+      - name: Audit Vercel CLI production dependencies
+        run: npm audit --omit=dev --prefix .github/tools/vercel-cli
+      - name: Clear pre-existing Vercel artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf -- .vercel
       - name: Pull Vercel environment
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: .github/tools/vercel-cli/node_modules/.bin/vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Sync required Vercel production environment
+        shell: bash
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          VITE_WS_BASE_URL: ${{ secrets.VITE_WS_BASE_URL }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_AUTH_GOOGLE_ENABLED: "true"
+          # Keep Apple visible-but-disabled until the Apple Developer and
+          # Supabase provider setup is complete. Flip this repository variable
+          # to "true" only after the live authorize flow is verified.
+          VITE_AUTH_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED }}
+        run: |
+          set -euo pipefail
+
+          sync_variable() {
+            local name="$1"
+            local value="$2"
+
+            if [[ -z "$value" ]]; then
+              echo "::error::${name} is missing or empty in the GitHub Production environment."
+              return 1
+            fi
+
+            if ! printf '%s\n' "$value" | .github/tools/vercel-cli/node_modules/.bin/vercel env add "$name" production \
+              --force --no-sensitive --yes --token="$VERCEL_TOKEN" >/dev/null 2>&1; then
+              echo "::error::Failed to synchronize ${name} to Vercel Production."
+              return 1
+            fi
+          }
+
+          sync_variable VITE_API_BASE_URL "$VITE_API_BASE_URL"
+          sync_variable VITE_WS_BASE_URL "$VITE_WS_BASE_URL"
+          sync_variable VITE_SUPABASE_URL "$VITE_SUPABASE_URL"
+          sync_variable VITE_SUPABASE_PUBLISHABLE_KEY "$VITE_SUPABASE_PUBLISHABLE_KEY"
+          sync_variable VITE_AUTH_GOOGLE_ENABLED "$VITE_AUTH_GOOGLE_ENABLED"
+          sync_variable VITE_AUTH_APPLE_ENABLED "$VITE_AUTH_APPLE_ENABLED"
+      - name: Refresh Vercel production environment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: .github/tools/vercel-cli/node_modules/.bin/vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Validate production frontend environment
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const envPath = '.vercel/.env.production.local';
+          if (!fs.existsSync(envPath)) {
+            console.error(`::error file=${envPath}::Vercel production environment was not pulled.`);
+            process.exit(1);
+          }
+
+          const values = new Map();
+          for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+            const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/);
+            if (!match) continue;
+
+            let value = match[2].trim();
+            const quote = value[0];
+            if ((quote === '"' || quote === "'") && value.at(-1) === quote) {
+              value = value.slice(1, -1);
+            }
+            values.set(match[1], value.trim());
+          }
+
+          const required = [
+            'VITE_API_BASE_URL',
+            'VITE_WS_BASE_URL',
+            'VITE_SUPABASE_URL',
+            'VITE_SUPABASE_PUBLISHABLE_KEY',
+            'VITE_AUTH_GOOGLE_ENABLED',
+            'VITE_AUTH_APPLE_ENABLED',
+          ];
+          const missingOrEmpty = required.filter((name) => !values.get(name));
+          let failed = false;
+
+          if (missingOrEmpty.length > 0) {
+            console.error(
+              `::error file=${envPath}::Missing or empty required Vercel Production variables: ${missingOrEmpty.join(', ')}`,
+            );
+            failed = true;
+          }
+
+          if (values.has('VITE_AUTH_GOOGLE_ENABLED') && values.get('VITE_AUTH_GOOGLE_ENABLED') !== 'true') {
+            console.error(
+              `::error file=${envPath}::VITE_AUTH_GOOGLE_ENABLED must equal true in Vercel Production.`,
+            );
+            failed = true;
+          }
+
+          if (
+            values.has('VITE_AUTH_APPLE_ENABLED')
+            && !['true', 'false'].includes(values.get('VITE_AUTH_APPLE_ENABLED'))
+          ) {
+            console.error(
+              `::error file=${envPath}::VITE_AUTH_APPLE_ENABLED must equal true or false in Vercel Production.`,
+            );
+            failed = true;
+          }
+
+          if (failed) process.exit(1);
+          console.log('Verified required Vercel Production frontend variables without exposing values.');
+          NODE
       - name: Build frontend
-        run: vercel build --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: .github/tools/vercel-cli/node_modules/.bin/vercel build --prod --token="$VERCEL_TOKEN"
       - name: Deploy frontend
-        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        id: deploy_frontend
+        shell: bash
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+
+          deployment_result="${RUNNER_TEMP}/vercel-deployment.json"
+          .github/tools/vercel-cli/node_modules/.bin/vercel deploy --prebuilt --prod --yes \
+            --format=json \
+            --meta "githubCommitSha=${GITHUB_SHA}" \
+            --token="$VERCEL_TOKEN" >"$deployment_result"
+
+          DEPLOYMENT_RESULT="$deployment_result" node <<'NODE'
+          const fs = require('node:fs');
+
+          const payload = JSON.parse(fs.readFileSync(process.env.DEPLOYMENT_RESULT, 'utf8'));
+          const deployment = payload.payload?.deployment ?? payload.deployment ?? payload;
+          const id = String(deployment.id ?? '');
+          const url = String(deployment.url ?? '');
+
+          if (!/^dpl_[A-Za-z0-9]+$/.test(id)) {
+            console.error('::error::Vercel did not return a valid deployment ID.');
+            process.exit(1);
+          }
+          try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.vercel.app')) throw new Error();
+          } catch {
+            console.error('::error::Vercel did not return a valid HTTPS deployment URL.');
+            process.exit(1);
+          }
+          if (deployment.readyState !== 'READY' || deployment.target !== 'production') {
+            console.error('::error::Vercel deployment was not returned as READY production.');
+            process.exit(1);
+          }
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_id=${id}\ndeployment_url=${url}\n`);
+          console.log(`Captured production deployment ${id} for exact revision verification.`);
+          NODE
+      - name: Verify canonical Vercel revision
+        id: verify_frontend
+        shell: bash
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          DEPLOYMENT_ID: ${{ steps.deploy_frontend.outputs.deployment_id }}
+          DEPLOYMENT_URL: ${{ steps.deploy_frontend.outputs.deployment_url }}
+          CANONICAL_FRONTEND_ALIAS: https://brasstune.vercel.app
+        run: |
+          set -euo pipefail
+
+          deployment_metadata="${RUNNER_TEMP}/vercel-deployment-metadata.json"
+          canonical_inspection="${RUNNER_TEMP}/vercel-canonical-inspection.json"
+          evidence_path="${RUNNER_TEMP}/production-deployment-evidence.json"
+
+          .github/tools/vercel-cli/node_modules/.bin/vercel api "/v13/deployments/${DEPLOYMENT_ID}" \
+            --raw --token="$VERCEL_TOKEN" >"$deployment_metadata"
+          .github/tools/vercel-cli/node_modules/.bin/vercel inspect "$CANONICAL_FRONTEND_ALIAS" \
+            --format=json --token="$VERCEL_TOKEN" >"$canonical_inspection"
+
+          DEPLOYMENT_METADATA="$deployment_metadata" \
+          CANONICAL_INSPECTION="$canonical_inspection" \
+          EVIDENCE_PATH="$evidence_path" \
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const fail = (message) => {
+            console.error(`::error::${message}`);
+            process.exit(1);
+          };
+          const metadata = JSON.parse(fs.readFileSync(process.env.DEPLOYMENT_METADATA, 'utf8'));
+          const canonical = JSON.parse(fs.readFileSync(process.env.CANONICAL_INSPECTION, 'utf8'));
+          const expectedSha = process.env.GITHUB_SHA.toLowerCase();
+          const providerSha = String(metadata.meta?.githubCommitSha ?? '').toLowerCase();
+          const canonicalHostname = new URL(process.env.CANONICAL_FRONTEND_ALIAS).hostname;
+          const deploymentHostname = new URL(process.env.DEPLOYMENT_URL).hostname;
+          const metadataHostname = String(metadata.url ?? '');
+          const aliases = Array.isArray(canonical.aliases) ? canonical.aliases : [];
+
+          if (metadata.id !== process.env.DEPLOYMENT_ID || canonical.id !== process.env.DEPLOYMENT_ID) {
+            fail('Canonical Vercel alias does not resolve to the deployment created by this workflow.');
+          }
+          if (metadata.readyState !== 'READY' || canonical.readyState !== 'READY') {
+            fail('Canonical Vercel deployment is not READY.');
+          }
+          if (metadata.target !== 'production' || canonical.target !== 'production') {
+            fail('Canonical Vercel deployment is not a production deployment.');
+          }
+          if (metadataHostname !== deploymentHostname || canonical.url !== deploymentHostname) {
+            fail('Vercel deployment URL identity changed during canonical verification.');
+          }
+          if (!aliases.includes(canonicalHostname)) {
+            fail('Canonical Vercel alias is absent from the verified deployment aliases.');
+          }
+          if (providerSha !== expectedSha) {
+            fail(`Vercel provider revision ${providerSha || '<missing>'} does not match workflow revision ${expectedSha}.`);
+          }
+
+          const evidence = {
+            schema_version: 1,
+            target: 'frontend',
+            commit_sha: expectedSha,
+            provider_metadata_sha: providerSha,
+            deployment_id: metadata.id,
+            deployment_url: process.env.DEPLOYMENT_URL,
+            canonical_alias: process.env.CANONICAL_FRONTEND_ALIAS,
+            canonical_deployment_id: canonical.id,
+            ready_state: metadata.readyState,
+            target_environment: metadata.target,
+            verified_at: new Date().toISOString(),
+          };
+          fs.writeFileSync(process.env.EVIDENCE_PATH, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `evidence_path=${process.env.EVIDENCE_PATH}\n`);
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `Verified Vercel deployment \`${metadata.id}\` and canonical alias ` +
+              `\`${canonicalHostname}\` at exact revision \`${expectedSha}\`.\n`,
+          );
+          console.log(`Verified canonical Vercel alias at exact revision ${expectedSha}.`);
+          NODE
+      - name: Store frontend deployment evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-deployment-evidence
+          path: ${{ steps.verify_frontend.outputs.evidence_path }}
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove Vercel environment artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf -- .vercel
 
   deploy-backend:
-    if: ${{ github.ref == 'refs/heads/main' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'backend') }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event.inputs.target == 'backend' }}
+    # Production credentials never run on the persistent CI runner pool.
     runs-on: ${{ fromJSON(vars.BRASSTUNE_DEPLOY_RUNNER || '"ubuntu-latest"') }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     environment: production
     env:
       BRASSTUNE_API_BASE_URL: ${{ vars.BRASSTUNE_API_BASE_URL || 'https://brasstune-u8qj.onrender.com' }}
       BRASSTUNE_EXPECTED_BACKEND_SHA: ${{ github.sha }}
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+      BRASSTUNE_RENDER_PYTHON_VERSION: "3.11.15"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Disable Render auto-deploy
@@ -67,16 +325,326 @@ jobs:
             --header "Content-Type: application/json" \
             --data '{"autoDeploy":"no"}' \
             --output /dev/null
-      - name: Trigger exact Render deploy
+      - name: Synchronize deletion tombstone key to Render
+        shell: bash
+        env:
+          BRASSTUNE_DELETION_TOMBSTONE_SECRET: ${{ secrets.BRASSTUNE_DELETION_TOMBSTONE_SECRET }}
         run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import sys
+
+          value = os.environ.get("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "")
+          if len(value.encode("utf-8")) < 32:
+              print("::error::BRASSTUNE_DELETION_TOMBSTONE_SECRET must be a stable secret of at least 32 bytes.")
+              sys.exit(1)
+          PY
+          python - <<'PY' | curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
+            --request PUT \
+            --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/env-vars/BRASSTUNE_DELETION_TOMBSTONE_SECRET" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data-binary @- \
+            --output /dev/null
+          import json
+          import os
+
+          print(json.dumps({"value": os.environ["BRASSTUNE_DELETION_TOMBSTONE_SECRET"]}))
+          PY
+          echo "Synchronized the dedicated deletion tombstone key without exposing its value."
+      - name: Pin Render Python version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' | curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
+            --request PUT \
+            --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/env-vars/PYTHON_VERSION" \
+            --header "Authorization: Bearer ${RENDER_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data-binary @- \
+            --output /dev/null
+          import json
+          import os
+
+          print(json.dumps({"value": os.environ["BRASSTUNE_RENDER_PYTHON_VERSION"]}))
+          PY
+          echo "Pinned the Render Python runtime to ${BRASSTUNE_RENDER_PYTHON_VERSION}."
+      - name: Remove legacy Render CORS regex variables
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          delete_render_env_var() {
+            local key="$1"
+            local status
+
+            if ! status="$(curl --max-time 30 --retry 2 --retry-all-errors --silent --show-error \
+              --request DELETE \
+              --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/env-vars/${key}" \
+              --header "Authorization: Bearer ${RENDER_API_KEY}" \
+              --output /dev/null \
+              --write-out '%{http_code}')"; then
+              echo "::error::Render request failed while deleting ${key}."
+              return 1
+            fi
+
+            case "$status" in
+              204)
+                echo "Deleted legacy Render environment variable ${key}."
+                ;;
+              404)
+                echo "Legacy Render environment variable ${key} was already absent."
+                ;;
+              *)
+                echo "::error::Render refused to delete ${key} (HTTP ${status})."
+                return 1
+                ;;
+            esac
+          }
+
+          delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX
+          delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: Trigger exact Render deploy
+        id: trigger_backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          deployment_response="${RUNNER_TEMP}/render-deployment.json"
           curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
             --request POST \
             --url "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
             --header "Authorization: Bearer ${RENDER_API_KEY}" \
             --header "Content-Type: application/json" \
-            --data "{\"commitId\":\"${GITHUB_SHA}\",\"clearCache\":\"do_not_clear\"}"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "24"
+            --data "{\"commitId\":\"${GITHUB_SHA}\",\"clearCache\":\"do_not_clear\"}" \
+            --output "$deployment_response"
+          RENDER_DEPLOYMENT_RESPONSE="$deployment_response" node <<'NODE'
+          const fs = require('node:fs');
+
+          const payload = JSON.parse(fs.readFileSync(process.env.RENDER_DEPLOYMENT_RESPONSE, 'utf8'));
+          const id = String(payload.id ?? '');
+          if (!/^dep-[A-Za-z0-9]+$/.test(id)) {
+            console.error('::error::Render did not return a valid deployment ID.');
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_id=${id}\n`);
+          console.log(`Captured Render deployment ${id} for exact revision verification.`);
+          NODE
+      - name: Wait for exact Render deployment
+        id: verify_backend_deployment
+        shell: bash
+        env:
+          RENDER_API_BASE_URL: https://api.render.com
+          RENDER_DEPLOYMENT_ID: ${{ steps.trigger_backend.outputs.deployment_id }}
+          RENDER_DEPLOYMENT_WAIT_TIMEOUT_MS: "900000"
+          RENDER_DEPLOYMENT_POLL_INTERVAL_MS: "10000"
+          RENDER_DEPLOYMENT_REQUEST_TIMEOUT_MS: "20000"
+        run: |
+          set -euo pipefail
+          provider_evidence="${RUNNER_TEMP}/render-provider-deployment.json"
+          RENDER_PROVIDER_EVIDENCE="$provider_evidence" node <<'NODE'
+          const fs = require('node:fs');
+
+          class FatalDeployError extends Error {}
+
+          const positiveInt = (value, fallback) => {
+            const parsed = Number.parseInt(String(value ?? ''), 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+          };
+          const fail = (message) => {
+            throw new FatalDeployError(message);
+          };
+          const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+          const apiBase = String(process.env.RENDER_API_BASE_URL ?? '').replace(/\/+$/, '');
+          const apiKey = String(process.env.RENDER_API_KEY ?? '');
+          const serviceId = String(process.env.RENDER_SERVICE_ID ?? '');
+          const deploymentId = String(process.env.RENDER_DEPLOYMENT_ID ?? '');
+          const expectedSha = String(process.env.GITHUB_SHA ?? '').toLowerCase();
+          const evidencePath = String(process.env.RENDER_PROVIDER_EVIDENCE ?? '');
+          const timeoutMs = positiveInt(process.env.RENDER_DEPLOYMENT_WAIT_TIMEOUT_MS, 15 * 60 * 1000);
+          const intervalMs = positiveInt(process.env.RENDER_DEPLOYMENT_POLL_INTERVAL_MS, 10 * 1000);
+          const requestTimeoutMs = positiveInt(process.env.RENDER_DEPLOYMENT_REQUEST_TIMEOUT_MS, 20 * 1000);
+          const inProgressStatuses = new Set([
+            'created',
+            'queued',
+            'build_in_progress',
+            'pre_deploy_in_progress',
+            'update_in_progress',
+          ]);
+          const failedStatuses = new Set([
+            'build_failed',
+            'pre_deploy_failed',
+            'update_failed',
+            'canceled',
+            'deactivated',
+          ]);
+          const retryableHttpStatuses = new Set([404, 408, 409, 425, 429, 500, 502, 503, 504]);
+
+          async function main() {
+            if (!apiBase.startsWith('https://') && !apiBase.startsWith('http://127.0.0.1:')) {
+              fail('Render API base URL is invalid.');
+            }
+            if (!apiKey) fail('Render API key is missing.');
+            if (!/^srv-[A-Za-z0-9]+$/.test(serviceId)) fail('Render service ID is invalid.');
+            if (!/^dep-[A-Za-z0-9]+$/.test(deploymentId)) fail('Render deployment ID is invalid.');
+            if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(expectedSha)) fail('Workflow revision is invalid.');
+            if (!evidencePath) fail('Render provider evidence path is missing.');
+
+            const endpoint =
+              `${apiBase}/v1/services/${encodeURIComponent(serviceId)}/deploys/${encodeURIComponent(deploymentId)}`;
+            const deadline = Date.now() + timeoutMs;
+            let lastSafeError = 'no provider response';
+
+            while (Date.now() < deadline) {
+              try {
+                const response = await fetch(endpoint, {
+                  headers: {
+                    Accept: 'application/json',
+                    Authorization: `Bearer ${apiKey}`,
+                  },
+                  signal: AbortSignal.timeout(requestTimeoutMs),
+                });
+                if (!response.ok) {
+                  await response.body?.cancel();
+                  if (response.status === 401 || response.status === 403) {
+                    fail(`Render rejected deployment verification credentials (HTTP ${response.status}).`);
+                  }
+                  if (!retryableHttpStatuses.has(response.status)) {
+                    fail(`Render deployment verification failed with HTTP ${response.status}.`);
+                  }
+                  lastSafeError = `retryable HTTP ${response.status}`;
+                } else {
+                  let deployment;
+                  try {
+                    deployment = await response.json();
+                  } catch {
+                    fail('Render deployment verification returned invalid JSON.');
+                  }
+
+                  const providerId = String(deployment.id ?? '');
+                  const providerStatus = String(deployment.status ?? '');
+                  const providerCommitSha = String(deployment.commit?.id ?? '').toLowerCase();
+                  if (providerId !== deploymentId) {
+                    fail('Render deployment verification returned a different deployment ID.');
+                  }
+                  if (providerCommitSha && providerCommitSha !== expectedSha) {
+                    fail(
+                      `Render deployment ${deploymentId} identifies revision ${providerCommitSha}, ` +
+                        `not workflow revision ${expectedSha}.`,
+                    );
+                  }
+                  if (failedStatuses.has(providerStatus)) {
+                    fail(`Render deployment ${deploymentId} entered terminal status ${providerStatus}.`);
+                  }
+                  if (providerStatus === 'live') {
+                    if (providerCommitSha !== expectedSha) {
+                      fail(`Live Render deployment ${deploymentId} is missing the exact provider commit.`);
+                    }
+                    const evidence = {
+                      deployment_id: deploymentId,
+                      provider_status: providerStatus,
+                      provider_commit_sha: providerCommitSha,
+                      verified_at: new Date().toISOString(),
+                    };
+                    fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+                    fs.appendFileSync(process.env.GITHUB_OUTPUT, `provider_evidence_path=${evidencePath}\n`);
+                    console.log(
+                      `Verified exact Render deployment ${deploymentId} reached live at revision ${providerCommitSha}.`,
+                    );
+                    return;
+                  }
+                  if (!inProgressStatuses.has(providerStatus)) {
+                    fail(
+                      `Render deployment ${deploymentId} returned unknown status ${providerStatus || '<missing>'}.`,
+                    );
+                  }
+                  lastSafeError = `provider status ${providerStatus}`;
+                }
+              } catch (error) {
+                if (error instanceof FatalDeployError) throw error;
+                lastSafeError = error?.name === 'TimeoutError' ? 'request timeout' : 'provider request error';
+              }
+
+              console.log(`Waiting for exact Render deployment ${deploymentId}: ${lastSafeError}.`);
+              const remainingMs = deadline - Date.now();
+              if (remainingMs > 0) await sleep(Math.min(intervalMs, remainingMs));
+            }
+
+            fail(`Timed out waiting for exact Render deployment ${deploymentId}: ${lastSafeError}.`);
+          }
+
+          main().catch((error) => {
+            const message =
+              error instanceof FatalDeployError ? error.message : 'Unexpected Render deployment verification error.';
+            console.error(`::error::${message}`);
+            process.exit(1);
+          });
+          NODE
       - name: Wait for Render backend release
+        env:
+          BRASSTUNE_RELEASE_WAIT_TIMEOUT_MS: "300000"
         run: npm run wait:backend-release
+      - name: Record backend deployment evidence
+        id: record_backend
+        shell: bash
+        env:
+          RENDER_DEPLOYMENT_ID: ${{ steps.trigger_backend.outputs.deployment_id }}
+          RENDER_PROVIDER_EVIDENCE: ${{ steps.verify_backend_deployment.outputs.provider_evidence_path }}
+        run: |
+          set -euo pipefail
+          version_response="${RUNNER_TEMP}/render-version.json"
+          evidence_path="${RUNNER_TEMP}/production-deployment-evidence.json"
+          curl --max-time 30 --retry 2 --retry-all-errors --fail-with-body --silent --show-error \
+            --url "${BRASSTUNE_API_BASE_URL%/}/api/version" \
+            --header "Accept: application/json" \
+            --output "$version_response"
+          VERSION_RESPONSE="$version_response" EVIDENCE_PATH="$evidence_path" node <<'NODE'
+          const fs = require('node:fs');
+
+          const version = JSON.parse(fs.readFileSync(process.env.VERSION_RESPONSE, 'utf8'));
+          const provider = JSON.parse(fs.readFileSync(process.env.RENDER_PROVIDER_EVIDENCE, 'utf8'));
+          const expectedSha = process.env.GITHUB_SHA.toLowerCase();
+          const reportedSha = String(version.commit_sha ?? '').toLowerCase();
+          const providerCommitSha = String(provider.provider_commit_sha ?? '').toLowerCase();
+          if (reportedSha !== expectedSha) {
+            console.error(
+              `::error::Render /api/version revision ${reportedSha || '<missing>'} ` +
+                `does not match workflow revision ${expectedSha}.`,
+            );
+            process.exit(1);
+          }
+          if (
+            provider.deployment_id !== process.env.RENDER_DEPLOYMENT_ID ||
+            provider.provider_status !== 'live' ||
+            providerCommitSha !== expectedSha
+          ) {
+            console.error('::error::Exact Render provider deployment evidence is invalid.');
+            process.exit(1);
+          }
+          const evidence = {
+            schema_version: 1,
+            target: 'backend',
+            commit_sha: expectedSha,
+            reported_backend_sha: reportedSha,
+            render_deployment_id: process.env.RENDER_DEPLOYMENT_ID,
+            render_deployment_status: provider.provider_status,
+            render_deployment_commit_sha: providerCommitSha,
+            api_base_url: process.env.BRASSTUNE_API_BASE_URL,
+            verification:
+              'Exact Render deployment reached live and public readiness plus /api/version matched the workflow revision',
+            verified_at: new Date().toISOString(),
+          };
+          fs.writeFileSync(process.env.EVIDENCE_PATH, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `evidence_path=${process.env.EVIDENCE_PATH}\n`);
+          NODE
+      - name: Store backend deployment evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-deployment-evidence
+          path: ${{ steps.record_backend.outputs.evidence_path }}
+          if-no-files-found: error
+          retention-days: 30

@@ -1,18 +1,28 @@
 import { describe, expect, it } from 'vitest';
+import scorerContract from '../../../fixtures/play_along_contract.json';
 import {
   EXERCISES,
+  DEFAULT_PLAY_ALONG_ATTACK_TRIM_MS,
+  DEFAULT_PLAY_ALONG_HOLD_MS,
+  DEFAULT_PLAY_ALONG_MAX_DROPOUT_MS,
+  DEFAULT_PLAY_ALONG_MIN_CONFIDENCE,
+  DEFAULT_PLAY_ALONG_MIN_SAMPLES,
   MAJOR_SCALES,
   MINOR_SCALES,
   OTHER_EXERCISES,
+  PLAY_ALONG_ACCEPTED_CENTS,
+  PLAY_ALONG_CENTERED_CENTS,
   PlayAlongGrader,
   centsGrade,
+  isAcceptedPlayAlongCents,
   normalizePitchClass,
   samePitchClass,
   summarizeGrades,
 } from './playAlong';
 import type { PitchFrame } from './types';
+import { starsForPercent } from './tuningLanguage';
 
-function frame(note: string | null, cents: number | null, confidence = 0.9): PitchFrame {
+function frame(note: string | null, cents: number | null, confidence = 0.99): PitchFrame {
   return {
     timestamp_ms: 0,
     frequency_hz: note ? 440 : null,
@@ -35,10 +45,48 @@ function frame(note: string | null, cents: number | null, confidence = 0.9): Pit
 describe('centsGrade', () => {
   it('classifies by absolute cents', () => {
     expect(centsGrade(3)).toBe('excellent');
-    expect(centsGrade(-12)).toBe('good');
-    expect(centsGrade(25)).toBe('close');
+    expect(centsGrade(-12)).toBe('close');
+    expect(centsGrade(25)).toBe('off');
     expect(centsGrade(60)).toBe('off');
     expect(centsGrade(null)).toBe('missed');
+  });
+
+  it('loads rating, acceptance, and star thresholds from the portable contract', () => {
+    expect({
+      centered_cents_inclusive: PLAY_ALONG_CENTERED_CENTS,
+      accepted_cents_inclusive: PLAY_ALONG_ACCEPTED_CENTS,
+      hold_ms: DEFAULT_PLAY_ALONG_HOLD_MS,
+      minimum_confidence: DEFAULT_PLAY_ALONG_MIN_CONFIDENCE,
+      minimum_samples: DEFAULT_PLAY_ALONG_MIN_SAMPLES,
+      attack_trim_ms: DEFAULT_PLAY_ALONG_ATTACK_TRIM_MS,
+      maximum_dropout_ms: DEFAULT_PLAY_ALONG_MAX_DROPOUT_MS,
+    }).toEqual(scorerContract.policy);
+
+    for (const testCase of scorerContract.rating_cases) {
+      expect(centsGrade(testCase.cents), testCase.name).toBe(testCase.expected_rating);
+      expect(isAcceptedPlayAlongCents(testCase.cents), testCase.name).toBe(testCase.expected_accepted);
+      expect(testCase.cents != null && Math.abs(testCase.cents) <= PLAY_ALONG_CENTERED_CENTS, testCase.name).toBe(testCase.expected_centered);
+    }
+    for (const testCase of scorerContract.star_cases) {
+      expect(starsForPercent(testCase.in_tune_percent), String(testCase.in_tune_percent)).toBe(testCase.expected_stars);
+    }
+    for (const testCase of scorerContract.summary_cases) {
+      const results = testCase.ratings.map((rating, index) => ({
+        name: `N${index}`,
+        avgCents: rating.cents,
+        samples: rating.cents == null ? 0 : 5,
+        grade: rating.rating as ReturnType<typeof centsGrade>,
+      }));
+      const summary = summarizeGrades(results);
+      expect(summary, testCase.name).toEqual({
+        total: testCase.expected_total,
+        hit: testCase.expected_hit,
+        inTune: testCase.expected_in_tune,
+        inTunePercent: testCase.expected_in_tune_percent,
+        averageAbsCents: testCase.expected_average_abs_cents,
+      });
+      expect(starsForPercent(summary.inTunePercent), testCase.name).toBe(testCase.expected_stars);
+    }
   });
 });
 
@@ -113,8 +161,62 @@ describe('exercise catalog', () => {
 });
 
 describe('PlayAlongGrader', () => {
-  it('advances after sustaining the correct note and records average cents', () => {
+  it('replays every portable temporal timeline at its declared checkpoints', () => {
+    expect(scorerContract.temporal_evidence_kind).toContain('synthetic deterministic pitch-frame timelines');
+
+    for (const testCase of scorerContract.temporal_cases) {
+      const grader = new PlayAlongGrader(testCase.notes);
+      const checkpoints = new Map(testCase.checkpoints.map((checkpoint) => [checkpoint.after_frame_index, checkpoint]));
+
+      testCase.frames.forEach((testFrame, frameIndex) => {
+        const snapshot = grader.feed(frame(testFrame.written_note, testFrame.cents, testFrame.confidence), testFrame.timestamp_ms);
+        const checkpoint = checkpoints.get(frameIndex);
+        if (!checkpoint) return;
+        expect(snapshot.currentName, `${testCase.name}: current note after frame ${frameIndex}`).toBe(checkpoint.expected_current_note);
+        expect(snapshot.heldFraction * grader.holdMs, `${testCase.name}: held ms after frame ${frameIndex}`).toBeCloseTo(
+          checkpoint.expected_held_ms,
+          8,
+        );
+        expect(snapshot.results, `${testCase.name}: result count after frame ${frameIndex}`).toHaveLength(checkpoint.expected_result_count);
+        expect(snapshot.done, `${testCase.name}: done after frame ${frameIndex}`).toBe(checkpoint.expected_done);
+      });
+
+      expect(
+        grader.results.map((result) => ({
+          name: result.name,
+          median_cents: result.avgCents,
+          sample_count: result.samples,
+          rating: result.grade,
+        })),
+        testCase.name,
+      ).toEqual(testCase.expected_results);
+    }
+  });
+
+  it('uses a 2-second default and does not advance before the full hold', () => {
+    const grader = new PlayAlongGrader(['C']);
+    expect(grader.holdMs).toBe(DEFAULT_PLAY_ALONG_HOLD_MS);
+
+    for (let t = 0; t <= 1_750; t += 250) grader.feed(frame('C', 5), t);
+    const justBefore = grader.feed(frame('C', 5), 1_999);
+
+    expect(justBefore.heldFraction).toBeCloseTo(1_999 / 2_000, 5);
+    expect(grader.results).toEqual([]);
+    expect(grader.currentName).toBe('C');
+  });
+
+  it('advances once the default 2-second hold is reached', () => {
+    const grader = new PlayAlongGrader(['C', 'D']);
+    for (let t = 0; t <= 2_000; t += 250) grader.feed(frame('C', 5), t);
+
+    expect(grader.results).toHaveLength(1);
+    expect(grader.results[0].name).toBe('C');
+    expect(grader.currentName).toBe('D');
+  });
+
+  it('honors an explicit hold override and records average cents', () => {
     const grader = new PlayAlongGrader(['C', 'D'], { holdMs: 400, minSamples: 3 });
+    expect(grader.holdMs).toBe(400);
     // Sustain C at +10c for 500ms (frames every 100ms).
     for (let t = 0; t <= 500; t += 100) {
       grader.feed(frame('C', 10), t);
@@ -122,7 +224,7 @@ describe('PlayAlongGrader', () => {
     expect(grader.results.length).toBe(1);
     expect(grader.results[0].name).toBe('C');
     expect(grader.results[0].avgCents).toBeCloseTo(10, 5);
-    expect(grader.results[0].grade).toBe('good');
+    expect(grader.results[0].grade).toBe('close');
     expect(grader.currentName).toBe('D');
   });
 
@@ -142,6 +244,7 @@ describe('PlayAlongGrader', () => {
     grader.feed(frame('C', 5), 300);
     grader.feed(frame('C', 5), 400); // only 100ms since reset
     expect(grader.results.length).toBe(0);
+    expect(grader.snapshot().heldFraction).toBeCloseTo(0.25, 5);
   });
 
   it('grades detector canonical names against enharmonic written spellings', () => {
@@ -157,9 +260,23 @@ describe('PlayAlongGrader', () => {
     grader.feed(frame('C', 8), 0);
     grader.feed(frame(null, null, 0.1), 100); // silence blip
     grader.feed(frame('C', 8), 200);
-    grader.feed(frame('C', 8), 440); // total window >= 400ms, latest gap <= 250ms
+    grader.feed(frame('C', 8), 400);
+    grader.feed(frame('C', 8), 600); // 400ms of confirmed matching time
     expect(grader.results.length).toBe(1);
-    expect(grader.results[0].grade).toBe('good');
+    expect(grader.results[0].grade).toBe('close');
+  });
+
+  it('pauses visible held progress during a tolerated detector dropout', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 400, minSamples: 3, maximumDropoutMs: 250 });
+    grader.feed(frame('C', 4), 0);
+    const beforeDropout = grader.feed(frame('C', 4), 100);
+    const duringDropout = grader.feed(frame(null, null, 0.1), 200);
+    const afterResume = grader.feed(frame('C', 4), 250);
+
+    expect(beforeDropout.heldFraction).toBeCloseTo(0.25, 5);
+    expect(duringDropout.heldFraction).toBeCloseTo(0.25, 5);
+    expect(afterResume.heldFraction).toBeCloseTo(0.25, 5);
+    expect(grader.results).toEqual([]);
   });
 
   it('resets a stale hold after the native 250ms dropout grace', () => {
@@ -172,6 +289,34 @@ describe('PlayAlongGrader', () => {
     for (let t = 600; t <= 800; t += 100) grader.feed(frame('C', 4), t);
     expect(grader.done).toBe(false);
     expect(grader.results).toEqual([]);
+  });
+
+  it('does not advance until the matching note is within the accepted 15-cent window', () => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    grader.feed(frame('C', 16), 0);
+    grader.feed(frame('C', 16), 100);
+    grader.feed(frame('C', 16), 200);
+    grader.feed(frame('C', 16), 300);
+    expect(grader.results).toEqual([]);
+    expect(grader.snapshot().heldFraction).toBe(0);
+
+    for (let timestamp = 400; timestamp <= 700; timestamp += 100) {
+      grader.feed(frame('C', 15), timestamp);
+    }
+    expect(grader.done).toBe(true);
+    expect(grader.results[0].grade).toBe('close');
+  });
+
+  it('accrues a full hold at exactly +15 cents but never at +15.1 cents', () => {
+    const edge = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    for (let timestamp = 0; timestamp <= 300; timestamp += 100) edge.feed(frame('C', 15), timestamp);
+    expect(edge.done).toBe(true);
+    expect(edge.results[0].grade).toBe('close');
+
+    const outside = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    for (let timestamp = 0; timestamp <= 300; timestamp += 100) outside.feed(frame('C', 15.1), timestamp);
+    expect(outside.done).toBe(false);
+    expect(outside.results).toEqual([]);
   });
 
   it('resets while receiving prolonged low-confidence frames', () => {
@@ -211,8 +356,38 @@ describe('PlayAlongGrader', () => {
 
   it('ignores low-confidence frames entirely', () => {
     const grader = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
-    for (let t = 0; t <= 600; t += 100) grader.feed(frame('C', 5, 0.4), t); // below 0.65 gate
+    let snapshot = grader.snapshot();
+    for (let t = 0; t <= 600; t += 100) snapshot = grader.feed(frame('C', 0, 0.9), t); // centered, but below the 95% scoring gate
     expect(grader.results.length).toBe(0);
+    expect(snapshot.heldFraction).toBe(0);
+    expect(snapshot.detectedName).toBeNull();
+    expect(snapshot.detectedCents).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'explicitly invalid',
+      patch: { is_valid_for_recording: false, save_eligibility_reason: 'unstable/no pitch lock' },
+    },
+    {
+      name: 'unstable',
+      patch: { tuning_status: 'unstable' as const },
+    },
+    {
+      name: 'silence',
+      patch: { tuning_status: 'silence' as const },
+    },
+  ])('does not award an excellent grade to $name pitch frames', ({ patch }) => {
+    const grader = new PlayAlongGrader(['C'], { holdMs: 300, minSamples: 3 });
+    let snapshot = grader.snapshot();
+    for (let timestamp = 0; timestamp <= 600; timestamp += 100) {
+      snapshot = grader.feed({ ...frame('C', 0), ...patch }, timestamp);
+    }
+
+    expect(grader.results).toEqual([]);
+    expect(snapshot.heldFraction).toBe(0);
+    expect(snapshot.detectedName).toBeNull();
+    expect(snapshot.detectedCents).toBeNull();
   });
 
   it('marks a skipped note as missed', () => {

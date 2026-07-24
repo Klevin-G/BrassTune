@@ -8,11 +8,16 @@ test.beforeEach(async ({ page, request }) => {
     await request.post(`${apiBaseURL}/api/admin/demo-data/repair`).catch(() => undefined);
   }
   await page.addInitScript(() => {
-    Object.keys(localStorage)
-      .filter((key) => key.startsWith('brasstune.'))
-      .filter((key) => key !== 'brasstune.theme')
-      .forEach((key) => localStorage.removeItem(key));
-    localStorage.setItem('brasstune.onboardingComplete', 'true');
+    const preserveOnboardingState = sessionStorage.getItem('e2e.preserveOnboardingState') === 'true';
+    sessionStorage.removeItem('e2e.preserveOnboardingState');
+    if (!preserveOnboardingState) {
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith('brasstune.'))
+        .filter((key) => key !== 'brasstune.theme')
+        .forEach((key) => localStorage.removeItem(key));
+      localStorage.setItem('brasstune.onboardingComplete', 'true');
+      localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
+    }
     localStorage.setItem('brasstune.demoMode', 'true');
     localStorage.setItem('brasstune.guestAccess', 'true');
   });
@@ -22,11 +27,11 @@ test('critical routes render identifiable content', async ({ page }) => {
   const routes = [
     ['/', /Tune up, play along, and see how you sound/i],
     ['/practice', /Live mic/i],
-    ['/practice/play-along', /Play-Along/i],
+    ['/practice/scorer', /Practice Scorer/i],
     ['/metronome', /Metronome/i],
-    ['/practice/score', /Sheet Music/i],
-    ['/sessions', /Your recordings/i],
-    ['/progress', /Your progress/i],
+    ['/practice/sheet-music', /Sheet Music/i],
+    ['/sessions', /Recordings/i],
+    ['/progress', /Progress/i],
     ['/ensemble', /Class/i],
     ['/settings', /Settings/i],
     ['/auth/sign-in', /Welcome back/i],
@@ -46,15 +51,24 @@ test('critical routes render identifiable content', async ({ page }) => {
 });
 
 test('merged and retired routes redirect to their new home', async ({ page }) => {
-  for (const [from, expected] of [
-    ['/home', /\/practice$/],
-    ['/analytics', /\/progress$/],
-    ['/coach', /\/progress$/],
-    ['/more', /\/settings$/],
+  const runtimeErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') runtimeErrors.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => runtimeErrors.push(`pageerror: ${error.message}`));
+
+  for (const [from, expected, destinationText] of [
+    ['/home', /\/practice$/, /Live mic/i],
+    ['/analytics', /\/progress$/, /Progress/i],
+    ['/coach', /\/progress$/, /Progress/i],
+    ['/more', /\/settings$/, /Settings/i],
   ] as const) {
     await page.goto(from);
     await expect(page).toHaveURL(expected);
+    await expect(page.getByRole('main').getByText(destinationText, { exact: true }).first()).toBeVisible();
   }
+
+  expect(runtimeErrors).toEqual([]);
 });
 
 test('guest class route invites sign-in without exposing director controls', async ({ page }) => {
@@ -66,7 +80,7 @@ test('guest class route invites sign-in without exposing director controls', asy
 test('accounts-unavailable routes still offer guest practice', async ({ page }) => {
   await page.goto('/auth/reset-password');
   await expect(page.getByText(/accounts aren't turned on yet/i)).toBeVisible();
-  await expect(page.getByRole('link', { name: /continue as guest|start practicing|keep practicing/i }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /continue as guest|start practicing|keep practicing/i }).first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/Supabase|VITE_SUPABASE|env vars/i);
 });
 
@@ -79,6 +93,75 @@ test('root gateway starts a guest practice session on the tuner', async ({ page 
   await page.getByRole('button', { name: /start practicing/i }).first().click();
   await expect(page).toHaveURL(/\/practice$/);
   await expect(page.getByText(/Live mic/i)).toBeVisible();
+});
+
+test('explicit guest entry opens one-step instrument setup even after a legacy completion', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /start practicing/i }).first().click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
+  await expect(dialog).toContainText(/Practicing as a guest/);
+  await expect(dialog).toContainText(/This build is guest-only/);
+  await expect(dialog).toContainText(/Account sync and Class/);
+  await expect(dialog.getByRole('button', { name: /dismiss tour for now/i })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /next|back|show me around/i })).toHaveCount(0);
+  await dialog.getByRole('combobox').selectOption('horn');
+  await expect(dialog.getByRole('combobox')).toHaveValue('horn');
+  await dialog.getByRole('button', { name: /open the tuner/i }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestOnboardingComplete'))).toBe('true');
+  await page.reload();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('tiny-phone onboarding keeps its close control clear in English and Arabic', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+
+  for (const locale of ['en', 'ar']) {
+    await page.goto('/');
+    await page.evaluate((nextLocale) => {
+      localStorage.setItem('brasstune.locale', nextLocale);
+      localStorage.setItem('brasstune.guestAccess', 'true');
+      // A completed legacy account/tour must not suppress a fresh guest setup.
+      localStorage.setItem('brasstune.onboardingComplete', 'true');
+      localStorage.removeItem('brasstune.guestOnboardingComplete');
+      // The next navigation must retain this deliberately incomplete guest setup.
+      sessionStorage.setItem('e2e.preserveOnboardingState', 'true');
+    }, locale);
+    await page.goto('/practice');
+
+    const dialog = page.getByRole('dialog');
+    const close = dialog.locator('.ob-close');
+    await expect(close).toBeVisible();
+    const overlapAreas = await dialog.evaluate((element) => {
+      const closeRect = element.querySelector('.ob-close')!.getBoundingClientRect();
+      return Array.from(element.querySelectorAll('.ob-heading-icon, .ob-heading h2')).map((target) => {
+        const targetRect = target.getBoundingClientRect();
+        const width = Math.max(0, Math.min(closeRect.right, targetRect.right) - Math.max(closeRect.left, targetRect.left));
+        const height = Math.max(0, Math.min(closeRect.bottom, targetRect.bottom) - Math.max(closeRect.top, targetRect.top));
+        return width * height;
+      });
+    });
+    expect(overlapAreas, `${locale} heading should not overlap the close control`).toEqual([0, 0]);
+    await close.click();
+  }
+});
+
+test('closing a guest tour is temporary until the tour is completed', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /start practicing/i }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: /close for now/i }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestOnboardingComplete'))).toBe('false');
+
+  await page.evaluate(() => sessionStorage.setItem('e2e.preserveOnboardingState', 'true'));
+  await page.reload();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
 });
 
 test('settings replays the tour with a keyboard-trapped dialog', async ({ page }) => {
@@ -160,7 +243,7 @@ test('short mobile tuner controls stay clear of the bottom navigation', async ({
 test('tiny-phone empty-state actions stay clear of the bottom navigation', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   for (const [route, actionName] of [
-    ['/progress', /record your first note/i],
+    ['/progress', /record your first take/i],
     ['/sessions', /start practicing/i],
   ] as const) {
     await page.goto(route);

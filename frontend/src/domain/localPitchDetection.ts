@@ -19,6 +19,11 @@ export interface PitchDetectionOptions {
   minCorrelation?: number;
 }
 
+/** JS/Swift-compatible midpoint rule: exact .5 MIDI values round upward. */
+export function nearestMidiForFrequency(frequencyHz: number, referencePitch: number): number {
+  return Math.round(frequencyToMidi(frequencyHz, referencePitch));
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -149,7 +154,7 @@ export function pitchFrameFromPcm(
     return pitchFrameFromFrequency(null, 0, instrumentId, referencePitch, timestampMs, estimate.confidence, estimate.rms, 'browser_local_pitch');
   }
   const midi = frequencyToMidi(estimate.frequencyHz, referencePitch);
-  const cents = (midi - Math.round(midi)) * 100;
+  const cents = (midi - nearestMidiForFrequency(estimate.frequencyHz, referencePitch)) * 100;
   return pitchFrameFromFrequency(
     estimate.frequencyHz,
     cents,

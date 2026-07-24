@@ -108,8 +108,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
-  min-height: 34px;
+  margin-inline-start: auto;
+  min-height: var(--tap, 44px);
   padding: 0 10px;
   font-size: 0.82rem;
   font-weight: 700;
@@ -230,8 +230,13 @@
   color: var(--muted);
 }
 .ec-accept-select {
-  margin-left: auto;
+  margin-inline-start: auto;
   min-width: 190px;
+}
+.ec-instrument-required {
+  color: var(--red);
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 .ec-invite-actions {
   display: flex;
@@ -297,7 +302,7 @@
   flex: 1 1 auto;
 }
 .ec-newclass-btn {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .ec-leave-class {
   color: var(--red);
@@ -316,7 +321,7 @@
   margin-bottom: 16px;
   background: var(--surface-sunken);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--gold);
+  border-inline-start: 3px solid var(--gold);
   border-radius: var(--radius);
 }
 .ec-join-main {
@@ -390,7 +395,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 36px;
+  min-height: var(--tap, 44px);
   padding: 0 12px;
   font-size: 0.85rem;
   font-weight: 700;
@@ -542,7 +547,7 @@
 /* ---- narrow screens ---------------------------------------------------- */
 @media (max-width: 560px) {
   .ec-accept-select {
-    margin-left: 0;
+    margin-inline-start: 0;
     width: 100%;
   }
   .ec-invite-actions {

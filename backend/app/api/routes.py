@@ -8,13 +8,13 @@ import zipfile
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
-from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics
+from app.core.analytics.stats import build_heatmap, build_instrument_heatmap, calculate_note_stats, calculate_period_bounds, calculate_progress_metrics, duration_weighted_mean
 from app.core.ensemble.analytics import calculate_ensemble_summary, generate_rehearsal_report
 from app.core.instruments.profiles import get_all_profiles, get_instrument_profile, is_valid_instrument_id, require_instrument_profile
 from app.core.recommendations.rules import generate_practice_plan, generate_recommendations, generate_session_recommendations
@@ -23,7 +23,13 @@ from app.db.readiness import public_readiness_report, readiness_report, version_
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import MAX_AUDIO_UPLOAD_BYTES, attach_audio_to_session, audio_bytes_for_export, create_supabase_signed_url, delete_audio_for_session, enforce_audio_storage_quota, local_audio_path, read_audio_bytes
+from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
+from app.services.account_deletion import (
+    DeletionTombstoneSecretError,
+    complete_and_scrub_account_deletion_job,
+    ensure_deletion_tombstone_key_state,
+    maintain_terminal_account_deletion_jobs,
+)
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 from app.services.usage import record_event
@@ -39,6 +45,7 @@ STALE_DELETION_JOB_SECONDS = 15 * 60
 DEFAULT_MAX_OWNED_CLASSES_PER_USER = 10
 DEFAULT_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER = 20
 DEFAULT_MAX_PENDING_CLASS_INVITATIONS_PER_USER = 20
+CLASS_PRACTICE_AGGREGATE_SCOPE_CODE = "cloud_practice_sessions_since_membership_v1"
 
 
 def _bad_instrument(instrument_id: str) -> HTTPException:
@@ -260,15 +267,23 @@ class ExportBudget:
         if self.max_rows_per_session and max(samples, events) > self.max_rows_per_session:
             raise HTTPException(status_code=413, detail="Export contains too many pitch rows. Narrow the export scope.")
 
-    def require_total_rows(self, db: Session, session_ids: list[int] | None = None) -> None:
+    def require_total_rows(
+        self,
+        db: Session,
+        session_ids: list[int] | None = None,
+        additional_rows: int = 0,
+    ) -> None:
         samples = db.query(PitchSample.id)
         events = db.query(NoteEvent.id)
         if session_ids is not None:
             if not session_ids:
+                total_rows = max(0, int(additional_rows))
+                if self.max_total_rows and total_rows > self.max_total_rows:
+                    raise HTTPException(status_code=413, detail="Export contains too many rows. Narrow the export scope.")
                 return
             samples = samples.filter(PitchSample.session_id.in_(session_ids))
             events = events.filter(NoteEvent.session_id.in_(session_ids))
-        total_rows = samples.count() + events.count()
+        total_rows = samples.count() + events.count() + max(0, int(additional_rows))
         if self.max_total_rows and total_rows > self.max_total_rows:
             raise HTTPException(status_code=413, detail="Export contains too many rows. Narrow the export scope.")
 
@@ -311,12 +326,13 @@ def _write_session_audio_to_archive(archive: zipfile.ZipFile, session: PracticeS
     budget.write_bytes(archive, archive_path, data, audio=True)
 
 
-async def _read_limited_body(request: Request, max_bytes: int = MAX_AUDIO_UPLOAD_BYTES) -> bytes:
+async def _read_limited_body(request: Request, max_bytes: Optional[int] = None) -> bytes:
+    limit = audio_upload_limit_bytes() if max_bytes is None else min(max_bytes, audio_upload_limit_bytes())
     chunks = []
     total = 0
     async for chunk in request.stream():
         total += len(chunk)
-        if total > max_bytes:
+        if total > limit:
             raise HTTPException(status_code=413, detail="Audio upload is too large.")
         chunks.append(chunk)
     return b"".join(chunks)
@@ -422,12 +438,14 @@ def add_session_samples_batch(session_id: int, frames: List[PitchFrameIn], db: S
 
 @router.post("/sessions/{session_id}/stop")
 def stop_practice_session(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    _require_session_access(db, session_id, auth)
+    existing = _require_session_access(db, session_id, auth)
+    was_active = existing.ended_at is None
     session = stop_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     result = session_to_dict(session)
-    record_event(db, "session_completed", auth.user.id, {"session_id": session_id, "duration_seconds": result["duration_seconds"], "notes_count": result["notes_count"]})
+    if was_active:
+        record_event(db, "session_completed", auth.user.id, {"session_id": session_id, "duration_seconds": result["duration_seconds"], "notes_count": result["notes_count"]})
     return result
 
 
@@ -485,12 +503,34 @@ async def upload_session_audio(
 ):
     session = _require_session_access(db, session_id, auth)
     data, mime_type = read_audio_bytes(await _read_limited_body(request), content_type or "")
-    enforce_audio_storage_quota(db, session, len(data))
-    attach_audio_to_session(session, data, mime_type, x_audio_duration_seconds)
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    return {"uploaded": True, "audio": session_to_dict(session)}
+    result = replace_audio_for_session(
+        db,
+        session,
+        data,
+        mime_type,
+        x_audio_duration_seconds,
+    )
+    if result.cleanup_pending or result.reconciliation_pending or result.activation_pending:
+        if result.activation_pending:
+            message = "The recording was uploaded, but activation confirmation is pending durable reconciliation."
+        elif result.cleanup_pending and result.reconciliation_pending:
+            message = "The new recording is active. Metadata confirmation and previous-recording cleanup are queued."
+        elif result.reconciliation_pending:
+            message = "The new recording is active. Metadata confirmation is queued for retry."
+        else:
+            message = "The new recording is active. Cleanup of the previous recording is queued for retry."
+        return JSONResponse(
+            status_code=202,
+            content={
+                "uploaded": True,
+                "cleanup_pending": result.cleanup_pending,
+                "reconciliation_pending": result.reconciliation_pending,
+                "activation_pending": result.activation_pending,
+                "message": message,
+                "audio": result.audio_snapshot,
+            },
+        )
+    return {"uploaded": True, "audio": result.audio_snapshot}
 
 
 @router.get("/sessions/{session_id}/audio")
@@ -509,10 +549,30 @@ def get_session_audio(session_id: int, db: Session = Depends(get_db), auth: Auth
 @router.delete("/sessions/{session_id}/audio")
 def delete_session_audio(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     session = _require_session_access(db, session_id, auth)
-    delete_audio_for_session(session)
-    db.add(session)
-    db.commit()
-    return {"deleted": True}
+    try:
+        job_id = queue_audio_delete(db, session, "explicit_session_audio_delete")
+        if job_id is None:
+            db.rollback()
+            return {"deleted": True, "cleanup_pending": False}
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Audio deletion could not be queued safely. The recording is unchanged.",
+        ) from exc
+    cleanup = process_audio_delete_jobs(db, [job_id])
+    payload = {
+        "deleted": True,
+        "cleanup_pending": cleanup["still_retryable"] > 0,
+        "audio_cleanup": cleanup,
+    }
+    if payload["cleanup_pending"]:
+        return JSONResponse(status_code=202, content=payload)
+    return payload
 
 
 def _filtered_sessions(
@@ -751,26 +811,53 @@ def _invitation_to_dict(row: Invitation):
     }
 
 
+def _usage_event_to_dict(row: UsageEvent):
+    return {
+        "id": row.id,
+        "event_name": row.event_name,
+        "properties": row.properties if isinstance(row.properties, dict) else {},
+        "created_at": _iso(row.created_at),
+    }
+
+
 def _account_export_zip(db: Session, auth: AuthContext):
     user = auth.user
-    sessions = db.query(PracticeSession).filter(PracticeSession.user_id == user.id).order_by(PracticeSession.started_at.asc()).all()
-    memberships = db.query(GroupMember).filter(GroupMember.user_id == user.id).order_by(GroupMember.group_id.asc()).all()
-    owned_groups = db.query(Group).filter(Group.director_user_id == user.id).order_by(Group.id.asc()).all()
-    invitations = (
+    budget = ExportBudget()
+    sessions_query = db.query(PracticeSession).filter(PracticeSession.user_id == user.id)
+    session_count = sessions_query.count()
+    budget.require_session_count(session_count)
+    sessions = sessions_query.order_by(PracticeSession.started_at.asc()).all()
+
+    memberships_query = db.query(GroupMember).filter(GroupMember.user_id == user.id)
+    owned_groups_query = db.query(Group).filter(Group.director_user_id == user.id)
+    invitations_query = (
         db.query(Invitation)
         .filter((Invitation.invited_user_id == user.id) | (Invitation.invited_by_user_id == user.id))
-        .order_by(Invitation.created_at.asc())
-        .all()
     )
-    recommendations = db.query(Recommendation).filter(Recommendation.user_id == user.id).order_by(Recommendation.created_at.asc()).all()
+    recommendations_query = db.query(Recommendation).filter(Recommendation.user_id == user.id)
+    usage_events_query = db.query(UsageEvent).filter(UsageEvent.user_id == user.id)
+    related_rows = sum(
+        query.count()
+        for query in (
+            memberships_query,
+            owned_groups_query,
+            invitations_query,
+            recommendations_query,
+            usage_events_query,
+        )
+    )
+    budget.require_total_rows(db, [session.id for session in sessions], additional_rows=related_rows)
+
+    memberships = memberships_query.order_by(GroupMember.group_id.asc()).all()
+    owned_groups = owned_groups_query.order_by(Group.id.asc()).all()
+    invitations = invitations_query.order_by(Invitation.created_at.asc()).all()
+    recommendations = recommendations_query.order_by(Recommendation.created_at.asc()).all()
+    usage_events = usage_events_query.order_by(UsageEvent.created_at.asc()).all()
     account = user_to_dict(user)
     account["email"] = user.email
     account["supabase_user_id"] = user.supabase_user_id
     account["created_at"] = _iso(user.created_at)
     account["updated_at"] = _iso(user.updated_at)
-    budget = ExportBudget()
-    budget.require_session_count(len(sessions))
-    budget.require_total_rows(db, [session.id for session in sessions])
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         budget.write_text(archive, "README.txt", "BrassTune account export for the authenticated user. Source recordings are included only for this user's sessions when available.")
@@ -780,6 +867,7 @@ def _account_export_zip(db: Session, auth: AuthContext):
         budget.write_text(archive, "owned_groups.json", json.dumps([group_to_dict(group) for group in owned_groups], indent=2))
         budget.write_text(archive, "invitations.json", json.dumps([_invitation_to_dict(row) for row in invitations], indent=2))
         budget.write_text(archive, "recommendations.json", json.dumps([_recommendation_to_dict(row) for row in recommendations], indent=2))
+        budget.write_text(archive, "usage_events.json", json.dumps([_usage_event_to_dict(row) for row in usage_events], indent=2))
         for session in sessions:
             folder = "sessions/%s" % session.id
             payload = _session_json_payload(db, session, budget)
@@ -819,11 +907,33 @@ def repair_demo_data_dev(db: Session = Depends(get_db), auth: AuthContext = Depe
 def clear_my_sessions(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     sessions = db.query(PracticeSession).filter(PracticeSession.user_id == auth.user.id).all()
     deleted = len(sessions)
-    for session in sessions:
-        delete_audio_for_session(session)
-        db.delete(session)
-    db.commit()
-    return {"cleared": {"practice_sessions": deleted}}
+    try:
+        audio_job_ids = [
+            job_id
+            for session in sessions
+            if (job_id := queue_audio_delete(db, session, "clear_all_practice_sessions")) is not None
+        ]
+        for session in sessions:
+            db.delete(session)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Practice history could not be cleared safely. No remote cleanup was started.",
+        ) from exc
+    cleanup = process_audio_delete_jobs(db, audio_job_ids)
+    payload = {
+        "cleared": {"practice_sessions": deleted},
+        "audio_cleanup_pending": cleanup["still_retryable"] > 0,
+        "audio_cleanup": cleanup,
+    }
+    if payload["audio_cleanup_pending"]:
+        return JSONResponse(status_code=202, content=payload)
+    return payload
 
 
 @router.get("/users/me/export.zip")
@@ -844,8 +954,10 @@ def _mark_deletion_job(job: AccountDeletionJob, stage: str, status: str, error_c
         job.next_retry_at = dt.datetime.utcnow() + dt.timedelta(minutes=min(60, 2 ** min(job.retry_count, 6)))
 
 
-def _deletion_job_payload(job: AccountDeletionJob):
-    if isinstance(job.counts_json, dict):
+def _deletion_job_payload(job: AccountDeletionJob, counts_override: Optional[dict] = None):
+    if counts_override is not None:
+        counts = counts_override
+    elif isinstance(job.counts_json, dict):
         counts = job.counts_json
     elif isinstance(job.counts_json, str):
         try:
@@ -910,7 +1022,15 @@ def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
                         db,
                         AuthContext(user=user, is_guest=False, access_token=None),
                     )
-                    results.append({"job_id": job.id, "status": payload.get("deletion_status", "unknown"), "stage": payload.get("deletion_stage")})
+                    db.refresh(job)
+                    results.append(
+                        {
+                            "job_id": job.id,
+                            "status": job.status,
+                            "stage": job.stage,
+                            "deletion_status": payload.get("deletion_status", job.status),
+                        }
+                    )
                     continue
                 except HTTPException:
                     db.refresh(job)
@@ -918,7 +1038,7 @@ def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
                     continue
 
         if not job.supabase_user_id:
-            _mark_deletion_job(job, "completed", "completed")
+            complete_and_scrub_account_deletion_job(db, job)
             db.add(job)
             db.commit()
             results.append({"job_id": job.id, "status": job.status, "stage": job.stage})
@@ -932,17 +1052,22 @@ def retry_account_deletion_jobs(db: Session, limit: int = 10) -> dict:
         except Exception:
             external_deleted = False
         if external_deleted:
-            _mark_deletion_job(job, "completed", "completed")
+            try:
+                complete_and_scrub_account_deletion_job(db, job)
+            except DeletionTombstoneSecretError:
+                _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "identity_protection_unavailable")
         else:
             _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "external_identity_cleanup_failed")
         db.add(job)
         db.commit()
         results.append({"job_id": job.id, "status": job.status, "stage": job.stage})
+    privacy_maintenance = maintain_terminal_account_deletion_jobs(db, limit=max(50, limit))
     return {
         "processed": len(results),
         "completed": sum(1 for row in results if row["status"] == "completed"),
         "still_retryable": sum(1 for row in results if row["status"] == "retryable_failure"),
         "results": results,
+        "privacy_maintenance": privacy_maintenance,
     }
 
 
@@ -961,7 +1086,19 @@ def retry_account_deletions(
     db: Session = Depends(get_db),
 ):
     _require_account_deletion_retry_secret(x_brasstune_maintenance_secret)
-    return retry_account_deletion_jobs(db, limit=limit)
+    account_result = retry_account_deletion_jobs(db, limit=limit)
+    account_result["audio_storage"] = retry_audio_storage_jobs(db, limit=limit)
+    return account_result
+
+
+@router.post("/maintenance/audio-storage/retry")
+def retry_audio_storage(
+    limit: int = Query(default=10, ge=1, le=50),
+    x_brasstune_maintenance_secret: Optional[str] = Header(default=None, alias="X-BrassTune-Maintenance-Secret"),
+    db: Session = Depends(get_db),
+):
+    _require_account_deletion_retry_secret(x_brasstune_maintenance_secret)
+    return retry_audio_storage_jobs(db, limit=limit)
 
 
 @router.delete("/users/me")
@@ -972,6 +1109,13 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
     user = auth.user
     user_id = user.id
     supabase_user_id = user.supabase_user_id
+    if not auth.is_guest and supabase_user_id:
+        try:
+            # Validate the stable HMAC key before deleting any local data. A
+            # missing key must never weaken the deleted-identity deny list.
+            ensure_deletion_tombstone_key_state(db)
+        except DeletionTombstoneSecretError as exc:
+            raise HTTPException(status_code=503, detail="Account deletion protection is temporarily unavailable.") from exc
     job_key = "delete-user-%s" % user_id
     job = db.query(AccountDeletionJob).filter(AccountDeletionJob.idempotency_key == job_key).first()
     if job and job.status == "completed" and db.query(User).filter(User.id == user_id).first() is None:
@@ -1027,27 +1171,31 @@ def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get
     db.add(job)
     db.commit()
 
-    supabase_sessions_revoked = False
     supabase_identity_deleted = False
     if not auth.is_guest and supabase_user_id:
         try:
             _mark_deletion_job(job, "external_cleanup_started", "in_progress")
             db.add(job)
             db.commit()
-            supabase_sessions_revoked = supabase_global_sign_out(auth.access_token)
+            supabase_global_sign_out(auth.access_token)
             supabase_identity_deleted = delete_supabase_identity(supabase_user_id)
         except Exception:
-            supabase_sessions_revoked = False
             supabase_identity_deleted = False
         if not supabase_identity_deleted:
             _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "external_identity_cleanup_failed")
             db.add(job)
             db.commit()
             return _deletion_job_payload(job)
-    _mark_deletion_job(job, "completed", "completed")
-    db.add(job)
+    response_counts = dict(deleted_counts)
+    try:
+        complete_and_scrub_account_deletion_job(db, job)
+    except DeletionTombstoneSecretError:
+        _mark_deletion_job(job, "external_cleanup_failed", "retryable_failure", "identity_protection_unavailable")
+        db.add(job)
+        db.commit()
+        return _deletion_job_payload(job)
     db.commit()
-    return _deletion_job_payload(job)
+    return _deletion_job_payload(job, counts_override=response_counts)
 
 
 def _group_member_ids(db: Session, group_id: int):
@@ -1058,19 +1206,45 @@ def _member_active_since(member: GroupMember) -> dt.datetime:
     return member.active_since or member.created_at
 
 
+def _class_practice_aggregate_scope() -> dict:
+    """Stable disclosure contract for director-visible class aggregates.
+
+    Class analytics operate on server-stored ``PracticeSession`` rows (the
+    cloud-synced sessions in production). They intentionally expose aggregate
+    metrics from the membership's current active period, never reflections,
+    recording metadata/content, or session-level detail.
+    """
+    return {
+        "code": CLASS_PRACTICE_AGGREGATE_SCOPE_CODE,
+        "source": "cloud_practice_sessions",
+        "window": "membership_active_since",
+        "excludes": ["reflections", "audio", "session_detail"],
+    }
+
+
+def _member_scoped_sessions(
+    db: Session,
+    member: GroupMember,
+    *,
+    include_note_events: bool = False,
+) -> List[PracticeSession]:
+    query = db.query(PracticeSession)
+    if include_note_events:
+        query = query.options(joinedload(PracticeSession.note_events))
+    return (
+        query.filter(
+            PracticeSession.user_id == member.user_id,
+            PracticeSession.started_at >= _member_active_since(member),
+        )
+        .all()
+    )
+
+
 def _group_scoped_sessions(db: Session, group_id: int) -> List[PracticeSession]:
     members = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()
     sessions_by_id = {}
     for member in members:
-        rows = (
-            db.query(PracticeSession)
-            .options(joinedload(PracticeSession.note_events))
-            .filter(
-                PracticeSession.user_id == member.user_id,
-                PracticeSession.started_at >= _member_active_since(member),
-            )
-            .all()
-        )
+        rows = _member_scoped_sessions(db, member, include_note_events=True)
         for session in rows:
             sessions_by_id[session.id] = session
     return list(sessions_by_id.values())
@@ -1492,14 +1666,18 @@ def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(
 def ensemble_group_summary(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_group_manager(db, group_id, auth)
     sessions = _group_scoped_sessions(db, group_id)
-    return calculate_ensemble_summary(group_id, sessions)
+    payload = calculate_ensemble_summary(group_id, sessions)
+    payload["practice_aggregate_scope"] = _class_practice_aggregate_scope()
+    return payload
 
 
 @router.get("/ensemble/groups/{group_id}/report")
 def ensemble_group_report(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _require_group_manager(db, group_id, auth)
     sessions = _group_scoped_sessions(db, group_id)
-    return generate_rehearsal_report(group_id, sessions)
+    payload = generate_rehearsal_report(group_id, sessions)
+    payload["practice_aggregate_scope"] = _class_practice_aggregate_scope()
+    return payload
 
 
 @router.get("/ensemble/summary")
@@ -1510,13 +1688,6 @@ def ensemble_summary(group_id: int = 1, db: Session = Depends(get_db), auth: Aut
 @router.get("/ensemble/report")
 def ensemble_report(group_id: int = 1, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     return ensemble_group_report(group_id, db, auth)
-
-
-def _weighted_mean(pairs):
-    total_weight = sum(weight for _, weight in pairs)
-    if total_weight <= 0:
-        return None
-    return sum(value * weight for value, weight in pairs) / total_weight
 
 
 @router.get("/ensemble/groups/{group_id}/roster")
@@ -1532,18 +1703,20 @@ def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: Au
     )
     students = []
     for member in members:
-        since = _member_active_since(member)
         sessions = []
         if member.status == "active":
-            sessions = (
-                db.query(PracticeSession)
-                .filter(PracticeSession.user_id == member.user_id, PracticeSession.started_at >= since)
-                .all()
-            )
-        weighted = [(s.average_abs_cents, s.notes_count or 0) for s in sessions if (s.notes_count or 0) > 0]
-        intune = [(s.in_tune_percentage, s.notes_count or 0) for s in sessions if (s.notes_count or 0) > 0]
-        avg_abs_cents = _weighted_mean(weighted)
-        in_tune_pct = _weighted_mean(intune)
+            sessions = _member_scoped_sessions(db, member)
+        tuning_sessions = [session for session in sessions if (session.notes_count or 0) > 0]
+        avg_abs_cents = duration_weighted_mean(
+            tuning_sessions,
+            "average_abs_cents",
+            "duration_seconds",
+        )
+        in_tune_pct = duration_weighted_mean(
+            tuning_sessions,
+            "in_tune_percentage",
+            "duration_seconds",
+        )
         last_practice_at = max((s.started_at for s in sessions), default=None)
         user = member.user
         students.append({
@@ -1559,11 +1732,12 @@ def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: Au
             "average_abs_cents": round(avg_abs_cents, 1) if avg_abs_cents is not None else None,
             "in_tune_percentage": round(in_tune_pct, 1) if in_tune_pct is not None else None,
             "last_practice_at": iso(last_practice_at),
-            # Do not expose a not-yet-accepted (invited) person's activity — only
-            # show it once they have consented by accepting.
-            "last_active_at": iso(getattr(user, "last_active_at", None)) if member.status == "active" else None,
         })
-    return {"group_id": group_id, "students": students}
+    return {
+        "group_id": group_id,
+        "practice_aggregate_scope": _class_practice_aggregate_scope(),
+        "students": students,
+    }
 
 
 @router.get("/admin/metrics")

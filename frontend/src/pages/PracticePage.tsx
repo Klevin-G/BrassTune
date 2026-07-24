@@ -1,26 +1,60 @@
 import { FileText, Timer } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useBlocker, useLocation, useSearchParams } from 'react-router-dom';
 import { friendlyUserFacingError } from '../api/client';
 import { NoteDisplay } from '../components/NoteDisplay';
 import { SessionControls } from '../components/SessionControls';
 import { TuningMeter } from '../components/TuningMeter';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
+import { DroneIntervalPanel } from '../components/practice/DroneIntervalPanel';
+import { GuidedWarmupPanel } from '../components/practice/GuidedWarmupPanel';
+import { PracticePackPanel } from '../components/practice/PracticePackPanel';
+import { PracticeShortcuts } from '../components/practice/PracticeShortcuts';
+import { WeeklyGoalCard } from '../components/practice/WeeklyGoalCard';
 import { ScreenContainer, SegmentedControl } from '../components/ui/AppPrimitives';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { usePitchStream } from '../hooks/usePitchStream';
 import { useSessionRecorder } from '../hooks/useSessionRecorder';
-import { recordPracticeActivity } from '../domain/practiceStreak';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { useAuth } from '../state/AuthContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import './PracticePage.css';
+import { gatewayPathWithReturn } from '../domain/authNavigation';
+import { useI18n } from '../i18n/LocaleContext';
+import { isReliableTunerFrame } from '../domain/pitchFrameStatus';
+import type { PracticeSession } from '../domain/types';
 
 // How many consecutive centered frames count as a full "held in tune" reward.
 const HOLD_TARGET_FRAMES = 16;
+interface TakeTransitionOperation {
+  (): Promise<PracticeSession | null>;
+}
+
+export function nextTunerHoldCount(current: number, frame: Parameters<typeof isReliableTunerFrame>[0]): number {
+  const centered = isReliableTunerFrame(frame) && Math.abs(frame.cents_deviation!) <= 5;
+  return centered ? Math.min(HOLD_TARGET_FRAMES, current + 1) : 0;
+}
+
+export function shouldShowMicrophoneDemoFallback(
+  demoMode: boolean,
+  micActive: boolean,
+  statusMessage: string,
+  audioContextState: string,
+): boolean {
+  if (demoMode || micActive) return false;
+  return audioContextState === 'unavailable'
+    || audioContextState === 'error'
+    || /denied|blocked|not allowed|need|unavailable|unsupported|cannot|disconnected/i.test(statusMessage);
+}
 
 export function PracticePage() {
+  const { locale, t, formatNumber } = useI18n();
   const { instrumentId, referencePitch, demoMode, setDemoMode } = useAppSettings();
   const auth = useAuth();
+  const location = useLocation();
+  const { recordSavedSession, storageError } = usePracticeLibrary();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const practiceTool = searchParams.get('tool') === 'drone' ? 'drone' : 'tuner';
   const cloudSessionEnabled = auth.isSignedIn;
   const recorder = useSessionRecorder(instrumentId, referencePitch, { cloudEnabled: cloudSessionEnabled });
   const audioRecorder = useAudioRecorder();
@@ -29,9 +63,24 @@ export function PracticePage() {
   const holdCountRef = useRef(0);
   const lastFrameTsRef = useRef<number | null>(null);
   const micRequestedRef = useRef(false);
+  const lastSavedIdRef = useRef<string | number | null>(null);
+  const recorderRef = useRef(recorder);
+  const audioRecorderRef = useRef(audioRecorder);
+  const streamRef = useRef<ReturnType<typeof usePitchStream> | null>(null);
+  const demoModeRef = useRef(demoMode);
+  const activeSessionIdRef = useRef<number | null>(recorder.activeSession?.id ?? null);
+  const recordingCloudEnabledRef = useRef(cloudSessionEnabled);
+  const recordingDemoModeRef = useRef(demoMode);
+  const takeTransitionRef = useRef<Promise<PracticeSession | null> | null>(null);
+  const takeTransitionKindRef = useRef<'start' | 'stop' | null>(null);
+  const toolSwitchPromiseRef = useRef<Promise<void> | null>(null);
+  const stopRef = useRef(async (): Promise<PracticeSession | null> => null);
+  const recordSavedSessionRef = useRef(recordSavedSession);
+  const navigationIntentRef = useRef(false);
+  const blockedNavigationRef = useRef(false);
 
   const stream = usePitchStream({
-    enabled: true,
+    enabled: practiceTool === 'tuner',
     demoMode,
     instrumentId,
     referencePitch,
@@ -40,118 +89,288 @@ export function PracticePage() {
     persistDemoFramesToBackend: cloudSessionEnabled,
     onFrame: recorder.captureFrame,
   });
+  recorderRef.current = recorder;
+  audioRecorderRef.current = audioRecorder;
+  recordSavedSessionRef.current = recordSavedSession;
+  streamRef.current = stream;
+  demoModeRef.current = demoMode;
+  if (recorder.activeSession) {
+    activeSessionIdRef.current = recorder.activeSession.id;
+  } else if (recorder.state === 'idle') {
+    activeSessionIdRef.current = null;
+  }
+  const activeTake = recorder.recording || Boolean(recorder.activeSession) || activeSessionIdRef.current !== null;
 
   // Live-on-open: request the microphone as soon as the tuner mounts in mic mode
   // (and whenever the user switches back to mic), so the tuner just works.
   useEffect(() => {
-    if (demoMode) {
+    if (practiceTool !== 'tuner' || demoMode) {
+      if (practiceTool !== 'tuner' && stream.micActive) stream.stopMicrophone();
       micRequestedRef.current = false;
       return;
     }
     if (micRequestedRef.current || stream.micActive) return;
     micRequestedRef.current = true;
     stream.startMicrophone().catch(() => undefined);
-  }, [demoMode, stream]);
+  }, [demoMode, practiceTool, stream]);
 
   // Count a completed take toward the practice streak.
-  const lastSavedIdRef = useRef<string | number | null>(null);
   useEffect(() => {
     const summary = recorder.lastSummary;
     if (summary && summary.id !== lastSavedIdRef.current) {
-      lastSavedIdRef.current = summary.id;
-      recordPracticeActivity(Math.max(1, Math.round((summary.duration_seconds ?? 0) / 60)));
+      if (recordSavedSession(summary)) lastSavedIdRef.current = summary.id;
     }
-  }, [recorder.lastSummary]);
+  }, [recordSavedSession, recorder.lastSummary]);
+
+  const recordCompletedSession = (summary: PracticeSession) => {
+    if (recordSavedSessionRef.current(summary)) lastSavedIdRef.current = summary.id;
+  };
 
   // Grow the in-tune reward the longer the player holds a centered pitch.
   useEffect(() => {
     const frame = stream.currentFrame;
     if (!frame || frame.timestamp_ms === lastFrameTsRef.current) return;
     lastFrameTsRef.current = frame.timestamp_ms;
-    const centered = frame.tuning_status !== 'silence' && frame.cents_deviation != null && Math.abs(frame.cents_deviation) <= 5;
-    holdCountRef.current = centered ? Math.min(HOLD_TARGET_FRAMES, holdCountRef.current + 1) : 0;
+    holdCountRef.current = nextTunerHoldCount(holdCountRef.current, frame);
     setHoldFraction(holdCountRef.current / HOLD_TARGET_FRAMES);
   }, [stream.currentFrame]);
 
-  const start = async () => {
-    if (transitionBusy || recorder.busy || recorder.recording) return;
+  const runTakeTransition = (
+    kind: 'start' | 'stop',
+    operation: TakeTransitionOperation,
+  ) => {
     setTransitionBusy(true);
-    let openedMicrophone = false;
-    try {
-      const inputStream = demoMode ? null : stream.micActive ? stream.mediaStream : await stream.startMicrophone();
-      openedMicrophone = !demoMode && !stream.micActive && Boolean(inputStream);
-      if (!demoMode && !stream.micActive && !inputStream) {
-        recorder.setError('We need your microphone to record. Turn it on, or switch to Demo above.');
-        return;
+    takeTransitionKindRef.current = kind;
+    const promise = operation().finally(() => {
+      if (takeTransitionRef.current === promise) {
+        takeTransitionRef.current = null;
+        takeTransitionKindRef.current = null;
+        setTransitionBusy(false);
       }
-      const session = await recorder.start(`Practice ${new Date().toLocaleDateString()}`);
-      await audioRecorder.start(session.id, demoMode, inputStream);
-    } catch (error) {
-      if (openedMicrophone) stream.stopMicrophone();
-      recorder.setError(friendlyUserFacingError(error, 'Recording could not start. Guest practice still works on this device.'));
-    } finally {
-      setTransitionBusy(false);
-    }
+    });
+    takeTransitionRef.current = promise;
+    return promise;
   };
 
-  const stop = async () => {
-    if (transitionBusy || recorder.busy || !recorder.activeSession) return null;
-    setTransitionBusy(true);
-    try {
-      const sessionId = recorder.activeSession?.id;
-      if (!cloudSessionEnabled) {
-        const guestAudio = await audioRecorder.stopLocal(demoMode);
-        try {
-          const summary = await recorder.stop(guestAudio);
-          if (guestAudio) audioRecorder.markLocalSaved();
+  const start = async (): Promise<PracticeSession | null> => {
+    if (takeTransitionRef.current) return takeTransitionRef.current;
+    if (recorderRef.current.busy || recorderRef.current.recording || activeSessionIdRef.current !== null) {
+      return recorderRef.current.activeSession;
+    }
+    recordingCloudEnabledRef.current = cloudSessionEnabled;
+    recordingDemoModeRef.current = demoModeRef.current;
+    return runTakeTransition('start', async () => {
+      let openedMicrophone = false;
+      try {
+        const currentStream = streamRef.current;
+        const currentDemoMode = recordingDemoModeRef.current;
+        const inputStream = currentDemoMode
+          ? null
+          : currentStream?.micActive
+            ? currentStream.mediaStream
+            : await currentStream?.startMicrophone();
+        openedMicrophone = !currentDemoMode && !currentStream?.micActive && Boolean(inputStream);
+        if (!currentDemoMode && !currentStream?.micActive && !inputStream) {
+          recorderRef.current.setError(t('practice.errorMicRecord'));
+          return null;
+        }
+        const session = await recorderRef.current.start(`Practice ${new Date().toLocaleDateString()}`);
+        activeSessionIdRef.current = session.id;
+        await audioRecorderRef.current.start(session.id, currentDemoMode, inputStream);
+        return session;
+      } catch (error) {
+        if (openedMicrophone) streamRef.current?.stopMicrophone();
+        recorderRef.current.setError(locale === 'en' ? friendlyUserFacingError(error, t('practice.errorStart')) : t('practice.errorStart'));
+        return null;
+      }
+    });
+  };
+
+  const stop = async (): Promise<PracticeSession | null> => {
+    // A Drone request can arrive while microphone permission or the backend
+    // session start is still pending. Let that single start settle, then close
+    // the take. Repeated requests share whichever stop is already in flight.
+    while (takeTransitionRef.current) {
+      const currentTransition = takeTransitionRef.current;
+      const currentKind = takeTransitionKindRef.current;
+      const result = await currentTransition;
+      if (currentKind === 'stop') return result;
+    }
+
+    const sessionId = activeSessionIdRef.current ?? recorderRef.current.activeSession?.id ?? null;
+    if (sessionId === null) return null;
+
+    return runTakeTransition('stop', async () => {
+      try {
+        const currentDemoMode = recordingDemoModeRef.current;
+        if (!recordingCloudEnabledRef.current) {
+          const guestAudio = await audioRecorderRef.current.stopLocal(currentDemoMode);
+          try {
+            const summary = await recorderRef.current.stop(guestAudio);
+            activeSessionIdRef.current = null;
+            if (guestAudio) audioRecorderRef.current.markLocalSaved();
+            if (summary) recordCompletedSession(summary);
+            return summary;
+          } catch (saveError) {
+            audioRecorderRef.current.markLocalSaveFailed(t('practice.errorLocalSave'));
+            throw saveError;
+          }
+        }
+        if (currentDemoMode) {
+          let demoUploadFailed = false;
+          const uploadPromise = audioRecorderRef.current.stopAndUpload(sessionId, true);
+          const flush = await streamRef.current?.finishPersistingFrames() ?? { saved: 0, rejected: 0, failed: 0 };
+          try {
+            const uploaded = await uploadPromise;
+            if (!uploaded) demoUploadFailed = true;
+          } catch {
+            demoUploadFailed = true;
+          }
+          const summary = await recorderRef.current.stop();
+          activeSessionIdRef.current = null;
+          if (summary) recordCompletedSession(summary);
+          if (flush.failed > 0) recorderRef.current.setError(t('practice.errorFrameSync'));
+          if (demoUploadFailed) recorderRef.current.setError(t('practice.errorAudioUpload'));
           return summary;
-        } catch (saveError) {
-          audioRecorder.markLocalSaveFailed('Your take was recorded, but it could not be saved on this device.');
-          throw saveError;
         }
-      }
-      if (sessionId && demoMode) {
-        let demoUploadFailed = false;
-        const uploadPromise = audioRecorder.stopAndUpload(sessionId, true);
-        const flush = await stream.finishPersistingFrames();
-        try {
-          const uploaded = await uploadPromise;
-          if (!uploaded) demoUploadFailed = true;
-        } catch {
-          demoUploadFailed = true;
-        }
-        const summary = await recorder.stop();
-        if (flush.failed > 0) recorder.setError('Take saved, but the last few notes may not have synced. Record again if the summary looks short.');
-        if (demoUploadFailed) recorder.setError('Take saved, but the audio upload failed. Your results are still here.');
-        return summary;
-      }
-      let uploadFailed = false;
-      let frameSyncFailed = false;
-      if (sessionId) {
-        const uploadPromise = audioRecorder.stopAndUpload(sessionId, demoMode);
-        const flush = await stream.finishPersistingFrames();
+        let uploadFailed = false;
+        const uploadPromise = audioRecorderRef.current.stopAndUpload(sessionId, currentDemoMode);
+        const flush = await streamRef.current?.finishPersistingFrames() ?? { saved: 0, rejected: 0, failed: 0 };
         try {
           const uploaded = await uploadPromise;
           if (!uploaded) uploadFailed = true;
         } catch {
           uploadFailed = true;
         }
-        frameSyncFailed = flush.failed > 0;
+        const summary = await recorderRef.current.stop();
+        activeSessionIdRef.current = null;
+        if (summary) recordCompletedSession(summary);
+        if (flush.failed > 0) recorderRef.current.setError(t('practice.errorFrameSync'));
+        if (uploadFailed) recorderRef.current.setError(t('practice.errorAudioUpload'));
+        return summary;
+      } catch (error) {
+        recorderRef.current.setError(locale === 'en' ? friendlyUserFacingError(error, t('practice.errorSave')) : t('practice.errorSave'));
+        return null;
       }
-      const summary = await recorder.stop();
-      if (frameSyncFailed) recorder.setError('Take saved, but the last few notes may not have synced. Record again if the summary looks short.');
-      if (uploadFailed) recorder.setError('Take saved, but the audio upload failed. Your results are still here.');
-      return summary;
-    } catch (error) {
-      recorder.setError(friendlyUserFacingError(error, 'Your take could not be saved. Try again in a moment.'));
-      return null;
-    } finally {
-      setTransitionBusy(false);
+    });
+  };
+  stopRef.current = stop;
+
+  const hasTakeLifecycleToFinalize = () => Boolean(
+    takeTransitionRef.current
+    || activeSessionIdRef.current !== null
+    || recorderRef.current.activeSession
+    || recorderRef.current.busy
+    || recorderRef.current.recording
+    || audioRecorderRef.current.status === 'recording'
+    || audioRecorderRef.current.status === 'uploading',
+  );
+
+  const navigationBlocker = useBlocker(({ currentLocation, nextLocation }) => (
+    currentLocation.pathname !== nextLocation.pathname
+    || currentLocation.search !== nextLocation.search
+    || currentLocation.hash !== nextLocation.hash
+  ) && hasTakeLifecycleToFinalize());
+
+  // The data router blocks before this route unmounts, preserving the current
+  // Tuner instance and its Stop/retry surface if finalization fails.
+  useEffect(() => {
+    if (navigationBlocker.state !== 'blocked' || blockedNavigationRef.current) return;
+    blockedNavigationRef.current = true;
+    void (async () => {
+      await stopRef.current();
+      if (activeSessionIdRef.current === null && !takeTransitionRef.current) {
+        // A query/hash transition can preserve this page instance. Release the
+        // first-intent capture before proceeding so later links remain usable.
+        navigationIntentRef.current = false;
+        navigationBlocker.proceed();
+        return;
+      }
+      navigationIntentRef.current = false;
+      navigationBlocker.reset();
+    })().finally(() => {
+      blockedNavigationRef.current = false;
+    });
+  }, [navigationBlocker]);
+
+  // The router owns link and history transitions. This capture listener only
+  // suppresses later same-origin link clicks while the first blocked link is
+  // being finalized, preventing a second destination from replacing it.
+  useEffect(() => {
+    const onDocumentClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest('a[href]');
+      if (!(anchor instanceof HTMLAnchorElement) || anchor.target || anchor.hasAttribute('download')) return;
+      const destination = new URL(anchor.href, window.location.href);
+      if (destination.origin !== window.location.origin) return;
+      const current = `${location.pathname}${location.search}${location.hash}`;
+      const next = `${destination.pathname}${destination.search}${destination.hash}`;
+      if (next === current || !hasTakeLifecycleToFinalize()) return;
+
+      if (navigationIntentRef.current) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      navigationIntentRef.current = true;
+    };
+
+    document.addEventListener('click', onDocumentClick, true);
+    return () => {
+      document.removeEventListener('click', onDocumentClick, true);
+    };
+  }, [location.hash, location.pathname, location.search]);
+
+  // Navigation must use the same serialized stop path as the Stop control so
+  // an active cloud or guest take is finalized exactly once before this route
+  // releases its tuner/audio ownership.
+  useEffect(() => () => {
+    void stopRef.current();
+  }, []);
+
+  const setPracticeTool = (value: 'tuner' | 'drone') => {
+    if (value === practiceTool) return;
+    if (value === 'tuner') {
+      setSearchParams({}, { replace: true });
+      return;
     }
+
+    const takeLifecycleActive = Boolean(
+      takeTransitionRef.current
+      || activeSessionIdRef.current !== null
+      || recorderRef.current.activeSession
+      || recorderRef.current.busy
+      || recorderRef.current.recording
+      || audioRecorderRef.current.status === 'recording'
+      || audioRecorderRef.current.status === 'uploading',
+    );
+    if (!takeLifecycleActive) {
+      streamRef.current?.stopMicrophone();
+      setSearchParams({ tool: 'drone' }, { replace: true });
+      return;
+    }
+    if (toolSwitchPromiseRef.current) return;
+
+    const switchPromise = (async () => {
+      await stop();
+      // The hook's React state can still expose the just-closed session until
+      // the next render. This ref is cleared only after recorder.stop()
+      // succeeds, so it is the synchronous source of truth for this handoff.
+      if (activeSessionIdRef.current !== null) return;
+      streamRef.current?.stopMicrophone();
+      setSearchParams({ tool: 'drone' }, { replace: true });
+    })().finally(() => {
+      if (toolSwitchPromiseRef.current === switchPromise) {
+        toolSwitchPromiseRef.current = null;
+      }
+    });
+    toolSwitchPromiseRef.current = switchPromise;
   };
 
   const setMode = (mode: 'mic' | 'demo') => {
-    if (recorder.recording) return;
+    if (activeTake) return;
     if (mode === 'demo') {
       if (stream.micActive) stream.stopMicrophone();
       setDemoMode(true);
@@ -161,35 +380,51 @@ export function PracticePage() {
     recorder.setError(null);
   };
 
-  const micDenied = !demoMode && !stream.micActive && /denied|blocked|not allowed|need/i.test(stream.statusMessage);
+  const showMicrophoneDemoFallback = shouldShowMicrophoneDemoFallback(
+    demoMode,
+    stream.micActive,
+    stream.statusMessage,
+    stream.streamInfo?.audioContextState ?? 'unavailable',
+  );
 
   return (
     <ScreenContainer>
       <div className="tuner-page">
+        <SegmentedControl
+          ariaLabel={t('practice.tool')}
+          value={practiceTool}
+          onChange={setPracticeTool}
+          options={[
+            { value: 'tuner', label: t('nav.tuner') },
+            { value: 'drone', label: t('practice.droneIntervals') },
+          ]}
+        />
+        {practiceTool === 'tuner' ? (
+          <>
         <div className="tuner-topline">
           <SegmentedControl
-            ariaLabel="Sound source"
+            ariaLabel={t('practice.soundSource')}
             value={demoMode ? 'demo' : 'mic'}
             onChange={(value) => setMode(value as 'mic' | 'demo')}
             options={[
-              { value: 'mic', label: 'Live mic' },
-              { value: 'demo', label: 'Demo' },
+              { value: 'mic', label: t('practice.liveMic') },
+              { value: 'demo', label: t('practice.demo') },
             ]}
           />
           <span className="tuner-ref">A = {referencePitch} Hz</span>
         </div>
 
-        {micDenied && (
+        {showMicrophoneDemoFallback && (
           <div className="tuner-banner" role="status">
-            We can’t hear your microphone yet. Allow mic access in your browser, or switch to <button type="button" className="link-button" onClick={() => setMode('demo')}>Demo</button>.
+            {t('practice.micDeniedBefore')} <button type="button" className="link-button" onClick={() => setMode('demo')}>{t('practice.demo')}</button>{t('practice.micDeniedAfter')}
           </div>
         )}
 
-        <section className="tuner-stage" aria-label="Live tuner">
+        <section className="tuner-stage" aria-label={t('practice.liveTuner')}>
           <NoteDisplay frame={stream.currentFrame} />
           <TuningMeter frame={stream.currentFrame} holdFraction={holdFraction} />
           <SessionControls
-            recording={recorder.recording}
+            recording={activeTake}
             elapsedSeconds={recorder.elapsedSeconds}
             demoMode={demoMode}
             micActive={stream.micActive}
@@ -200,37 +435,53 @@ export function PracticePage() {
             onMicStop={stream.stopMicrophone}
           />
           {recorder.error && <div className="alert" role="alert">{recorder.error}</div>}
+          {audioRecorder.error && audioRecorder.error !== recorder.error && (
+            <div className="alert" role="alert">{audioRecorder.error}</div>
+          )}
+          {audioRecorder.pendingReason && (
+            <div className="tuner-banner" role="status">
+              {t(`audioUpload.${audioRecorder.pendingReason}` as import('../i18n/messages.base').MessageId)}
+            </div>
+          )}
         </section>
 
-        <div className="tuner-tools" aria-label="Practice tools">
+        <div className="tuner-tools" aria-label={t('practice.tools')}>
           <Link className="tuner-tool" to="/metronome">
             <Timer size={18} />
-            <span>Metronome</span>
+            <span>{t('practice.metronome')}</span>
           </Link>
-          <Link className="tuner-tool" to="/practice/score">
+          <Link className="tuner-tool" to="/practice/sheet-music">
             <FileText size={18} />
-            <span>Sheet music</span>
+            <span>{t('practice.sheetMusic')}</span>
           </Link>
         </div>
 
         {!cloudSessionEnabled && (
           <p className="tuner-signin-note">
-            <Link to="/">Sign in</Link> to save your practice history and join your class.
+            <Link to={gatewayPathWithReturn(`${location.pathname}${location.search}${location.hash}`)} onClick={auth.exitGuest}>{t('nav.signIn')}</Link> {t('practice.signInBenefit')}
           </p>
         )}
 
         {recorder.lastSummary && (
           <div className="tuner-saved">
             <div>
-              <strong>{Math.round(recorder.lastSummary.in_tune_percentage)}% in tune</strong>
-              <span>{recorder.lastSummary.notes_count} notes · saved</span>
+              <strong>{t('practice.percentInTune', { percent: formatNumber(Math.round(recorder.lastSummary.in_tune_percentage)) })}</strong>
+              <span>{t('practice.notesSaved', { count: recorder.lastSummary.notes_count })}</span>
             </div>
             {recorder.lastSummary.audio_available && <SessionAudioPlayer session={recorder.lastSummary} compact />}
             <Link to={`/sessions/${recorder.lastSummary.id}`} className="ghost-button">
-              See results
+              {t('practice.seeResults')}
             </Link>
           </div>
         )}
+          </>
+        ) : <DroneIntervalPanel />}
+
+        {storageError && <div className="alert" role="alert">{t('error.storage')}</div>}
+        <GuidedWarmupPanel />
+        <PracticeShortcuts />
+        <WeeklyGoalCard />
+        <PracticePackPanel />
       </div>
     </ScreenContainer>
   );

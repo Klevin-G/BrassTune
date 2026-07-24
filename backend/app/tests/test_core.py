@@ -1,8 +1,16 @@
+import datetime as dt
 import json
 import math
 from pathlib import Path
 
-from app.core.analytics.stats import calculate_most_improved_notes, calculate_note_stats, heatmap_severity
+from app.core.analytics.stats import (
+    calculate_most_improved_notes,
+    calculate_note_stats,
+    calculate_progress_timeseries,
+    classify_note_trend,
+    duration_weighted_mean,
+    heatmap_severity,
+)
 from app.core.instruments.profiles import get_instrument_profile
 from app.core.music.theory import (
     calculate_cents_deviation,
@@ -103,6 +111,47 @@ def test_session_average_calculations_weight_by_duration():
     assert math.isclose(summary["in_tune_percentage"], 77.5)
 
 
+def test_duration_weighted_contract_handles_legacy_zero_duration_rows():
+    rows = [
+        {"duration_ms": 0, "avg_abs_cents": 4},
+        {"duration_ms": 0, "avg_abs_cents": 10},
+    ]
+    assert duration_weighted_mean(rows, "avg_abs_cents", "duration_ms") == 7
+    summary = compute_session_summary(
+        [
+            {"duration_ms": 0, "avg_signed_cents": 4, "avg_abs_cents": 4, "in_tune_percentage": 80},
+            {"duration_ms": 0, "avg_signed_cents": -2, "avg_abs_cents": 10, "in_tune_percentage": 20},
+        ]
+    )
+    assert summary["duration_seconds"] == 0
+    assert summary["average_signed_cents"] == 1
+    assert summary["average_abs_cents"] == 7
+    assert summary["in_tune_percentage"] == 50
+
+
+def test_progress_timeseries_uses_session_duration_for_tuning_averages():
+    rows = [
+        {
+            "started_at": dt.datetime(2026, 7, 1, 10),
+            "duration_seconds": 60,
+            "notes_count": 1,
+            "average_abs_cents": 20,
+            "in_tune_percentage": 20,
+        },
+        {
+            "started_at": dt.datetime(2026, 7, 1, 11),
+            "duration_seconds": 180,
+            "notes_count": 2,
+            "average_abs_cents": 4,
+            "in_tune_percentage": 80,
+        },
+    ]
+    period = calculate_progress_timeseries(rows)[0]
+    assert period["practice_minutes"] == 4
+    assert period["avg_abs_cents"] == 8
+    assert period["in_tune_percentage"] == 65
+
+
 def test_heatmap_severity_classifications():
     assert heatmap_severity({"duration_seconds": 1, "sample_count": 20, "avg_abs_cents": 2}) == "insufficient"
     assert heatmap_severity({"duration_seconds": 4, "sample_count": 20, "avg_abs_cents": 4}) == "green"
@@ -126,6 +175,47 @@ def test_recommendation_rules():
     assert rec["category"] == "Sharp tendency"
     assert "sharp" in rec["message"]
     assert rec["related_note"] == "D5"
+
+
+def test_centered_and_tendency_recommendation_thresholds_are_aligned():
+    profile = get_instrument_profile("trumpet")
+    cases = [
+        (-8, "Mostly flat", "Flat tendency"),
+        (-5.01, "Mostly flat", "Flat tendency"),
+        (-5, "Centered", "Good progress"),
+        (5, "Centered", "Good progress"),
+        (5.01, "Mostly sharp", "Sharp tendency"),
+        (8, "Mostly sharp", "Sharp tendency"),
+    ]
+    for cents, expected_trend, expected_category in cases:
+        stats = {
+            "note_label": "D5",
+            "avg_signed_cents": cents,
+            "avg_abs_cents": abs(cents),
+            "stddev_cents": 2,
+            "stability_score": 90,
+            "duration_seconds": 10,
+            "in_tune_percentage": 70,
+        }
+        assert classify_note_trend(stats) == expected_trend
+        assert generate_note_recommendation(stats, profile)["category"] == expected_category
+
+
+def test_problem_score_rounds_nonnegative_half_values_up():
+    for case in _fixture("problem_score_rounding_cases.json"):
+        assert calculate_note_stats(
+            [
+                {
+                    "written_note": "D",
+                    "written_octave": 4,
+                    "duration_ms": 1_000,
+                    "sample_count": 10,
+                    "avg_signed_cents": 0,
+                    **case["note_stats"],
+                    "stability_score": 90,
+                }
+            ]
+        )[0]["problem_severity"] == case["expected_problem_severity"], case["name"]
 
 
 def test_shared_pitch_math_fixtures():

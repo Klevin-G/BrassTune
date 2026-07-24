@@ -1,176 +1,44 @@
 {
-  "schema_version": 7,
-  "generated_at": "2026-06-21T05:51:09Z",
-  "repo": "Klevin-G/BrassTune",
-  "phase": "historical_phase_1_web_production_completion",
-  "authoritative_status_2026_07_09": {
-    "see": "docs/release-readiness/RELEASE_STATUS_2026-07-09.md",
-    "web_code": "complete_and_merged_to_main",
-    "native_code": "complete_and_merged_to_main",
-    "main_sha": "7913ba9",
-    "merged_prs": [7, 8],
-    "closed_prs": [1, 6],
-    "web_deploy_decision": "blocked_on_owner: reconnect Render + Vercel GitHub integrations (repo transfer severed them) and enable GitHub Actions billing",
-    "native_store_decision": "blocked_on_owner: physical-device validation + Apple signing/TestFlight",
-    "supabase": "active_healthy_verified",
-    "note": "The current_audit_2026_07_08 block below and earlier gate files are historical June-beta evidence, not the current decision."
+  "updated": "2026-07-23",
+  "candidate_revision": "a3f436ea7442c471760e06ed1422ec3ddbbf1217",
+  "decision": "pending_exact_sha_ci_and_release_gates",
+  "local": {
+    "backend": "246 passed, 4 skipped after the 428a123 duplicate-identity PII race correction",
+    "frontend_units": "251/251",
+    "frontend_build": "passed; 11 lazy non-English locale chunks",
+    "frontend_audit": "0 findings",
+    "frontend_e2e": "443 passed, 7 skipped, 0 failed",
+    "swift_core": "3/3",
+    "native_units": "140/140",
+    "native_ui": "17/17 in one invocation; result bundle /tmp/brasstune-final-a3f436e-all-ui.xcresult",
+    "native_builds": "Debug iPhone/iPad and Release iPhone passed with zero warnings",
+    "google_branding": "independent review approved"
   },
-  "current_audit_2026_07_08": {
-    "status": "historical_only_not_current_release_decision",
-    "web_release_decision": "blocked",
-    "native_release_decision": "blocked",
-    "current_main_sha": "1c998d5480f52b5fcf0e2c143f5078893caead66",
-    "web_pr_7_head_sha": "b37ed6ce6c8bb33089e14ce950c3de768a295602",
-    "native_pr_8_head_sha": "989abb1684cc8a2076e061607678a70f31e25969",
-    "local_web_validation": {
-      "status": "passed_locally_not_committed_or_deployed",
-      "backend_pytest": "104 passed",
-      "frontend_unit": "50 passed",
-      "frontend_build": "passed",
-      "local_e2e": "95 passed",
-      "bandit": "no issues",
-      "pip_audit_local": "no known vulnerabilities",
-      "npm_audit_omit_dev": "0 vulnerabilities",
-      "diff_check": "passed",
-      "secret_and_large_file_dirty_diff_scan": "no high-confidence secrets or dirty files over 1MiB observed"
-    },
-    "provider_blockers": [
-      "Production Render returns 404 for /api/live, /api/ready, and /api/version.",
-      "Production Vercel is publicly reachable but cannot be release-valid while production Render is stale.",
-      "PR #7 preview deployment dpl_J6mJ8Qyk2NA4Z9FUdGwBmpG2udP6 is Ready but SSO-protected without accepted automation bypass/share evidence.",
-      "Deploy, Backend, Frontend, Production Smoke, Device Simulation, and Render Keepalive workflows are disabled manually."
-    ],
-    "native_blockers": [
-      "Real AVAudioEngine microphone pitch capture is implemented locally in PR #8, but no physical iPhone/iPad microphone validation was available.",
-      "No physical iPhone/iPad validation was available.",
-      "Apple signing, archive validation, TestFlight, and App Store Connect gates are unavailable."
-    ]
+  "provider_state": {
+    "google": "enabled; authorize-start verified",
+    "apple": "client implementation complete; linked provider disabled pending Apple Developer and Supabase setup"
   },
-  "production_auth_mode": "historical_disabled_guest_first_beta",
-  "web_version": "0.1.0-beta.1",
-  "web_production_completion_gate": "historical_passed_june_2026_not_current_release_decision",
-  "native_phase_allowed": true,
-  "web_completion_branch_sha": "a642508ab638233e1fe297653147b8ccd3ceaf54",
-  "web_completion_merge_sha": "b956cf5bc6914fcb07fc6a18c83eac75c1d70446",
-  "hosted_smoke_hotfix_sha": "d0cce2614710e17b955ae8f81815141ea6281df5",
-  "final_web_main_sha": "6acb91d54a734e722ed937590aecb51dec53543c",
-  "vercel_deployment_id": "dpl_6pScePaqbs8fYYD44wanhdgZkAPN",
-  "vercel_previous_production_deployment_id": "dpl_2T68p4MQo8VbbAst4f7gnbHKitnP",
-  "render_deployment_id": "not_exposed_by_available_tooling",
-  "render_runtime_request_id": "3d161b7d-d73f-4d77",
-  "release_tag": "web-beta-2026.06.21.1",
-  "github_release_url": "https://github.com/aryasalem09/BrassTune/releases/tag/web-beta-2026.06.21.1",
-  "items": [
-    {
-      "id": "backend-full",
-      "gate": "Backend full suite",
-      "command": "cd backend && .venv/bin/python -m pytest",
-      "status": "passed",
-      "result": "77 tests passed"
-    },
-    {
-      "id": "backend-hardening",
-      "gate": "Backend hardening regression",
-      "command": "cd backend && .venv/bin/python -m pytest app/tests/test_hardening.py",
-      "status": "passed",
-      "result": "61 tests passed"
-    },
-    {
-      "id": "frontend-unit",
-      "gate": "Frontend unit tests",
-      "command": "cd frontend && npm test",
-      "status": "passed",
-      "result": "9 files, 40 tests passed"
-    },
-    {
-      "id": "frontend-build",
-      "gate": "Frontend build/typecheck",
-      "command": "cd frontend && npm run build",
-      "status": "passed",
-      "result": "TypeScript and Vite production build passed"
-    },
-    {
-      "id": "frontend-e2e-local",
-      "gate": "Local browser journeys and accessibility",
-      "command": "cd frontend && CI=true npm run e2e:local",
-      "status": "passed",
-      "result": "80 tests passed across Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit"
-    },
-    {
-      "id": "device-simulation",
-      "gate": "Responsive device simulation",
-      "command": "cd frontend && npm run simulate:devices",
-      "status": "passed",
-      "result": "All configured Chromium viewport simulations passed"
-    },
-    {
-      "id": "frontend-audit",
-      "gate": "Frontend dependency audit",
-      "command": "cd frontend && npm audit --omit=dev",
-      "status": "passed",
-      "result": "0 vulnerabilities"
-    },
-    {
-      "id": "backend-bandit",
-      "gate": "Backend SAST",
-      "command": "cd backend && .venv/bin/python -m bandit -r app -x app/tests",
-      "status": "passed",
-      "result": "No issues identified"
-    },
-    {
-      "id": "backend-pip-audit-direct",
-      "gate": "Backend direct requirements audit",
-      "command": "cd backend && .venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt",
-      "status": "blocked",
-      "result": "Local resolver venv creation failed during ensurepip before vulnerability analysis"
-    },
-    {
-      "id": "backend-pip-audit-uv",
-      "gate": "Backend dependency audit via clean uv Python 3.12 environment",
-      "command": "cd backend && uv venv --python 3.12 /tmp/... && uv pip install --python /tmp/.../.venv/bin/python -r requirements-dev.txt && /tmp/.../.venv/bin/python -m pip_audit -r requirements.txt -r requirements-dev.txt",
-      "status": "passed",
-      "result": "No known vulnerabilities found"
-    },
-    {
-      "id": "pr-3-ci",
-      "gate": "PR #3 exact-head CI",
-      "command": "GitHub Actions and Vercel status for a642508ab638233e1fe297653147b8ccd3ceaf54",
-      "status": "passed",
-      "result": "Backend, Frontend, Security, and Vercel passed"
-    },
-    {
-      "id": "pr-4-ci",
-      "gate": "PR #4 hotfix CI",
-      "command": "GitHub Actions and Vercel status for d0cce2614710e17b955ae8f81815141ea6281df5",
-      "status": "passed",
-      "result": "Frontend, Security, and Vercel passed"
-    },
-    {
-      "id": "production-smoke",
-      "gate": "Final hosted smoke",
-      "command": "npm run smoke:hosted",
-      "status": "passed",
-      "result": "7/7 checks passed against production"
-    },
-    {
-      "id": "strict-hosted-playwright",
-      "gate": "Strict hosted browser smoke",
-      "command": "cd frontend && E2E_BASE_URL=https://brass-tune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com E2E_STRICT_HOSTED_CONTENT=1 npm run e2e:hosted -- --project=chromium",
-      "status": "passed",
-      "result": "7 passed"
-    },
-    {
-      "id": "diff-check",
-      "gate": "Diff hygiene",
-      "command": "git diff --check",
-      "status": "passed",
-      "result": "No whitespace errors"
-    }
+  "locales": [
+    "English",
+    "Spanish",
+    "Simplified Chinese",
+    "Traditional Chinese",
+    "Arabic",
+    "French",
+    "German",
+    "Russian",
+    "Portuguese (Brazil)",
+    "Japanese",
+    "Korean",
+    "Vietnamese"
   ],
-  "remaining_external_gates": [
-    "Live Supabase/Google/Apple provider lifecycle requires owner credentials and disposable users",
-    "Apple signing/TestFlight/App Store submission remains external",
-    "Physical-device microphone/brass validation remains hardware-gated"
-  ],
-  "gate_line": "HISTORICAL WEB PRODUCTION COMPLETION GATE: PASSED"
+  "pending": [
+    "independent review",
+    "post-merge exact-SHA self-hosted CI, including live confirmation of the pre-baked SQLite runtime",
+    "three Supabase expand migrations and config push",
+    "same-SHA Render/Vercel deployment and hosted smoke",
+    "terminal privacy contract after expand cleanup",
+    "physical-device, signing, TestFlight, and App Store gates",
+    "Gmail reconnect as the designated BrassTune sender before professor drafts"
+  ]
 }

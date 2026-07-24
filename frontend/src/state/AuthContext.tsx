@@ -3,6 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/client';
 import { apiBase } from '../api/runtimeConfig';
 import { authProviders, supabase, supabaseConfigured } from '../lib/supabase';
+import { clearAccountPracticeState } from '../domain/practiceLibrary';
+import { oauthCallbackRedirectURL, passwordResetRedirectURL } from '../domain/authNavigation';
 
 interface BackendProfile {
   id: number;
@@ -33,15 +35,17 @@ interface AuthState {
   hasAuthSession: boolean;
   isSignedIn: boolean;
   cloudReady: boolean;
+  localPracticeOwnerId: string | null;
   guestMode: boolean;
+  guestEntrySequence: number;
   providers: typeof authProviders;
-  continueAsGuest: () => void;
+  continueAsGuest: () => Promise<void>;
   exitGuest: () => void;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (payload: SignUpPayload) => Promise<void>;
-  signInWithGoogle: (redirectTo?: string) => Promise<void>;
-  signInWithApple: (redirectTo?: string) => Promise<void>;
-  requestPasswordReset: (email: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
+  requestPasswordReset: (email: string, next?: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
   deleteAccount: (confirmation: string) => Promise<{ deletionStatus?: string }>;
@@ -51,6 +55,74 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 const accountsDisabledMessage = 'Accounts are not enabled in this build yet. You can still use guest practice.';
 const guestAccessKey = 'brasstune.guestAccess';
+const verifiedPracticeNamespacePrefix = 'brasstune.verifiedPracticeNamespace.v1.';
+
+interface VerifiedPracticeNamespace {
+  version: 1;
+  subject: string;
+  ownerId: string;
+}
+
+export function verifiedPracticeNamespaceKey(subject: string): string {
+  return `${verifiedPracticeNamespacePrefix}${encodeURIComponent(subject)}`;
+}
+
+export function readVerifiedPracticeNamespace(
+  storage: Pick<Storage, 'getItem'>,
+  subject: string | null | undefined,
+): string | null {
+  if (!subject || subject.length > 200 || /[\u0000-\u001f\u007f]/.test(subject)) return null;
+  try {
+    const raw = storage.getItem(verifiedPracticeNamespaceKey(subject));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<VerifiedPracticeNamespace>;
+    if (
+      value.version !== 1
+      || value.subject !== subject
+      || typeof value.ownerId !== 'string'
+      || !/^account:[1-9]\d{0,18}$/.test(value.ownerId)
+      || Object.keys(value).sort().join(',') !== 'ownerId,subject,version'
+    ) {
+      return null;
+    }
+    return value.ownerId;
+  } catch {
+    return null;
+  }
+}
+
+export function writeVerifiedPracticeNamespace(
+  storage: Pick<Storage, 'setItem'>,
+  subject: string,
+  profileId: string | number,
+): string | null {
+  const numericProfileId = String(profileId);
+  if (
+    !subject
+    || subject.length > 200
+    || /[\u0000-\u001f\u007f]/.test(subject)
+    || !/^[1-9]\d{0,18}$/.test(numericProfileId)
+  ) {
+    return null;
+  }
+  const ownerId = `account:${numericProfileId}`;
+  const value: VerifiedPracticeNamespace = { version: 1, subject, ownerId };
+  try {
+    storage.setItem(verifiedPracticeNamespaceKey(subject), JSON.stringify(value));
+    return ownerId;
+  } catch {
+    return null;
+  }
+}
+
+interface GuestSessionTransition {
+  hasAuthSession: boolean;
+  clearInMemoryAccount: () => void;
+  signOutLocal: () => Promise<{ error: unknown }>;
+  clearPersistedSession: () => void;
+  activateGuest: () => void;
+  reportError: (message: string) => void;
+}
 
 export function friendlyAuthError(error: unknown) {
   const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
@@ -65,6 +137,9 @@ export function friendlyAuthError(error: unknown) {
   }
   if (lower.includes('weak password') || lower.includes('password should')) {
     return 'Choose a stronger password and try again.';
+  }
+  if (lower.includes('storage') || lower.includes('could not be cleared')) {
+    return 'This browser could not clear the saved account session. Try again or clear BrassTune site data.';
   }
   if (lower.includes('email not confirmed') || lower.includes('confirmation')) {
     return 'Confirm your email before signing in, then try again.';
@@ -106,38 +181,128 @@ function throwFriendlyAuthError(error: unknown): never {
   throw new Error(friendlyAuthError(error));
 }
 
+type OAuthProvider = 'apple' | 'google';
+
+interface OAuthClient {
+  signInWithOAuth: (credentials: {
+    provider: OAuthProvider;
+    options: {
+      redirectTo: string;
+      scopes?: string;
+      queryParams?: Record<string, string>;
+    };
+  }) => Promise<{ error: unknown }>;
+}
+
+export async function startOAuthProviderSignIn(
+  authClient: OAuthClient,
+  provider: OAuthProvider,
+  origin = window.location.origin,
+): Promise<void> {
+  const options = provider === 'google'
+    ? {
+      redirectTo: oauthCallbackRedirectURL(origin),
+      scopes: 'openid email profile',
+      queryParams: { prompt: 'select_account' },
+    }
+    : { redirectTo: oauthCallbackRedirectURL(origin) };
+  const { error } = await authClient.signInWithOAuth({ provider, options });
+  if (error) throw error;
+}
+
+/**
+ * Clears an unresolved account session before guest-only state becomes
+ * reachable. The explicit storage fallback matters because Supabase's local
+ * sign-out can return before removing its persisted session when its logout
+ * request fails.
+ */
+export async function transitionToGuest({
+  hasAuthSession,
+  clearInMemoryAccount,
+  signOutLocal,
+  clearPersistedSession,
+  activateGuest,
+  reportError,
+}: GuestSessionTransition) {
+  if (!hasAuthSession) {
+    activateGuest();
+    return;
+  }
+
+  clearInMemoryAccount();
+  try {
+    const { error } = await signOutLocal();
+    if (error) throw error;
+  } catch (error) {
+    try {
+      clearPersistedSession();
+    } catch (storageError) {
+      const message = friendlyAuthError(storageError);
+      reportError(message);
+      throw new Error(message);
+    }
+    reportError(friendlyAuthError(error));
+  }
+  activateGuest();
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<BackendProfile | null>(null);
+  const [localPracticeOwnerId, setLocalPracticeOwnerId] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [guestMode, setGuestMode] = useState(() => localStorage.getItem(guestAccessKey) === 'true');
+  const [guestEntrySequence, setGuestEntrySequence] = useState(0);
   const profileRequestId = useRef(0);
   const profileRef = useRef(profile);
+  const profileUserIdRef = useRef<string | null>(null);
+  const sessionUserIdRef = useRef<string | null>(null);
+  const localPracticeSubjectRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    profileRef.current = profile;
-  }, [profile]);
+  const clearProfileState = useCallback((clearError = true) => {
+    profileRef.current = null;
+    profileUserIdRef.current = null;
+    setProfile(null);
+    if (clearError) setProfileError(null);
+  }, []);
 
   const resetAccountState = useCallback(() => {
     profileRequestId.current += 1;
+    sessionUserIdRef.current = null;
     setSession(null);
     setUser(null);
-    setProfile(null);
-    setProfileError(null);
-  }, []);
+    localPracticeSubjectRef.current = null;
+    setLocalPracticeOwnerId(null);
+    clearProfileState();
+  }, [clearProfileState]);
+
+  const adoptSession = useCallback((nextSession: Session | null) => {
+    const nextUserId = nextSession?.user.id ?? null;
+    if (sessionUserIdRef.current !== nextUserId) {
+      profileRequestId.current += 1;
+      clearProfileState();
+      sessionUserIdRef.current = nextUserId;
+      localPracticeSubjectRef.current = nextUserId;
+      setLocalPracticeOwnerId(readVerifiedPracticeNamespace(localStorage, nextUserId));
+    }
+    setSession(nextSession);
+    setUser(nextSession?.user ?? null);
+    if (nextSession) {
+      localStorage.removeItem(guestAccessKey);
+      setGuestMode(false);
+    }
+  }, [clearProfileState]);
 
   const loadProfile = useCallback(async (activeSession: Session | null, options: { required?: boolean } = {}) => {
     const requestId = ++profileRequestId.current;
     if (supabase && !activeSession) {
-      setProfile(null);
-      setProfileError(null);
+      clearProfileState();
       return null;
     }
     if (!supabase && apiBase()) {
-      setProfile(null);
-      setProfileError(null);
+      clearProfileState();
       return null;
     }
     try {
@@ -153,6 +318,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else if (requestId !== profileRequestId.current) {
         return null;
       }
+      profileRef.current = current;
+      profileUserIdRef.current = activeSession?.user.id ?? null;
+      const verifiedOwnerId = activeSession?.user.id
+        ? writeVerifiedPracticeNamespace(localStorage, activeSession.user.id, current.id) ?? `account:${current.id}`
+        : `account:${current.id}`;
+      localPracticeSubjectRef.current = activeSession?.user.id ?? null;
+      setLocalPracticeOwnerId(verifiedOwnerId);
       setProfile(current);
       setProfileError(null);
       return current;
@@ -162,15 +334,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const message = friendlyAuthError(error);
       setProfileError(message);
-      if (options.required || !profileRef.current) {
-        setProfile(null);
+      const requestedUserId = activeSession?.user.id ?? null;
+      if (options.required || !profileRef.current || profileUserIdRef.current !== requestedUserId) {
+        clearProfileState(false);
       }
       if (options.required) {
         throw new Error(message);
       }
       return null;
     }
-  }, []);
+  }, [clearProfileState]);
 
   const refreshProfile = useCallback(async () => {
     await loadProfile(session);
@@ -189,40 +362,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth
       .getSession()
       .then(({ data }) => {
-        setSession(data.session ?? null);
-        setUser(data.session?.user ?? null);
+        adoptSession(data.session ?? null);
         loadProfile(data.session ?? null).finally(() => setLoading(false));
       })
       .catch(() => {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
+        resetAccountState();
         setLoading(false);
       });
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
+      adoptSession(nextSession);
       loadProfile(nextSession);
     });
     return () => {
       subscription.subscription.unsubscribe();
       setAuthTokenProvider(null);
     };
-  }, [loadProfile]);
+  }, [adoptSession, loadProfile, resetAccountState]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      setProfile(null);
-      setProfileError(null);
+      adoptSession(data.session ?? null);
       const loadedProfile = await loadProfile(data.session ?? null, { required: Boolean(data.session) });
       if (data.session && !loadedProfile) {
         throw new Error('Account profile is not ready yet. Try again in a moment.');
       }
-      setSession(data.session ?? null);
-      setUser(data.session?.user ?? null);
       localStorage.removeItem(guestAccessKey);
       setGuestMode(false);
     } catch (error) {
@@ -230,7 +396,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetAccountState();
       throwFriendlyAuthError(error);
     }
-  }, [loadProfile, resetAccountState]);
+  }, [adoptSession, loadProfile, resetAccountState]);
 
   const signUp = useCallback(async (payload: SignUpPayload) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
@@ -247,14 +413,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       });
       if (error) throw error;
-      setProfile(null);
-      setProfileError(null);
+      adoptSession(data.session ?? null);
       const loadedProfile = await loadProfile(data.session ?? null, { required: Boolean(data.session) });
       if (data.session && !loadedProfile) {
         throw new Error('Account profile is not ready yet. Try again in a moment.');
       }
-      setSession(data.session ?? null);
-      setUser(data.session?.user ?? null);
       localStorage.removeItem(guestAccessKey);
       setGuestMode(false);
     } catch (error) {
@@ -262,49 +425,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetAccountState();
       throwFriendlyAuthError(error);
     }
-  }, [loadProfile, resetAccountState]);
+  }, [adoptSession, loadProfile, resetAccountState]);
 
-  const signInWithApple = useCallback(async (redirectTo = `${window.location.origin}/auth/callback`) => {
+  const signInWithApple = useCallback(async () => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     if (!authProviders.apple) throw new Error('Apple sign-in is not available in this release.');
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'apple',
-        options: {
-          redirectTo,
-        },
-      });
-      if (error) throw error;
+      await startOAuthProviderSignIn(supabase.auth, 'apple');
     } catch (error) {
       throwFriendlyAuthError(error);
     }
   }, []);
 
-  const signInWithGoogle = useCallback(async (redirectTo = `${window.location.origin}/auth/callback`) => {
+  const signInWithGoogle = useCallback(async () => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     if (!authProviders.google) throw new Error('Google sign-in is not available in this release.');
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          scopes: 'openid email profile',
-          queryParams: {
-            prompt: 'select_account',
-          },
-        },
-      });
-      if (error) throw error;
+      await startOAuthProviderSignIn(supabase.auth, 'google');
     } catch (error) {
       throwFriendlyAuthError(error);
     }
   }, []);
 
-  const requestPasswordReset = useCallback(async (email: string) => {
+  const requestPasswordReset = useCallback(async (email: string, next = '/home') => {
     if (!supabase) throw new Error(accountsDisabledMessage);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/reset-password`,
+        redirectTo: passwordResetRedirectURL(next, window.location.origin),
       });
       if (error) throw error;
     } catch (error) {
@@ -339,7 +486,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile, resetAccountState]);
 
   const deleteAccount = useCallback(async (confirmation: string) => {
+    const ownerId = profileRef.current?.id != null ? `account:${profileRef.current.id}` : null;
+    const subject = sessionUserIdRef.current;
     const result = await deleteMyAccount(confirmation);
+    if (ownerId) clearAccountPracticeState(localStorage, sessionStorage, ownerId);
+    if (subject) localStorage.removeItem(verifiedPracticeNamespaceKey(subject));
     if (supabase) {
       await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
     }
@@ -349,10 +500,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { deletionStatus: result.deletion_status };
   }, [resetAccountState]);
 
-  const continueAsGuest = useCallback(() => {
-    localStorage.setItem(guestAccessKey, 'true');
-    setGuestMode(true);
-  }, []);
+  const continueAsGuest = useCallback(async () => {
+    const activateGuest = () => {
+      localStorage.setItem(guestAccessKey, 'true');
+      setGuestMode(true);
+      setGuestEntrySequence((value) => value + 1);
+    };
+    await transitionToGuest({
+      hasAuthSession: Boolean(session),
+      clearInMemoryAccount: resetAccountState,
+      signOutLocal: async () => {
+        if (!supabase) return { error: null };
+        return supabase.auth.signOut({ scope: 'local' });
+      },
+      clearPersistedSession: () => {
+        const storageKey = (supabase?.auth as unknown as { storageKey?: string } | undefined)?.storageKey;
+        if (!storageKey) {
+          throw new Error('Local account session could not be cleared.');
+        }
+        localStorage.removeItem(storageKey);
+        localStorage.removeItem(`${storageKey}-code-verifier`);
+        localStorage.removeItem(`${storageKey}-user`);
+      },
+      activateGuest,
+      reportError: setProfileError,
+    });
+  }, [resetAccountState, session]);
 
   const exitGuest = useCallback(() => {
     localStorage.removeItem(guestAccessKey);
@@ -370,7 +543,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasAuthSession: Boolean(session),
       isSignedIn: Boolean(session && profile),
       cloudReady: Boolean(session && profile),
+      localPracticeOwnerId: session && localPracticeSubjectRef.current === session.user.id
+        ? localPracticeOwnerId
+        : null,
       guestMode,
+      guestEntrySequence,
       providers: authProviders,
       continueAsGuest,
       exitGuest,
@@ -384,7 +561,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       refreshProfile,
     }),
-    [continueAsGuest, deleteAccount, exitGuest, guestMode, loading, profile, profileError, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
+    [continueAsGuest, deleteAccount, exitGuest, guestEntrySequence, guestMode, loading, localPracticeOwnerId, profile, profileError, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

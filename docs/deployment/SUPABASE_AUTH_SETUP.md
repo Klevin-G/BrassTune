@@ -1,48 +1,28 @@
 # Supabase Auth Setup
 
-Status: owner action required before live account creation. Guest practice works without this setup.
+Updated: 2026-07-23. Apply only as part of the reviewed post-merge rollout.
 
-## Frontend Environment
+## Browser/native configuration
 
-Set these in Vercel for Production and any approved Preview environment:
+- Vercel: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`.
+- Render: provider-side Supabase URL/publishable key/secret/JWKS configuration required by the backend. Do not expose provider-side keys in clients.
+- Native Google: allow `com.brasstune.auth://oauth/google?state=*` in Supabase Auth redirect URLs. In `supabase/config.toml`, the literal `?` is escaped: `com.brasstune.auth://oauth/google\\?state=*`.
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_PUBLISHABLE_KEY`
+## Narrow allowlist
 
-Do not commit values to Git.
+- `https://brasstune.vercel.app/auth/callback`
+- `https://brasstune.vercel.app/auth/reset-password`
+- `http://localhost:5173/auth/callback`
+- `http://localhost:5173/auth/reset-password`
+- owner-restricted preview callback/reset patterns
+- native Google callback above
 
-## Backend Environment
+Never permit a blanket `https://*.vercel.app/...` pattern.
 
-Set these in Render:
+## Provider state
 
-- `SUPABASE_URL`
-- `SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_SECRET_KEY`
-- `SUPABASE_JWKS_URL` if the backend is configured to validate JWTs through JWKS
-- `BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET`
+Google is enabled on the linked project and its authorize-start redirect has been checked. Apple implementation is complete in the clients, but the linked Apple provider is disabled pending Apple Developer credentials and Supabase configuration. Keep production Apple UI disabled until live authorization is verified.
 
-Keep the secret key provider-side only. It must never be exposed to the browser or committed.
+## Live verification
 
-## Redirect URLs
-
-Configure Supabase Auth redirect allowlist for:
-
-- Local development: `http://localhost:5173/auth/callback`
-- Local development: `http://localhost:5173/auth/reset-password`
-- Production: `https://brasstune.vercel.app/auth/callback`
-- Production: `https://brasstune.vercel.app/auth/reset-password`
-- Approved preview: an exact preview URL, or the owner-restricted pattern
-  `https://*-kelvis-prject.vercel.app/auth/callback`
-
-Never allow `https://*.vercel.app/...`: it includes projects owned by other Vercel users.
-
-Apple provider setup remains an external owner task through Apple Developer and Supabase provider settings.
-
-## Verification
-
-After setting env vars, redeploy Vercel and Render, then verify:
-
-1. Sign-in no longer shows account-disabled mode.
-2. Sign-up, sign-in, callback, refresh, password reset, export, and deletion pass with disposable accounts.
-3. Browser responses never expose service keys or raw provider tokens.
-4. Guest practice still works when signed out.
+Use disposable accounts to verify sign-up, sign-in, reset, Google/Apple success/cancel/error, refresh, export/delete, storage cleanup, class authorization, and WebSocket first-message auth. Verify again after config pushes; local tests do not prove these provider outcomes.

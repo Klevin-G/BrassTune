@@ -1,33 +1,26 @@
 # Vercel Environment
 
-Status: required before real account/sync testing.
+Updated: 2026-07-23. Production deployment remains pending exact-SHA CI and the rollout checklist.
 
-## Required Frontend Variables
+## Required production variables
 
 ```text
 VITE_API_BASE_URL=https://brasstune-u8qj.onrender.com
 VITE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com
-VITE_SUPABASE_URL=<from Supabase>
-VITE_SUPABASE_PUBLISHABLE_KEY=<from Supabase>
-```
-
-Optional provider buttons are hidden unless explicitly enabled in Vercel:
-
-```text
+VITE_SUPABASE_URL=<Supabase project URL>
+VITE_SUPABASE_PUBLISHABLE_KEY=<publishable key only>
 VITE_AUTH_GOOGLE_ENABLED=true
-VITE_AUTH_APPLE_ENABLED=true
+VITE_AUTH_APPLE_ENABLED=false
 ```
 
-Only set those flags after the matching Supabase Auth provider is configured and the redirect allowlist includes the production and approved preview callback URLs.
+The checked-in deployment workflow synchronizes these values without logging them, validates the production pull, builds, deploys, and verifies the canonical alias plus `githubCommitSha` against the exact workflow SHA.
 
-## Setup Steps
+## Provider behavior
 
-1. Open the Vercel project settings.
-2. Add the variables for Production and any approved Preview environments.
-3. Redeploy Vercel so the variables are baked into the frontend bundle.
-4. Verify `/auth/sign-in` no longer shows account-disabled mode when Supabase is configured.
-5. Verify Supabase redirect URLs include production and any approved preview callback/reset-password URL.
+Provider buttons are not hidden when a provider is disabled: they remain visible with an unavailable state. Google is deliberately synchronized enabled. Apple is deliberately synchronized as `false` until Apple Developer configuration, Supabase Apple provider enablement, and a disposable live authorize test have succeeded. Change Apple only through the protected production variable and redeploy.
 
-The frontend has a beta-safe Render fallback only for known BrassTune production/preview hostnames. Unknown hosted origins must use explicit environment configuration rather than silently calling production Render.
+## Redirect boundaries
 
-Do not add secret values to this file, `.env.example`, screenshots, logs, PR text, or chat.
+Allow only production, localhost, and owner-restricted preview callback/reset URLs in Supabase. Do not use a blanket `*.vercel.app` pattern. The native Google callback requires its configured custom-scheme allowlist separately.
+
+Never store backend secrets, provider keys, or service-role credentials in a `VITE_*` variable.

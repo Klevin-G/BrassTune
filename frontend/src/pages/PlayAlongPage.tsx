@@ -1,10 +1,14 @@
 import { AlertCircle, Mic, Music4, Play, RotateCcw, SkipForward, Square, Star, Trophy, Volume2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import './PlayAlongPage.css';
+import { CustomExerciseBuilder } from '../components/practice/CustomExerciseBuilder';
+import { PracticeReflectionCard } from '../components/practice/PracticeReflectionCard';
 import { PageHeader, ScreenContainer, SectionCard, SelectionChip } from '../components/ui/AppPrimitives';
 import { usePitchStream } from '../hooks/usePitchStream';
 import {
   EXERCISES,
+  DEFAULT_PLAY_ALONG_HOLD_MS,
   MAJOR_SCALES,
   MINOR_SCALES,
   OTHER_EXERCISES,
@@ -14,14 +18,33 @@ import {
   type Exercise,
   type GraderSnapshot,
   type NoteGrade,
-  type CentsGrade,
 } from '../domain/playAlong';
 import { describeCents, describeInTunePercent, starsForPercent } from '../domain/tuningLanguage';
-import { instrumentDisplayName } from '../domain/instrumentNames';
-import { midiToFrequency, noteLabelToMidi } from '../domain/music';
+import { writtenNoteFrequency } from '../domain/referenceTone';
 import { useAppSettings } from '../state/AppSettingsContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
+import { ownerBestScorePrefix } from '../domain/practiceLibrary';
+import { useI18n } from '../i18n/LocaleContext';
+import type { MessageId } from '../i18n/messages.base';
 
 type Phase = 'idle' | 'running' | 'done';
+
+export function canStartReferenceTone(phase: Phase, referenceToneActive: boolean): boolean {
+  return phase !== 'running' && !referenceToneActive;
+}
+
+export function shouldGradePitchFrame(phase: Phase, referenceToneActive: boolean): boolean {
+  return phase === 'running' && !referenceToneActive;
+}
+
+export function shouldShowPitchRecovery(micActive: boolean, audioContextState: string): boolean {
+  return !micActive && audioContextState !== 'starting' && audioContextState !== 'demo';
+}
+
+export function playAlongAnnouncementBucket(snapshot: Pick<GraderSnapshot, 'index' | 'currentName' | 'heldFraction'>): string {
+  const heldPercent = Math.min(100, Math.max(0, Math.floor(snapshot.heldFraction * 4) * 25));
+  return `${snapshot.index}:${snapshot.currentName ?? ''}:${heldPercent}`;
+}
 
 const GRADE_TONE: Record<string, string> = {
   excellent: 'tone-green',
@@ -29,51 +52,6 @@ const GRADE_TONE: Record<string, string> = {
   close: 'tone-amber',
   off: 'tone-red',
   missed: 'tone-muted',
-};
-
-// Plain word for each note's landing, so results lead with language not cents.
-const GRADE_WORD: Record<CentsGrade, string> = {
-  excellent: 'Spot on',
-  good: 'In tune',
-  close: 'A little off',
-  off: 'Off',
-  missed: 'Skipped',
-};
-
-// Difficulty flag + one-line plain-English help per exercise, so a beginner
-// knows where to start and what an unfamiliar term means.
-type Difficulty = { tag: string; variant: 'start' | 'plain' | 'hard' };
-const EXERCISE_META: Record<string, { difficulty: Difficulty; help: string }> = {
-  cmaj: { difficulty: { tag: 'Start here', variant: 'start' }, help: 'The easiest place to begin — eight notes going up.' },
-  fmaj: { difficulty: { tag: 'Easy', variant: 'plain' }, help: 'Same idea as C major, starting on F.' },
-  gmaj: { difficulty: { tag: 'Easy', variant: 'plain' }, help: 'Same idea as C major, starting on G.' },
-  arpeggio: { difficulty: { tag: 'Easy', variant: 'plain' }, help: 'Just the main notes of the chord — skips in between.' },
-  chromatic: { difficulty: { tag: 'Harder', variant: 'hard' }, help: 'Every half-step in a row. Trickier — try it once scales feel easy.' },
-  longtones: { difficulty: { tag: 'Warm-up', variant: 'plain' }, help: 'Hold each note long and steady to warm up.' },
-};
-
-function exerciseMeta(exercise: Exercise): { difficulty: Difficulty; help: string } {
-  const explicit = EXERCISE_META[exercise.id];
-  if (explicit) return explicit;
-  if (exercise.group === 'major') {
-    return { difficulty: { tag: 'Major', variant: 'plain' }, help: `Play the ${exercise.label} scale going up.` };
-  }
-  return { difficulty: { tag: 'Minor', variant: 'plain' }, help: `Play the ${exercise.label} scale going up (natural minor).` };
-}
-
-// Written -> concert transposition (semitones down) for the reference tone, so
-// "Hear it" sounds the pitch the player should actually produce on their horn.
-const WRITTEN_TRANSPOSE: Record<string, number> = {
-  trumpet: 2,
-  cornet: 2,
-  flugelhorn: 2,
-  baritone: 2,
-  horn: 7,
-  'french-horn': 7,
-  trombone: 0,
-  'bass-trombone': 0,
-  euphonium: 0,
-  tuba: 0,
 };
 
 function HoldRing({ fraction }: { fraction: number }) {
@@ -95,20 +73,14 @@ function HoldRing({ fraction }: { fraction: number }) {
   );
 }
 
-function verdictHeadline(stars: number): string {
-  if (stars >= 3) return 'Nailed it!';
-  if (stars === 2) return 'Great playing!';
-  if (stars === 1) return 'Nice work!';
-  return 'Good try — keep at it!';
+function bestKey(ownerId: string, exerciseId: string): string {
+  return `${ownerBestScorePrefix(ownerId)}${exerciseId}`;
 }
 
-function bestKey(exerciseId: string): string {
-  return `brasstune.playalong.best.${exerciseId}`;
-}
-
-function readBest(exerciseId: string): number | null {
+function readBest(ownerId: string | null, exerciseId: string): number | null {
+  if (!ownerId) return null;
   try {
-    const raw = localStorage.getItem(bestKey(exerciseId));
+    const raw = localStorage.getItem(bestKey(ownerId, exerciseId));
     if (raw == null) return null;
     const value = Number(raw);
     return Number.isFinite(value) ? value : null;
@@ -117,37 +89,80 @@ function readBest(exerciseId: string): number | null {
   }
 }
 
-function writeBest(exerciseId: string, percent: number): void {
+function writeBest(ownerId: string | null, exerciseId: string, percent: number): void {
+  if (!ownerId) return;
   try {
-    localStorage.setItem(bestKey(exerciseId), String(percent));
+    localStorage.setItem(bestKey(ownerId, exerciseId), String(percent));
   } catch {
     /* storage unavailable — best is a nicety, safe to skip */
   }
 }
 
 export function PlayAlongPage() {
+  const { t, formatNumber } = useI18n();
   const { instrumentId, referencePitch } = useAppSettings();
-  const [exerciseId, setExerciseId] = useState(EXERCISES[0].id);
+  const practiceLibrary = usePracticeLibrary();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const allExercises: Exercise[] = [
+    ...EXERCISES,
+    ...practiceLibrary.library.customExercises.map((item) => ({ id: item.id, label: item.name, detail: t(item.source === 'generated' ? 'playAlong.generatedExercise' : 'playAlong.customExercise'), notes: item.notes, group: 'other' as const })),
+  ];
+  const requestedExerciseId = searchParams.get('exercise');
+  const [exerciseId, setExerciseId] = useState(() => requestedExerciseId && allExercises.some((item) => item.id === requestedExerciseId) ? requestedExerciseId : EXERCISES[0].id);
   const [phase, setPhase] = useState<Phase>('idle');
   const [snapshot, setSnapshot] = useState<GraderSnapshot | null>(null);
   const [error, setError] = useState('');
   const [prevBest, setPrevBest] = useState<number | null>(null);
   const [isNewBest, setIsNewBest] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const graderRef = useRef<PlayAlongGrader | null>(null);
   const phaseRef = useRef<Phase>('idle');
   const finishRef = useRef<() => void>(() => {});
   const mountedRef = useRef(true);
+  const startInProgressRef = useRef(false);
+  const startGenerationRef = useRef(0);
   const exerciseIdRef = useRef(exerciseId);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const referenceToneOscillatorRef = useRef<OscillatorNode | null>(null);
+  const referenceToneActiveRef = useRef(false);
+  const [referenceToneActive, setReferenceToneActive] = useState(false);
+  const completionRecordedRef = useRef(false);
+  const scoreFocusRef = useRef<HTMLDivElement | null>(null);
   phaseRef.current = phase;
   exerciseIdRef.current = exerciseId;
 
-  const exercise = EXERCISES.find((item) => item.id === exerciseId) ?? EXERCISES[0];
-  const meta = exerciseMeta(exercise);
+  const exercise = allExercises.find((item) => item.id === exerciseId) ?? EXERCISES[0];
+  const exerciseLabel = (item: Exercise): string => {
+    if (practiceLibrary.library.customExercises.some((custom) => custom.id === item.id)) return item.label;
+    const root = item.label.split(' ')[0];
+    if (item.group === 'major') return t('playAlong.majorLabel', { note: root });
+    if (item.group === 'minor') return t('playAlong.minorLabel', { note: root });
+    if (item.id === 'arpeggio') return t('playAlong.arpeggioLabel');
+    if (item.id === 'chromatic') return t('playAlong.chromaticLabel');
+    return t('playAlong.longTonesLabel');
+  };
+  const localizedExerciseLabel = exerciseLabel(exercise);
+  const exerciseHelp = (item: Exercise): string => {
+    if (practiceLibrary.library.customExercises.some((custom) => custom.id === item.id)) return t('playAlong.helpCustom');
+    if (item.id === 'cmaj') return t('playAlong.helpStart');
+    if (item.id === 'fmaj') return t('playAlong.helpF');
+    if (item.id === 'gmaj') return t('playAlong.helpG');
+    if (item.id === 'arpeggio') return t('playAlong.helpArpeggio');
+    if (item.id === 'chromatic') return t('playAlong.helpChromatic');
+    if (item.id === 'longtones') return t('playAlong.helpLongTones');
+    return t(item.group === 'major' ? 'playAlong.helpMajor' : 'playAlong.helpMinor', { exercise: exerciseLabel(item) });
+  };
+  const exerciseDetail = (item: Exercise): string => {
+    if (practiceLibrary.library.customExercises.some((custom) => custom.id === item.id)) return item.detail;
+    if (item.id === 'arpeggio') return 'C · E · G · C';
+    if (item.id === 'chromatic') return t('playAlong.chromaticDetail');
+    if (item.id === 'longtones') return t('playAlong.longTonesDetail');
+    return t(item.group === 'minor' ? 'playAlong.minorDetail' : 'playAlong.exerciseDetail');
+  };
 
   const onFrame = useCallback((frame: any) => {
-    if (phaseRef.current !== 'running' || !graderRef.current) return;
+    if (!shouldGradePitchFrame(phaseRef.current, referenceToneActiveRef.current) || !graderRef.current) return;
     const snap = graderRef.current.feed(frame, performance.now());
     setSnapshot(snap);
     if (snap.done) finishRef.current();
@@ -165,34 +180,64 @@ export function PlayAlongPage() {
 
   const recordBest = useCallback((finalResults: NoteGrade[]) => {
     const summary = summarizeGrades(finalResults);
-    const previous = readBest(exerciseIdRef.current);
+    const previous = readBest(practiceLibrary.ownerId, exerciseIdRef.current);
     setPrevBest(previous);
     const beat = previous == null || summary.inTunePercent > previous;
     setIsNewBest(beat);
-    if (beat) writeBest(exerciseIdRef.current, summary.inTunePercent);
-  }, []);
+    if (beat) writeBest(practiceLibrary.ownerId, exerciseIdRef.current, summary.inTunePercent);
+  }, [practiceLibrary.ownerId]);
 
   finishRef.current = () => {
     setPhase('done');
     stream.stopMicrophone();
     recordBest(graderRef.current?.results ?? []);
+    if (!completionRecordedRef.current) {
+      completionRecordedRef.current = true;
+      practiceLibrary.recordActivity(1, { kind: 'play-along', id: exerciseIdRef.current });
+    }
   };
+
+  useEffect(() => {
+    if (requestedExerciseId && allExercises.some((item) => item.id === requestedExerciseId)) setExerciseId(requestedExerciseId);
+  }, [allExercises, requestedExerciseId]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      startGenerationRef.current += 1;
+      startInProgressRef.current = false;
       stream.stopMicrophone();
     };
   }, []); // stop mic on unmount
 
+  const stopReferenceTone = useCallback(() => {
+    const oscillator = referenceToneOscillatorRef.current;
+    referenceToneOscillatorRef.current = null;
+    referenceToneActiveRef.current = false;
+    setReferenceToneActive(false);
+    if (!oscillator) return;
+    oscillator.onended = null;
+    try { oscillator.stop(); } catch { /* already stopped */ }
+    oscillator.disconnect();
+  }, []);
+
   useEffect(() => () => {
+    const oscillator = referenceToneOscillatorRef.current;
+    referenceToneOscillatorRef.current = null;
+    referenceToneActiveRef.current = false;
+    if (oscillator) {
+      oscillator.onended = null;
+      try { oscillator.stop(); } catch { /* already stopped */ }
+      oscillator.disconnect();
+    }
     audioCtxRef.current?.close().catch(() => undefined);
   }, []); // release the reference-tone audio context on unmount
 
   // Play the concert pitch of a written note as a short reference tone.
   const hearNote = useCallback(
     (writtenNote: string) => {
+      if (!canStartReferenceTone(phaseRef.current, referenceToneActiveRef.current)) return;
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextClass) return;
       let ctx = audioCtxRef.current;
@@ -202,9 +247,8 @@ export function PlayAlongPage() {
       }
       if (ctx.state === 'suspended') void ctx.resume();
 
-      const writtenMidi = noteLabelToMidi(`${writtenNote}4`);
-      const semitones = WRITTEN_TRANSPOSE[instrumentId] ?? 0;
-      const frequency = midiToFrequency(writtenMidi - semitones, referencePitch);
+      const frequency = writtenNoteFrequency(writtenNote, instrumentId, referencePitch);
+      if (frequency == null) return;
 
       const now = ctx.currentTime;
       const osc = ctx.createOscillator();
@@ -216,6 +260,16 @@ export function PlayAlongPage() {
       gain.gain.setValueAtTime(0.22, now + 1.0);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.35);
       osc.connect(gain).connect(ctx.destination);
+      referenceToneActiveRef.current = true;
+      referenceToneOscillatorRef.current = osc;
+      setReferenceToneActive(true);
+      osc.onended = () => {
+        if (referenceToneOscillatorRef.current !== osc) return;
+        referenceToneOscillatorRef.current = null;
+        referenceToneActiveRef.current = false;
+        setReferenceToneActive(false);
+        osc.disconnect();
+      };
       osc.start(now);
       osc.stop(now + 1.4);
     },
@@ -223,23 +277,36 @@ export function PlayAlongPage() {
   );
 
   const start = async () => {
+    if (startInProgressRef.current || phaseRef.current === 'running') return;
+    stopReferenceTone();
+    startInProgressRef.current = true;
+    const generation = ++startGenerationRef.current;
     setError('');
+    completionRecordedRef.current = false;
     graderRef.current = new PlayAlongGrader(exercise.notes);
     setSnapshot(graderRef.current.snapshot());
     setPhase('running');
-    const mic = await stream.startMicrophone();
-    if (!mountedRef.current) {
-      // Unmounted (or navigated away) while the permission dialog was open.
-      stream.stopMicrophone();
-      return;
-    }
-    if (!mic) {
-      setPhase('idle');
-      setError('We couldn’t turn on your microphone. Allow mic access in your browser (look for the mic icon in the address bar), then tap Start again.');
+    try {
+      const mic = await stream.startMicrophone();
+      if (!mountedRef.current || generation !== startGenerationRef.current) {
+        // Unmounted, stopped, or superseded while the permission dialog was open.
+        stream.stopMicrophone();
+        return;
+      }
+      if (!mic) {
+        setPhase('idle');
+        setError(t('playAlong.micError'));
+      } else {
+        practiceLibrary.recordRecent({ kind: 'play-along', id: exercise.id, label: localizedExerciseLabel, href: `/practice/scorer?exercise=${encodeURIComponent(exercise.id)}` });
+      }
+    } finally {
+      if (generation === startGenerationRef.current) startInProgressRef.current = false;
     }
   };
 
   const stop = () => {
+    startGenerationRef.current += 1;
+    startInProgressRef.current = false;
     setPhase('idle');
     setSnapshot(null);
     graderRef.current = null;
@@ -258,6 +325,7 @@ export function PlayAlongPage() {
   const summary = phase === 'done' ? summarizeGrades(results) : null;
   const stars = summary ? starsForPercent(summary.inTunePercent) : 0;
   const percentVerdict = summary ? describeInTunePercent(summary.inTunePercent) : null;
+  const announcementBucket = snapshot ? playAlongAnnouncementBucket(snapshot) : '';
 
   const noteStatus = (index: number): 'done' | 'current' | 'upcoming' => {
     if (index < (snapshot?.index ?? 0)) return 'done';
@@ -268,45 +336,56 @@ export function PlayAlongPage() {
   const bestLine = (() => {
     if (!summary) return null;
     if (isNewBest) {
-      return prevBest == null ? 'First time through — nice start!' : `New best! You beat ${prevBest}% in tune.`;
+      return prevBest == null ? t('playAlong.firstBest') : t('playAlong.newBest', { percent: formatNumber(prevBest) });
     }
     if (prevBest != null) {
       const gap = prevBest - summary.inTunePercent;
-      return gap === 0 ? `Tied your best of ${prevBest}% in tune.` : `Your best is ${prevBest}% in tune — ${gap}% to beat it.`;
+      return gap === 0 ? t('playAlong.tiedBest', { percent: formatNumber(prevBest) }) : t('playAlong.bestGap', { percent: formatNumber(prevBest), gap: formatNumber(gap) });
     }
     return null;
   })();
 
+  const selectedTarget = { kind: 'play-along' as const, id: exercise.id, label: localizedExerciseLabel, href: `/practice/scorer?exercise=${encodeURIComponent(exercise.id)}` };
+  const selectExercise = (id: string) => {
+    setExerciseId(id);
+    setSearchParams({ exercise: id }, { replace: true });
+  };
+
+  useEffect(() => {
+    if (phase !== 'done') return undefined;
+    const frame = window.requestAnimationFrame(() => scoreFocusRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase]);
+
   return (
-    <ScreenContainer>
-      <PageHeader
-        title="Play-Along"
-        description="Pick an exercise and play it. We’ll listen and tell you how in-tune each note is."
-      />
+      <ScreenContainer>
+        <PageHeader
+          title={t('playAlong.title')}
+          description={t('playAlong.description')}
+        />
 
       {phase === 'idle' && (
-        <SectionCard title="Choose an exercise">
+        <SectionCard title={t('playAlong.choose')}>
           <div className="pa-exercise-groups">
             {([
-              ['Major scales', MAJOR_SCALES],
-              ['Minor scales', MINOR_SCALES],
-              ['Other exercises', OTHER_EXERCISES],
-            ] as const).map(([heading, exercises]) => (
-              <section className="pa-exercise-group" aria-labelledby={`pa-${heading.replace(/ /g, '-').toLowerCase()}`} key={heading}>
-                <h3 id={`pa-${heading.replace(/ /g, '-').toLowerCase()}`}>{heading}</h3>
+              ['major', t('playAlong.majorScales'), MAJOR_SCALES],
+              ['minor', t('playAlong.minorScales'), MINOR_SCALES],
+              ['other', t('playAlong.otherExercises'), OTHER_EXERCISES],
+            ] as const).map(([groupId, heading, exercises]) => (
+              <section className="pa-exercise-group" aria-labelledby={`pa-${groupId}`} key={groupId}>
+                <h3 id={`pa-${groupId}`}>{heading}</h3>
                 <div className="chip-row pa-chips">
                   {exercises.map((item) => {
-                    const itemMeta = exerciseMeta(item);
                     return (
                       <SelectionChip
                         key={item.id}
                         active={item.id === exerciseId}
-                        onClick={() => setExerciseId(item.id)}
+                        onClick={() => selectExercise(item.id)}
                         tone="gold"
                       >
                         <span className="pa-chip-body">
-                          {item.label}
-                          {item.id === 'cmaj' && <span className={`pa-chip-tag pa-tag-${itemMeta.difficulty.variant}`}>{itemMeta.difficulty.tag}</span>}
+                          {exerciseLabel(item)}
+                          {item.id === 'cmaj' && <span className="pa-chip-tag pa-tag-start">{t('playAlong.startHere')}</span>}
                         </span>
                       </SelectionChip>
                     );
@@ -314,28 +393,42 @@ export function PlayAlongPage() {
                 </div>
               </section>
             ))}
+            {practiceLibrary.library.customExercises.length > 0 && (
+              <section className="pa-exercise-group" aria-labelledby="pa-saved-exercises">
+                <h3 id="pa-saved-exercises">{t('playAlong.savedExercises')}</h3>
+                <div className="chip-row pa-chips">
+                  {practiceLibrary.library.customExercises.map((item) => (
+                    <SelectionChip key={item.id} active={item.id === exerciseId} onClick={() => selectExercise(item.id)} tone="gold">{item.name}</SelectionChip>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
 
           <div className="pa-selected">
             <div className="pa-selected-info">
               <p className="pa-selected-detail">
-                {exercise.detail.replace('ascending', 'going up')} · {exercise.notes.length} notes · shown for your {instrumentDisplayName(instrumentId)}
+                {exerciseDetail(exercise)} · {t('playAlong.noteCount', { count: exercise.notes.length })} · {t('playAlong.forInstrument', { instrument: t(`instrument.${instrumentId}` as MessageId) })}
               </p>
-              {meta && <p className="pa-selected-help">{meta.help}</p>}
+              <p className="pa-selected-help">{exerciseHelp(exercise)}</p>
             </div>
-            <button className="ghost-button pa-hear" type="button" onClick={() => hearNote(exercise.notes[0])}>
+            <button className="ghost-button pa-hear" type="button" disabled={referenceToneActive} onClick={() => hearNote(exercise.notes[0])}>
               <Volume2 size={17} />
-              Hear it
+              {t('playAlong.hearIt')}
+            </button>
+            <button className="ghost-button" type="button" aria-pressed={practiceLibrary.isFavorite(selectedTarget)} onClick={() => practiceLibrary.toggleFavorite(selectedTarget)}>
+              <Star size={17} fill={practiceLibrary.isFavorite(selectedTarget) ? 'currentColor' : 'none'} />
+              {t(practiceLibrary.isFavorite(selectedTarget) ? 'playAlong.favorited' : 'playAlong.favorite')}
             </button>
           </div>
 
           <button className="primary-button pa-start" type="button" onClick={start}>
             <Play size={20} />
-            Start
+            {t('common.start')}
           </button>
           <p className="pa-mic-note">
             <Mic size={15} />
-            We’ll ask to use your microphone so we can hear you play.
+            {t('playAlong.micNote')}
           </p>
           {error && (
             <p className="pa-error" role="status" aria-live="polite">
@@ -343,112 +436,168 @@ export function PlayAlongPage() {
               {error}
             </p>
           )}
+          <CustomExerciseBuilder
+            onSaved={selectExercise}
+            onDeleted={(id) => {
+              if (exerciseId === id) selectExercise(EXERCISES[0].id);
+            }}
+          />
         </SectionCard>
       )}
 
       {phase === 'running' && snapshot && (
-        <SectionCard title="Play along" eyebrow={`Note ${Math.min(snapshot.index + 1, exercise.notes.length)} of ${exercise.notes.length}`}>
+        <SectionCard title={t('playAlong.play')} eyebrow={t('playAlong.noteProgress', { current: formatNumber(Math.min(snapshot.index + 1, exercise.notes.length)), total: formatNumber(exercise.notes.length) })}>
+          <output className="visually-hidden" aria-live="polite" aria-atomic="true">
+            {announcementBucket
+              ? t('playAlong.a11yTargetProgress', {
+                note: snapshot.currentName ?? '—',
+                current: formatNumber(Math.min(snapshot.index + 1, exercise.notes.length)),
+                total: formatNumber(exercise.notes.length),
+                percent: formatNumber(Math.min(100, Math.max(0, Math.floor(snapshot.heldFraction * 4) * 25))),
+              })
+              : ''}
+          </output>
+          {!stream.micActive && (
+            <div className="pa-error" role="status" aria-live="polite">
+              <AlertCircle size={16} />
+              <span>{stream.statusMessage}</span>
+              {shouldShowPitchRecovery(stream.micActive, stream.streamInfo.audioContextState) && (
+                <button className="ghost-button" type="button" onClick={() => void stream.startMicrophone()}>
+                  <Mic size={15} />
+                  {t('session.turnOnMic')}
+                </button>
+              )}
+            </div>
+          )}
           <div className="playalong-live">
+            <progress
+              className="visually-hidden"
+              aria-label={t('playAlong.a11yHoldProgress', { note: snapshot.currentName ?? '—' })}
+              max={100}
+              value={Math.round(snapshot.heldFraction * 100)}
+            />
             <div className="playalong-target">
               <HoldRing fraction={snapshot.heldFraction} />
               <div className="playalong-target-note">
-                <span className="playalong-target-label">Play</span>
+                <span className="playalong-target-label">{t('playAlong.playNote')}</span>
                 <strong>{snapshot.currentName ?? '—'}</strong>
               </div>
             </div>
             <div className="playalong-detected">
-              <span className="playalong-detected-label">You’re playing</span>
+              <span className="playalong-detected-label">{t('playAlong.youArePlaying')}</span>
               <strong className={samePitchClass(snapshot.detectedName, snapshot.currentName) ? 'match' : ''}>{snapshot.detectedName ?? '—'}</strong>
               {(() => {
                 const cents = snapshot.detectedCents;
                 const onTarget = samePitchClass(snapshot.detectedName, snapshot.currentName) && cents != null;
                 if (!onTarget) {
                   return (
-                    <span className="pa-live-verdict">
-                      {snapshot.detectedName ? `Play ${snapshot.currentName}` : 'Listening…'}
-                    </span>
+                    <output className="pa-live-verdict" aria-live="off">
+                      {snapshot.detectedName ? t('playAlong.playTarget', { note: snapshot.currentName ?? '' }) : t('playAlong.listening')}
+                    </output>
                   );
                 }
                 const verdict = describeCents(cents);
+                const label = verdict.tone === 'green' ? t('tuning.inTune') : verdict.direction === 'sharp' ? t(verdict.tone === 'amber' ? 'tuning.littleSharp' : 'tuning.sharp') : t(verdict.tone === 'amber' ? 'tuning.littleFlat' : 'tuning.flat');
+                const cue = t(verdict.direction === 'sharp' ? 'tuning.easeDown' : verdict.direction === 'flat' ? 'tuning.liftUp' : 'tuning.holdIt');
+                const detail = t(verdict.direction === 'sharp' ? 'tuning.centsSharp' : 'tuning.centsFlat', { cents: formatNumber(Math.abs(Math.round(cents))) });
                 return (
-                  <span className={`pa-live-verdict tone-${verdict.tone}`}>
-                    {verdict.label}
-                    {verdict.cue ? ` — ${verdict.cue}` : ''}
-                    {verdict.tone !== 'green' && verdict.detail ? <em className="pa-live-cents"> ({verdict.detail})</em> : null}
-                  </span>
+                  <output className={`pa-live-verdict tone-${verdict.tone}`} aria-live="off">
+                    {label} — {cue}
+                    {verdict.tone !== 'green' ? <em className="pa-live-cents"> (<bdi>{detail}</bdi>)</em> : null}
+                  </output>
                 );
               })()}
             </div>
           </div>
           <p className="pa-hold-caption">
             <Mic size={15} />
-            Hold each note steady until it locks in.
+            {t('playAlong.holdHelp', { seconds: formatNumber(DEFAULT_PLAY_ALONG_HOLD_MS / 1_000) })}
           </p>
-          <div className="playalong-sequence">
+          <ol className="playalong-sequence" aria-label={t('playAlong.noteByNote')}>
             {exercise.notes.map((note, index) => {
               const status = noteStatus(index);
               const graded = results[index];
               return (
-                <span key={index} className={`playalong-note ${status} ${graded ? GRADE_TONE[graded.grade] : ''}`}>
-                  {note}
-                </span>
+                <li
+                  key={index}
+                  className={`playalong-note ${status} ${graded ? GRADE_TONE[graded.grade] : ''}`}
+                  aria-label={t('playAlong.a11yNoteState', {
+                    note,
+                    state: t(status === 'done' ? 'playAlong.stateComplete' : status === 'current' ? 'playAlong.stateCurrent' : 'playAlong.stateUpcoming'),
+                  })}
+                >
+                  <bdi dir="ltr">{note}</bdi>
+                </li>
               );
             })}
-          </div>
+          </ol>
           <div className="settings-actions">
-            <button className="ghost-button" type="button" onClick={() => snapshot.currentName && hearNote(snapshot.currentName)}>
+            <button className="ghost-button" type="button" disabled aria-disabled="true">
               <Volume2 size={17} />
-              Hear it
+              {t('playAlong.hearIt')}
             </button>
             <button className="ghost-button" type="button" onClick={skip}>
               <SkipForward size={17} />
-              Skip note
+              {t('playAlong.skipNote')}
             </button>
             <button className="ghost-button danger-action" type="button" onClick={stop}>
               <Square size={17} />
-              Stop
+              {t('playAlong.stop')}
             </button>
           </div>
         </SectionCard>
       )}
 
       {phase === 'done' && summary && percentVerdict && (
-        <SectionCard title="Your score">
-          <div className="pa-verdict">
-            <div className="pa-stars" role="img" aria-label={`${stars} out of 3 stars`}>
+        <>
+        <SectionCard title={t('playAlong.score')}>
+          <section
+            className="pa-verdict"
+            ref={scoreFocusRef}
+            tabIndex={-1}
+            aria-label={t('playAlong.a11yScoreSummary', {
+              percent: formatNumber(summary.inTunePercent),
+              inTune: formatNumber(summary.inTune),
+              total: formatNumber(summary.total),
+            })}
+          >
+            <div className="pa-stars" role="img" aria-label={t('playAlong.stars', { count: formatNumber(stars), total: formatNumber(3) })}>
               {[0, 1, 2].map((i) => (
                 <Star key={i} size={36} className={i < stars ? 'pa-star on' : 'pa-star'} fill={i < stars ? 'currentColor' : 'none'} />
               ))}
             </div>
-            <strong className={`pa-verdict-title tone-${percentVerdict.tone}`}>{verdictHeadline(stars)}</strong>
-            <p className="pa-verdict-sub">{percentVerdict.label} · {summary.inTune} of {summary.total} notes on pitch</p>
+            <strong className={`pa-verdict-title tone-${percentVerdict.tone}`}>{t(stars >= 3 ? 'playAlong.verdictThree' : stars === 2 ? 'playAlong.verdictTwo' : stars === 1 ? 'playAlong.verdictOne' : 'playAlong.verdictTry')}</strong>
+            <p className="pa-verdict-sub">{t('practice.percentInTune', { percent: formatNumber(summary.inTunePercent) })} · {t('playAlong.notesOnPitch', { inTune: formatNumber(summary.inTune), total: formatNumber(summary.total) })}</p>
             {bestLine && (
               <p className={`pa-best ${isNewBest ? 'pa-best-new' : ''}`}>
                 <Trophy size={15} />
                 {bestLine}
               </p>
             )}
-          </div>
+          </section>
 
           <div className="settings-actions">
             <button className="primary-button" type="button" onClick={start}>
               <RotateCcw size={18} />
-              Play again
+              {t('playAlong.again')}
             </button>
             <button className="ghost-button" type="button" onClick={stop}>
               <Music4 size={18} />
-              Pick another
+              {t('playAlong.pickAnother')}
             </button>
           </div>
 
-          <details className="pa-details">
-            <summary>Note by note</summary>
+          <details className="pa-details" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+            <summary>
+              <span>{t('playAlong.noteByNote')}</span>
+              <span className="pa-details-toggle">{t(detailsOpen ? 'common.hide' : 'common.show')}</span>
+            </summary>
             <div className="playalong-results">
               {results.map((grade: NoteGrade, index: number) => (
                 <div className={`playalong-result-row ${GRADE_TONE[grade.grade]}`} key={index}>
                   <span className="playalong-result-note">{grade.name}</span>
                   <span className="playalong-result-grade">
-                    <span className="pa-grade-word">{GRADE_WORD[grade.grade]}</span>
+                    <span className="pa-grade-word">{t(`playAlong.grade.${grade.grade}` as MessageId)}</span>
                     {grade.grade !== 'missed' && grade.avgCents != null && (
                       <span className="pa-grade-cents">{grade.avgCents > 0 ? '+' : ''}{grade.avgCents}¢</span>
                     )}
@@ -458,6 +607,8 @@ export function PlayAlongPage() {
             </div>
           </details>
         </SectionCard>
+        <PracticeReflectionCard />
+        </>
       )}
     </ScreenContainer>
   );

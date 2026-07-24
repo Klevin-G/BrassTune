@@ -9,12 +9,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import DEPLOYED_ENVIRONMENTS, LOCAL_ENVIRONMENTS, app_environment, auth_mode
 from app.core.instruments.profiles import is_valid_instrument_id
 from app.db.database import get_db
 from app.models.db import AccountDeletionJob, Group, User
+from app.services.account_deletion import DeletionTombstoneSecretError, deleted_identity_is_blocked
 from app.services.session_service import get_or_create_default_user
 from app.services.usage import record_event
 
@@ -57,6 +59,10 @@ def assert_auth_configured() -> None:
         raise RuntimeError("SUPABASE_PUBLISHABLE_KEY is required when BRASSTUNE_AUTH_MODE=supabase.")
     if not os.getenv("SUPABASE_SECRET_KEY"):
         raise RuntimeError("SUPABASE_SECRET_KEY is required when BRASSTUNE_AUTH_MODE=supabase.")
+    try:
+        _supabase_endpoint("/")
+    except HTTPException as exc:
+        raise RuntimeError("SUPABASE_URL must be an HTTPS origin without credentials, paths, or query parameters.") from exc
 
 
 def _bearer_token(authorization: Optional[str]) -> Optional[str]:
@@ -65,7 +71,10 @@ def _bearer_token(authorization: Optional[str]) -> Optional[str]:
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token:
         return None
-    return token.strip()
+    token = token.strip()
+    if len(token) > 16_384:
+        raise HTTPException(status_code=413, detail="Authentication token is too large.")
+    return token
 
 
 def _normalize_username(value: Optional[str], fallback: str) -> str:
@@ -106,6 +115,13 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
         if deletion_job.status == "completed":
             raise HTTPException(status_code=410, detail="This account has been deleted.")
         raise HTTPException(status_code=423, detail="Account deletion is still finishing. Try again later.")
+    try:
+        if deleted_identity_is_blocked(db, supabase_id):
+            raise HTTPException(status_code=410, detail="This account has been deleted.")
+    except DeletionTombstoneSecretError as exc:
+        # Fail closed: without the keyed digest, a deleted remote identity could
+        # otherwise be recreated as a new local account.
+        raise HTTPException(status_code=503, detail="Account identity protection is temporarily unavailable.") from exc
     user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
     is_new = user is None
     if user is None:
@@ -146,7 +162,28 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
     now = dt.datetime.utcnow()
     user.last_active_at = now
     user.updated_at = now
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two first requests for the same remote identity can both observe that
+        # no local row exists. The unique constraint chooses the winner; the
+        # loser must not let the IntegrityError escape because its SQLAlchemy
+        # representation can include the attempted INSERT parameters.
+        db.rollback()
+        if is_new:
+            user = db.query(User).filter(User.supabase_user_id == supabase_id).first()
+            if user is not None:
+                is_new = False
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Account setup is temporarily unavailable. Try again.",
+                ) from None
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="Account update is temporarily unavailable. Try again.",
+            ) from None
     db.refresh(user)
     if is_new:
         record_event(db, "signup", user.id, {"source": "supabase"})
@@ -154,14 +191,27 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
 
 
 def _supabase_endpoint(path: str) -> str:
-    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_url = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
     if not supabase_url:
         raise HTTPException(status_code=401, detail="Supabase auth is not configured on the backend.")
     parsed = urllib.parse.urlparse(supabase_url)
-    is_local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    is_local_http = (
+        app_environment() in LOCAL_ENVIRONMENTS
+        and parsed.scheme == "http"
+        and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    )
     if parsed.scheme != "https" and not is_local_http:
         raise HTTPException(status_code=503, detail="SUPABASE_URL must be HTTPS outside local development.")
-    if not parsed.netloc:
+    if (
+        not parsed.netloc
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
         raise HTTPException(status_code=503, detail="SUPABASE_URL is invalid.")
     return "%s/%s" % (supabase_url.rstrip("/"), path.lstrip("/"))
 

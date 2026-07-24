@@ -99,13 +99,13 @@
 
 .au-pass-wrap input {
   width: 100%;
-  padding-right: 46px;
+  padding-inline-end: 46px;
 }
 
 .au-pass-toggle {
   position: absolute;
   top: 0;
-  right: 0;
+  inset-inline-end: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -121,6 +121,10 @@
 
 .au-pass-toggle:hover {
   color: var(--text);
+}
+
+[dir="rtl"] .au-pass-toggle {
+  border-radius: 15px 0 0 15px;
 }
 
 /* Helper text below a field. */

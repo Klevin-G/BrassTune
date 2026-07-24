@@ -39,6 +39,15 @@
 5. Supabase storage/auth: do not manually delete identities or buckets during rollback unless tied to a documented incident and owner approval.
 6. Communicate affected surfaces, start/end times, and whether user data was impacted.
 
+### Account-deletion privacy expand/contract ordering
+
+1. Apply only `20260723021828_account_deletion_privacy_tombstones.sql` as the database expand phase. It adds private tombstone/config storage and nullable terminal identifiers but deliberately adds no terminal-row CHECK, so the deployed `b84dacc` writer remains compatible.
+2. Deploy the privacy-aware backend. Require its startup scrubber to report success, confirm the tombstone config is initialized in `expand`, and record the exact deploy artifact/SHA as the database-compatible rollback target.
+3. In a separate migration release, apply `20260723052642_enforce_account_deletion_terminal_privacy.sql`. It aborts unless the privacy-aware backend initialized the phase and every legacy terminal row was scrubbed, then adds and validates the strict CHECK and flips the phase to `contract` atomically.
+4. Only after contract succeeds should frontend rollout and hosted deletion/readiness smoke proceed.
+
+Before contract, rollback to `b84dacc` remains database-compatible. After contract, `b84dacc` is not a safe rollback target because it completes jobs without tombstoning or scrubbing. Roll back to the retained exact privacy-aware backend artifact instead. Do not apply contract until that artifact is recorded and restorable; do not weaken the CHECK or drop tombstones as an emergency application rollback.
+
 ## Current Deployment Notes
 
 - Hosted WebSocket handshake passed after Render deployed exact commit `395a9d29870b25a7aadf161dc1d69c988bdaa841`.

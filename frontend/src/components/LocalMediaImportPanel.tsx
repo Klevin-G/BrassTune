@@ -6,6 +6,12 @@ import { createGuestSession, saveGuestSessionFromFrames } from '../domain/guestS
 import { analyzeLocalMediaFile } from '../domain/localMediaAnalysis';
 import type { PracticeSession } from '../domain/types';
 import { useAuth } from '../state/AuthContext';
+import { useI18n } from '../i18n/LocaleContext';
+import { usePracticeLibrary } from '../state/PracticeLibraryContext';
+
+function bidiIsolate(value: string | number) {
+  return `\u2068${value}\u2069`;
+}
 
 export function LocalMediaImportPanel({
   instrumentId,
@@ -17,9 +23,11 @@ export function LocalMediaImportPanel({
   onImported?: (session: PracticeSession) => void;
 }) {
   const auth = useAuth();
+  const { recordSavedSession } = usePracticeLibrary();
+  const { locale, t, formatNumber } = useI18n();
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const [status, setStatus] = useState('Ready to analyze a saved recording.');
+  const [status, setStatus] = useState(() => t('localMedia.ready'));
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<PracticeSession | null>(null);
@@ -33,42 +41,43 @@ export function LocalMediaImportPanel({
     setBusy(true);
     setProgress(0);
     setSummary(null);
-    setStatus('Decoding local media. The original file is not uploaded or stored.');
+    setStatus(t('localMedia.decoding'));
     try {
       const analysis = await analyzeLocalMediaFile(file, instrumentId, referencePitch, setProgress, controller.signal);
       const validFrames = analysis.frames.filter((frame) => frame.is_valid_for_recording);
       if (validFrames.length === 0) {
-        setStatus('No recording-quality pitch frames were found in this local media file.');
+        setStatus(t('localMedia.noFrames'));
         return;
       }
       let stopped: PracticeSession;
       if (auth.isSignedIn) {
-        const session = await startSession(instrumentId, referencePitch, 'Imported recording');
+        const session = await startSession(instrumentId, referencePitch, t('localMedia.importedRecording'));
         startedSession = session;
-        setStatus(`Saving ${validFrames.length} analyzed pitch frames. Source recording remains on this device.`);
+        setStatus(t('localMedia.savingFrames', { count: formatNumber(validFrames.length) }));
         const result = await recordPitchFramesInBatches(session.id, validFrames, {
           signal: controller.signal,
           onProgress: (saved, attempted) => {
-            setStatus(`Saving analyzed pitch frames: ${attempted}/${validFrames.length} sent, ${saved} saved.`);
+            setStatus(t('localMedia.savingProgress', { attempted: formatNumber(attempted), total: formatNumber(validFrames.length), saved: formatNumber(saved) }));
           },
         });
-        if (result.rejected > 0) setStatus(`${result.saved} analyzed frames saved; ${result.rejected} frames were outside recording criteria.`);
+        if (result.rejected > 0) setStatus(t('localMedia.rejected', { saved: formatNumber(result.saved), rejected: formatNumber(result.rejected) }));
         stopped = await stopSession(session.id);
       } else {
-        const draft = createGuestSession(instrumentId, referencePitch, `Imported ${file.name}`);
+        const draft = createGuestSession(instrumentId, referencePitch, t('localMedia.importedRecording'));
         stopped = saveGuestSessionFromFrames(draft, validFrames);
-        setStatus(`Saved ${Math.round(analysis.analyzedSeconds)}s from ${file.name} as a guest review. Source recording remains on this device.`);
+        setStatus(t('localMedia.guestSaved', { seconds: formatNumber(Math.round(analysis.analyzedSeconds)), filename: bidiIsolate(file.name) }));
       }
       setSummary(stopped);
+      recordSavedSession(stopped);
       onImported?.(stopped);
       if (auth.isSignedIn) {
-        setStatus(`Analyzed ${Math.round(analysis.analyzedSeconds)}s from ${file.name}. The source recording was not stored by BrassTune.`);
+        setStatus(t('localMedia.analyzed', { seconds: formatNumber(Math.round(analysis.analyzedSeconds)), filename: bidiIsolate(file.name) }));
       }
     } catch (error) {
       if (startedSession) {
         stopSession(startedSession.id).catch(() => undefined);
       }
-      setStatus(friendlyUserFacingError(error, 'Local media analysis failed. Try a shorter audio or image file.'));
+      setStatus(locale === 'en' ? friendlyUserFacingError(error, t('localMedia.failed')) : t('localMedia.failed'));
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
@@ -78,7 +87,7 @@ export function LocalMediaImportPanel({
 
   const cancel = () => {
     abortRef.current?.abort();
-    setStatus('Local media analysis was canceled.');
+    setStatus(t('localMedia.canceled'));
     setBusy(false);
   };
 
@@ -89,23 +98,23 @@ export function LocalMediaImportPanel({
           <FileIcon size={18} />
         </span>
         <div>
-          <h3>Import recording</h3>
-          <span>Audio analysis only</span>
+          <h3>{t('localMedia.title')}</h3>
+          <span>{t('localMedia.audioOnly')}</span>
         </div>
       </div>
       <p>
-        Choose an audio or video file from Photos or Files. BrassTune analyzes the audio track, saves derived pitch frames, and leaves the source file on your device.
+        {t('localMedia.description')}
       </p>
       <div className="settings-actions">
         <label className={`ghost-button file-action ${busy ? 'disabled' : ''}`}>
           <Upload size={17} />
-          Choose audio or video file
-          <input ref={libraryInputRef} className="visually-hidden" type="file" accept="audio/*,video/mp4,video/webm,video/quicktime" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label="Choose local audio or video file" />
+          {t('localMedia.choose')}
+          <input ref={libraryInputRef} className="visually-hidden" type="file" accept="audio/*,video/mp4,video/webm,video/quicktime" disabled={busy} onChange={(event) => analyzeFile(event.target.files?.[0])} aria-label={t('localMedia.choose')} />
         </label>
         {busy && (
           <button className="ghost-button" type="button" onClick={cancel}>
             <Square size={17} />
-            Cancel
+            {t('common.cancel')}
           </button>
         )}
       </div>
@@ -113,7 +122,7 @@ export function LocalMediaImportPanel({
         <div
           className="import-progress"
           role="progressbar"
-          aria-label="Local media analysis progress"
+          aria-label={t('localMedia.progress')}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(progress * 100)}
@@ -129,13 +138,13 @@ export function LocalMediaImportPanel({
               <CheckCircle2 size={18} />
             </span>
             <div>
-              <h3>Import analyzed</h3>
-              <span>{summary.notes_count} note events</span>
+              <h3>{t('localMedia.complete')}</h3>
+              <span><bdi dir="ltr">{t('localMedia.noteEvents', { count: summary.notes_count })}</bdi></span>
             </div>
           </div>
-          <p>{summary.average_abs_cents.toFixed(1)} cents average absolute error, {Math.round(summary.in_tune_percentage)}% in tune.</p>
+          <p>{t('localMedia.summary', { cents: formatNumber(summary.average_abs_cents, { maximumFractionDigits: 1 }), percent: formatNumber(Math.round(summary.in_tune_percentage)) })}</p>
           <Link to={`/sessions/${summary.id}`} className="primary-button">
-            Review imported take
+            {t('localMedia.review')}
           </Link>
         </div>
       )}

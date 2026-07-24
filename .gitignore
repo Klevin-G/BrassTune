@@ -15,21 +15,28 @@ swift/**/.build/
 swift/**/.swiftpm/
 swift/**/*.xcodeproj/project.xcworkspace/
 swift/**/*.xcodeproj/xcuserdata/
+DerivedData/
+*.xcresult
+*.xcarchive
 .DS_Store
+.idea/
+.omo/evidence/
+.xcodebuildmcp/
+tmp/pdfs/
 .pytest_cache/
 .env
 .env.local
 .env.*
 *.env
 *.env.*
-!.env.example
-!**/.env.example
 .agents/
 skills-lock.json
 .vercel/
 **/.vercel/
 .vercel
 .env*
+!.env.example
+!**/.env.example
 
 # Supabase CLI local link state
 supabase/.temp/

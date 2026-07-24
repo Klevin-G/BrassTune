@@ -1,6 +1,41 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { updateCurrentUser } from '../api/client';
 import { useAuth } from './AuthContext';
+import type { MessageId } from '../i18n/messages.base';
+
+const legacyOnboardingCompleteKey = 'brasstune.onboardingComplete';
+const guestOnboardingCompleteKey = 'brasstune.guestOnboardingComplete';
+export const MIN_REFERENCE_PITCH = 430;
+export const MAX_REFERENCE_PITCH = 450;
+
+export function clampReferencePitch(value: number): number | null {
+  if (!Number.isFinite(value)) return null;
+  return Math.min(MAX_REFERENCE_PITCH, Math.max(MIN_REFERENCE_PITCH, value));
+}
+
+interface AccountOnboardingInput {
+  authLoading: boolean;
+  hasAuthSession: boolean;
+  isSignedIn: boolean;
+  onboardingCompletedAt?: string | null;
+}
+
+export function accountOnboardingDecision(input: AccountOnboardingInput) {
+  if (input.authLoading || !input.hasAuthSession || !input.isSignedIn) return null;
+  const completed = Boolean(input.onboardingCompletedAt);
+  return { completed, open: !completed };
+}
+
+/**
+ * Guest completion belongs to the guest audience only. The legacy shared flag
+ * is still written when completion succeeds so older releases can understand
+ * it, but it must never silently complete a new (or explicitly reset) guest
+ * setup.
+ */
+export function guestOnboardingDecision(guestCompletion: string | null) {
+  const completed = guestCompletion === 'true';
+  return { completed, open: !completed };
+}
 
 interface AppSettings {
   instrumentId: string;
@@ -11,9 +46,12 @@ interface AppSettings {
   setDemoMode: (value: boolean) => void;
   onboardingOpen: boolean;
   onboardingComplete: boolean;
+  onboardingSaving: boolean;
+  onboardingSaveError: MessageId | null;
   openOnboarding: () => void;
   closeOnboarding: () => void;
-  completeOnboarding: () => void;
+  completeOnboarding: () => Promise<boolean>;
+  retryOnboardingCompletion: () => Promise<boolean>;
 }
 
 const AppSettingsContext = createContext<AppSettings | null>(null);
@@ -23,48 +61,128 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
   const [instrumentId, setInstrumentId] = useState(() => localStorage.getItem('brasstune.instrument') ?? 'trumpet');
   const [referencePitch, setReferencePitchState] = useState(() => {
     const stored = Number(localStorage.getItem('brasstune.referencePitch') ?? 440);
-    return Number.isFinite(stored) && stored > 0 ? stored : 440;
+    return clampReferencePitch(stored) ?? 440;
   });
   // Real microphone by default; the guided-audio demo is an explicit opt-in.
   const [demoMode, setDemoModeState] = useState(() => localStorage.getItem('brasstune.demoMode') === 'true');
-  const [onboardingComplete, setOnboardingComplete] = useState(() => localStorage.getItem('brasstune.onboardingComplete') === 'true');
-  const [onboardingOpen, setOnboardingOpen] = useState(() => localStorage.getItem('brasstune.onboardingComplete') !== 'true');
+  // Keep the dialog closed until account restoration has settled. The effect
+  // below then makes an audience-aware decision for an account or a guest.
+  const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingSaving, setOnboardingSaving] = useState(false);
+  const [onboardingSaveError, setOnboardingSaveError] = useState<MessageId | null>(null);
+  const handledGuestEntrySequence = useRef(0);
+  const onboardingSaveInFlight = useRef(false);
 
-  const setReferencePitch = (value: number) => {
-    if (!Number.isFinite(value) || value <= 0) return;
-    setReferencePitchState(value);
-    localStorage.setItem('brasstune.referencePitch', String(value));
-  };
-  const setInstrumentIdPersisted = (value: string) => {
+  const setReferencePitch = useCallback((value: number) => {
+    const clamped = clampReferencePitch(value);
+    if (clamped === null) return;
+    setReferencePitchState(clamped);
+    localStorage.setItem('brasstune.referencePitch', String(clamped));
+  }, []);
+  const setInstrumentIdPersisted = useCallback((value: string) => {
     setInstrumentId(value);
     localStorage.setItem('brasstune.instrument', value);
-  };
-  const setDemoMode = (value: boolean) => {
+  }, []);
+  const setDemoMode = useCallback((value: boolean) => {
     setDemoModeState(value);
     localStorage.setItem('brasstune.demoMode', String(value));
-  };
-  const openOnboarding = () => setOnboardingOpen(true);
-  const closeOnboarding = () => {
-    // Dismissing the tour (X / Escape) counts as done for this device, so it
-    // does not re-open on every reload.
+  }, []);
+  const openOnboarding = useCallback(() => {
+    setOnboardingSaveError(null);
+    setOnboardingOpen(true);
+  }, []);
+  const closeOnboarding = useCallback(() => {
+    // Closing is intentionally temporary. New users should see the tour again
+    // after a reload until they finish the last step and its completion saves.
+    setOnboardingSaveError(null);
     setOnboardingOpen(false);
-    setOnboardingComplete(true);
-    localStorage.setItem('brasstune.onboardingComplete', 'true');
-  };
-  const completeOnboarding = () => {
-    setOnboardingComplete(true);
-    setOnboardingOpen(false);
-    localStorage.setItem('brasstune.onboardingComplete', 'true');
-    updateCurrentUser({ onboarding_completed: true, primary_instrument_id: instrumentId }).catch(() => undefined);
-  };
-
-  useEffect(() => {
-    if (auth.profile?.onboarding_completed_at) {
+  }, []);
+  const completeOnboarding = useCallback(async () => {
+    if (onboardingSaveInFlight.current) return false;
+    onboardingSaveInFlight.current = true;
+    setOnboardingSaving(true);
+    setOnboardingSaveError(null);
+    try {
+      if (auth.isSignedIn) {
+        await updateCurrentUser({ onboarding_completed: true, primary_instrument_id: instrumentId });
+        await auth.refreshProfile();
+      } else if (auth.guestMode) {
+        localStorage.setItem(guestOnboardingCompleteKey, 'true');
+      } else {
+        throw new Error('Start as a guest or sign in before finishing the tour.');
+      }
+      localStorage.setItem(legacyOnboardingCompleteKey, 'true');
       setOnboardingComplete(true);
       setOnboardingOpen(false);
-      localStorage.setItem('brasstune.onboardingComplete', 'true');
+      return true;
+    } catch {
+      setOnboardingComplete(false);
+      setOnboardingOpen(true);
+      setOnboardingSaveError('onboarding.saveFailed');
+      return false;
+    } finally {
+      onboardingSaveInFlight.current = false;
+      setOnboardingSaving(false);
     }
-  }, [auth.profile?.onboarding_completed_at]);
+  }, [auth.guestMode, auth.isSignedIn, auth.refreshProfile, instrumentId]);
+  const retryOnboardingCompletion = completeOnboarding;
+
+  useEffect(() => {
+    if (auth.loading) return;
+
+    if (auth.hasAuthSession) {
+      // A signed-in profile is the source of truth. AppShell keeps the tour
+      // unmounted while that profile is still being restored.
+      const accountDecision = accountOnboardingDecision({
+        authLoading: auth.loading,
+        hasAuthSession: auth.hasAuthSession,
+        isSignedIn: auth.isSignedIn,
+        onboardingCompletedAt: auth.profile?.onboarding_completed_at,
+      });
+      if (!accountDecision) {
+        setOnboardingOpen(false);
+        return;
+      }
+      setOnboardingComplete(accountDecision.completed);
+      setOnboardingOpen(accountDecision.open);
+      setOnboardingSaveError(null);
+      if (accountDecision.completed) {
+        localStorage.setItem(legacyOnboardingCompleteKey, 'true');
+      }
+      return;
+    }
+
+    if (!auth.guestMode) {
+      setOnboardingComplete(false);
+      setOnboardingOpen(false);
+      setOnboardingSaveError(null);
+      return;
+    }
+
+    if (auth.guestEntrySequence > handledGuestEntrySequence.current) {
+      // Every explicit guest entry starts a fresh tour, even on a browser
+      // whose legacy shared flag says that another audience completed it.
+      handledGuestEntrySequence.current = auth.guestEntrySequence;
+      localStorage.setItem(guestOnboardingCompleteKey, 'false');
+      setOnboardingComplete(false);
+      setOnboardingOpen(true);
+      setOnboardingSaveError(null);
+      return;
+    }
+
+    const guestDecision = guestOnboardingDecision(localStorage.getItem(guestOnboardingCompleteKey));
+    setOnboardingComplete(guestDecision.completed);
+    setOnboardingOpen(guestDecision.open);
+  }, [
+    auth.guestEntrySequence,
+    auth.guestMode,
+    auth.hasAuthSession,
+    auth.isSignedIn,
+    auth.loading,
+    auth.profile?.onboarding_completed_at,
+    auth.session?.user.id,
+  ]);
 
   const value = useMemo(
     () => ({
@@ -76,11 +194,14 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
       setDemoMode,
       onboardingOpen,
       onboardingComplete,
+      onboardingSaving,
+      onboardingSaveError,
       openOnboarding,
       closeOnboarding,
       completeOnboarding,
+      retryOnboardingCompletion,
     }),
-    [instrumentId, referencePitch, demoMode, onboardingOpen, onboardingComplete],
+    [closeOnboarding, completeOnboarding, demoMode, instrumentId, onboardingComplete, onboardingOpen, onboardingSaveError, onboardingSaving, openOnboarding, referencePitch, retryOnboardingCompletion, setDemoMode, setInstrumentIdPersisted, setReferencePitch],
   );
   return <AppSettingsContext.Provider value={value}>{children}</AppSettingsContext.Provider>;
 }

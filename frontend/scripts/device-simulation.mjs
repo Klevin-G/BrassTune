@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,19 @@ const viewports = [
   { name: 'Ultra-wide desktop', slug: 'ultra-wide-desktop', width: 2560, height: 1440, kind: 'wide-desktop' },
 ];
 
-const routesVisited = ['Auth Gateway', 'Onboarding', 'Tuner', 'Play-Along', 'Metronome', 'Sheet Music', 'Session Review', 'Progress', 'Sessions', 'Class', 'Settings'];
+export function selectViewports(configuredViewports, requestedSlugs = '') {
+  const requested = requestedSlugs
+    .split(',')
+    .map((slug) => slug.trim())
+    .filter(Boolean);
+  if (requested.length === 0) return configuredViewports;
+  const known = new Map(configuredViewports.map((viewport) => [viewport.slug, viewport]));
+  const unknown = requested.filter((slug) => !known.has(slug));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown device simulation viewport${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`);
+  }
+  return requested.map((slug) => known.get(slug));
+}
 
 const screenshotPlan = new Map([
   ['tiny-phone:practice', 'tiny-phone-practice.png'],
@@ -61,6 +73,26 @@ async function isReachable(url) {
   } catch {
     return false;
   }
+}
+
+export function assertSimulationPortsAvailable({ apiReachable, appReachable }) {
+  const occupied = [apiReachable ? apiUrl : null, appReachable ? appUrl : null].filter(Boolean);
+  if (occupied.length > 0) {
+    throw new Error(`Device simulation refuses to reuse unverified servers at ${occupied.join(', ')}. Stop them so this checkout can start and own both servers.`);
+  }
+}
+
+export function formatCheckoutIdentity(sha, dirty) {
+  return `${sha}${dirty ? ' (dirty worktree)' : ' (clean worktree)'}`;
+}
+
+function currentCheckoutIdentity() {
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: rootDir, encoding: 'utf8', shell: false });
+  const status = spawnSync('git', ['status', '--porcelain'], { cwd: rootDir, encoding: 'utf8', shell: false });
+  if (revision.status !== 0 || status.status !== 0) {
+    throw new Error('Device simulation could not verify the checkout Git identity.');
+  }
+  return { sha: revision.stdout.trim(), dirty: status.stdout.trim().length > 0 };
 }
 
 async function waitFor(url, label, timeoutMs = 20000) {
@@ -110,24 +142,23 @@ async function backendServerCommand() {
 async function ensureServers() {
   const started = [];
   try {
-    if (!(await isReachable(apiUrl))) {
-      const backend = await backendServerCommand();
-      started.push(spawnServer(backend.command, backend.args, backendDir, {
-        APP_ENV: 'local',
-        FRONTEND_ORIGIN: appUrl,
-        CORS_ALLOWED_ORIGINS: `${appUrl},http://localhost:5173,http://127.0.0.1:5173`,
-      }));
-    }
-    if (!(await isReachable(appUrl))) {
-      const viteBin = path.join(frontendDir, 'node_modules', 'vite', 'bin', 'vite.js');
-      started.push(spawnServer(process.execPath, [viteBin, '--host', '127.0.0.1', '--port', '5173'], frontendDir, {
-        VITE_API_BASE_URL: 'http://127.0.0.1:8000',
-        VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
-        VITE_SUPABASE_URL: '',
-        VITE_SUPABASE_PUBLISHABLE_KEY: '',
-        VITE_ENABLE_INTERNAL_TOOLS: 'false',
-      }));
-    }
+    const [apiReachable, appReachable] = await Promise.all([isReachable(apiUrl), isReachable(appUrl)]);
+    assertSimulationPortsAvailable({ apiReachable, appReachable });
+    const backend = await backendServerCommand();
+    started.push(spawnServer(backend.command, backend.args, backendDir, {
+      APP_ENV: 'local',
+      FRONTEND_ORIGIN: appUrl,
+      CORS_ALLOWED_ORIGINS: `${appUrl},http://localhost:5173,http://127.0.0.1:5173`,
+    }));
+    const viteBin = path.join(frontendDir, 'node_modules', 'vite', 'bin', 'vite.js');
+    started.push(spawnServer(process.execPath, [viteBin, '--host', '127.0.0.1', '--port', '5173'], frontendDir, {
+      VITE_API_BASE_URL: 'http://127.0.0.1:8000',
+      VITE_WS_BASE_URL: 'ws://127.0.0.1:8000',
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_PUBLISHABLE_KEY: '',
+      VITE_E2E_DISABLE_SUPABASE: 'true',
+      VITE_ENABLE_INTERNAL_TOOLS: 'false',
+    }));
     await waitFor(apiUrl, 'FastAPI');
     await waitFor(appUrl, 'Vite');
     return started;
@@ -264,7 +295,10 @@ async function assertMobileChrome(page, viewport, issues, label) {
         const rect = button.getBoundingClientRect();
         const visible = rect.bottom > 0 && rect.top < window.innerHeight;
         const overlaps = visible && rect.left < navRect.right && rect.right > navRect.left && rect.top < navRect.bottom && rect.bottom > navRect.top;
-        if (overlaps) overlappedButtons.push(button.textContent?.trim() || button.className);
+        if (overlaps) {
+          const name = button.textContent?.trim() || button.className;
+          overlappedButtons.push(`${name} (${Math.round(rect.top)}-${Math.round(rect.bottom)}px; nav ${Math.round(navRect.top)}-${Math.round(navRect.bottom)}px)`);
+        }
       }
     }
     return { navVisible, sidebarHidden, overlappedButtons };
@@ -309,6 +343,10 @@ async function assertSideBySide(page, selector, issues, label) {
 async function saveScreenshot(page, viewport, key, screenshots) {
   const fileName = screenshotPlan.get(`${viewport.slug}:${key}`);
   if (!fileName) return;
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
   await page.screenshot({ path: path.join(screenshotDir, fileName), fullPage: key !== 'sessions' });
   screenshots.push(fileName);
 }
@@ -321,6 +359,28 @@ async function gotoAndCheck(page, viewport, route, routeLabel, issues) {
   if (!routeLabel.startsWith('Auth')) {
     await assertMobileChrome(page, viewport, issues, `${viewport.name} ${routeLabel}`);
   }
+}
+
+export async function trackVerifiedRoute(routes, label, issues, verify) {
+  const issueCount = issues.length;
+  await verify();
+  if (issues.length === issueCount && !routes.includes(label)) routes.push(label);
+}
+
+export async function trackConditionalRoute(condition, routes, label, issues, verify) {
+  if (!condition) return false;
+  await trackVerifiedRoute(routes, label, issues, verify);
+  return true;
+}
+
+export async function dismissOnboardingDialog(dialog, timeoutMs = 3000) {
+  const dismiss = dialog.getByRole('button', { name: /close for now|dismiss tour for now/i });
+  if (await dismiss.count() === 0) {
+    const available = await dialog.getByRole('button').allTextContents();
+    throw new Error(`Onboarding opened without a supported dismiss action. Available buttons: ${available.filter(Boolean).join(', ') || 'none'}`);
+  }
+  await dismiss.first().click();
+  await dialog.waitFor({ state: 'hidden', timeout: timeoutMs });
 }
 
 async function runViewport(browser, viewport) {
@@ -344,33 +404,40 @@ async function runViewport(browser, viewport) {
   const page = await context.newPage();
   const issues = [];
   const screenshots = [];
+  const routes = [];
   page.on('console', (message) => {
     if (message.type() === 'error') issues.push(`${viewport.name} console: ${message.text()}`);
   });
   page.on('pageerror', (error) => issues.push(`${viewport.name} pageerror: ${error.message}`));
 
   try {
-    await gotoAndCheck(page, viewport, '/', 'Auth Gateway', issues);
-    await saveScreenshot(page, viewport, 'auth', screenshots);
+    await trackVerifiedRoute(routes, 'Auth Gateway', issues, async () => {
+      await gotoAndCheck(page, viewport, '/', 'Auth Gateway', issues);
+      await saveScreenshot(page, viewport, 'auth', screenshots);
+    });
 
-    await gotoAndCheck(page, viewport, '/auth/sign-in', 'Auth Form', issues);
-    if (viewport.slug === 'iphone-modern') {
+    await trackVerifiedRoute(routes, 'Sign In', issues, () => gotoAndCheck(page, viewport, '/auth/sign-in', 'Auth Form', issues));
+    await trackConditionalRoute(viewport.slug === 'iphone-modern', routes, 'Onboarding', issues, async () => {
       await gotoAndCheck(page, viewport, '/settings', 'Settings onboarding trigger', issues);
       await page.getByRole('button', { name: /replay tour/i }).click();
-      await page.getByRole('dialog').waitFor({ state: 'visible' });
+      const dialog = page.getByRole('dialog');
+      await dialog.waitFor({ state: 'visible', timeout: 5000 });
       await assertNoHorizontalOverflow(page, issues, `${viewport.name} Onboarding`);
       await saveScreenshot(page, viewport, 'onboarding', screenshots);
-      await page.getByRole('button', { name: /skip/i }).click();
-    }
+      await dismissOnboardingDialog(dialog);
+    });
 
-    await gotoAndCheck(page, viewport, '/practice', 'Practice', issues);
-    await assertTunerDominant(page, viewport, issues, `${viewport.name} Practice`);
-    await page.locator('.tuner-stage').waitFor({ state: 'visible' });
-    await saveScreenshot(page, viewport, 'practice', screenshots);
+    await trackVerifiedRoute(routes, 'Tuner', issues, async () => {
+      await gotoAndCheck(page, viewport, '/practice', 'Practice', issues);
+      await assertTunerDominant(page, viewport, issues, `${viewport.name} Practice`);
+      await page.locator('.tuner-stage').waitFor({ state: 'visible' });
+      await saveScreenshot(page, viewport, 'practice', screenshots);
+    });
 
-    await gotoAndCheck(page, viewport, '/practice/play-along', 'Play-Along', issues);
-    await gotoAndCheck(page, viewport, '/metronome', 'Metronome', issues);
-    await gotoAndCheck(page, viewport, '/practice/score', 'Sheet Music', issues);
+    await trackVerifiedRoute(routes, 'Play-Along', issues, () => gotoAndCheck(page, viewport, '/practice/play-along', 'Play-Along', issues));
+    await trackVerifiedRoute(routes, 'Metronome', issues, () => gotoAndCheck(page, viewport, '/metronome', 'Metronome', issues));
+    await trackVerifiedRoute(routes, 'Sheet Music', issues, () => gotoAndCheck(page, viewport, '/practice/score', 'Sheet Music', issues));
+    const sessionReviewIssueCount = issues.length;
     await gotoAndCheck(page, viewport, '/practice', 'Practice return', issues);
 
     await page.getByRole('radio', { name: 'Demo', exact: true }).click();
@@ -392,30 +459,40 @@ async function runViewport(browser, viewport) {
     await assertNoHorizontalOverflow(page, issues, `${viewport.name} Session Review`);
     if (viewport.kind === 'tablet-landscape') await assertSideBySide(page, '.two-column-grid', issues, `${viewport.name} Session Review`);
     await saveScreenshot(page, viewport, 'session-review', screenshots);
+    if (issues.length === sessionReviewIssueCount) routes.push('Session Review');
 
-    await gotoAndCheck(page, viewport, '/progress', 'Progress', issues);
-    await page.getByRole('heading', { name: /your progress/i }).waitFor({ state: 'visible' });
-    await saveScreenshot(page, viewport, 'progress', screenshots);
+    await trackVerifiedRoute(routes, 'Progress', issues, async () => {
+      await gotoAndCheck(page, viewport, '/progress', 'Progress', issues);
+      await page.getByRole('heading', { name: /progress/i }).waitFor({ state: 'visible' });
+      await saveScreenshot(page, viewport, 'progress', screenshots);
+    });
 
-    await gotoAndCheck(page, viewport, '/sessions', 'Sessions', issues);
-    await saveScreenshot(page, viewport, 'sessions', screenshots);
-    await gotoAndCheck(page, viewport, '/ensemble', 'Class', issues);
-    await saveScreenshot(page, viewport, 'ensemble', screenshots);
-    await gotoAndCheck(page, viewport, '/settings', 'Settings', issues);
-    await saveScreenshot(page, viewport, 'settings', screenshots);
+    await trackVerifiedRoute(routes, 'Sessions', issues, async () => {
+      await gotoAndCheck(page, viewport, '/sessions', 'Sessions', issues);
+      await saveScreenshot(page, viewport, 'sessions', screenshots);
+    });
+    await trackVerifiedRoute(routes, 'Class', issues, async () => {
+      await gotoAndCheck(page, viewport, '/ensemble', 'Class', issues);
+      await saveScreenshot(page, viewport, 'ensemble', screenshots);
+    });
+    await trackVerifiedRoute(routes, 'Settings', issues, async () => {
+      await gotoAndCheck(page, viewport, '/settings', 'Settings', issues);
+      await saveScreenshot(page, viewport, 'settings', screenshots);
+    });
   } catch (error) {
     issues.push(`Fatal simulation error: ${error.message}`);
   } finally {
     await context.close().catch(() => {});
   }
-  return { viewport, issues, screenshots, routes: routesVisited };
+  return { viewport, issues, screenshots, routes };
 }
 
-async function writeReport(results) {
+async function writeReport(results, checkoutIdentity) {
   const lines = [
     '# Device Simulation Report',
     '',
     `Generated: ${new Date().toISOString()}`,
+    `Checkout: ${formatCheckoutIdentity(checkoutIdentity.sha, checkoutIdentity.dirty)}`,
     '',
     'The committed Playwright harness was used for repeatable multi-viewport browser automation.',
     '',
@@ -441,6 +518,8 @@ async function writeReport(results) {
 }
 
 async function main() {
+  const checkoutIdentity = currentCheckoutIdentity();
+  console.log(`Device simulation checkout: ${formatCheckoutIdentity(checkoutIdentity.sha, checkoutIdentity.dirty)}`);
   await fs.mkdir(screenshotDir, { recursive: true });
   await fs.rm(screenshotDir, { recursive: true, force: true });
   await fs.mkdir(screenshotDir, { recursive: true });
@@ -448,9 +527,10 @@ async function main() {
   let browser;
   let cleanupError = null;
   const results = [];
+  const selectedViewports = selectViewports(viewports, process.env.DEVICE_SIMULATION_VIEWPORTS);
   try {
     browser = await chromium.launch({ headless: true });
-    for (const viewport of viewports) {
+    for (const viewport of selectedViewports) {
       results.push(await runViewport(browser, viewport));
     }
   } finally {
@@ -465,7 +545,7 @@ async function main() {
       cleanupError ??= error;
     }
   }
-  await writeReport(results);
+  await writeReport(results, checkoutIdentity);
   if (cleanupError) throw cleanupError;
   const failures = results.filter((result) => result.issues.length > 0);
   if (failures.length > 0) {
@@ -479,7 +559,9 @@ async function main() {
   console.log(`Device simulation passed. Report: ${reportPath}`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

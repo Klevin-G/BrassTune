@@ -86,8 +86,8 @@ export function MetricTile({
   tone = 'default',
 }: {
   label: string;
-  value: string;
-  detail?: string;
+  value: ReactNode;
+  detail?: ReactNode;
   icon?: LucideIcon;
   tone?: Tone;
 }) {
@@ -216,15 +216,38 @@ export function SegmentedControl<T extends string>({
   onChange: (value: T) => void;
   ariaLabel: string;
 }) {
+  function moveSelection(index: number, event: React.KeyboardEvent<HTMLButtonElement>) {
+    const keyOffsets: Partial<Record<React.KeyboardEvent['key'], number>> = {
+      ArrowLeft: -1,
+      ArrowUp: -1,
+      ArrowRight: 1,
+      ArrowDown: 1,
+    };
+    let nextIndex: number | undefined;
+    if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = options.length - 1;
+    else if (keyOffsets[event.key]) {
+      nextIndex = (index + keyOffsets[event.key]! + options.length) % options.length;
+    }
+    if (nextIndex === undefined) return;
+
+    event.preventDefault();
+    onChange(options[nextIndex].value);
+    const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]');
+    buttons?.[nextIndex]?.focus();
+  }
+
   return (
     <div className="segmented-control" role="radiogroup" aria-label={ariaLabel}>
-      {options.map((option) => (
+      {options.map((option, index) => (
         <button
           aria-checked={value === option.value}
           className={value === option.value ? 'active' : ''}
           key={option.value}
           onClick={() => onChange(option.value)}
+          onKeyDown={(event) => moveSelection(index, event)}
           role="radio"
+          tabIndex={value === option.value ? 0 : -1}
           type="button"
         >
           {option.label}
@@ -234,8 +257,8 @@ export function SegmentedControl<T extends string>({
   );
 }
 
-export function FloatingTabBar({ children }: { children: ReactNode }) {
-  return <nav className="floating-tabbar" aria-label="Primary mobile navigation">{children}</nav>;
+export function FloatingTabBar({ children, ariaLabel }: { children: ReactNode; ariaLabel: string }) {
+  return <nav className="floating-tabbar" aria-label={ariaLabel}>{children}</nav>;
 }
 
 export function BottomActionBar({ children }: { children: ReactNode }) {
@@ -267,9 +290,9 @@ export function EmptyActionState({
   );
 }
 
-export function LoadingSkeleton({ rows = 3 }: { rows?: number }) {
+export function LoadingSkeleton({ rows = 3, label }: { rows?: number; label: string }) {
   return (
-    <div className="loading-skeleton" aria-label="Loading">
+    <div className="loading-skeleton" role="status" aria-live="polite" aria-label={label}>
       {Array.from({ length: rows }).map((_, index) => (
         <span key={index} />
       ))}

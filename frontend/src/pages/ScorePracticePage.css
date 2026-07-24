@@ -34,7 +34,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .sm-pager-label {
@@ -47,7 +47,7 @@
 
 .sm-menu-wrap {
   position: relative;
-  margin-left: 4px;
+  margin-inline-start: 4px;
 }
 
 .sm-menu-scrim {
@@ -59,7 +59,7 @@
 .sm-menu {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  inset-inline-end: 0;
   z-index: 21;
   display: grid;
   min-width: 168px;
@@ -78,7 +78,7 @@
   padding: 10px 11px;
   color: var(--text);
   font-weight: 700;
-  text-align: left;
+  text-align: start;
   border: none;
   border-radius: 10px;
   background: transparent;
@@ -115,7 +115,7 @@
   align-content: start;
   max-height: min(72vh, 760px);
   overflow-y: auto;
-  padding-right: 2px;
+  padding-inline-end: 2px;
 }
 
 .sm-thumb {
@@ -123,7 +123,7 @@
   gap: 7px;
   padding: 8px;
   color: var(--text);
-  text-align: left;
+  text-align: start;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.035);
@@ -372,6 +372,6 @@
   }
 
   .sm-pager {
-    margin-left: 0;
+    margin-inline-start: 0;
   }
 }

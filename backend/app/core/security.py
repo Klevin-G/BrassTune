@@ -43,22 +43,25 @@ def allowed_origins() -> List[str]:
 
 def _normalize_origin(raw_origin: str) -> str:
     origin = raw_origin.strip().rstrip("/")
-    if app_environment() in DEPLOYED_ENVIRONMENTS:
-        _validate_deployed_origin(origin)
+    _validate_origin(origin)
     return origin
 
 
-def _validate_deployed_origin(origin: str) -> None:
+def _validate_origin(origin: str) -> None:
+    if not origin or len(origin) > 512:
+        raise RuntimeError("CORS origins must be non-empty and no longer than 512 characters.")
     if origin == "*" or "*" in origin:
-        raise RuntimeError("Deployed CORS origins must be exact HTTPS origins; wildcards are not allowed.")
+        raise RuntimeError("CORS origins must be exact origins; wildcards are not allowed.")
     parsed = urlparse(origin)
-    if parsed.scheme != "https" or not parsed.netloc:
-        raise RuntimeError("Deployed CORS origins must use https:// and include a host.")
+    environment = app_environment()
+    local_http = environment in LOCAL_ENVIRONMENTS and parsed.scheme == "http"
+    if (parsed.scheme != "https" and not local_http) or not parsed.netloc or not parsed.hostname:
+        raise RuntimeError("CORS origins must use https:// (or http:// in local environments) and include a host.")
     if parsed.path or parsed.params or parsed.query or parsed.fragment:
-        raise RuntimeError("Deployed CORS origins must not include paths, query strings, or fragments.")
+        raise RuntimeError("CORS origins must not include paths, query strings, or fragments.")
     if parsed.username or parsed.password:
-        raise RuntimeError("Deployed CORS origins must not include credentials.")
-    if parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
+        raise RuntimeError("CORS origins must not include credentials.")
+    if environment in DEPLOYED_ENVIRONMENTS and parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
         raise RuntimeError("Deployed CORS origins must not point to localhost.")
 
 
@@ -80,6 +83,8 @@ def origin_is_allowed(origin: str | None) -> bool:
     if not origin:
         return False
     normalized = origin.strip().rstrip("/")
+    if len(normalized) > 512:
+        return False
     if normalized in allowed_origins():
         return True
     try:

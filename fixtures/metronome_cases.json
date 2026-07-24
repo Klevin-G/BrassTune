@@ -1,0 +1,9 @@
+{
+  "contract": "BPM is the selected denominator beat; subdivision alone divides that beat.",
+  "cases": [
+    { "name": "7/8 quarter", "bpm": 120, "numerator": 7, "denominator": 8, "subdivision": "quarter", "expected_seconds": 0.5 },
+    { "name": "2/2 quarter", "bpm": 120, "numerator": 2, "denominator": 2, "subdivision": "quarter", "expected_seconds": 0.5 },
+    { "name": "7/8 eighth", "bpm": 120, "numerator": 7, "denominator": 8, "subdivision": "eighth", "expected_seconds": 0.25 },
+    { "name": "4/4 triplet", "bpm": 120, "numerator": 4, "denominator": 4, "subdivision": "triplet", "expected_seconds": 0.16666666666666666 }
+  ]
+}

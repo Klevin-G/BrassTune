@@ -4,6 +4,10 @@ import io
 import json
 import math
 import asyncio
+import os
+import subprocess
+import sys
+import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +22,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
+import app.db.database as database_module
+import app.services.audio_storage as audio_storage_module
+import app.services.account_deletion as account_deletion_module
 from app.api.auth import AuthContext, _sync_supabase_user, delete_supabase_identity
 from app.api.routes import (
     _filtered_events,
@@ -25,8 +32,13 @@ from app.api.routes import (
     _read_limited_body,
     accept_invitation,
     add_member_by_username,
+    clear_my_sessions,
     create_ensemble_group,
+    ensemble_group_report,
     delete_my_account,
+    delete_session_audio,
+    ensemble_group_roster,
+    ensemble_group_summary,
     get_ensemble_group,
     join_ensemble_by_code,
     leave_ensemble_group,
@@ -44,7 +56,8 @@ from app.db.database import Base, DATABASE_URL, SessionLocal, database_backend, 
 from app.db.maintenance import clear_practice_data, repair_demo_data
 from app.db.seed import _sync_explicit_identity_sequences, seed_demo_data
 from app.main import app
-from app.models.db import AccountDeletionJob, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, UsageEvent, User
+from app.models.db import AccountDeletionJob, AudioStorageJob, DeletedIdentityTombstone, Group, GroupMember, NoteEvent, PitchSample, PracticeSession, UsageEvent, User
+from app.services.account_deletion import ensure_deletion_tombstone_key_state
 from app.schemas.schemas import (
     MAX_BATCH_PITCH_FRAMES,
     AcceptInvitationRequest,
@@ -54,8 +67,9 @@ from app.schemas.schemas import (
     JoinByCodeRequest,
     UpdateGroupMemberRequest,
 )
-from app.services.audio_storage import delete_audio_for_session
-from app.services.session_service import save_pitch_frames
+from app.services.audio_storage import AudioReplaceResult, delete_audio_for_session, prepare_audio_upload, queue_audio_delete, replace_audio_for_session, reserve_audio_upload, retry_audio_storage_jobs
+from app.services.serializers import session_to_dict
+from app.services.session_service import save_pitch_frames, start_session, stop_session
 
 WEBM_AUDIO_BYTES = b"\x1a\x45\xdf\xa3webm-audio-bytes"
 
@@ -63,7 +77,10 @@ WEBM_AUDIO_BYTES = b"\x1a\x45\xdf\xa3webm-audio-bytes"
 def _test_db():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine)()
+    db = sessionmaker(bind=engine)()
+    ensure_deletion_tombstone_key_state(db, allow_initialization=True)
+    db.commit()
+    return db
 
 
 def test_sqlite_engine_uses_busy_timeout_for_browser_ci_contention():
@@ -74,6 +91,168 @@ def test_sqlite_engine_uses_busy_timeout_for_browser_ci_contention():
         journal_mode = str(connection.exec_driver_sql("PRAGMA journal_mode").scalar()).lower()
     assert busy_timeout_ms >= 30000
     assert journal_mode in {"wal", "memory"}
+
+
+def test_legacy_sqlite_account_deletion_jobs_are_rebuilt_nullable_without_data_loss(monkeypatch, tmp_path):
+    legacy_engine = create_engine("sqlite:///%s" % (tmp_path / "legacy.db"))
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                "create table account_deletion_jobs ("
+                "id integer not null primary key, user_id integer not null, supabase_user_id varchar, "
+                "idempotency_key varchar not null unique, stage varchar not null, status varchar not null, "
+                "retry_count integer not null, next_retry_at datetime, safe_error_category varchar, "
+                "counts_json json not null, completed_at datetime, created_at datetime not null, updated_at datetime not null)"
+            )
+        )
+        connection.execute(
+            text(
+                "insert into account_deletion_jobs values "
+                "(1, 42, 'subject-42', 'delete-user-42', 'external_cleanup_failed', 'retryable_failure', "
+                "1, null, 'external_identity_cleanup_failed', '{}', null, current_timestamp, current_timestamp)"
+            )
+        )
+    monkeypatch.setattr(database_module, "engine", legacy_engine)
+
+    database_module._ensure_sqlite_account_deletion_user_id_nullable()
+
+    with legacy_engine.connect() as connection:
+        columns = {row[1]: row for row in connection.execute(text("pragma table_info(account_deletion_jobs)"))}
+        row = connection.execute(text("select user_id, supabase_user_id, status from account_deletion_jobs")).one()
+    assert columns["user_id"][3] == 0
+    assert row == (42, "subject-42", "retryable_failure")
+
+
+def test_fresh_sqlite_tombstone_config_has_expand_phase_and_is_readiness_compatible(monkeypatch):
+    import app.db.readiness as readiness_module
+
+    fresh_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(fresh_engine)
+    monkeypatch.setattr(database_module, "engine", fresh_engine)
+    database_module.ensure_additive_columns()
+
+    with fresh_engine.begin() as connection:
+        columns = {
+            row[1]: row
+            for row in connection.execute(text("pragma table_info(deleted_identity_tombstone_config)"))
+        }
+        connection.execute(
+            text(
+                "insert into deleted_identity_tombstone_config (id, key_verifier, created_at) "
+                "values (1, :verifier, current_timestamp)"
+            ),
+            {"verifier": "a" * 64},
+        )
+        phase = connection.execute(
+            text("select enforcement_phase from deleted_identity_tombstone_config where id = 1")
+        ).scalar_one()
+
+    assert columns["enforcement_phase"][3] == 1
+    assert columns["enforcement_phase"][4] == "'expand'"
+    assert phase == "expand"
+    monkeypatch.setattr(
+        readiness_module,
+        "_configured_engine",
+        lambda: (fresh_engine, False, "sqlite:///:memory:"),
+    )
+    assert readiness_module.database_readiness_issues() == []
+
+
+def test_existing_sqlite_tombstone_config_adds_expand_phase(monkeypatch):
+    legacy_engine = create_engine("sqlite:///:memory:")
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                "create table deleted_identity_tombstone_config ("
+                "id integer not null primary key, key_verifier varchar(64) not null, "
+                "created_at datetime not null)"
+            )
+        )
+        connection.execute(
+            text(
+                "insert into deleted_identity_tombstone_config (id, key_verifier, created_at) "
+                "values (1, :verifier, current_timestamp)"
+            ),
+            {"verifier": "b" * 64},
+        )
+    monkeypatch.setattr(database_module, "engine", legacy_engine)
+    monkeypatch.setattr(database_module, "DATABASE_URL", "postgresql+psycopg://selected-by-ci")
+
+    database_module.ensure_additive_columns()
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                "update deleted_identity_tombstone_config "
+                "set enforcement_phase = 'legacy-invalid'"
+            )
+        )
+    database_module.ensure_additive_columns()
+
+    with legacy_engine.connect() as connection:
+        columns = {
+            row[1]: row
+            for row in connection.execute(text("pragma table_info(deleted_identity_tombstone_config)"))
+        }
+        phase = connection.execute(
+            text("select enforcement_phase from deleted_identity_tombstone_config where id = 1")
+        ).scalar_one()
+    assert columns["enforcement_phase"][3] == 1
+    assert columns["enforcement_phase"][4] == "'expand'"
+    assert phase == "expand"
+
+
+def test_default_pytest_database_is_process_isolated():
+    if os.getenv("BRASSTUNE_PYTEST_DATABASE_ISOLATED") != "1":
+        pytest.skip("Caller explicitly selected the test database.")
+    assert DATABASE_URL.startswith("sqlite:///")
+    assert not DATABASE_URL.endswith("/backend/data/brasstune.db")
+    assert "brasstune-pytest-" in DATABASE_URL
+
+
+def _probe_pytest_database_environment(env):
+    code = """
+import json
+import os
+import runpy
+import sys
+
+state = runpy.run_path(sys.argv[1])
+from app.db.database import DATABASE_URL
+print(json.dumps({
+    "database_url": DATABASE_URL,
+    "isolated": os.getenv("BRASSTUNE_PYTEST_DATABASE_ISOLATED"),
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(Path(__file__).with_name("conftest.py"))],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_pytest_ignores_ambient_application_database_urls(tmp_path):
+    env = os.environ.copy()
+    env.pop("BRASSTUNE_TEST_DATABASE_URL", None)
+    env["BRASSTUNE_DATABASE_URL"] = "sqlite:///%s" % (tmp_path / "ambient-brasstune.db")
+    env["DATABASE_URL"] = "sqlite:///%s" % (tmp_path / "ambient-generic.db")
+    result = _probe_pytest_database_environment(env)
+    assert result["isolated"] == "1"
+    assert "brasstune-pytest-" in result["database_url"]
+    assert "ambient" not in result["database_url"]
+
+
+def test_pytest_requires_test_only_database_url_for_explicit_database(tmp_path):
+    explicit_url = "sqlite:///%s" % (tmp_path / "explicit-test.db")
+    env = os.environ.copy()
+    env["BRASSTUNE_TEST_DATABASE_URL"] = explicit_url
+    env["BRASSTUNE_DATABASE_URL"] = "sqlite:///%s" % (tmp_path / "ambient-brasstune.db")
+    env["DATABASE_URL"] = "sqlite:///%s" % (tmp_path / "ambient-generic.db")
+    result = _probe_pytest_database_environment(env)
+    assert result == {"database_url": explicit_url, "isolated": None}
 
 
 def test_backend_requirements_install_uvicorn_websocket_protocol():
@@ -87,6 +266,126 @@ def test_backend_requirements_use_sqlalchemy_two_floor():
     constraints = (Path(__file__).resolve().parents[2] / "constraints.txt").read_text()
     assert "sqlalchemy>=2.0,<3" in requirements.lower()
     assert "sqlalchemy>=2.0" in constraints.lower()
+
+
+def test_backend_deploy_and_ci_use_hash_pinned_lockfiles():
+    root = Path(__file__).resolve().parents[3]
+    prod_lock = (root / "backend" / "requirements-prod.lock").read_text()
+    dev_lock = (root / "backend" / "requirements-dev.lock").read_text()
+    assert "--hash=sha256:" in prod_lock
+    assert "--hash=sha256:" in dev_lock
+    assert "fastapi==" in prod_lock
+    assert "pytest==" in dev_lock
+    assert "pip-audit==" in dev_lock
+    assert "pip install --require-hashes -r requirements-prod.lock" in (root / "render.yaml").read_text()
+    for workflow in ("backend.yml", "frontend.yml", "device-simulation.yml", "security.yml"):
+        contents = (root / ".github" / "workflows" / workflow).read_text()
+        assert "pip install --require-hashes -r requirements" in contents
+        assert "--upgrade pip" not in contents
+
+
+def test_postgresql_integration_workflow_supplies_test_only_tombstone_secret_to_readiness():
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github" / "workflows" / "backend.yml").read_text()
+    test_secret = "ci-test-only-deletion-tombstone-secret-20260723"
+
+    assert f"BRASSTUNE_DELETION_TOMBSTONE_SECRET: {test_secret}" in workflow
+    assert len(test_secret.encode("utf-8")) >= 32
+    assert "python -m app.db.scrub_deletion_privacy && python -m app.db.check_ready" in workflow
+
+
+def test_deploy_uses_an_audited_locked_local_vercel_cli_and_disallows_all_target():
+    root = Path(__file__).resolve().parents[3]
+    deploy = (root / ".github" / "workflows" / "deploy.yml").read_text()
+    security = (root / ".github" / "workflows" / "security.yml").read_text()
+    vercel_cli_dir = root / ".github" / "tools" / "vercel-cli"
+    package = json.loads((vercel_cli_dir / "package.json").read_text())
+    lock = json.loads((vercel_cli_dir / "package-lock.json").read_text())
+
+    assert package["dependencies"]["vercel"] == "54.14.0"
+    assert package["overrides"] == {
+        "@tootallnate/once": "2.0.1",
+        "ajv": "8.18.0",
+        "js-yaml": "4.3.0",
+        "minimatch@10.1.1": "10.2.5",
+        "path-to-regexp@6.1.0": "6.3.0",
+        "path-to-regexp@8.2.0": "8.4.0",
+        "path-to-regexp@8.3.0": "8.4.0",
+        "smol-toml": "1.6.1",
+        "srvx": "0.11.13",
+        "tar": "7.5.19",
+        "undici@5.28.4": "6.27.0",
+    }
+    locked_vercel = lock["packages"]["node_modules/vercel"]
+    assert locked_vercel["version"] == "54.14.0"
+    assert locked_vercel["integrity"].startswith("sha512-")
+    locked_overrides = {
+        "node_modules/@tootallnate/once": "2.0.1",
+        "node_modules/ajv": "8.18.0",
+        "node_modules/js-yaml": "4.3.0",
+        "node_modules/minimatch": "10.2.5",
+        "node_modules/path-to-regexp": "8.4.0",
+        "node_modules/@vercel/node/node_modules/path-to-regexp": "6.3.0",
+        "node_modules/smol-toml": "1.6.1",
+        "node_modules/srvx": "0.11.13",
+        "node_modules/tar": "7.5.19",
+        "node_modules/undici": "6.27.0",
+    }
+    for path, version in locked_overrides.items():
+        assert lock["packages"][path]["version"] == version
+        assert lock["packages"][path]["integrity"].startswith("sha512-")
+
+    install = "npm ci --prefix .github/tools/vercel-cli --ignore-scripts"
+    audit = "npm audit --omit=dev --prefix .github/tools/vercel-cli"
+    first_credential = "VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}"
+    assert install in deploy
+    assert audit in deploy
+    assert deploy.index(install) < deploy.index(audit) < deploy.index(first_credential)
+    assert "cache-dependency-path: .github/tools/vercel-cli/package-lock.json" in deploy
+    assert "npm install -g vercel" not in deploy
+    assert ".github/tools/vercel-cli/node_modules/.bin/vercel" in deploy
+    assert "VITE_AUTH_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED }}" in deploy
+    assert 'sync_variable VITE_AUTH_APPLE_ENABLED "$VITE_AUTH_APPLE_ENABLED"' in deploy
+    assert "'VITE_AUTH_APPLE_ENABLED'," in deploy
+    assert "VITE_AUTH_APPLE_ENABLED must equal true or false in Vercel Production." in deploy
+    assert "default: all" not in deploy
+    assert "- all" not in deploy
+    assert "target == 'all'" not in deploy
+
+    assert security.count('".github/workflows/deploy.yml"') == 2
+    assert security.count('".github/tools/vercel-cli/**"') == 2
+    assert "frontend/package-lock.json\n            .github/tools/vercel-cli/package-lock.json" in security
+    assert install in security
+    assert audit in security
+    assert security.index(install) < security.index(audit) < security.index("secrets.GITHUB_TOKEN")
+    assert "VERCEL_TOKEN" not in security
+
+
+def test_render_deploy_removes_legacy_cors_regex_and_uses_authoritative_runtime_values():
+    root = Path(__file__).resolve().parents[3]
+    render = (root / "render.yaml").read_text()
+    deploy = (root / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "BRASSTUNE_ALLOW_CORS_REGEX" not in render
+    assert "CORS_ALLOWED_ORIGIN_REGEX" not in render
+    assert "BRASSTUNE_DELETION_TOMBSTONE_SECRET" in render
+    assert "BRASSTUNE_DELETION_TOMBSTONE_SECRET\n        sync: false" in render
+    assert "generateValue: true" not in render
+    assert 'PYTHON_VERSION\n        value: "3.11.15"' in render
+    assert "/env-vars/BRASSTUNE_DELETION_TOMBSTONE_SECRET" in deploy
+    assert "secrets.BRASSTUNE_DELETION_TOMBSTONE_SECRET" in deploy
+    assert "--request DELETE" in deploy
+    assert "/env-vars/${key}" in deploy
+    assert "delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX" in deploy
+    assert "delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX" in deploy
+    assert deploy.index("delete_render_env_var CORS_ALLOWED_ORIGIN_REGEX") < deploy.index(
+        "delete_render_env_var BRASSTUNE_ALLOW_CORS_REGEX"
+    )
+    assert "204)" in deploy
+    assert "404)" in deploy
+    assert deploy.index("Disable Render auto-deploy") < deploy.index("Remove legacy Render CORS regex variables")
+    assert deploy.index("Remove legacy Render CORS regex variables") < deploy.index("Trigger exact Render deploy")
+    assert "/env-vars/PYTHON_VERSION" in deploy
+    assert 'BRASSTUNE_RENDER_PYTHON_VERSION: "3.11.15"' in deploy
 
 
 def _session(db, user_id: int, instrument_id: str, started_at: dt.datetime):
@@ -149,8 +448,10 @@ def test_invalid_instrument_rejected_by_api():
     with TestClient(app) as client:
         response = client.post("/api/sessions/start", json={"instrument_id": "trumpett", "reference_pitch_hz": 440})
         assert response.status_code == 400
+        assert response.json()["code"] == "bad_request"
         response = client.get("/api/recommendations?instrument_id=trumpett")
         assert response.status_code == 400
+        assert response.json()["code"] == "bad_request"
 
 
 def test_global_json_body_limit_rejects_oversized_payload(monkeypatch):
@@ -163,8 +464,37 @@ def test_global_json_body_limit_rejects_oversized_payload(monkeypatch):
         )
     assert response.status_code == 413
     assert response.json()["detail"] == "Request body is too large."
+    assert response.json()["code"] == "payload_too_large"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+
+
+def test_global_json_body_limit_covers_structured_json_and_is_bounded(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_MAX_JSON_BODY_BYTES", "8")
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/start",
+            headers={"Content-Type": "application/problem+json"},
+            content=b'{"instrument_id":"trumpet"}',
+        )
+    assert response.status_code == 413
+    assert response.json()["code"] == "payload_too_large"
+
+    monkeypatch.setenv("BRASSTUNE_MAX_JSON_BODY_BYTES", "0")
+    assert main_module._bounded_json_body_limit() == main_module._DEFAULT_MAX_JSON_BODY_BYTES
+    monkeypatch.setenv("BRASSTUNE_MAX_JSON_BODY_BYTES", str(10**12))
+    assert main_module._bounded_json_body_limit() == main_module._ABSOLUTE_MAX_JSON_BODY_BYTES
+
+
+def test_validation_error_has_stable_code_and_preserves_detail_shape():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "name": "x" * 121},
+        )
+    assert response.status_code == 422
+    assert response.json()["code"] == "request_validation_failed"
+    assert isinstance(response.json()["detail"], list)
 
 
 def test_configurable_rate_limit_rejects_repeated_requests(monkeypatch):
@@ -217,6 +547,43 @@ def test_deployed_cors_origins_reject_wildcards_and_insecure_values(monkeypatch)
     assert allowed_origins() == ["https://brasstune.vercel.app"]
 
 
+def test_local_cors_origins_still_reject_wildcards_credentials_and_paths(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "local")
+    for origin in ("*", "http://user:password@localhost:5173", "http://localhost:5173/path"):
+        monkeypatch.setenv("CORS_ALLOWED_ORIGINS", origin)
+        with pytest.raises(RuntimeError):
+            allowed_origins()
+
+
+def test_cors_preflight_allows_public_headers_but_not_maintenance_secret():
+    with TestClient(app) as client:
+        allowed = client.options(
+            "/api/sessions/start",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+        blocked = client.options(
+            "/api/maintenance/audio-storage/retry",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "x-brasstune-maintenance-secret",
+            },
+        )
+    assert allowed.status_code == 200
+    assert blocked.status_code == 400
+
+
+def test_overlong_origin_is_rejected_before_cors_regex_processing():
+    with TestClient(app) as client:
+        response = client.get("/api/instruments", headers={"Origin": "https://" + ("a" * 600)})
+    assert response.status_code == 400
+    assert response.json()["code"] == "bad_request"
+
+
 def test_default_deployed_environment_requires_explicit_cors_origins(monkeypatch):
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
@@ -233,9 +600,11 @@ def test_api_responses_include_security_headers():
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["cache-control"] == "no-store"
+    assert len(response.headers["x-request-id"]) == 32
 
 
-def test_unhandled_http_errors_are_generic_and_hardened():
+def test_unhandled_http_errors_are_generic_hardened_and_secret_free_in_logs(caplog):
     route_path = "/api/__test_unhandled_error"
 
     if not any(getattr(route, "path", None) == route_path for route in app.routes):
@@ -243,13 +612,17 @@ def test_unhandled_http_errors_are_generic_and_hardened():
         def _raise_test_error():
             raise RuntimeError("database password leaked in traceback")
 
-    with TestClient(app, raise_server_exceptions=False) as client:
-        response = client.get(route_path)
+    with caplog.at_level("ERROR", logger="brasstune.api"):
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(route_path)
     assert response.status_code == 500
     assert response.json()["detail"] == "The server could not complete this request."
     assert "password" not in response.text.lower()
     assert response.headers["x-content-type-options"] == "nosniff"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert response.json()["code"] == "internal_error"
+    assert "password" not in caplog.text.lower()
+    assert route_path in caplog.text
 
 
 def test_live_and_version_endpoints_are_public(monkeypatch):
@@ -318,6 +691,239 @@ def test_postgres_readiness_requires_account_deletion_counts_jsonb():
         "account_deletion_jobs",
         [{"name": "counts_json", "type": "JSONB"}],
     ) == []
+    assert _postgres_column_type_issues(
+        "audio_storage_jobs",
+        [{"name": "details_json", "type": "TEXT"}],
+    ) == ["Column audio_storage_jobs.details_json must be jsonb, not text."]
+
+
+def test_postgres_readiness_requires_terminal_job_identifier_nullability():
+    from app.db.readiness import _postgres_column_nullability_issues
+
+    assert _postgres_column_nullability_issues(
+        "audio_storage_jobs",
+        [{"name": "user_id", "nullable": False}, {"name": "session_id", "nullable": True}],
+    ) == ["Column audio_storage_jobs.user_id must be nullable."]
+    assert _postgres_column_nullability_issues(
+        "audio_storage_jobs",
+        [{"name": "user_id", "nullable": True}, {"name": "session_id", "nullable": True}],
+    ) == []
+
+    assert _postgres_column_nullability_issues(
+        "account_deletion_jobs",
+        [{"name": "user_id", "nullable": False}],
+    ) == ["Column account_deletion_jobs.user_id must be nullable."]
+
+
+def test_postgres_readiness_tracks_account_deletion_expand_and_contract_phases():
+    from app.db.readiness import _account_deletion_constraint_phase_issues
+
+    assert _account_deletion_constraint_phase_issues("expand", []) == []
+    assert _account_deletion_constraint_phase_issues("expand", [False]) == [
+        "Expand-phase account deletion privacy must not install the terminal constraint."
+    ]
+    assert _account_deletion_constraint_phase_issues("contract", [True]) == []
+    assert _account_deletion_constraint_phase_issues("contract", []) == [
+        "Contract-phase account deletion privacy requires one validated terminal constraint."
+    ]
+    assert _account_deletion_constraint_phase_issues("contract", [False]) == [
+        "Contract-phase account deletion privacy requires one validated terminal constraint."
+    ]
+    assert _account_deletion_constraint_phase_issues(None, []) == [
+        "Account deletion privacy rollout phase is missing or invalid."
+    ]
+
+
+def test_deployed_readiness_requires_dedicated_stable_deletion_tombstone_key(monkeypatch):
+    from app.db.readiness import maintenance_readiness_issues
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", "configured")
+    monkeypatch.delenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", raising=False)
+    assert "BRASSTUNE_DELETION_TOMBSTONE_SECRET" in " ".join(maintenance_readiness_issues())
+    monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "too-short")
+    assert "at least 32 bytes" in " ".join(maintenance_readiness_issues())
+    monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "production-deletion-tombstone-key-32-bytes")
+    assert maintenance_readiness_issues() == []
+
+
+class _ReadinessResult:
+    def __init__(self, rows=None, scalar_value=None):
+        self.rows = rows or []
+        self.scalar_value = scalar_value
+
+    def mappings(self):
+        return self
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def first(self):
+        return self.rows[0] if self.rows else None
+
+    def scalar(self):
+        return self.scalar_value
+
+
+def test_postgres_application_readiness_detects_rls_policy_and_grant_drift():
+    from app.db.readiness import BACKEND_APPLICATION_TABLES, _postgres_application_security_issues
+
+    class FakeConnection:
+        def execute(self, statement, _params=None):
+            sql = str(statement)
+            if "c.relrowsecurity as rls_enabled" in sql:
+                return _ReadinessResult(
+                    [
+                        {"table_name": table, "rls_enabled": table != "users"}
+                        for table in BACKEND_APPLICATION_TABLES
+                    ]
+                )
+            if "count(*) as policy_count" in sql:
+                return _ReadinessResult([{"tablename": "usage_events", "policy_count": 1}])
+            if "has_table_privilege" in sql:
+                rows = []
+                for role in ("anon", "authenticated"):
+                    for table in BACKEND_APPLICATION_TABLES:
+                        rows.append(
+                            {
+                                "rolname": role,
+                                "table_name": table,
+                                "can_select": role == "authenticated" and table == "users",
+                                "can_insert": False,
+                                "can_update": False,
+                                "can_delete": False,
+                                "can_truncate": False,
+                                "can_reference": False,
+                                "can_trigger": False,
+                            }
+                        )
+                return _ReadinessResult(rows)
+            if "has_sequence_privilege" in sql:
+                return _ReadinessResult(
+                    [
+                        {
+                            "rolname": "anon",
+                            "sequence_name": "users_id_seq",
+                            "can_use": True,
+                            "can_select": False,
+                            "can_update": False,
+                        }
+                    ]
+                )
+            raise AssertionError(sql)
+
+    issues = _postgres_application_security_issues(
+        FakeConnection(),
+        set(BACKEND_APPLICATION_TABLES),
+    )
+    assert "Row level security must be enabled on public.users." in issues
+    assert "Backend-only public.usage_events must not have Data API RLS policies." in issues
+    assert "Data API role authenticated must not access public.users." in issues
+    assert "Data API role anon must not access application sequence users_id_seq." in issues
+
+
+def test_storage_readiness_enforces_private_bucket_settings_and_policy_scope():
+    from app.db.readiness import _postgres_storage_security_issues
+
+    class FakeConnection:
+        def __init__(self, *, public=False, file_size_limit=50 * 1024 * 1024, policy_qual=None):
+            self.public = public
+            self.file_size_limit = file_size_limit
+            self.policy_qual = policy_qual
+
+        def execute(self, statement, _params=None):
+            sql = str(statement)
+            if "information_schema.columns" in sql:
+                return _ReadinessResult(
+                    [{"column_name": name} for name in ("id", "public", "file_size_limit", "allowed_mime_types")]
+                )
+            if "from storage.buckets where id" in sql:
+                return _ReadinessResult(
+                    [
+                        {
+                            "public": self.public,
+                            "file_size_limit": self.file_size_limit,
+                            "allowed_mime_types": ["audio/webm", "audio/mp4", "audio/mpeg", "audio/wav", "audio/ogg"],
+                        }
+                    ]
+                )
+            if "c.relrowsecurity as rls_enabled" in sql:
+                return _ReadinessResult(
+                    [
+                        {"table_name": "buckets", "rls_enabled": True},
+                        {"table_name": "objects", "rls_enabled": True},
+                    ]
+                )
+            if "from pg_policies" in sql:
+                if self.policy_qual is None:
+                    return _ReadinessResult([])
+                return _ReadinessResult(
+                    [
+                        {
+                            "tablename": "objects",
+                            "policyname": "browser policy",
+                            "roles": ["authenticated"],
+                            "qual": self.policy_qual,
+                            "with_check": None,
+                        }
+                    ]
+                )
+            raise AssertionError(sql)
+
+    assert _postgres_storage_security_issues(
+        FakeConnection(policy_qual="bucket_id = 'avatars'::text"),
+        "session-audio",
+    ) == []
+    issues = _postgres_storage_security_issues(
+        FakeConnection(public=True, file_size_limit=1, policy_qual="true"),
+        "session-audio",
+    )
+    assert "Configured audio bucket must be private." in issues
+    assert "Configured audio bucket must enforce the backend upload-size limit." in issues
+    assert "Browser-facing Storage policies may expose the configured audio bucket." in issues
+
+
+def test_storage_policy_checks_using_and_with_check_independently():
+    from app.db.readiness import _storage_policy_may_reach_bucket
+
+    assert _storage_policy_may_reach_bucket(
+        {
+            "roles": ["authenticated"],
+            "qual": "true",
+            "with_check": "bucket_id = 'avatars'::text",
+        },
+        "session-audio",
+    )
+    assert not _storage_policy_may_reach_bucket(
+        {
+            "roles": ["authenticated"],
+            "qual": "bucket_id = 'avatars'::text",
+            "with_check": "bucket_id = 'avatars'::text",
+        },
+        "session-audio",
+    )
+
+
+def test_deployed_release_readiness_requires_one_matching_full_revision(monkeypatch):
+    from app.db.readiness import release_readiness_issues, version_payload
+
+    monkeypatch.setenv("APP_ENV", "production")
+    for name in ("RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA", "GITHUB_SHA", "BRASSTUNE_RELEASE_SHA"):
+        monkeypatch.delenv(name, raising=False)
+    assert release_readiness_issues() == ["Missing exact release revision identity."]
+
+    monkeypatch.setenv("BRASSTUNE_RELEASE_SHA", "abc123")
+    assert release_readiness_issues() == ["Release revision identity must be a full Git object id."]
+
+    revision = "a" * 40
+    monkeypatch.setenv("BRASSTUNE_RELEASE_SHA", revision)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", revision.upper())
+    assert release_readiness_issues() == []
+    assert version_payload()["commit_sha"] == revision.upper()
+    assert version_payload()["revision_source"] == "RENDER_GIT_COMMIT"
+
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "b" * 40)
+    assert release_readiness_issues() == ["Configured release revision identities do not match."]
 
 
 def test_postgres_readiness_accepts_exact_membership_unique_constraint_or_index():
@@ -479,6 +1085,195 @@ def test_batch_save_commits_multiple_pitch_frames():
         assert len(samples) == 2
     finally:
         db.close()
+
+
+def test_start_session_fails_closed_when_owner_is_missing():
+    db = _test_db()
+    try:
+        with pytest.raises(HTTPException) as missing_owner:
+            start_session(db, "trumpet", "No owner", 440.0, user_id=999_999)
+        assert missing_owner.value.status_code == 404
+        assert db.query(User).count() == 0
+        assert db.query(PracticeSession).count() == 0
+    finally:
+        db.close()
+
+
+def test_start_session_finalizes_previous_active_session_for_owner():
+    db = _test_db()
+    try:
+        user = User(id=901, username="session-owner-901", name="Session Owner", primary_instrument_id="trumpet")
+        db.add(user)
+        db.commit()
+
+        first = start_session(db, "trumpet", "First", 440.0, user_id=user.id)
+        second = start_session(db, "trumpet", "Second", 440.0, user_id=user.id)
+        db.refresh(first)
+
+        assert first.ended_at is not None
+        assert second.ended_at is None
+        assert (
+            db.query(PracticeSession)
+            .filter(
+                PracticeSession.user_id == user.id,
+                PracticeSession.ended_at.is_(None),
+            )
+            .count()
+            == 1
+        )
+    finally:
+        db.close()
+
+
+def test_stopped_session_rejects_new_pitch_samples():
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        stopped = client.post(f"/api/sessions/{session['id']}/stop")
+        frame = frequency_to_pitch_frame(
+            midi_to_frequency(60),
+            MIN_RECORDING_CONFIDENCE,
+            0.1,
+            0,
+            "trumpet",
+            440.0,
+        ).to_dict()
+        response = client.post(f"/api/sessions/{session['id']}/samples", json=frame)
+
+    assert stopped.status_code == 200
+    assert response.status_code == 409
+    assert response.json()["code"] == "conflict"
+    assert "ended" in response.json()["detail"].lower()
+
+
+def test_cached_websocket_session_cannot_save_after_http_stop():
+    """A socket keeps one SQLAlchemy session open while HTTP may stop a session.
+
+    The write-side lookup must replace an identity-map-cached active session with
+    its durable state before deciding whether it may insert samples.
+    """
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        websocket_db = SessionLocal()
+        try:
+            cached = websocket_db.query(PracticeSession).filter(PracticeSession.id == session["id"]).first()
+            assert cached is not None
+            assert cached.ended_at is None
+
+            stopped = client.post(f"/api/sessions/{session['id']}/stop")
+            assert stopped.status_code == 200
+
+            frame = frequency_to_pitch_frame(
+                midi_to_frequency(60),
+                MIN_RECORDING_CONFIDENCE,
+                0.1,
+                0,
+                "trumpet",
+                440.0,
+            ).to_dict()
+            with pytest.raises(HTTPException) as rejected:
+                save_pitch_frames(websocket_db, session["id"], [frame])
+
+            assert rejected.value.status_code == 409
+            assert websocket_db.query(PitchSample).filter(PitchSample.session_id == session["id"]).count() == 0
+        finally:
+            websocket_db.close()
+
+
+def test_cached_websocket_session_cannot_refinalize_after_http_stop():
+    """Disconnect cleanup must preserve an HTTP stop's durable summary exactly."""
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        websocket_db = SessionLocal()
+        observer_db = SessionLocal()
+        try:
+            cached = websocket_db.query(PracticeSession).filter(PracticeSession.id == session["id"]).first()
+            assert cached is not None
+            assert cached.ended_at is None
+
+            stopped = client.post(f"/api/sessions/{session['id']}/stop")
+            assert stopped.status_code == 200
+            original = observer_db.query(PracticeSession).filter(PracticeSession.id == session["id"]).first()
+            assert original is not None
+            original_summary = (
+                original.ended_at,
+                original.duration_seconds,
+                original.notes_count,
+                original.average_signed_cents,
+                original.average_abs_cents,
+                original.in_tune_percentage,
+            )
+
+            stopped_again = stop_session(websocket_db, session["id"])
+            assert stopped_again is not None
+
+            observer_db.expire_all()
+            preserved = observer_db.query(PracticeSession).filter(PracticeSession.id == session["id"]).first()
+            assert preserved is not None
+            assert (
+                preserved.ended_at,
+                preserved.duration_seconds,
+                preserved.notes_count,
+                preserved.average_signed_cents,
+                preserved.average_abs_cents,
+                preserved.in_tune_percentage,
+            ) == original_summary
+        finally:
+            observer_db.close()
+            websocket_db.close()
+
+
+def test_repeated_stop_preserves_original_end_timestamp():
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        first = client.post(f"/api/sessions/{session['id']}/stop")
+        second = client.post(f"/api/sessions/{session['id']}/stop")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["ended_at"] == first.json()["ended_at"]
+    db = SessionLocal()
+    try:
+        completion_events = [
+            event
+            for event in db.query(UsageEvent).filter(UsageEvent.event_name == "session_completed").all()
+            if event.properties.get("session_id") == session["id"]
+        ]
+        assert len(completion_events) == 1
+    finally:
+        db.close()
+
+
+def test_websocket_disconnect_finalizes_socket_created_session():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_json(
+                {
+                    "type": "start_session",
+                    "instrument_id": "trumpet",
+                    "name": "Disconnected practice",
+                    "reference_pitch_hz": 440,
+                }
+            )
+            started = websocket.receive_json()
+            assert started["type"] == "session_started"
+            session_id = started["session"]["id"]
+
+        session = client.get(f"/api/sessions/{session_id}")
+
+    assert session.status_code == 200
+    assert session.json()["ended_at"] is not None
 
 
 def test_saved_pitch_frames_are_canonicalized_server_side():
@@ -693,6 +1488,61 @@ def test_production_startup_requires_explicit_auth_mode(monkeypatch):
             pass
 
 
+def test_supabase_auth_rejects_credentialed_or_pathful_base_urls(monkeypatch):
+    from app.api.auth import _supabase_endpoint
+
+    for value in (
+        "https://user:password@example.supabase.co",
+        "https://example.supabase.co/project",
+        "https://example.supabase.co?token=value",
+    ):
+        monkeypatch.setenv("SUPABASE_URL", value)
+        with pytest.raises(HTTPException) as blocked:
+            _supabase_endpoint("/auth/v1/user")
+        assert blocked.value.status_code == 503
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SUPABASE_URL", "http://localhost:54321")
+    with pytest.raises(HTTPException) as deployed_localhost:
+        _supabase_endpoint("/auth/v1/user")
+    assert deployed_localhost.value.status_code == 503
+
+
+def test_bearer_token_length_is_bounded():
+    from app.api.auth import _bearer_token
+
+    with pytest.raises(HTTPException) as blocked:
+        _bearer_token("Bearer " + ("x" * 16_385))
+    assert blocked.value.status_code == 413
+
+
+def test_supabase_storage_rejects_unsafe_bucket_and_cross_origin_signed_url(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-service-key-placeholder")
+    monkeypatch.setenv("SUPABASE_STORAGE_BUCKET", "../private")
+    with pytest.raises(HTTPException) as unsafe_bucket:
+        audio_storage_module._supabase_bucket()
+    assert unsafe_bucket.value.status_code == 503
+
+    monkeypatch.setenv("SUPABASE_STORAGE_BUCKET", "session-audio")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"signedURL": "https://evil.example/recording.webm"}).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: FakeResponse())
+    with pytest.raises(HTTPException) as invalid_signed_url:
+        audio_storage_module.create_supabase_signed_url("1/1/recording.webm")
+    assert invalid_signed_url.value.status_code == 502
+    assert "invalid" in invalid_signed_url.value.detail.lower()
+
+
 def test_invalid_app_env_is_rejected(monkeypatch):
     monkeypatch.setenv("APP_ENV", "prod")
     monkeypatch.setenv("BRASSTUNE_AUTH_MODE", "disabled")
@@ -825,6 +1675,19 @@ def test_audio_upload_rejects_spoofed_audio_mime():
             assert "format" in response.json()["detail"].lower()
 
 
+@pytest.mark.parametrize("duration", ["nan", "inf", "-1", "86401"])
+def test_audio_upload_rejects_invalid_duration_metadata(duration):
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        response = client.post(
+            f"/api/sessions/{session['id']}/audio",
+            content=WEBM_AUDIO_BYTES,
+            headers={"Content-Type": "audio/webm", "X-Audio-Duration-Seconds": duration},
+        )
+    assert response.status_code == 400
+    assert "duration" in response.json()["detail"].lower()
+
+
 def test_session_zip_contains_expected_files():
     with TestClient(app) as client:
         session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
@@ -943,6 +1806,7 @@ def test_websocket_stop_session_requires_owner_or_admin():
             websocket.send_json({"type": "stop_session", "session_id": created["id"]})
             message = websocket.receive_json()
         assert message["type"] == "error"
+        assert message["code"] == "permission_denied"
         assert "access" in message["message"].lower()
         session = client.get(f"/api/sessions/{created['id']}", headers={"Authorization": "Bearer dev-user-3"}).json()
         assert session["ended_at"] is None
@@ -955,6 +1819,7 @@ def test_websocket_pcm_frame_size_is_limited():
             websocket.send_json({"type": "audio_frame", "instrument_id": "trumpet", "sample_rate": 48000, "pcm": oversized_pcm})
             message = websocket.receive_json()
     assert message["type"] == "error"
+    assert message["code"] == "payload_too_large"
     assert "too large" in message["message"].lower()
 
 
@@ -963,6 +1828,7 @@ def test_websocket_rejects_query_token_auth():
         with client.websocket_connect("/ws/pitch?token=dev-user-1") as websocket:
             message = websocket.receive_json()
     assert message["type"] == "error"
+    assert message["code"] == "query_auth_disabled"
     assert "query-token" in message["message"]
 
 
@@ -979,6 +1845,7 @@ def test_websocket_rejects_unapproved_origin():
         with client.websocket_connect("/ws/pitch", headers={"Origin": "https://evil.example"}) as websocket:
             message = websocket.receive_json()
     assert message["type"] == "error"
+    assert message["code"] == "origin_not_allowed"
     assert "origin" in message["message"].lower()
 
 
@@ -1044,7 +1911,33 @@ def test_websocket_raw_message_size_is_limited():
             websocket.send_text('{"type":"ping","padding":"%s"}' % ("x" * (270 * 1024)))
             message = websocket.receive_json()
     assert message["type"] == "error"
+    assert message["code"] == "payload_too_large"
     assert "too large" in message["message"].lower()
+
+
+def test_websocket_binary_frames_close_with_stable_unsupported_data_error():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_bytes(b"not-json")
+            message = websocket.receive_json()
+            assert message == {
+                "type": "error",
+                "code": "binary_message_not_supported",
+                "message": "Binary WebSocket messages are not supported.",
+            }
+            with pytest.raises(WebSocketDisconnect) as disconnected:
+                websocket.receive_json()
+    assert disconnected.value.code == 1003
+
+
+def test_websocket_invalid_stop_session_is_recoverable_and_stable():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/pitch") as websocket:
+            websocket.send_json({"type": "stop_session", "session_id": True})
+            message = websocket.receive_json()
+            assert message["code"] == "request_validation_failed"
+            websocket.send_json({"type": "ping"})
+            assert websocket.receive_json() == {"type": "pong"}
 
 
 def test_batch_pitch_frame_size_is_limited():
@@ -1066,6 +1959,29 @@ def test_limited_body_reader_rejects_before_unbounded_accumulation():
         assert False, "Expected HTTPException"
     except Exception as exc:
         assert getattr(exc, "status_code", None) == 413
+
+
+def test_audio_upload_limit_can_only_be_lowered_not_disabled_or_raised(monkeypatch):
+    absolute_limit = audio_storage_module.MAX_AUDIO_UPLOAD_BYTES
+    monkeypatch.setenv("SESSION_AUDIO_MAX_BYTES", "8")
+    assert audio_storage_module.audio_upload_limit_bytes() == 8
+    monkeypatch.setenv("SESSION_AUDIO_MAX_BYTES", "0")
+    assert audio_storage_module.audio_upload_limit_bytes() == absolute_limit
+    monkeypatch.setenv("SESSION_AUDIO_MAX_BYTES", str(absolute_limit * 10))
+    assert audio_storage_module.audio_upload_limit_bytes() == absolute_limit
+
+
+def test_unsupported_audio_storage_backend_is_rejected_before_reservation(monkeypatch):
+    db = _test_db()
+    try:
+        session = _session(db, 49, "trumpet", dt.datetime(2026, 6, 15))
+        monkeypatch.setenv("SESSION_AUDIO_STORAGE_BACKEND", "misspelled-provider")
+        with pytest.raises(HTTPException) as blocked:
+            prepare_audio_upload(session, b"RIFF....WAVE", "audio/wav", 4.0)
+        assert blocked.value.status_code == 503
+        assert db.query(AudioStorageJob).count() == 0
+    finally:
+        db.close()
 
 
 def test_signed_in_student_cannot_use_full_json_export_bypass():
@@ -1176,6 +2092,89 @@ def test_student_roster_view_is_self_only_and_redacted():
     assert "username" not in member
 
 
+def test_ensemble_roster_uses_session_duration_for_tuning_averages():
+    db = _test_db()
+    try:
+        director = User(id=780, username="director780", name="Director", role="director", primary_instrument_id="trumpet")
+        student = User(
+            id=781,
+            username="student781",
+            name="Student",
+            role="student",
+            primary_instrument_id="horn",
+            last_active_at=dt.datetime(2026, 7, 3, 9),
+        )
+        group = Group(id=782, name="Duration Contract", director_user_id=director.id)
+        membership = GroupMember(
+            group_id=group.id,
+            user_id=student.id,
+            instrument_id="horn",
+            role_in_group="student",
+            status="active",
+            active_since=dt.datetime(2026, 7, 1),
+        )
+        db.add_all([director, student, group, membership])
+        db.commit()
+        db.add_all(
+            [
+                PracticeSession(
+                    user_id=student.id,
+                    instrument_id="horn",
+                    name="private reflection: short session",
+                    started_at=dt.datetime(2026, 7, 2, 10),
+                    duration_seconds=60,
+                    notes_count=1,
+                    average_abs_cents=20,
+                    in_tune_percentage=20,
+                    audio_storage_provider="supabase",
+                    audio_object_key="private/student781/short.webm",
+                ),
+                PracticeSession(
+                    user_id=student.id,
+                    instrument_id="horn",
+                    name="Long",
+                    started_at=dt.datetime(2026, 7, 2, 11),
+                    duration_seconds=180,
+                    notes_count=2,
+                    average_abs_cents=4,
+                    in_tune_percentage=80,
+                ),
+            ]
+        )
+        db.commit()
+
+        payload = ensemble_group_roster(
+            group.id,
+            db,
+            AuthContext(user=director, is_guest=True, access_token=None),
+        )
+
+        row = payload["students"][0]
+        assert payload["practice_aggregate_scope"] == {
+            "code": "cloud_practice_sessions_since_membership_v1",
+            "source": "cloud_practice_sessions",
+            "window": "membership_active_since",
+            "excludes": ["reflections", "audio", "session_detail"],
+        }
+        assert row["average_abs_cents"] == 8
+        assert row["in_tune_percentage"] == 65
+        assert row["practice_minutes"] == 4
+        assert "last_active_at" not in row
+        assert not {
+            "session_id",
+            "session_name",
+            "reflection",
+            "reflections",
+            "audio_object_key",
+            "audio_storage_provider",
+        } & row.keys()
+        serialized = json.dumps(payload)
+        assert "private reflection: short session" not in serialized
+        assert "private/student781/short.webm" not in serialized
+    finally:
+        db.close()
+
+
 def test_student_group_list_redacts_director_identity():
     with TestClient(app) as client:
         response = client.get("/api/ensemble/groups", headers={"Authorization": "Bearer dev-user-1"})
@@ -1197,6 +2196,12 @@ def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():
         db.commit()
         before = _session(db, student.id, "trumpet", dt.datetime(2026, 6, 5))
         after = _session(db, student.id, "trumpet", dt.datetime(2026, 6, 12))
+        before.name = "private pre-membership reflection"
+        before.audio_storage_provider = "supabase"
+        before.audio_object_key = "private/student81/before.webm"
+        after.name = "private in-membership reflection"
+        after.audio_storage_provider = "supabase"
+        after.audio_object_key = "private/student81/after.webm"
         member = GroupMember(
             group_id=group.id,
             user_id=student.id,
@@ -1212,6 +2217,164 @@ def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():
 
         assert [row.id for row in rows] == [after.id]
         assert before.id not in {row.id for row in rows}
+
+        auth = AuthContext(user=director, is_guest=True, access_token=None)
+        summary = ensemble_group_summary(group.id, db, auth)
+        report = ensemble_group_report(group.id, db, auth)
+        expected_scope = {
+            "code": "cloud_practice_sessions_since_membership_v1",
+            "source": "cloud_practice_sessions",
+            "window": "membership_active_since",
+            "excludes": ["reflections", "audio", "session_detail"],
+        }
+        assert summary["practice_aggregate_scope"] == expected_scope
+        assert report["practice_aggregate_scope"] == expected_scope
+        assert summary["session_count"] == 1
+        serialized = json.dumps({"summary": summary, "report": report})
+        assert "private pre-membership reflection" not in serialized
+        assert "private in-membership reflection" not in serialized
+        assert "private/student81/before.webm" not in serialized
+        assert "private/student81/after.webm" not in serialized
+    finally:
+        db.close()
+
+
+def test_multi_class_rosters_isolate_membership_admin_data_and_apply_each_membership_window():
+    db = _test_db()
+    try:
+        first_director = User(
+            id=1080,
+            username="director1080",
+            name="First Director",
+            role="director",
+            primary_instrument_id="trumpet",
+        )
+        second_director = User(
+            id=1081,
+            username="director1081",
+            name="Second Director",
+            role="director",
+            primary_instrument_id="trombone",
+        )
+        shared_student = User(
+            id=1082,
+            username="student1082",
+            name="Shared Student",
+            role="student",
+            primary_instrument_id="horn",
+            last_active_at=dt.datetime(2026, 7, 20, 10),
+        )
+        second_class_only_student = User(
+            id=1083,
+            username="student1083",
+            name="Second Class Only",
+            role="student",
+            primary_instrument_id="tuba",
+        )
+        first_group = Group(id=1084, name="First Class", director_user_id=first_director.id)
+        second_group = Group(id=1085, name="Second Class", director_user_id=second_director.id)
+        db.add_all(
+            [
+                first_director,
+                second_director,
+                shared_student,
+                second_class_only_student,
+                first_group,
+                second_group,
+            ]
+        )
+        db.commit()
+        first_membership = GroupMember(
+            group_id=first_group.id,
+            user_id=shared_student.id,
+            instrument_id="horn",
+            role_in_group="student",
+            status="active",
+            active_since=dt.datetime(2026, 7, 1),
+        )
+        second_membership = GroupMember(
+            group_id=second_group.id,
+            user_id=shared_student.id,
+            instrument_id="tuba",
+            role_in_group="assistant",
+            status="active",
+            active_since=dt.datetime(2026, 7, 10),
+        )
+        second_only_membership = GroupMember(
+            group_id=second_group.id,
+            user_id=second_class_only_student.id,
+            instrument_id="tuba",
+            role_in_group="student",
+            status="active",
+            active_since=dt.datetime(2026, 7, 1),
+        )
+        db.add_all([first_membership, second_membership, second_only_membership])
+        db.commit()
+        first_window_session = PracticeSession(
+            user_id=shared_student.id,
+            instrument_id="horn",
+            name="first class window private session",
+            started_at=dt.datetime(2026, 7, 5),
+            duration_seconds=60,
+            audio_storage_provider="supabase",
+            audio_object_key="private/student1082/first-window.webm",
+        )
+        shared_window_session = PracticeSession(
+            user_id=shared_student.id,
+            instrument_id="horn",
+            name="shared window private session",
+            started_at=dt.datetime(2026, 7, 15),
+            duration_seconds=120,
+            audio_storage_provider="supabase",
+            audio_object_key="private/student1082/shared-window.webm",
+        )
+        db.add_all([first_window_session, shared_window_session])
+        db.commit()
+
+        first_roster = ensemble_group_roster(
+            first_group.id,
+            db,
+            AuthContext(user=first_director, is_guest=True, access_token=None),
+        )
+        second_roster = ensemble_group_roster(
+            second_group.id,
+            db,
+            AuthContext(user=second_director, is_guest=True, access_token=None),
+        )
+
+        first_row = first_roster["students"][0]
+        second_shared_row = next(row for row in second_roster["students"] if row["user_id"] == shared_student.id)
+        assert first_roster["group_id"] == first_group.id
+        assert first_row["instrument_id"] == "horn"
+        assert first_row["role_in_group"] == "student"
+        assert first_row["sessions_count"] == 2
+        assert {row["user_id"] for row in first_roster["students"]} == {shared_student.id}
+        assert second_roster["group_id"] == second_group.id
+        assert second_shared_row["instrument_id"] == "tuba"
+        assert second_shared_row["role_in_group"] == "assistant"
+        assert second_shared_row["sessions_count"] == 1
+        assert {row["user_id"] for row in second_roster["students"]} == {
+            shared_student.id,
+            second_class_only_student.id,
+        }
+        assert "last_active_at" not in first_row
+        assert "last_active_at" not in second_shared_row
+        assert first_roster["practice_aggregate_scope"] == second_roster["practice_aggregate_scope"]
+        assert first_roster["practice_aggregate_scope"]["code"] == "cloud_practice_sessions_since_membership_v1"
+
+        with pytest.raises(HTTPException) as denied:
+            ensemble_group_roster(
+                second_group.id,
+                db,
+                AuthContext(user=first_director, is_guest=True, access_token=None),
+            )
+        assert denied.value.status_code == 403
+
+        serialized = json.dumps({"first": first_roster, "second": second_roster})
+        assert "first class window private session" not in serialized
+        assert "shared window private session" not in serialized
+        assert "private/student1082/first-window.webm" not in serialized
+        assert "private/student1082/shared-window.webm" not in serialized
     finally:
         db.close()
 
@@ -1255,13 +2418,25 @@ def test_account_export_contains_profile_and_lifecycle_data():
     assert response.status_code == 200
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         names = set(archive.namelist())
-        assert {"account.json", "sessions.json", "memberships.json", "owned_groups.json", "invitations.json", "recommendations.json"}.issubset(names)
+        assert {"account.json", "sessions.json", "memberships.json", "owned_groups.json", "invitations.json", "recommendations.json", "usage_events.json"}.issubset(names)
+        assert "account_deletion_jobs.json" not in names
+        assert "deleted_identity_tombstones.json" not in names
         account = json.loads(archive.read("account.json"))
         sessions = json.loads(archive.read("sessions.json"))
+        usage_events = json.loads(archive.read("usage_events.json"))
     assert account["id"] == 1
     assert account["role"] == "student"
     assert all("audio_object_key" not in row for row in sessions)
     assert all("audio_storage_provider" not in row for row in sessions)
+    assert all("user_id" not in row for row in usage_events)
+
+
+def test_account_export_applies_total_row_budget_to_lifecycle_data(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_EXPORT_MAX_TOTAL_ROWS", "1")
+    with TestClient(app) as client:
+        response = client.get("/api/users/me/export.zip", headers={"Authorization": "Bearer dev-user-1"})
+    assert response.status_code == 413
+    assert response.json()["code"] == "payload_too_large"
 
 
 def test_clear_practice_data_deletes_audio_before_bulk_rows(monkeypatch):
@@ -1324,6 +2499,642 @@ def test_supabase_audio_delete_is_called_before_metadata_is_cleared(monkeypatch)
         db.close()
 
 
+def test_explicit_audio_delete_is_durable_when_remote_cleanup_fails(monkeypatch):
+    db = _test_db()
+    try:
+        session = _session(db, 501, "trumpet", dt.datetime(2026, 7, 20))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "501/%s/recording.webm" % session.id
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 123
+        db.commit()
+        user = db.query(User).filter(User.id == session.user_id).one()
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_supabase_object",
+            lambda _key: (_ for _ in ()).throw(HTTPException(status_code=502, detail="cleanup failed")),
+        )
+
+        response = delete_session_audio(
+            session.id,
+            db,
+            AuthContext(user=user, is_guest=True, access_token=None),
+        )
+
+        assert response.status_code == 202
+        payload = json.loads(response.body)
+        assert payload["deleted"] is True
+        assert payload["cleanup_pending"] is True
+        db.expire_all()
+        current = db.query(PracticeSession).filter(PracticeSession.id == session.id).one()
+        assert current.audio_object_key is None
+        job = db.query(AudioStorageJob).one()
+        assert job.status == "retryable_failure"
+        assert job.object_key == "501/%s/recording.webm" % session.id
+        assert job.reason == "explicit_session_audio_delete"
+    finally:
+        db.close()
+
+
+def test_audio_delete_commit_failure_does_not_touch_remote_storage(monkeypatch):
+    db = _test_db()
+    remote_deletes = []
+    try:
+        session = _session(db, 502, "trumpet", dt.datetime(2026, 7, 20))
+        object_key = "502/%s/recording.webm" % session.id
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = object_key
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 123
+        db.commit()
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_audio_object",
+            lambda provider, key: remote_deletes.append((provider, key)),
+        )
+        monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(RuntimeError("commit failed")))
+
+        queue_audio_delete(db, session, "commit_failure_test")
+        with pytest.raises(RuntimeError, match="commit failed"):
+            db.commit()
+        db.rollback()
+
+        assert remote_deletes == []
+        db.expire_all()
+        current = db.query(PracticeSession).filter(PracticeSession.id == session.id).one()
+        assert current.audio_object_key == object_key
+        assert db.query(AudioStorageJob).count() == 0
+    finally:
+        db.close()
+
+
+def test_clear_all_sessions_keeps_failed_remote_deletes_in_durable_jobs(monkeypatch):
+    db = _test_db()
+    try:
+        sessions = [
+            _session(db, 503, "trumpet", dt.datetime(2026, 7, 20, hour))
+            for hour in (10, 11)
+        ]
+        object_keys = []
+        for session in sessions:
+            session.audio_storage_provider = "supabase"
+            session.audio_object_key = "503/%s/recording.webm" % session.id
+            session.audio_mime_type = "audio/webm"
+            session.audio_size_bytes = 100
+            object_keys.append(session.audio_object_key)
+        db.commit()
+        user = db.query(User).filter(User.id == 503).one()
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_audio_object",
+            lambda *_args: (_ for _ in ()).throw(HTTPException(status_code=502, detail="cleanup failed")),
+        )
+
+        response = clear_my_sessions(
+            db,
+            AuthContext(user=user, is_guest=True, access_token=None),
+        )
+
+        assert response.status_code == 202
+        payload = json.loads(response.body)
+        assert payload["cleared"]["practice_sessions"] == 2
+        assert payload["audio_cleanup_pending"] is True
+        assert db.query(PracticeSession).filter(PracticeSession.user_id == user.id).count() == 0
+        jobs = db.query(AudioStorageJob).order_by(AudioStorageJob.id.asc()).all()
+        assert [job.status for job in jobs] == ["retryable_failure", "retryable_failure"]
+        assert [job.object_key for job in jobs] == object_keys
+        assert all(job.reason == "clear_all_practice_sessions" for job in jobs)
+    finally:
+        db.close()
+
+
+def test_cross_mime_audio_replacement_commits_metadata_before_old_cleanup(monkeypatch):
+    db = _test_db()
+    calls = []
+    try:
+        session = _session(db, 52, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "52/%s/recording.webm" % session.id
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "replacement")
+        monkeypatch.setattr(
+            "app.services.audio_storage._upload_to_supabase",
+            lambda key, data, mime: calls.append(("upload", key, mime, len(data))),
+        )
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_supabase_object",
+            lambda key: calls.append(("delete", key)),
+        )
+        real_commit = db.commit
+        commit_count = 0
+
+        def tracked_commit():
+            nonlocal commit_count
+            commit_count += 1
+            calls.append(("commit", commit_count))
+            real_commit()
+
+        monkeypatch.setattr(db, "commit", tracked_commit)
+
+        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 2.5)
+        replacement_key = "52/%s/versions/replacement/recording.wav" % session.id
+        assert result.cleanup_pending is False
+        assert result.reconciliation_pending is False
+        assert session.audio_object_key == replacement_key
+        assert session.audio_mime_type == "audio/wav"
+        assert calls == [
+            ("commit", 1),
+            ("upload", replacement_key, "audio/wav", 12),
+            ("commit", 2),
+            ("commit", 3),
+            ("delete", "52/%s/recording.webm" % session.id),
+            ("commit", 4),
+        ]
+        jobs = db.query(AudioStorageJob).order_by(AudioStorageJob.id.asc()).all()
+        assert [(job.action, job.status) for job in jobs] == [
+            ("reconcile_metadata", "completed"),
+            ("delete_object", "completed"),
+        ]
+        for job in jobs:
+            assert job.user_id is None
+            assert job.session_id is None
+            assert job.idempotency_key == "terminal:%s" % job.id
+            assert job.object_key == "[redacted]"
+            assert job.size_bytes == 0
+            assert job.details_json == {}
+            assert job.completed_at is not None
+
+        delete_audio_for_session(session)
+        assert calls[-1] == ("delete", replacement_key)
+        assert session.audio_object_key is None
+    finally:
+        db.close()
+
+
+def test_cross_mime_audio_commit_failure_discards_only_new_object(monkeypatch):
+    db = _test_db()
+    calls = []
+    try:
+        session = _session(db, 53, "trumpet", dt.datetime(2026, 6, 15))
+        previous_key = "53/%s/recording.webm" % session.id
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = previous_key
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "replacement")
+        monkeypatch.setattr(
+            "app.services.audio_storage._upload_to_supabase",
+            lambda key, data, mime: calls.append(("upload", key)),
+        )
+        real_commit = db.commit
+        commit_count = 0
+
+        def fail_metadata_commit_only():
+            nonlocal commit_count
+            commit_count += 1
+            calls.append(("commit", commit_count))
+            if commit_count == 2:
+                raise RuntimeError("commit failed")
+            real_commit()
+
+        monkeypatch.setattr(db, "commit", fail_metadata_commit_only)
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_supabase_object",
+            lambda key: calls.append(("delete", key)),
+        )
+
+        with pytest.raises(HTTPException) as blocked:
+            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 3.0)
+        assert blocked.value.status_code == 503
+        replacement_key = "53/%s/versions/replacement/recording.wav" % session.id
+        assert "staged upload was removed" in blocked.value.detail.lower()
+        assert calls == [
+            ("commit", 1),
+            ("upload", replacement_key),
+            ("commit", 2),
+            ("delete", replacement_key),
+            ("commit", 3),
+        ]
+        db.refresh(session)
+        assert session.audio_object_key == previous_key
+        assert session.audio_mime_type == "audio/webm"
+        assert session.audio_size_bytes == 100
+        job = db.query(AudioStorageJob).one()
+        assert job.action == "upload_reservation"
+        assert job.status == "cancelled"
+    finally:
+        db.close()
+
+
+def test_cross_mime_post_commit_cleanup_failure_keeps_new_recording_active(monkeypatch):
+    db = _test_db()
+    calls = []
+    try:
+        session = _session(db, 54, "trumpet", dt.datetime(2026, 6, 15))
+        previous_key = "54/%s/recording.webm" % session.id
+        replacement_key = "54/%s/versions/replacement/recording.wav" % session.id
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = previous_key
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "replacement")
+        monkeypatch.setattr(
+            "app.services.audio_storage._upload_to_supabase",
+            lambda key, data, mime: calls.append(("upload", key)),
+        )
+
+        def fail_old_cleanup(key):
+            calls.append(("delete", key))
+            raise HTTPException(status_code=502, detail="old cleanup failed")
+
+        monkeypatch.setattr("app.services.audio_storage._delete_supabase_object", fail_old_cleanup)
+
+        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 3.0)
+        assert result.cleanup_pending is True
+        assert result.reconciliation_pending is False
+        assert calls == [("upload", replacement_key), ("delete", previous_key)]
+        db.refresh(session)
+        assert session.audio_object_key == replacement_key
+        assert session.audio_mime_type == "audio/wav"
+        assert session.audio_size_bytes == 12
+        jobs = db.query(AudioStorageJob).order_by(AudioStorageJob.id.asc()).all()
+        assert [(job.action, job.status) for job in jobs] == [
+            ("reconcile_metadata", "completed"),
+            ("delete_object", "retryable_failure"),
+        ]
+    finally:
+        db.close()
+
+
+def test_audio_upload_truthfully_reports_post_commit_cleanup_pending(monkeypatch):
+    def fake_replace(db, session, _data, mime_type, duration_seconds):
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "%s/%s/versions/new/recording.wav" % (session.user_id, session.id)
+        session.audio_mime_type = mime_type
+        session.audio_duration_seconds = duration_seconds
+        session.audio_size_bytes = 12
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return AudioReplaceResult(audio_snapshot=session_to_dict(session), cleanup_pending=True)
+
+    monkeypatch.setattr("app.api.routes.replace_audio_for_session", fake_replace)
+    with TestClient(app) as client:
+        session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        response = client.post(
+            f"/api/sessions/{session['id']}/audio",
+            content=b"RIFF....WAVE",
+            headers={"Content-Type": "audio/wav", "X-Audio-Duration-Seconds": "3"},
+        )
+    assert response.status_code == 202
+    assert response.json()["uploaded"] is True
+    assert response.json()["cleanup_pending"] is True
+    assert "new recording is active" in response.json()["message"].lower()
+
+
+def test_audio_refresh_failure_returns_snapshot_and_leaves_durable_reconciliation(monkeypatch):
+    db = _test_db()
+    try:
+        session = _session(db, 55, "trumpet", dt.datetime(2026, 6, 15))
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "refresh-failure")
+        monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: None)
+        monkeypatch.setattr(db, "refresh", lambda _row: (_ for _ in ()).throw(RuntimeError("refresh failed")))
+
+        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        assert result.activation_pending is False
+        assert result.reconciliation_pending is True
+        assert result.audio_snapshot["audio_mime_type"] == "audio/wav"
+        assert result.audio_snapshot["audio_size_bytes"] == 12
+        job = db.query(AudioStorageJob).one()
+        assert job.action == "reconcile_metadata"
+        assert job.status == "pending"
+        assert job.details_json["audio_snapshot"] == result.audio_snapshot
+    finally:
+        db.close()
+
+
+def test_failed_staged_cleanup_is_durable_and_operator_retry_is_idempotent(monkeypatch):
+    db = _test_db()
+    try:
+        session = _session(db, 56, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "56/%s/recording.webm" % session.id
+        session.audio_mime_type = "audio/webm"
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage.secrets.token_hex", lambda _size: "cleanup-retry")
+        monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: None)
+        real_commit = db.commit
+        commit_count = 0
+
+        def fail_metadata_commit_only():
+            nonlocal commit_count
+            commit_count += 1
+            if commit_count == 2:
+                raise RuntimeError("commit failed")
+            real_commit()
+
+        monkeypatch.setattr(db, "commit", fail_metadata_commit_only)
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_supabase_object",
+            lambda _key: (_ for _ in ()).throw(HTTPException(status_code=502, detail="cleanup failed")),
+        )
+
+        with pytest.raises(HTTPException, match="queued for retry"):
+            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        job = db.query(AudioStorageJob).one()
+        assert job.action == "delete_object"
+        assert job.status == "retryable_failure"
+        assert job.user_id == session.user_id
+        assert job.session_id == session.id
+        assert job.provider == "supabase"
+        assert job.size_bytes == 12
+        assert job.reason == "metadata_commit_failed_cleanup"
+        job.next_retry_at = dt.datetime.utcnow() - dt.timedelta(seconds=1)
+        original_object_key = job.object_key
+        db.add(job)
+        db.commit()
+        deleted = []
+        monkeypatch.setattr("app.services.audio_storage._delete_supabase_object", lambda key: deleted.append(key))
+
+        first = retry_audio_storage_jobs(db)
+        second = retry_audio_storage_jobs(db)
+
+        assert first["completed"] == 1
+        assert second["processed"] == 0
+        assert deleted == [original_object_key]
+        db.refresh(job)
+        assert job.status == "completed"
+        assert job.user_id is None
+        assert job.session_id is None
+        assert job.idempotency_key == "terminal:%s" % job.id
+        assert job.object_key == "[redacted]"
+        assert job.size_bytes == 0
+        assert job.details_json == {}
+    finally:
+        db.close()
+
+
+def test_terminal_audio_jobs_are_purged_after_bounded_short_ttl(monkeypatch):
+    db = _test_db()
+    try:
+        jobs = []
+        for suffix in ("expired", "recent"):
+            job = AudioStorageJob(
+                user_id=560,
+                session_id=1,
+                idempotency_key="ttl-%s" % suffix,
+                action="delete_object",
+                provider="supabase",
+                object_key="560/%s/recording.webm" % suffix,
+                size_bytes=10,
+                reason="ttl_test",
+                status="pending",
+                details_json={"private": suffix},
+            )
+            db.add(job)
+            db.flush()
+            jobs.append(job.id)
+        db.commit()
+        assert all(audio_storage_module._mark_audio_job_completed(db, job_id) for job_id in jobs)
+        expired = db.query(AudioStorageJob).filter(AudioStorageJob.id == jobs[0]).one()
+        recent = db.query(AudioStorageJob).filter(AudioStorageJob.id == jobs[1]).one()
+        expired.completed_at = dt.datetime.utcnow() - dt.timedelta(days=8)
+        recent.completed_at = dt.datetime.utcnow() - dt.timedelta(days=6)
+        db.commit()
+
+        monkeypatch.setenv("BRASSTUNE_AUDIO_JOB_TERMINAL_RETENTION_DAYS", "7")
+        result = audio_storage_module.purge_terminal_audio_storage_jobs(db)
+
+        assert result == {"retention_days": 7, "purged": 1, "failed": False}
+        assert db.query(AudioStorageJob).filter(AudioStorageJob.id == jobs[0]).first() is None
+        remaining = db.query(AudioStorageJob).filter(AudioStorageJob.id == jobs[1]).one()
+        assert remaining.user_id is None
+        assert remaining.session_id is None
+        assert remaining.object_key == "[redacted]"
+
+        monkeypatch.setenv("BRASSTUNE_AUDIO_JOB_TERMINAL_RETENTION_DAYS", "9999")
+        assert audio_storage_module._audio_job_terminal_retention_days() == 30
+        monkeypatch.setenv("BRASSTUNE_AUDIO_JOB_TERMINAL_RETENTION_DAYS", "0")
+        assert audio_storage_module._audio_job_terminal_retention_days() == 7
+    finally:
+        db.close()
+
+
+def test_known_over_quota_upload_never_writes_storage(monkeypatch):
+    db = _test_db()
+    writes = []
+    try:
+        session = _session(db, 57, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_storage_provider = "supabase"
+        session.audio_object_key = "57/%s/recording.webm" % session.id
+        session.audio_size_bytes = 100
+        db.commit()
+        db.refresh(session)
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "105")
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: writes.append("upload"))
+
+        with pytest.raises(HTTPException) as blocked:
+            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        assert blocked.value.status_code == 413
+        assert writes == []
+        assert db.query(AudioStorageJob).count() == 0
+    finally:
+        db.close()
+
+
+def test_pending_cleanup_bytes_remain_in_quota_until_retry_completes(monkeypatch):
+    db = _test_db()
+    writes = []
+    try:
+        session = _session(db, 58, "trumpet", dt.datetime(2026, 6, 15))
+        session.audio_size_bytes = 50
+        db.add(
+            AudioStorageJob(
+                user_id=58,
+                session_id=session.id,
+                idempotency_key="pending-cleanup-58",
+                action="delete_object",
+                provider="supabase",
+                object_key="58/old/recording.webm",
+                size_bytes=40,
+                reason="test_pending_cleanup",
+                status="pending",
+                details_json={},
+            )
+        )
+        db.commit()
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "100")
+        monkeypatch.setattr("app.services.audio_storage.storage_backend", lambda: "supabase")
+        monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: writes.append("upload"))
+
+        with pytest.raises(HTTPException) as blocked:
+            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        assert blocked.value.status_code == 413
+        assert writes == []
+    finally:
+        db.close()
+
+
+def test_account_scoped_upload_budget_blocks_second_outstanding_reservation(monkeypatch):
+    db = _test_db()
+    try:
+        first = _session(db, 59, "trumpet", dt.datetime(2026, 6, 15))
+        second = _session(db, 59, "trumpet", dt.datetime(2026, 6, 16))
+        monkeypatch.setenv("BRASSTUNE_MAX_PENDING_AUDIO_UPLOADS_PER_USER", "1")
+        first_stage = prepare_audio_upload(first, b"RIFF....WAVE", "audio/wav", 4.0)
+        reserve_audio_upload(db, first, first_stage)
+        second_stage = prepare_audio_upload(second, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        with pytest.raises(HTTPException) as blocked:
+            reserve_audio_upload(db, second, second_stage)
+
+        assert blocked.value.status_code == 429
+        assert db.query(AudioStorageJob).filter(AudioStorageJob.status == "reserved").count() == 1
+    finally:
+        db.close()
+
+
+def test_concurrent_reservations_cannot_overcommit_account_bytes(monkeypatch):
+    db = _test_db()
+    try:
+        first = _session(db, 60, "trumpet", dt.datetime(2026, 6, 15))
+        second = _session(db, 60, "trumpet", dt.datetime(2026, 6, 16))
+        monkeypatch.setenv("BRASSTUNE_MAX_PENDING_AUDIO_UPLOADS_PER_USER", "10")
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "20")
+        first_stage = prepare_audio_upload(first, b"RIFF....WAVE", "audio/wav", 4.0)
+        reserve_audio_upload(db, first, first_stage)
+        second_stage = prepare_audio_upload(second, b"RIFF....WAVE", "audio/wav", 4.0)
+
+        with pytest.raises(HTTPException) as blocked:
+            reserve_audio_upload(db, second, second_stage)
+
+        assert blocked.value.status_code == 413
+        assert db.query(AudioStorageJob).filter(AudioStorageJob.status == "reserved").count() == 1
+    finally:
+        db.close()
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL row-lock regression")
+def test_postgres_concurrent_reservations_serialize_account_quota(monkeypatch):
+    """Two real transactions cannot both reserve the same account headroom."""
+    user_id = 900060
+    setup_db = SessionLocal()
+    first_holds_account_lock = threading.Event()
+    release_first_reservation = threading.Event()
+    second_started = threading.Event()
+    results = {}
+    failures = []
+    threads = []
+    try:
+        setup_db.query(AudioStorageJob).filter(AudioStorageJob.user_id == user_id).delete(synchronize_session=False)
+        setup_db.query(PracticeSession).filter(PracticeSession.user_id == user_id).delete(synchronize_session=False)
+        setup_db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
+        setup_db.add(User(id=user_id, name="Concurrent Audio User", role="student", primary_instrument_id="trumpet"))
+        setup_db.flush()
+        rows = [
+            PracticeSession(
+                user_id=user_id,
+                instrument_id="trumpet",
+                name="Concurrent reservation %s" % index,
+                started_at=dt.datetime(2026, 7, 16, 12, index),
+                created_at=dt.datetime(2026, 7, 16, 12, index),
+                duration_seconds=8,
+            )
+            for index in (1, 2)
+        ]
+        setup_db.add_all(rows)
+        setup_db.commit()
+        session_ids = [row.id for row in rows]
+
+        monkeypatch.setenv("BRASSTUNE_MAX_PENDING_AUDIO_UPLOADS_PER_USER", "10")
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "20")
+        real_pending_bytes = audio_storage_module._pending_audio_storage_bytes
+
+        def pause_first_while_account_is_locked(db, locked_user_id):
+            pending_bytes = real_pending_bytes(db, locked_user_id)
+            if threading.current_thread().name == "first-audio-reservation":
+                first_holds_account_lock.set()
+                if not release_first_reservation.wait(timeout=10):
+                    raise RuntimeError("Timed out waiting to release first reservation")
+            return pending_bytes
+
+        monkeypatch.setattr(audio_storage_module, "_pending_audio_storage_bytes", pause_first_while_account_is_locked)
+
+        def reserve(name, session_id):
+            db = SessionLocal()
+            try:
+                if name == "second":
+                    second_started.set()
+                row = db.query(PracticeSession).filter(PracticeSession.id == session_id).one()
+                stage = prepare_audio_upload(row, b"RIFF....WAVE", "audio/wav", 4.0)
+                reserve_audio_upload(db, row, stage)
+                results[name] = "reserved"
+            except HTTPException as exc:
+                results[name] = exc.status_code
+            except Exception as exc:  # pragma: no cover - surfaced by the assertion below
+                failures.append(exc)
+            finally:
+                db.close()
+
+        first = threading.Thread(
+            target=reserve,
+            args=("first", session_ids[0]),
+            name="first-audio-reservation",
+        )
+        second = threading.Thread(
+            target=reserve,
+            args=("second", session_ids[1]),
+            name="second-audio-reservation",
+        )
+        threads = [first, second]
+        first.start()
+        assert first_holds_account_lock.wait(timeout=10)
+        second.start()
+        assert second_started.wait(timeout=10)
+        second.join(timeout=0.25)
+        assert second.is_alive(), "The second transaction should wait on the account row lock."
+        release_first_reservation.set()
+        for thread in threads:
+            thread.join(timeout=10)
+            assert not thread.is_alive()
+
+        assert failures == []
+        assert results == {"first": "reserved", "second": 413}
+        assert setup_db.query(AudioStorageJob).filter(
+            AudioStorageJob.user_id == user_id,
+            AudioStorageJob.status == "reserved",
+        ).count() == 1
+    finally:
+        release_first_reservation.set()
+        for thread in threads:
+            thread.join(timeout=1)
+        setup_db.rollback()
+        setup_db.query(AudioStorageJob).filter(AudioStorageJob.user_id == user_id).delete(synchronize_session=False)
+        setup_db.query(PracticeSession).filter(PracticeSession.user_id == user_id).delete(synchronize_session=False)
+        setup_db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
+        setup_db.commit()
+        setup_db.close()
+
+
 def test_account_deletion_local_cleanup_failure_does_not_delete_external_identity(monkeypatch):
     db = _test_db()
     external_calls = []
@@ -1383,11 +3194,25 @@ def test_account_deletion_records_completed_job_and_external_cleanup_last(monkey
         assert payload["deletion_status"] == "completed"
         assert db.query(User).filter(User.id == user.id).first() is None
         assert external_calls == [("signout", "access-token", True), ("delete", "supabase-151", True)]
-        job = db.query(AccountDeletionJob).filter(AccountDeletionJob.user_id == user.id).one()
+        job = db.query(AccountDeletionJob).one()
         assert job.status == "completed"
         assert job.stage == "completed"
-        assert isinstance(job.counts_json, dict)
-        assert job.counts_json["practice_sessions"] == 1
+        assert job.user_id is None
+        assert job.supabase_user_id is None
+        assert job.idempotency_key == "terminal:%s" % job.id
+        assert job.counts_json == {}
+        tombstone = db.query(DeletedIdentityTombstone).one()
+        assert len(tombstone.subject_digest) == 64
+        assert "supabase-151" not in tombstone.subject_digest
+        assert payload["counts"]["practice_sessions"] == 1
+        assert "supabase-151" not in json.dumps(payload)
+
+        with pytest.raises(HTTPException) as exc:
+            _sync_supabase_user(
+                db,
+                {"id": "supabase-151", "email": "recreate@example.com", "user_metadata": {}, "app_metadata": {}},
+            )
+        assert exc.value.status_code == 410
     finally:
         db.close()
 
@@ -1470,6 +3295,20 @@ def test_account_deletion_retry_endpoint_requires_secret(monkeypatch):
         assert response.status_code == 403
         response = client.post("/api/maintenance/account-deletions/retry", headers={"X-BrassTune-Maintenance-Secret": "retry-secret"})
         assert response.status_code == 200
+        assert "audio_storage" in response.json()
+
+
+def test_audio_storage_retry_endpoint_reuses_secure_maintenance_secret(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_RETRY_SECRET", "retry-secret")
+    with TestClient(app) as client:
+        response = client.post("/api/maintenance/audio-storage/retry")
+        assert response.status_code == 403
+        response = client.post(
+            "/api/maintenance/audio-storage/retry",
+            headers={"X-BrassTune-Maintenance-Secret": "retry-secret"},
+        )
+        assert response.status_code == 200
+        assert {"processed", "completed", "still_retryable", "results"}.issubset(response.json())
 
 
 def test_account_deletion_retry_executor_completes_external_cleanup(monkeypatch):
@@ -1496,6 +3335,10 @@ def test_account_deletion_retry_executor_completes_external_cleanup(monkeypatch)
         assert job.status == "completed"
         assert job.stage == "completed"
         assert job.next_retry_at is None
+        assert job.user_id is None
+        assert job.supabase_user_id is None
+        assert job.counts_json == {}
+        assert db.query(DeletedIdentityTombstone).count() == 1
     finally:
         db.close()
 
@@ -1628,6 +3471,268 @@ def test_account_deletion_retry_executor_recovers_local_cleanup_failure(monkeypa
         db.close()
 
 
+def test_account_deletion_retry_executor_reports_local_retry_external_failure_as_retryable(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(id=156, username="delete156", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-156")
+        job = AccountDeletionJob(
+            user_id=user.id,
+            supabase_user_id=user.supabase_user_id,
+            idempotency_key="delete-user-156",
+            stage="local_cleanup_failed",
+            status="retryable_failure",
+            next_retry_at=dt.datetime.utcnow() - dt.timedelta(minutes=1),
+            counts_json="{}",
+        )
+        db.add_all([user, job])
+        db.commit()
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda _user_id: False)
+
+        result = retry_account_deletion_jobs(db)
+
+        assert result["processed"] == 1
+        assert result["completed"] == 0
+        assert result["still_retryable"] == 1
+        assert result["results"] == [
+            {
+                "job_id": job.id,
+                "status": "retryable_failure",
+                "stage": "external_cleanup_failed",
+                "deletion_status": "external_cleanup_queued",
+            }
+        ]
+        db.refresh(job)
+        assert job.status == "retryable_failure"
+        assert job.stage == "external_cleanup_failed"
+    finally:
+        db.close()
+
+
+def test_deleted_identity_key_rotation_fails_closed(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(id=259, username="delete259", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-259")
+        db.add(user)
+        db.commit()
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda _token: True)
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda _user_id: True)
+        delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=False, access_token="access-token"),
+        )
+        monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "different-production-tombstone-key-32-bytes")
+        with pytest.raises(HTTPException) as exc:
+            _sync_supabase_user(
+                db,
+                {"id": "supabase-259", "email": "recreate@example.com", "user_metadata": {}, "app_metadata": {}},
+            )
+        assert exc.value.status_code == 503
+        assert db.query(User).filter(User.supabase_user_id == "supabase-259").first() is None
+    finally:
+        db.close()
+
+
+def test_deletion_key_mismatch_is_rejected_before_local_or_external_cleanup(monkeypatch):
+    db = _test_db()
+    external_calls = []
+    try:
+        user = User(id=262, username="delete262", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-262")
+        db.add(user)
+        db.commit()
+        monkeypatch.setenv("BRASSTUNE_DELETION_TOMBSTONE_SECRET", "different-production-tombstone-key-32-bytes")
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda token: external_calls.append(("signout", token)))
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda subject: external_calls.append(("delete", subject)))
+
+        with pytest.raises(HTTPException) as exc:
+            delete_my_account(
+                AccountDeletionRequest(confirmation="delete my account"),
+                db,
+                AuthContext(user=user, is_guest=False, access_token="access-token"),
+            )
+
+        assert exc.value.status_code == 503
+        assert external_calls == []
+        assert db.query(User).filter(User.id == user.id).one()
+        assert db.query(AccountDeletionJob).count() == 0
+    finally:
+        db.close()
+
+
+def test_terminal_account_deletion_jobs_are_purged_but_hmac_tombstones_remain(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(id=260, username="delete260", name="Delete Me", role="student", primary_instrument_id="trumpet", supabase_user_id="supabase-260")
+        db.add(user)
+        db.commit()
+        monkeypatch.setattr("app.api.routes.supabase_global_sign_out", lambda _token: True)
+        monkeypatch.setattr("app.api.routes.delete_supabase_identity", lambda _user_id: True)
+        delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=False, access_token="access-token"),
+        )
+        job = db.query(AccountDeletionJob).one()
+        job.completed_at = dt.datetime.utcnow() - dt.timedelta(days=8)
+        db.commit()
+
+        monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_JOB_RETENTION_DAYS", "7")
+        result = account_deletion_module.purge_terminal_account_deletion_jobs(db)
+        assert result == {"retention_days": 7, "purged": 1, "failed": False}
+        assert db.query(AccountDeletionJob).count() == 0
+        assert db.query(DeletedIdentityTombstone).count() == 1
+        with pytest.raises(HTTPException) as exc:
+            _sync_supabase_user(
+                db,
+                {"id": "supabase-260", "email": "recreate@example.com", "user_metadata": {}, "app_metadata": {}},
+            )
+        assert exc.value.status_code == 410
+
+        monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_JOB_RETENTION_DAYS", "999")
+        assert account_deletion_module._terminal_job_retention_days() == 30
+        monkeypatch.setenv("BRASSTUNE_ACCOUNT_DELETION_JOB_RETENTION_DAYS", "0")
+        assert account_deletion_module._terminal_job_retention_days() == 7
+    finally:
+        db.close()
+
+
+def test_legacy_completed_deletion_job_is_hmac_backfilled_and_scrubbed_by_maintenance():
+    db = _test_db()
+    try:
+        job = AccountDeletionJob(
+            user_id=261,
+            supabase_user_id="legacy-supabase-261",
+            idempotency_key="delete-user-261",
+            stage="completed",
+            status="completed",
+            retry_count=2,
+            safe_error_category="legacy-detail",
+            counts_json={"practice_sessions": 4, "usage_events": 9},
+            completed_at=dt.datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+
+        result = account_deletion_module.maintain_terminal_account_deletion_jobs(db)
+
+        assert result["scrubbed"] == 1
+        assert result["failed"] == 0
+        db.refresh(job)
+        assert job.user_id is None
+        assert job.supabase_user_id is None
+        assert job.idempotency_key == "terminal:%s" % job.id
+        assert job.counts_json == {}
+        assert job.safe_error_category is None
+        tombstone = db.query(DeletedIdentityTombstone).one()
+        assert "legacy-supabase-261" not in tombstone.subject_digest
+    finally:
+        db.close()
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL migration compatibility regression")
+def test_postgres_expand_new_writer_scrubs_and_tombstones_terminal_job():
+    """The privacy-aware writer finishes safely while the database is in expand."""
+    db = SessionLocal()
+    job_id = None
+    subject = "expand-new-writer-subject-%s" % os.getpid()
+    digest = account_deletion_module.deleted_identity_digest(subject)
+    try:
+        db.query(DeletedIdentityTombstone).filter(DeletedIdentityTombstone.subject_digest == digest).delete(
+            synchronize_session=False
+        )
+        job = AccountDeletionJob(
+            user_id=990261,
+            supabase_user_id=subject,
+            idempotency_key="expand-new-writer-job-%s" % os.getpid(),
+            stage="external_cleanup_started",
+            status="in_progress",
+            counts_json={"practice_sessions": 2},
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+        account_deletion_module.complete_and_scrub_account_deletion_job(db, job)
+        db.commit()
+        db.refresh(job)
+
+        assert account_deletion_module.terminal_job_is_scrubbed(job)
+        assert db.query(DeletedIdentityTombstone).filter(
+            DeletedIdentityTombstone.subject_digest == digest
+        ).one()
+    finally:
+        db.rollback()
+        if job_id is not None:
+            db.query(AccountDeletionJob).filter(AccountDeletionJob.id == job_id).delete(synchronize_session=False)
+        db.query(DeletedIdentityTombstone).filter(DeletedIdentityTombstone.subject_digest == digest).delete(
+            synchronize_session=False
+        )
+        db.commit()
+        db.close()
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL migration compatibility regression")
+def test_postgres_expand_allows_old_writer_before_strict_contract():
+    """Replay the expand migration and the b84dacc completion shape."""
+    schema = "account_deletion_expand_%s" % os.getpid()
+    migrations_dir = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
+    expand_sql = (migrations_dir / "20260723021828_account_deletion_privacy_tombstones.sql").read_text()
+    expand_sql = expand_sql.replace("public.", "%s." % schema)
+
+    raw_connection = engine.raw_connection()
+    driver_connection = raw_connection.driver_connection
+    original_autocommit = driver_connection.autocommit
+    driver_connection.autocommit = True
+    try:
+        with driver_connection.cursor() as cursor:
+            cursor.execute("drop schema if exists %s cascade" % schema)
+            cursor.execute("create schema %s" % schema)
+            cursor.execute(
+                "create table %s.account_deletion_jobs ("
+                "id bigserial primary key, user_id bigint not null, supabase_user_id text, "
+                "idempotency_key text not null unique, stage text not null, status text not null, "
+                "retry_count integer not null default 0, next_retry_at timestamptz, "
+                "safe_error_category text, counts_json jsonb not null default '{}'::jsonb, "
+                "completed_at timestamptz, created_at timestamptz not null default now(), "
+                "updated_at timestamptz not null default now())" % schema
+            )
+
+            cursor.execute(expand_sql)
+            cursor.execute(
+                "insert into %s.account_deletion_jobs "
+                "(user_id, supabase_user_id, idempotency_key, stage, status, counts_json) "
+                "values (42, 'legacy-subject-42', 'delete-user-42', 'external_cleanup_started', "
+                "'in_progress', '{\"practice_sessions\": 2}'::jsonb) returning id" % schema
+            )
+            legacy_job_id = cursor.fetchone()[0]
+
+            # This is the b84dacc completion shape. It must succeed after expand.
+            cursor.execute(
+                "update %s.account_deletion_jobs set stage = 'completed', status = 'completed', "
+                "completed_at = now(), next_retry_at = null where id = %%s" % schema,
+                (legacy_job_id,),
+            )
+            cursor.execute(
+                "select user_id, supabase_user_id, idempotency_key, counts_json "
+                "from %s.account_deletion_jobs where id = %%s" % schema,
+                (legacy_job_id,),
+            )
+            assert cursor.fetchone() == (42, "legacy-subject-42", "delete-user-42", {"practice_sessions": 2})
+            cursor.execute(
+                "select count(*) from pg_constraint where "
+                "conrelid = %s::regclass and conname = 'account_deletion_jobs_terminal_privacy_check'",
+                ("%s.account_deletion_jobs" % schema,),
+            )
+            assert cursor.fetchone()[0] == 0
+    finally:
+        try:
+            with driver_connection.cursor() as cursor:
+                cursor.execute("drop schema if exists %s cascade" % schema)
+        finally:
+            driver_connection.autocommit = original_autocommit
+            raw_connection.close()
+
+
 def test_account_deletion_removes_sessions_audio_and_teacher_owned_group():
     with TestClient(app) as client:
         session = client.post(
@@ -1696,7 +3801,7 @@ def test_manager_cannot_force_activate_invited_member():
         roster = client.get(f"/api/ensemble/groups/{gid}/roster", headers={"Authorization": "Bearer dev-user-1"}).json()
         maya = next(s for s in roster["students"] if s["username"] == "maya")
         assert maya["status"] == "invited"
-        assert maya["last_active_at"] is None
+        assert "last_active_at" not in maya
 
 
 def test_invited_student_sets_own_instrument_on_accept():
@@ -2214,6 +4319,54 @@ def test_account_deletion_removes_linked_usage_events_and_reports_count():
         db.close()
 
 
+def test_account_deletion_cleanup_scrubs_surviving_audio_job_identifiers(monkeypatch):
+    db = _test_db()
+    deleted_objects = []
+    try:
+        user = User(id=621, username="delete621", name="Delete Audio Job", role="student", primary_instrument_id="trumpet")
+        db.add(user)
+        db.flush()
+        job = AudioStorageJob(
+            user_id=user.id,
+            session_id=999,
+            idempotency_key="account-delete-audio-621",
+            action="delete_object",
+            provider="supabase",
+            object_key="621/999/recording.webm",
+            size_bytes=123,
+            reason="account_deletion_cleanup",
+            status="pending",
+            details_json={"former_session": 999},
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+        payload = delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=True, access_token=None),
+        )
+        assert payload["deleted"] is True
+        monkeypatch.setattr(
+            "app.services.audio_storage._delete_audio_object",
+            lambda provider, object_key: deleted_objects.append((provider, object_key)),
+        )
+        result = retry_audio_storage_jobs(db)
+
+        assert result["completed"] == 1
+        assert deleted_objects == [("supabase", "621/999/recording.webm")]
+        terminal = db.query(AudioStorageJob).filter(AudioStorageJob.id == job_id).one()
+        assert terminal.user_id is None
+        assert terminal.session_id is None
+        assert terminal.idempotency_key == "terminal:%s" % job_id
+        assert terminal.object_key == "[redacted]"
+        assert terminal.size_bytes == 0
+        assert terminal.details_json == {}
+    finally:
+        db.close()
+
+
 def test_group_list_detail_capabilities_and_assistant_roster_privacy_are_isolated():
     db = _test_db()
     try:
@@ -2306,6 +4459,73 @@ def test_join_code_rotation_migration_targets_only_legacy_or_missing_codes():
     assert "generate_series(1, 8)" in migration
     assert "floor(random() * length(alphabet))" in migration
     assert "create unique index if not exists groups_join_code_key" in migration
+
+
+def test_audio_storage_jobs_migration_is_private_idempotent_and_indexed():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260716201825_audio_storage_jobs_and_upload_reservations.sql"
+    ).read_text().lower()
+    assert "create table if not exists public.audio_storage_jobs" in migration
+    assert "idempotency_key text not null unique" in migration
+    assert "details_json jsonb" in migration
+    assert "enable row level security" in migration
+    assert "revoke all privileges on table public.audio_storage_jobs" in migration
+    assert "revoke all privileges on sequence public.audio_storage_jobs_id_seq" in migration
+    assert "('anon', 'authenticated', 'service_role')" in migration
+    assert "audio_storage_jobs_terminal_privacy_check" in migration
+    assert "idempotency_key = 'terminal:' || id::text" in migration
+    assert "object_key = '[redacted]'" in migration
+    assert "details_json = '{}'::jsonb" in migration
+    assert "idx_audio_storage_jobs_account_state" in migration
+    assert "idx_audio_storage_jobs_retry_queue" in migration
+    assert "idx_audio_storage_jobs_terminal_purge" in migration
+    assert "where status in ('reserved', 'pending', 'in_progress', 'retryable_failure')" in migration
+    assert "default 7-day ttl" in migration
+    assert "rollback notes" in migration
+
+
+def test_account_deletion_privacy_expand_migration_is_private_and_old_writer_compatible():
+    expand_migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260723021828_account_deletion_privacy_tombstones.sql"
+    ).read_text().lower()
+    assert "create table if not exists public.deleted_identity_tombstones" in expand_migration
+    assert "create table if not exists public.deleted_identity_tombstone_config" in expand_migration
+    assert "subject_digest text not null unique" in expand_migration
+    assert "account_deletion_jobs alter column user_id drop not null" in expand_migration
+    assert "enforcement_phase text not null default 'expand'" in expand_migration
+    assert "do not add the terminal privacy check here" in expand_migration
+    assert "add constraint account_deletion_jobs_terminal_privacy_check" not in expand_migration
+    assert "enable row level security" in expand_migration
+    assert "('anon', 'authenticated', 'service_role')" in expand_migration
+    assert "revoke all privileges on table public.deleted_identity_tombstones" in expand_migration
+    assert "idx_account_deletion_jobs_retry_queue" in expand_migration
+    assert "idx_account_deletion_jobs_terminal_purge" in expand_migration
+    assert "default 7-day ttl bounded to 30 days" in expand_migration
+    assert "b84dacc" in expand_migration
+
+
+def test_backend_data_and_audio_privacy_reassertion_is_separately_sequenced():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260723120000_reassert_backend_data_and_audio_privacy.sql"
+    ).read_text().lower()
+    assert "'instrument_profiles'" in migration
+    assert "'audio_storage_jobs'" in migration
+    assert "enable row level security" in migration
+    assert "revoke all privileges on table" in migration
+    assert "revoke all privileges on all sequences in schema public" in migration
+    assert "set public = false" in migration
+    assert "set file_size_limit = 52428800" in migration
+    assert "allowed_mime_types" in migration
+    assert "does not drop unknown policies" in migration
 
 
 def test_env_granted_admin_is_revoked_when_email_removed(monkeypatch):

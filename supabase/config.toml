@@ -13,7 +13,13 @@ additional_redirect_urls = [
   # Vercel previews are restricted to the owner account suffix. Never use a
   # blanket *.vercel.app callback: other users can create matching hosts.
   "https://*-kelvis-prject.vercel.app/auth/callback",
+  "https://*-kelvis-prject.vercel.app/auth/reset-password",
   "http://localhost:5173/auth/callback",
+  "http://localhost:5173/auth/reset-password",
+  # Native Google OAuth returns only to this reverse-domain scheme and path.
+  # The bounded state wildcard lets each ASWebAuthenticationSession validate
+  # its own cryptographic state before exchanging the PKCE authorization code.
+  "com.brasstune.auth://oauth/google\\?state=*",
 ]
 jwt_expiry = 3600
 

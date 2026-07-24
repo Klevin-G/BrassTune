@@ -51,6 +51,7 @@ async function savedDocumentCount(page: Page) {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.demoMode', 'true');
     localStorage.setItem('brasstune.guestAccess', 'true');
   });
@@ -58,13 +59,15 @@ test.beforeEach(async ({ page }) => {
 
 test('a corrupt image with JPEG magic fails closed before persistence', async ({ page }) => {
   await page.goto('/practice/score');
-  const fileInput = page.getByLabel('Choose sheet music files');
+  const fileInput = page.getByLabel('Choose Files', { exact: true });
   await fileInput.setInputFiles({
     name: 'broken.jpg',
     mimeType: 'image/jpeg',
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02]),
   });
-  await expect(page.getByText(/broken\.jpg could not be decoded as a valid image/i)).toBeVisible();
+  const status = page.locator('.sm-status');
+  await expect(status).toContainText('broken.jpg');
+  await expect(status).toContainText('could not be decoded as a valid image.');
   expect(await savedDocumentCount(page)).toBe(0);
 });
 
@@ -124,22 +127,21 @@ test('a concurrent import is preserved while saved music hydrates', async ({ pag
   });
 
   await page.goto('/practice/score');
-  await page.getByLabel('Choose sheet music files').setInputFiles({
+  await page.getByLabel('Choose Files', { exact: true }).setInputFiles({
     name: 'new-import.pdf',
     mimeType: 'application/pdf',
     buffer: makeBlankPdf(1),
   });
 
-  await expect(page.getByLabel('Sheet music page for new-import.pdf')).toBeVisible();
-  await expect(page.getByText('new-import.pdf')).toBeVisible();
-  await expect(page.getByText('slow-saved.pdf')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Page 1.*new-import\.pdf/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Page 2.*slow-saved\.pdf/i })).toBeVisible();
   expect(await savedDocumentCount(page)).toBe(2);
 });
 
 test('oversized legacy PDFs are purged and delete failures are reported honestly', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'This test deliberately injects Chromium IndexedDB rows and transaction failures.');
   await page.goto('/privacy');
-  const fileInput = page.getByLabel('Choose sheet music files');
+  const fileInput = page.getByLabel('Choose Files', { exact: true });
   const oversizedPdf = makeBlankPdf(65);
   await page.evaluate(async ({ base64, dbName, storeName }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -184,7 +186,7 @@ test('oversized legacy PDFs are purged and delete failures are reported honestly
 
   await fileInput.setInputFiles({ name: 'one-page.pdf', mimeType: 'application/pdf', buffer: makeBlankPdf(1) });
   await expect(page.getByText('Added your page.')).toBeVisible();
-  await expect(page.getByLabel('Sheet music page for one-page.pdf')).toBeVisible();
+  await expect(page.getByLabel(/Sheet music page for.*one-page\.pdf/i)).toBeVisible();
   await expect.poll(() => savedDocumentCount(page)).toBe(1);
 
   await page.evaluate(() => {
@@ -199,7 +201,7 @@ test('oversized legacy PDFs are purged and delete failures are reported honestly
   await page.getByRole('menuitem', { name: /delete this page/i }).click();
   await page.getByRole('button', { name: 'Remove', exact: true }).click();
 
-  await expect(page.getByText(/couldn't be removed.*still in your saved music/i)).toBeVisible();
-  await expect(page.getByLabel('Sheet music page for one-page.pdf')).toBeVisible();
+  await expect(page.getByText(/could(?: not|n['’]t) be removed.*still in your saved music/i)).toBeVisible();
+  await expect(page.getByLabel(/Sheet music page for.*one-page\.pdf/i)).toBeVisible();
   await expect.poll(() => savedDocumentCount(page)).toBe(1);
 });
