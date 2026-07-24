@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "添加 {name} 至收藏夹",
   "metronomePreset.delete": "删除{name}",
   "playAlong.title": "练习评分",
-  "playAlong.description": "选择一个练习并进行练习。我们会聆听并告诉您每个音符的调准程度。",
+  "playAlong.description": "选择一个练习，并平稳地保持每个音。BrassTune 会检查你演奏的音符和音准。它不会评估节奏、力度或与乐谱的时间对齐。",
   "playAlong.choose": "选择一项练习",
   "playAlong.majorScales": "大调音阶",
   "playAlong.minorScales": "小调音阶",

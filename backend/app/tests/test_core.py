@@ -129,6 +129,70 @@ def test_duration_weighted_contract_handles_legacy_zero_duration_rows():
     assert summary["in_tune_percentage"] == 50
 
 
+def test_note_median_and_deviation_use_unequal_event_durations():
+    stats = calculate_note_stats(
+        [
+            {
+                "written_note": "D",
+                "written_octave": 4,
+                "duration_ms": 1_000,
+                "sample_count": 10,
+                "avg_signed_cents": 0,
+                "avg_abs_cents": 0,
+                "median_cents": 0,
+                "stddev_cents": 2,
+                "in_tune_percentage": 100,
+                "stability_score": 90,
+            },
+            {
+                "written_note": "D",
+                "written_octave": 4,
+                "duration_ms": 3_000,
+                "sample_count": 30,
+                "avg_signed_cents": 12,
+                "avg_abs_cents": 12,
+                "median_cents": 12,
+                "stddev_cents": 4,
+                "in_tune_percentage": 0,
+                "stability_score": 70,
+            },
+        ]
+    )[0]
+
+    assert stats["avg_signed_cents"] == 9
+    assert stats["median_cents"] == 12
+    assert math.isclose(stats["stddev_cents"], math.sqrt(27))
+
+
+def test_note_weighted_median_exact_boundary_and_legacy_fallback_are_deterministic():
+    common = {
+        "written_note": "F",
+        "written_octave": 4,
+        "sample_count": 10,
+        "avg_abs_cents": 5,
+        "stddev_cents": 2,
+        "in_tune_percentage": 70,
+        "stability_score": 90,
+    }
+    exact_boundary = calculate_note_stats(
+        [
+            {**common, "duration_ms": 1_000, "avg_signed_cents": 2, "median_cents": 2},
+            {**common, "duration_ms": 1_000, "avg_signed_cents": 10, "median_cents": 10},
+        ]
+    )[0]
+    legacy = calculate_note_stats(
+        [
+            {**common, "duration_ms": 0, "avg_signed_cents": 2, "median_cents": 2},
+            {**common, "duration_ms": 0, "avg_signed_cents": 10, "median_cents": 10},
+        ]
+    )[0]
+
+    assert exact_boundary["median_cents"] == 6
+    assert legacy["median_cents"] == 6
+    assert exact_boundary["stddev_cents"] == 4
+    assert legacy["stddev_cents"] == 4
+
+
 def test_progress_timeseries_uses_session_duration_for_tuning_averages():
     rows = [
         {

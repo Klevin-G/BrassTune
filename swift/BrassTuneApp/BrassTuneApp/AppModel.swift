@@ -77,6 +77,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var guestProgressSafetyPromptEligible = false
     @Published private(set) var persistedPracticeSuccessSequence = 0
     @Published private(set) var pendingDestination: PendingAppDestination?
+    @Published private(set) var microphoneRationaleSeen = false { didSet { persistLocalData() } }
 
     let audioEngine: NativeAudioEngine
     let apiClient: APIClient
@@ -254,6 +255,7 @@ final class AppModel: ObservableObject {
         metronome = MetronomeSettings()
         practiceFeatures = Self.freshPracticeFeatureState()
         successHapticsEnabled = true
+        microphoneRationaleSeen = !ProcessInfo.processInfo.arguments.contains("UITEST_MIC_RATIONALE")
         guestProgressSafetyPromptHandled = false
         guestProgressSafetyPromptEligible = false
         pendingDestination = nil
@@ -330,6 +332,10 @@ final class AppModel: ObservableObject {
         guestProgressSafetyPromptHandled = true
         guestProgressSafetyPromptEligible = false
         persistLocalData()
+    }
+
+    func markMicrophoneRationaleSeen() {
+        microphoneRationaleSeen = true
     }
 
     func flushPendingPersistence() {
@@ -1162,7 +1168,9 @@ final class AppModel: ObservableObject {
         do {
             try await authService.requestPasswordReset(email: email, config: config)
             lastError = nil
-            setAuthNotice(NativeLocalization.string("Password reset email sent. Check your inbox."))
+            setAuthNotice(NativeLocalization.string(
+                "Password reset email sent. Open the secure web reset page from the email, then return to BrassTune and sign in."
+            ))
         } catch {
             setAuthFailure(error)
         }
@@ -1853,12 +1861,13 @@ final class AppModel: ObservableObject {
             metronome: metronome,
             metronomeDefaultsVersion: 2,
             tutorialCompleted: tutorialCompleted,
-            snapshotVersion: 4,
+            snapshotVersion: 5,
             practiceFeatures: practiceFeatures,
             gatewayCompleted: gatewayCompleted,
             appLanguage: appLanguage,
             successHapticsEnabled: successHapticsEnabled,
-            guestProgressSafetyPromptHandled: guestProgressSafetyPromptHandled
+            guestProgressSafetyPromptHandled: guestProgressSafetyPromptHandled,
+            microphoneRationaleSeen: microphoneRationaleSeen
         )
     }
 
@@ -2180,6 +2189,7 @@ final class AppModel: ObservableObject {
         practiceFeatures = restoredFeatures
         successHapticsEnabled = snapshot.successHapticsEnabled ?? true
         guestProgressSafetyPromptHandled = snapshot.guestProgressSafetyPromptHandled ?? false
+        microphoneRationaleSeen = snapshot.microphoneRationaleSeen ?? false
         guestProgressSafetyPromptEligible = false
         persistedSessionIDs = Set(sessions.map(\.id))
         isRestoringLocalState = false
@@ -2247,6 +2257,7 @@ final class AppModel: ObservableObject {
         practiceFeatures = Self.freshPracticeFeatureState()
         successHapticsEnabled = true
         guestProgressSafetyPromptHandled = false
+        microphoneRationaleSeen = false
         guestProgressSafetyPromptEligible = false
         persistedSessionIDs = []
         gatewayCompleted = namespace != .guest
@@ -2297,6 +2308,7 @@ final class AppModel: ObservableObject {
         practiceFeatures = Self.freshPracticeFeatureState()
         successHapticsEnabled = true
         guestProgressSafetyPromptHandled = false
+        microphoneRationaleSeen = false
         guestProgressSafetyPromptEligible = false
         persistedSessionIDs = []
         pendingDestination = nil
@@ -2539,6 +2551,7 @@ struct NativeLocalSnapshot: Codable, Equatable {
     var appLanguage: AppLanguage? = nil
     var successHapticsEnabled: Bool? = nil
     var guestProgressSafetyPromptHandled: Bool? = nil
+    var microphoneRationaleSeen: Bool? = nil
 }
 
 struct NativeScoreImportService {

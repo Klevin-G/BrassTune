@@ -1,6 +1,6 @@
 # Feature Inventory
 
-Updated: 2026-07-23. This is an implementation inventory, not a hosted-release claim.
+Updated: 2026-07-24. This is an implementation inventory, not a hosted-release claim.
 
 | Area | Candidate capability | Evidence boundary |
 |---|---|---|
@@ -11,7 +11,7 @@ Updated: 2026-07-23. This is an implementation inventory, not a hosted-release c
 | Authentication | Email/password/reset plus Google and Apple affordances on web/iOS | Google live provider start is verified; Apple remains disabled live. |
 | Localization | 12 locales; web non-English catalogs are lazy-loaded | Professional linguistic review remains a human gate. |
 | Native | SwiftUI iPhone/iPad experience, auth/class/practice parity, Keychain, AVAudioEngine path | Simulator evidence only; no signing/device acceptance. |
-| Data lifecycle | Export/delete, privacy scrub/tombstone rollout support | Disposable live lifecycle testing and migration application remain pending. |
+| Data lifecycle | Export/delete, privacy scrub/tombstone rollout support | Linked Supabase migrations match through `20260724072904`; disposable live lifecycle testing remains pending. |
 
 ## Explicit limits
 

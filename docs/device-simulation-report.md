@@ -1,7 +1,7 @@
 # Device Simulation Report
 
-Generated: 2026-07-23T08:23:52.276Z
-Checkout: 3ec585ec8b604b9a04cb7708872c66bef963fe3f (clean worktree)
+Generated: 2026-07-24T07:48:30.352Z
+Checkout: 6f4054412765d2aafe28d901e85a23ead5238c97 (dirty worktree)
 
 The committed Playwright harness was used for repeatable multi-viewport browser automation.
 

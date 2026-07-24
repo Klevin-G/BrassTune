@@ -1,4 +1,5 @@
 import datetime as dt
+import math
 import statistics
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
@@ -51,6 +52,70 @@ def duration_weighted_mean(
     return None
 
 
+def _duration_weighted_values(
+    rows: Iterable[object],
+    value_key: str,
+    duration_key: str,
+) -> list[tuple[float, float]]:
+    entries = []
+    for row in rows:
+        raw_value = _value(row, value_key)
+        if raw_value is None:
+            continue
+        entries.append(
+            (
+                float(raw_value),
+                max(0.0, float(_value(row, duration_key, 0) or 0)),
+            )
+        )
+    if any(duration > 0 for _, duration in entries):
+        return [(value, duration) for value, duration in entries if duration > 0]
+    return [(value, 1.0) for value, _ in entries]
+
+
+def duration_weighted_median(
+    rows: Iterable[object],
+    value_key: str,
+    duration_key: str,
+) -> Optional[float]:
+    """Return a deterministic duration-weighted median.
+
+    Positive-duration rows define the distribution and legacy zero-duration
+    rows do not dilute it. If all rows are legacy, each row receives equal
+    weight. At an exact 50/50 boundary, the two adjacent values are averaged,
+    matching ``statistics.median`` for equal-weight even-sized inputs.
+    """
+    values = sorted(_duration_weighted_values(rows, value_key, duration_key))
+    if not values:
+        return None
+    halfway = sum(weight for _, weight in values) / 2.0
+    cumulative = 0.0
+    for index, (value, weight) in enumerate(values):
+        cumulative += weight
+        if math.isclose(cumulative, halfway, rel_tol=0.0, abs_tol=1e-12):
+            if index + 1 < len(values):
+                return (value + values[index + 1][0]) / 2.0
+            return value
+        if cumulative > halfway:
+            return value
+    return values[-1][0]
+
+
+def duration_weighted_pstdev(
+    rows: Iterable[object],
+    value_key: str,
+    duration_key: str,
+) -> Optional[float]:
+    """Return population deviation of event centers using duration weights."""
+    values = _duration_weighted_values(rows, value_key, duration_key)
+    if not values:
+        return None
+    total_weight = sum(weight for _, weight in values)
+    mean = sum(value * weight for value, weight in values) / total_weight
+    variance = sum(weight * ((value - mean) ** 2) for value, weight in values) / total_weight
+    return math.sqrt(max(0.0, variance))
+
+
 def calculate_note_stats(events: Iterable[object]) -> List[Dict[str, object]]:
     grouped: Dict[Tuple[str, int], List[object]] = defaultdict(list)
     for event in events:
@@ -60,20 +125,28 @@ def calculate_note_stats(events: Iterable[object]) -> List[Dict[str, object]]:
     stats: List[Dict[str, object]] = []
     for (note, octave), rows in grouped.items():
         duration = sum(max(0.0, float(_value(row, "duration_ms", 0) or 0)) for row in rows)
-        all_cents = [float(_value(row, "avg_signed_cents", 0)) for row in rows]
         sample_count = sum(int(_value(row, "sample_count", 0)) for row in rows)
         avg_signed = duration_weighted_mean(rows, "avg_signed_cents", "duration_ms") or 0.0
         avg_abs = duration_weighted_mean(rows, "avg_abs_cents", "duration_ms") or 0.0
         in_tune = duration_weighted_mean(rows, "in_tune_percentage", "duration_ms") or 0.0
         stability = duration_weighted_mean(rows, "stability_score", "duration_ms") or 0.0
-        stddev = statistics.pstdev(all_cents) if len(all_cents) > 1 else float(_value(rows[0], "stddev_cents", 0))
+        median = duration_weighted_median(rows, "median_cents", "duration_ms")
+        if median is None:
+            median = duration_weighted_median(rows, "avg_signed_cents", "duration_ms") or 0.0
+        # One event already carries within-event detector variation. With
+        # multiple events, report duration-weighted variation of their centers.
+        stddev = (
+            duration_weighted_pstdev(rows, "avg_signed_cents", "duration_ms") or 0.0
+            if len(rows) > 1
+            else float(_value(rows[0], "stddev_cents", 0))
+        )
         row = {
             "written_note": note,
             "written_octave": octave,
             "note_label": "%s%s" % (note, octave),
             "avg_signed_cents": avg_signed,
             "avg_abs_cents": avg_abs,
-            "median_cents": statistics.median(all_cents),
+            "median_cents": median,
             "stddev_cents": stddev,
             "in_tune_percentage": in_tune,
             "duration_ms": duration,

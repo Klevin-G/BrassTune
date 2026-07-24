@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "أضف {name} إلى المفضلة",
   "metronomePreset.delete": "حذف {name}",
   "playAlong.title": "مقيّم التدريب",
-  "playAlong.description": "اختر تمرينًا وقم بتشغيله. سوف نستمع ونخبرك بمدى تناغم كل ملاحظة.",
+  "playAlong.description": "اختر تمرينًا وثبّت كل نغمة. يتحقق BrassTune من النغمة التي تعزفها ومدى دقة التنغيم. لا يقيّم الإيقاع أو الديناميكيات أو التوقيت مع النوتة الموسيقية.",
   "playAlong.choose": "اختر تمرينًا",
   "playAlong.majorScales": "السلالم الكبرى",
   "playAlong.minorScales": "السلالم الصغرى",

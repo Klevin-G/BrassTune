@@ -392,6 +392,7 @@ async function runViewport(browser, viewport) {
       sessionStorage.setItem('brasstune.deviceSimulationInitialized', 'true');
     }
     localStorage.setItem('brasstune.onboardingComplete', 'true');
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.guestAccess', 'true');
     window.__brasstuneErrors = [];
     window.addEventListener('unhandledrejection', (event) => {

@@ -1,14 +1,19 @@
 import base64
 import binascii
+import datetime as dt
 import hmac
 import os
 import re
+import threading
+import time
+import urllib.error
+import urllib.request
 from typing import Iterable
 
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api.auth import assert_auth_configured
+from app.api.auth import _supabase_endpoint, assert_auth_configured
 from app.core.security import DEPLOYED_ENVIRONMENTS, app_environment
 from app.db.database import DATABASE_URL, assert_database_configured, build_engine, configured_database_url, database_backend, engine
 from app.services.account_deletion import (
@@ -62,6 +67,10 @@ REQUIRED_TABLE_COLUMNS = {
         "purpose",
         "created_at",
         "expires_at",
+    },
+    "maintenance_heartbeats": {
+        "purpose",
+        "last_succeeded_at",
     },
     "audio_storage_jobs": {
         "id",
@@ -132,11 +141,31 @@ BACKEND_APPLICATION_TABLES = {
     "account_deletion_jobs",
     "usage_events",
     "audio_storage_jobs",
+    "maintenance_heartbeats",
     "maintenance_request_nonces",
 }
 DATA_API_ROLES = {"anon", "authenticated"}
 
 _REVISION_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$", re.IGNORECASE)
+ACCOUNT_DELETION_CRON_JOB_NAME = "brasstune-account-deletion-retry"
+ACCOUNT_DELETION_CRON_SCHEDULE = "*/15 * * * *"
+ACCOUNT_DELETION_CRON_COMMAND = "select brasstune_private.enqueue_account_deletion_retry();"
+ACCOUNT_DELETION_CRON_STARTUP_GRACE_SECONDS = 20 * 60
+ACCOUNT_DELETION_CRON_MAX_SUCCESS_AGE_SECONDS = 35 * 60
+ACCOUNT_DELETION_CRON_MAX_RUNNING_SECONDS = 5 * 60
+ACCOUNT_DELETION_HEARTBEAT_PURPOSE = "account-deletions-retry-v1"
+ACCOUNT_DELETION_HEARTBEAT_STARTUP_GRACE_SECONDS = 20 * 60
+ACCOUNT_DELETION_HEARTBEAT_MAX_SUCCESS_AGE_SECONDS = 35 * 60
+SUPABASE_AUTH_PROBE_TIMEOUT_SECONDS = 3
+SUPABASE_AUTH_PROBE_CACHE_SECONDS = 30
+_PROCESS_STARTED_AT = dt.datetime.now(dt.timezone.utc)
+_SUPABASE_AUTH_PROBE_CONDITION = threading.Condition()
+_SUPABASE_AUTH_PROBE_CACHE: dict[str, object] = {
+    "origin": None,
+    "checked_at": 0.0,
+    "issue": None,
+    "in_flight_origin": None,
+}
 
 
 def _configured_engine():
@@ -144,6 +173,244 @@ def _configured_engine():
     if url == DATABASE_URL:
         return engine, False, url
     return build_engine(url), True, url
+
+
+def _utc_aware(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(dt.timezone.utc)
+
+
+def _normalized_sql(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _account_deletion_scheduler_metadata_issues(
+    jobs: list[dict],
+    runs: list[dict],
+    *,
+    now: dt.datetime | None = None,
+    process_started_at: dt.datetime | None = None,
+    function_exists: bool = True,
+) -> list[str]:
+    """Validate only non-secret pg_cron metadata and bounded run history."""
+    issues = []
+    if not function_exists:
+        issues.append("Account-deletion scheduler function is missing.")
+    if len(jobs) != 1:
+        issues.append("Exactly one account-deletion scheduler job is required.")
+        return issues
+
+    job = jobs[0]
+    if job.get("active") is not True:
+        issues.append("Account-deletion scheduler job must be active.")
+    if str(job.get("schedule") or "") != ACCOUNT_DELETION_CRON_SCHEDULE:
+        issues.append("Account-deletion scheduler cadence does not match the durable contract.")
+    if _normalized_sql(job.get("command")) != _normalized_sql(ACCOUNT_DELETION_CRON_COMMAND):
+        issues.append("Account-deletion scheduler command does not match the durable contract.")
+    if job.get("targets_current_database") is not True:
+        issues.append("Account-deletion scheduler targets the wrong database.")
+
+    current = _utc_aware(now or dt.datetime.now(dt.timezone.utc))
+    started = _utc_aware(process_started_at or _PROCESS_STARTED_AT)
+    ordered_runs = sorted(
+        runs,
+        key=lambda row: _utc_aware(row.get("start_time") or dt.datetime.min),
+        reverse=True,
+    )
+    if not ordered_runs:
+        if (current - started).total_seconds() > ACCOUNT_DELETION_CRON_STARTUP_GRACE_SECONDS:
+            issues.append("Account-deletion scheduler has not completed its first observed run.")
+        return issues
+
+    latest = ordered_runs[0]
+    latest_status = str(latest.get("status") or "").strip().lower()
+    latest_started = latest.get("start_time")
+    if latest_status == "running":
+        if (
+            latest_started is None
+            or (current - _utc_aware(latest_started)).total_seconds()
+            > ACCOUNT_DELETION_CRON_MAX_RUNNING_SECONDS
+        ):
+            issues.append("Account-deletion scheduler run is stuck.")
+    elif latest_status != "succeeded":
+        issues.append("Latest account-deletion scheduler run failed.")
+
+    successful_at = None
+    for run in ordered_runs:
+        if str(run.get("status") or "").strip().lower() != "succeeded":
+            continue
+        successful_at = run.get("end_time") or run.get("start_time")
+        if successful_at is not None:
+            break
+    if successful_at is None:
+        if (current - started).total_seconds() > ACCOUNT_DELETION_CRON_STARTUP_GRACE_SECONDS:
+            issues.append("Account-deletion scheduler has no successful observed run.")
+    elif (
+        current - _utc_aware(successful_at)
+    ).total_seconds() > ACCOUNT_DELETION_CRON_MAX_SUCCESS_AGE_SECONDS:
+        issues.append("Account-deletion scheduler success is overdue.")
+    return issues
+
+
+def _account_deletion_heartbeat_issues(
+    heartbeats: list[dict],
+    *,
+    now: dt.datetime | None = None,
+    process_started_at: dt.datetime | None = None,
+) -> list[str]:
+    """Require durable proof that the backend finished recent maintenance."""
+    current = _utc_aware(now or dt.datetime.now(dt.timezone.utc))
+    started = _utc_aware(process_started_at or _PROCESS_STARTED_AT)
+    matching = [
+        row
+        for row in heartbeats
+        if row.get("purpose") == ACCOUNT_DELETION_HEARTBEAT_PURPOSE
+    ]
+    if not matching:
+        if (
+            current - started
+        ).total_seconds() <= ACCOUNT_DELETION_HEARTBEAT_STARTUP_GRACE_SECONDS:
+            return []
+        return ["Account-deletion maintenance has no successful backend heartbeat."]
+    if len(matching) != 1:
+        return ["Exactly one account-deletion maintenance heartbeat is required."]
+
+    succeeded_at = matching[0].get("last_succeeded_at")
+    if not isinstance(succeeded_at, dt.datetime):
+        return ["Account-deletion maintenance heartbeat timestamp is invalid."]
+    age_seconds = (current - _utc_aware(succeeded_at)).total_seconds()
+    if age_seconds < -60:
+        return ["Account-deletion maintenance heartbeat timestamp is invalid."]
+    if age_seconds > ACCOUNT_DELETION_HEARTBEAT_MAX_SUCCESS_AGE_SECONDS:
+        return ["Account-deletion maintenance backend heartbeat is overdue."]
+    return []
+
+
+def _postgres_account_deletion_scheduler_issues(
+    connection,
+    *,
+    heartbeat_table_exists: bool,
+) -> list[str]:
+    function_exists = connection.execute(
+        text(
+            "select to_regprocedure("
+            "'brasstune_private.enqueue_account_deletion_retry()'"
+            ") is not null"
+        )
+    ).scalar()
+    jobs = [
+        dict(row)
+        for row in connection.execute(
+            text(
+                "select jobid, jobname, schedule, command, active, "
+                "database = current_database() as targets_current_database "
+                "from cron.job where jobname = :job_name"
+            ),
+            {"job_name": ACCOUNT_DELETION_CRON_JOB_NAME},
+        ).mappings()
+    ]
+    runs = []
+    if len(jobs) == 1 and jobs[0].get("jobid") is not None:
+        runs = [
+            dict(row)
+            for row in connection.execute(
+                text(
+                    "select status, start_time, end_time "
+                    "from cron.job_run_details where jobid = :job_id "
+                    "order by start_time desc nulls last limit 8"
+                ),
+                {"job_id": jobs[0]["jobid"]},
+            ).mappings()
+        ]
+    issues = _account_deletion_scheduler_metadata_issues(
+        jobs,
+        runs,
+        function_exists=function_exists is True,
+    )
+    if not heartbeat_table_exists:
+        issues.append("Account-deletion maintenance heartbeat table is missing.")
+        return issues
+    heartbeats = [
+        dict(row)
+        for row in connection.execute(
+            text(
+                "select purpose, last_succeeded_at "
+                "from public.maintenance_heartbeats "
+                "where purpose = :purpose"
+            ),
+            {"purpose": ACCOUNT_DELETION_HEARTBEAT_PURPOSE},
+        ).mappings()
+    ]
+    issues.extend(_account_deletion_heartbeat_issues(heartbeats))
+    return issues
+
+
+def _reset_supabase_auth_probe_cache_for_tests() -> None:
+    with _SUPABASE_AUTH_PROBE_CONDITION:
+        _SUPABASE_AUTH_PROBE_CACHE.update(
+            {
+                "origin": None,
+                "checked_at": 0.0,
+                "issue": None,
+                "in_flight_origin": None,
+            }
+        )
+        _SUPABASE_AUTH_PROBE_CONDITION.notify_all()
+
+
+def _supabase_auth_reachability_issue() -> str | None:
+    """Probe the public Auth settings endpoint without sending service secrets."""
+    origin = _supabase_endpoint("/")
+    while True:
+        monotonic_now = time.monotonic()
+        with _SUPABASE_AUTH_PROBE_CONDITION:
+            if (
+                _SUPABASE_AUTH_PROBE_CACHE["origin"] == origin
+                and monotonic_now
+                - float(_SUPABASE_AUTH_PROBE_CACHE["checked_at"])
+                <= SUPABASE_AUTH_PROBE_CACHE_SECONDS
+            ):
+                return _SUPABASE_AUTH_PROBE_CACHE["issue"]  # type: ignore[return-value]
+            if _SUPABASE_AUTH_PROBE_CACHE["in_flight_origin"] is None:
+                _SUPABASE_AUTH_PROBE_CACHE["in_flight_origin"] = origin
+                break
+            _SUPABASE_AUTH_PROBE_CONDITION.wait()
+
+    issue: str | None = None
+    try:
+        publishable_key = os.getenv("SUPABASE_PUBLISHABLE_KEY") or ""
+        request = urllib.request.Request(
+            _supabase_endpoint("/auth/v1/settings"),
+            headers={"apikey": publishable_key},
+            method="GET",
+        )
+        with urllib.request.urlopen(  # nosec B310 - validated Supabase HTTPS origin
+            request,
+            timeout=SUPABASE_AUTH_PROBE_TIMEOUT_SECONDS,
+        ) as response:
+            raw_status = getattr(response, "status", None)
+            if raw_status is None:
+                raw_status = response.getcode()
+            status = int(raw_status)
+            if status < 200 or status >= 300:
+                issue = "Supabase Auth settings endpoint is unavailable."
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError, TimeoutError):
+        issue = "Supabase Auth settings endpoint is unreachable."
+    except Exception:
+        issue = "Supabase Auth settings endpoint could not be verified."
+    finally:
+        with _SUPABASE_AUTH_PROBE_CONDITION:
+            _SUPABASE_AUTH_PROBE_CACHE.update(
+                {
+                    "origin": origin,
+                    "checked_at": time.monotonic(),
+                    "issue": issue,
+                    "in_flight_origin": None,
+                }
+            )
+            _SUPABASE_AUTH_PROBE_CONDITION.notify_all()
+    return issue
 
 
 def _missing_columns(actual_columns: Iterable[str], required_columns: Iterable[str]) -> list[str]:
@@ -620,6 +887,15 @@ def database_readiness_issues() -> list[str]:
                     "deleted_identity_tombstone_config",
                 }.issubset(table_names):
                     issues.extend(_postgres_account_deletion_security_issues(connection))
+                    if app_environment() in DEPLOYED_ENVIRONMENTS:
+                        issues.extend(
+                            _postgres_account_deletion_scheduler_issues(
+                                connection,
+                                heartbeat_table_exists=(
+                                    "maintenance_heartbeats" in table_names
+                                ),
+                            )
+                        )
                 if (
                     app_environment() in DEPLOYED_ENVIRONMENTS
                     and storage_backend() == "supabase"
@@ -655,6 +931,15 @@ def auth_readiness_issues() -> list[str]:
         assert_auth_configured()
     except RuntimeError as exc:
         return [str(exc)]
+    if app_environment() in DEPLOYED_ENVIRONMENTS:
+        try:
+            reachability_issue = _supabase_auth_reachability_issue()
+        except Exception:
+            # URL/config errors are already sanitized by assert_auth_configured;
+            # unexpected probe failures must remain fail-closed and secret-free.
+            reachability_issue = "Supabase Auth settings endpoint could not be verified."
+        if reachability_issue:
+            return [reachability_issue]
     return []
 
 

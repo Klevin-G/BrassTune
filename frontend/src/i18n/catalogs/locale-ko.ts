@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "즐겨찾기에 {name} 추가",
   "metronomePreset.delete": "{name} 삭제",
   "playAlong.title": "연습 평가",
-  "playAlong.description": "운동을 골라서 플레이해보세요. 우리는 각 음표의 조율이 얼마나 되는지 듣고 알려드릴 것입니다.",
+  "playAlong.description": "연습을 고르고 각 음을 안정적으로 길게 내세요. BrassTune은 어떤 음을 연주했는지와 음정을 확인합니다. 리듬, 셈여림, 악보에 맞춘 타이밍은 채점하지 않습니다.",
   "playAlong.choose": "운동을 선택하세요",
   "playAlong.majorScales": "메이저 스케일",
   "playAlong.minorScales": "마이너 스케일",

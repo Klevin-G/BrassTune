@@ -357,6 +357,8 @@ struct ProgressTabView: View {
 
                 ProgressTodaySection()
 
+                ProgressGettingStartedSection()
+
                 Text("This week")
                     .font(.title2.weight(.bold))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -365,6 +367,17 @@ struct ProgressTabView: View {
                 WeeklyGoalCard()
 
                 ProgressNextStepSection()
+
+                if progressShouldShowWarmupResume(model.currentWarmupCheckpoint) {
+                    NavigationLink {
+                        GuidedWarmupView()
+                    } label: {
+                        Label("Resume warm-up", systemImage: "play.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("progress.resumeWarmup")
+                }
 
                 Button {
                     selectedTab = .tuner
@@ -388,6 +401,85 @@ struct ProgressTabView: View {
         }
         .background(BTTheme.background.ignoresSafeArea())
         .navigationTitle("Progress")
+    }
+}
+
+func progressShouldShowWarmupResume(_ checkpoint: GuidedWarmupCheckpoint?) -> Bool {
+    checkpoint?.completed == false
+}
+
+struct ProgressOnboardingMilestone: Equatable, Identifiable {
+    let id: String
+    let title: String
+    let earned: Bool
+}
+
+@MainActor
+func progressOnboardingMilestones(for model: AppModel) -> [ProgressOnboardingMilestone] {
+    [
+        ProgressOnboardingMilestone(
+            id: "instrument",
+            title: NativeLocalization.string("Choose your instrument"),
+            earned: model.tutorialCompleted
+        ),
+        ProgressOnboardingMilestone(
+            id: "first-note",
+            title: NativeLocalization.string("Record your first note"),
+            earned: model.sessions.contains { session in
+                session.frames.contains { frame in
+                    frame.isValidForRecording
+                        && frame.frequencyHz != nil
+                        && frame.writtenNoteName != nil
+                }
+            }
+        ),
+        ProgressOnboardingMilestone(
+            id: "warmup",
+            title: NativeLocalization.string("Warm-up complete"),
+            earned: model.currentWarmupCheckpoint?.completed == true
+        ),
+        ProgressOnboardingMilestone(
+            id: "play-along",
+            title: NativeLocalization.string("Finish a Play-Along exercise"),
+            earned: !model.practiceFeatures.playAlongAttempts.isEmpty
+        ),
+    ]
+}
+
+private struct ProgressGettingStartedSection: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let milestones = progressOnboardingMilestones(for: model)
+        let earnedCount = milestones.filter(\.earned).count
+        VStack(alignment: .leading, spacing: BTSpacing.sm) {
+            Text("Getting started")
+                .font(.title2.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("progress.gettingStarted")
+            BTCard {
+                Text(verbatim: NativeLocalization.format(
+                    "%@ of %@ complete",
+                    String(earnedCount),
+                    String(milestones.count)
+                ))
+                    .font(.headline)
+                    .foregroundStyle(earnedCount == milestones.count ? BTTheme.success : BTTheme.text)
+
+                ForEach(milestones) { milestone in
+                    Label {
+                        Text(verbatim: milestone.title)
+                    } icon: {
+                        Image(systemName: milestone.earned ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(milestone.earned ? BTTheme.success : BTTheme.muted)
+                    }
+                    .accessibilityValue(milestone.earned
+                        ? NativeLocalization.string("Done")
+                        : NativeLocalization.string("Next step"))
+                    .accessibilityIdentifier("progress.milestone.\(milestone.id)")
+                }
+            }
+        }
     }
 }
 

@@ -33,7 +33,7 @@ from app.core.recommendations.rules import generate_practice_plan, generate_reco
 from app.db.database import get_db
 from app.db.readiness import public_readiness_report, readiness_report, version_payload
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
-from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, MaintenanceRequestNonce, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
+from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, MaintenanceHeartbeat, MaintenanceRequestNonce, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
 from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
 from app.services.account_deletion import (
@@ -42,6 +42,7 @@ from app.services.account_deletion import (
     ensure_deletion_tombstone_key_state,
     maintain_terminal_account_deletion_jobs,
 )
+from app.services.account_mutation import account_mutation_guard
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 from app.services.usage import record_event
@@ -730,14 +731,19 @@ def export_session_csv(session_id: int, db: Session = Depends(get_db), auth: Aut
     budget = ExportBudget()
     budget.require_session_rows(db, session_id)
     samples = db.query(PitchSample).filter(PitchSample.session_id == session_id).order_by(PitchSample.timestamp_ms.asc()).all()
-    return Response(_samples_csv_text(samples), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-samples.csv" % session_id})
+    response_text = _samples_csv_text(samples)
+    budget.require_response_text(response_text)
+    return Response(response_text, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-samples.csv" % session_id})
 
 
 @router.get("/export/session/{session_id}.json")
 def export_session_json(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     session = _require_session_access(db, session_id, auth)
-    payload = _session_json_payload(db, session, ExportBudget())
-    return Response(json.dumps(payload, indent=2), media_type="application/json", headers={"Content-Disposition": "attachment; filename=session-%s.json" % session_id})
+    budget = ExportBudget()
+    payload = _session_json_payload(db, session, budget)
+    response_text = json.dumps(payload, indent=2)
+    budget.require_response_text(response_text)
+    return Response(response_text, media_type="application/json", headers={"Content-Disposition": "attachment; filename=session-%s.json" % session_id})
 
 
 @router.get("/export/note-events/{session_id}.csv")
@@ -746,7 +752,9 @@ def export_note_events_csv(session_id: int, db: Session = Depends(get_db), auth:
     budget = ExportBudget()
     budget.require_session_rows(db, session_id)
     events = db.query(NoteEvent).filter(NoteEvent.session_id == session_id).order_by(NoteEvent.started_at_ms.asc()).all()
-    return Response(_note_events_csv_text(events), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-note-events.csv" % session_id})
+    response_text = _note_events_csv_text(events)
+    budget.require_response_text(response_text)
+    return Response(response_text, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=session-%s-note-events.csv" % session_id})
 
 
 @router.get("/export/session/{session_id}/audio")
@@ -1368,10 +1376,30 @@ def _aggregate_retry_count(result: dict, field: str) -> int:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
+def _record_account_deletion_maintenance_heartbeat(db: Session) -> None:
+    """Persist success only after every account-maintenance action returned."""
+    succeeded_at = dt.datetime.now(dt.timezone.utc)
+    heartbeat = db.get(MaintenanceHeartbeat, ACCOUNT_DELETION_RETRY_PURPOSE)
+    if heartbeat is None:
+        heartbeat = MaintenanceHeartbeat(
+            purpose=ACCOUNT_DELETION_RETRY_PURPOSE,
+            last_succeeded_at=succeeded_at,
+        )
+    else:
+        heartbeat.last_succeeded_at = succeeded_at
+    db.add(heartbeat)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
 def _run_account_maintenance(db: Session) -> tuple[dict, dict]:
     with _maintenance_executor_guard(db):
         account_result = retry_account_deletion_jobs(db, limit=MAINTENANCE_RETRY_LIMIT)
         audio_result = retry_audio_storage_jobs(db, limit=MAINTENANCE_RETRY_LIMIT)
+        _record_account_deletion_maintenance_heartbeat(db)
     return account_result, audio_result
 
 
@@ -1433,6 +1461,36 @@ async def retry_audio_storage(
 
 @router.delete("/users/me")
 def delete_my_account(payload: AccountDeletionRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    user_id = int(auth.user.id)
+    with account_mutation_guard(db, user_id):
+        # Refresh under the row lock after waiting for any in-flight session or
+        # audio mutation. A deletion that won the race removes the row; a
+        # mutation that won completes before local cleanup takes its snapshot.
+        locked_user = (
+            db.query(User)
+            .populate_existing()
+            .filter(User.id == user_id)
+            .with_for_update()
+            .first()
+        )
+        if locked_user is None:
+            raise HTTPException(status_code=404, detail="Account not found.")
+        return _delete_my_account_locked(
+            payload,
+            db,
+            AuthContext(
+                user=locked_user,
+                is_guest=auth.is_guest,
+                access_token=auth.access_token,
+            ),
+        )
+
+
+def _delete_my_account_locked(
+    payload: AccountDeletionRequest,
+    db: Session,
+    auth: AuthContext,
+):
     confirmation = payload.confirmation.strip().lower()
     if confirmation != "delete my account":
         raise HTTPException(status_code=400, detail='Type "delete my account" to confirm account deletion.')

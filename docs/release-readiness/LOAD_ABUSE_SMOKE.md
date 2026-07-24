@@ -10,7 +10,7 @@ Run only against owner-approved production or staging URLs. Keep volume low enou
 
 - Confirm owner approval for target URL and time window.
 - Confirm `APP_ENV=production` and production CORS origins are configured.
-- Confirm Render, Vercel, Supabase, and GitHub Actions dashboards are accessible to the owner.
+- Confirm Render, Vercel, and Supabase dashboards are accessible to the owner. GitHub Actions is disabled and is not part of this release path.
 - Confirm no real student roster, private recording, or personal account is used.
 
 ## Smoke Checks

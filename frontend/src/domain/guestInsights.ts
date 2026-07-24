@@ -19,13 +19,22 @@ export interface GuestInsightLocalizer {
   formatDate: (value: Date | number | string, options?: Intl.DateTimeFormatOptions) => string;
 }
 
-const guestHeatmapNotes: Record<string, string[]> = {
-  trumpet: ['F#4', 'G4', 'Ab4', 'A4', 'Bb4', 'B4', 'C5', 'C#5', 'D5', 'Eb5', 'E5', 'F5'],
-  horn: ['F4', 'F#4', 'G4', 'Ab4', 'A4', 'Bb4', 'B4', 'C5', 'C#5', 'D5', 'Eb5', 'E5'],
-  trombone: ['Bb2', 'C3', 'D3', 'Eb3', 'F3', 'G3', 'Ab3', 'Bb3', 'C4', 'D4', 'F4'],
-  euphonium: ['Bb2', 'C3', 'D3', 'Eb3', 'F3', 'G3', 'Bb3', 'C4', 'D4', 'F4'],
-  tuba: ['Bb1', 'F2', 'Bb2', 'C3', 'D3', 'Eb3', 'F3', 'G3'],
+const guestHeatmapRanges: Record<string, readonly [string, string]> = {
+  trumpet: ['F#3', 'C6'],
+  horn: ['F3', 'C6'],
+  trombone: ['E2', 'Bb4'],
+  euphonium: ['E2', 'Bb4'],
+  tuba: ['D1', 'F4'],
 };
+
+function noteLabelsInRange([start, end]: readonly [string, string]) {
+  const startMidi = noteLabelToMidi(start);
+  const endMidi = noteLabelToMidi(end);
+  return Array.from({ length: endMidi - startMidi + 1 }, (_, index) => {
+    const note = midiToNote(startMidi + index);
+    return `${note.note}${note.octave}`;
+  });
+}
 
 function inRange(session: GuestSessionDetail, range?: GuestInsightRange) {
   const started = new Date(session.started_at).getTime();
@@ -96,9 +105,39 @@ function emptyHeatmapRow(instrumentId: string, label: string, localizer?: GuestI
 }
 
 export function buildGuestHeatmap(instrumentId: string, stats: NoteStats[], localizer?: GuestInsightLocalizer): NoteStats[] {
-  const byLabel = new Map(stats.map((row) => [row.note_label, row]));
-  const labels = guestHeatmapNotes[instrumentId] ?? guestHeatmapNotes.trumpet;
-  return labels.map((label) => byLabel.get(label) ?? emptyHeatmapRow(instrumentId, label, localizer));
+  const range = guestHeatmapRanges[instrumentId] ?? guestHeatmapRanges.trumpet;
+  const startMidi = noteLabelToMidi(range[0]);
+  const endMidi = noteLabelToMidi(range[1]);
+  const byMidi = new Map<number, NoteStats>();
+  for (const row of stats) {
+    const midi = noteLabelToMidi(row.note_label);
+    if (!Number.isInteger(midi)) continue;
+    const current = byMidi.get(midi);
+    if (!current || row.sample_count > current.sample_count) byMidi.set(midi, row);
+  }
+  const midiValues = Array.from(
+    { length: endMidi - startMidi + 1 },
+    (_, index) => startMidi + index,
+  );
+  // Older local takes may contain a valid note outside a profile's current
+  // written range. Keep that observation visible instead of silently dropping it.
+  for (const midi of byMidi.keys()) {
+    if (midi < startMidi || midi > endMidi) midiValues.push(midi);
+  }
+  midiValues.sort((left, right) => left - right);
+  return midiValues.map((midi) => {
+    const note = midiToNote(midi);
+    const label = `${note.note}${note.octave}`;
+    const observed = byMidi.get(midi);
+    return observed
+      ? {
+          ...observed,
+          written_note: note.note,
+          written_octave: note.octave,
+          note_label: label,
+        }
+      : emptyHeatmapRow(instrumentId, label, localizer);
+  });
 }
 
 export function buildGuestRecommendations(stats: NoteStats[], localizer?: GuestInsightLocalizer): Recommendation[] {

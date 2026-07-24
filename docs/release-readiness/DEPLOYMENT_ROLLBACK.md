@@ -1,57 +1,35 @@
-# Deployment And Rollback
+# Direct Deployment And Rollback
 
-## Current Hosted Surfaces
+Updated: 2026-07-24. Target revision: `PENDING_FINAL_SHA`.
 
-- Web: `https://brasstune.vercel.app`
-- Backend: `https://brasstune-u8qj.onrender.com`
-- Health: `https://brasstune-u8qj.onrender.com/api/health`
+## Deployment boundary
 
-## CI/Checks Added Or Preserved
+- GitHub Actions is disabled and must not be used for this candidate.
+- Supabase migration `20260724072904_account_deletion_maintenance_heartbeats.sql` was applied on 2026-07-24; local and remote migration histories match.
+- Direct Render and Vercel deployment is planned; no deployment IDs or hosted results are recorded yet.
 
-- Backend pytest on PR/push.
-- Frontend unit/build/audit plus Playwright browser release journeys.
-- Security workflow with npm audit, pip-audit with exact ignored advisories, Bandit, and Gitleaks.
-- Swift workflow for Swift package tests, native simulator build, native unit tests, and native UI smoke with dynamic simulator discovery.
-- Deploy workflow is guarded to run only from `main`, uses the `production` GitHub environment, has bounded timeouts, minimal read permissions, deploy concurrency, and an exact-SHA Render API request.
+## Order
 
-## Deployment Procedure
+1. Record `PENDING_FINAL_SHA` after the final commit exists.
+2. Reconfirm the applied migration state before deployment.
+3. Deploy Render directly from the final SHA; verify readiness, reported revision, and maintenance-heartbeat behavior.
+4. Deploy Vercel directly from the same SHA; verify the production alias and reported revision.
+5. Run hosted smoke before expanding access or making production-complete claims.
 
-1. Merge reviewed PR to `main`.
-2. Confirm backend migrations are compatible with current production data.
-3. Trigger deploy workflow from `main` only.
-4. Frontend deploy uses Vercel CLI with `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
-5. Backend deploy uses `RENDER_API_KEY` and `RENDER_SERVICE_ID` to disable auto-deploy and request the exact workflow commit from Render's deploy API.
-6. Run hosted smoke:
-   - `BRASSTUNE_WEB_BASE_URL=https://brasstune.vercel.app BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com BRASSTUNE_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run smoke:hosted`
-   - `curl -IL https://brasstune.vercel.app`
-   - `curl -IL https://brasstune.vercel.app/settings`
-   - `curl -fsS --max-time 70 https://brasstune-u8qj.onrender.com/api/health`
-   - CORS OPTIONS from Vercel origin.
-   - `E2E_BASE_URL=https://brasstune.vercel.app E2E_API_BASE_URL=https://brasstune-u8qj.onrender.com E2E_WS_BASE_URL=wss://brasstune-u8qj.onrender.com npm run e2e:hosted`
-   - For protected previews, provide `E2E_VERCEL_SHARE_URL` or an automation bypass; connector-only access is not enough for local Playwright.
+## Known-good rollback boundary
 
-## Rollback Procedure
+- The pre-candidate production revision is `6f4054412765d2aafe28d901e85a23ead5238c97`.
+- The pre-candidate Render deployment is `dep-d9hg7cnavr4c73ehi0j0`.
+- The pre-candidate Vercel deployment is `dpl_3wrVmKHRx8fxmH75haGKz55WWJfR`.
+- The heartbeat migration is additive and private, so it remains schema-compatible with that application revision. The older backend does not write or enforce the new heartbeat.
+- The terminal privacy contract migration `20260724034725_enforce_account_deletion_terminal_privacy.sql` is already applied. Never roll back to a backend that can write unsanitized terminal deletion rows; use `6f4054412765d2aafe28d901e85a23ead5238c97` or a later privacy-aware revision.
 
-1. Stop rollout if health, CORS, auth, account deletion, or WebSocket checks fail.
-2. Vercel: promote/revert to last known-good deployment in Vercel dashboard or rerun deploy for the previous commit.
-3. Render: rollback to previous deploy from Render dashboard or redeploy previous commit.
-4. Database: do not roll back migrations without reviewing data compatibility. Prefer forward fixes unless a documented reversible migration exists.
-5. Supabase storage/auth: do not manually delete identities or buckets during rollback unless tied to a documented incident and owner approval.
-6. Communicate affected surfaces, start/end times, and whether user data was impacted.
+## Stop and rollback criteria
 
-### Account-deletion privacy expand/contract ordering
+Stop the rollout for a failed migration, mismatched revision, failed readiness/heartbeat check, or failed hosted smoke affecting REST, WebSocket, auth, class, audio, offline, or account lifecycle.
 
-1. Apply only `20260723021828_account_deletion_privacy_tombstones.sql` as the database expand phase. It adds private tombstone/config storage and nullable terminal identifiers but deliberately adds no terminal-row CHECK, so the deployed `b84dacc` writer remains compatible.
-2. Deploy the privacy-aware backend. Require its startup scrubber to report success, confirm the tombstone config is initialized in `expand`, and record the exact deploy artifact/SHA as the database-compatible rollback target.
-3. In a separate migration release, apply `20260724034725_enforce_account_deletion_terminal_privacy.sql`. It aborts unless the privacy-aware backend initialized the phase and every legacy terminal row was scrubbed, then adds and validates the strict CHECK and flips the phase to `contract` atomically.
-4. Only after contract succeeds should frontend rollout and hosted deletion/readiness smoke proceed.
+- Vercel: revert/promote only to a previously recorded known-good deployment after confirming the affected revision.
+- Render: roll back only to a previously recorded known-good deployment compatible with the applied database migration state.
+- Supabase: do not reverse migrations without a reviewed data-compatibility plan; prefer a forward corrective migration when safe.
 
-Before contract, rollback to `b84dacc` remains database-compatible. After contract, `b84dacc` is not a safe rollback target because it completes jobs without tombstoning or scrubbing. Roll back to the retained exact privacy-aware backend artifact instead. Do not apply contract until that artifact is recorded and restorable; do not weaken the CHECK or drop tombstones as an emergency application rollback.
-
-## Current Deployment Notes
-
-- The retained pre-contract rollback target is Render deployment `dep-d9hdu7navr4c73edcutg` at exact commit `898c85de53ea7a696334b4305eef36c9d0e5921e`. Its startup privacy scrub reported `ok: true`, `scrubbed: 0`, and no contract constraint; `/api/live`, `/api/ready`, `/api/version`, REST/CORS, and WebSocket protocol smoke passed.
-- Vercel production deployment `dpl_CjkgbkG3mHjZ81RH74jhnDg1dAik` served the same exact commit through the canonical `https://brasstune.vercel.app` alias before contract enforcement.
-- After PR merge, run `POST_MERGE_PRODUCTION_CHECKLIST.md` before inviting production closed-beta testers.
-- Protected Vercel preview page journeys still need an automation bypass; direct connector fetch and hosted API/WS smoke passed.
-- `render.yaml` no longer provides a broad `https://.*\.vercel\.app` CORS regex by default. Configure exact production and preview origins before deployment.
+Record the incident, affected surface, provider deployment IDs, revisions, data impact, and recovery verification. Apple provider/signing and physical-device microphone evidence are external and are not rollback proof. Gmail drafts remain prohibited until the designated sender identity is connected.

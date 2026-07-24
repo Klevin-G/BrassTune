@@ -1,31 +1,24 @@
-# Predeployment Test Matrix
+# Release Test Matrix
 
-Updated: 2026-07-23. Candidate source revision: `7c12b15`.
+Updated: 2026-07-24. Final release revision: `PENDING_FINAL_SHA`.
 
-| Gate | Latest evidence | Status | Release meaning |
+| Gate | Evidence | Status | Release meaning |
 |---|---|---|---|
-| Backend | `246 passed, 4 skipped` after `428a123` | Passed locally | Duplicate-identity PII race fixed; exact-SHA self-hosted CI still required. |
-| Frontend units | `251/251` | Passed locally | Needs exact-SHA CI. |
-| Frontend build | `npm run build` passed; 11 lazy non-English locale chunks | Passed locally | Needs deployed-bundle verification. |
-| Frontend dependency audit | `npm audit --omit=dev`: 0 findings | Passed locally | Point-in-time dependency result. |
-| Local browser journeys | `443 passed, 7 skipped, 0 failed` | Passed locally | Does not prove hosted services. |
+| Backend | `286 passed, 11 skipped` | Passed locally | Requires deployed backend verification. |
+| Frontend units | `253/253` | Passed locally | Requires deployed-bundle smoke. |
+| Frontend build | Passed | Passed locally | Requires Vercel deployment identity check. |
+| Device simulation | 12 viewport profiles passed | Passed locally | Not physical-device evidence. |
 | Swift Core | `3/3` | Passed locally | Shared-domain check only. |
-| Native units/UI | `139/139`; `15/15`; affected welcome/auth checks `4/4` after `7c12b15` | Passed in simulator | Unsigned simulator only. |
-| Native builds | Debug iPhone/iPad; Release iPhone, zero warnings | Passed locally | `7c12b15` follow-up build also reports zero warnings; not an archive or device test. |
-| Self-hosted CI | Linux and macOS runner variables/labels are configured | Pending exact SHA | Required checks must run and pass. |
-| Supabase | Three expand migrations pending | Pending | No provider mutation has been claimed here. |
-| Hosted smoke | Render/Vercel same-SHA smoke | Pending | Must include REST, WS, auth, class, audio, and offline paths. |
-| Physical iOS | Microphone, routes, accessibility, localization, signing | Pending | Required for native distribution claims. |
+| Native iPhone units | `145/145` | Passed in simulator | Unsigned simulator evidence only. |
+| Native iPhone UI | `20/20` | Passed in simulator | Unsigned simulator evidence only. |
+| Native iPad journeys | First-run, main, and class passed | Passed in simulator | Unsigned simulator evidence only. |
+| Localization | 660 keys, 12 locales, 0 issues | Passed locally | No human linguistic review recorded. |
+| GitHub Actions | Disabled | Not applicable | Must not be used for this release candidate. |
+| Supabase heartbeat migration | `20260724072904_account_deletion_maintenance_heartbeats.sql`; local/remote histories matched | Applied | Reconfirm before the dependent production verification. |
+| Render/Vercel same-SHA deployment | Direct deployment planned | Pending | Record provider deployment identities and exact revision. |
+| Hosted smoke | No current hosted result | Pending | Cover web, REST, WebSocket, auth, class, audio, offline, and account lifecycle. |
+| Apple/signing/physical microphone | External | Pending | Required for Apple/live-audio claims. |
 
-## Reproduction commands
+## Reproduction boundary
 
-```bash
-cd backend && .venv/bin/python -m pytest
-cd frontend && npm test
-cd frontend && npm run build
-cd frontend && npm audit --omit=dev
-cd frontend && npm run e2e:local
-cd swift/BrassTuneCore && swift test
-```
-
-Use dynamically discovered simulators for Xcode tests/builds. Re-run all relevant gates from the final commit before merge.
+The results above are supplied current working-tree evidence. Re-run affected local gates if the final commit changes; replace `PENDING_FINAL_SHA` only after that final commit is recorded.

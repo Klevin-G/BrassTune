@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import transpositionCases from '../../../fixtures/transposition_cases.json';
 import { nextDemoPitchFrame } from './demoPitch';
 import { buildGuestHeatmap, buildGuestNoteStats, buildGuestPracticePlan, buildGuestProgress, buildGuestRecommendations } from './guestInsights';
 import { GUEST_WORKSPACE_ACCESS, clearGuestSessions, createGuestSession, saveGuestSessionFromFrames } from './guestSessions';
+import { noteLabelToMidi } from './music';
 import type { MessageId } from '../i18n/messages.base';
 
 describe('guest insights', () => {
@@ -42,6 +44,48 @@ describe('guest insights', () => {
 
     expect(buildGuestProgress('trumpet', buildGuestNoteStats('trumpet')).session_count).toBe(1);
     expect(buildGuestProgress('horn', buildGuestNoteStats('horn')).session_count).toBe(0);
+  });
+
+  it('covers each shared profile written range and retains observed notes outside that range', () => {
+    for (const profile of transpositionCases) {
+      const heatmap = buildGuestHeatmap(profile.instrument_id, []);
+      const labels = heatmap.map((row) => row.note_label);
+      const [start, end] = profile.expected_typical_range_written.split('-');
+
+      expect(labels[0], profile.name).toBe(start);
+      expect(labels[labels.length - 1], profile.name).toBe(end);
+      expect(labels).toHaveLength(noteLabelToMidi(end) - noteLabelToMidi(start) + 1);
+    }
+
+    const legacyObservation = {
+      ...buildGuestHeatmap('trumpet', [])[0],
+      written_note: 'C',
+      written_octave: 7,
+      note_label: 'C7',
+      has_data: true,
+      sample_count: 12,
+      event_count: 1,
+    };
+    const heatmap = buildGuestHeatmap('trumpet', [legacyObservation]);
+    expect(heatmap.find((row) => row.note_label === 'C7')).toMatchObject({ has_data: true, sample_count: 12 });
+
+    const enharmonicObservation = {
+      ...legacyObservation,
+      written_note: 'A#',
+      written_octave: 4,
+      note_label: 'A#4',
+    };
+    const canonicalized = buildGuestHeatmap('trumpet', [
+      enharmonicObservation,
+      { ...legacyObservation, note_label: 'not-a-note' },
+    ]);
+    expect(canonicalized.filter((row) => row.note_label === 'Bb4')).toHaveLength(1);
+    expect(canonicalized.find((row) => row.note_label === 'Bb4')).toMatchObject({
+      written_note: 'Bb',
+      written_octave: 4,
+      has_data: true,
+    });
+    expect(canonicalized.some((row) => row.note_label === 'not-a-note')).toBe(false);
   });
 
   it('localizes generated guest coaching while preserving note names and formatting selected-locale dates', () => {

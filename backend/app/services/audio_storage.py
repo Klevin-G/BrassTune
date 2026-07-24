@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.security import LOCAL_ENVIRONMENTS, app_environment
 from app.db.database import DATA_DIR
 from app.models.db import AudioStorageJob, PracticeSession, User
+from app.services.account_mutation import account_mutation_guard, assert_account_accepts_mutation
 from app.services.serializers import session_to_dict
 
 ALLOWED_AUDIO_MIME_TYPES = {
@@ -67,6 +68,7 @@ def _lock_audio_account_and_session(db: Session, session: PracticeSession) -> Pr
     account_exists = db.query(User.id).filter(User.id == session.user_id).with_for_update().first()
     if account_exists is None:
         raise HTTPException(status_code=404, detail="Account not found.")
+    assert_account_accepts_mutation(db, session.user_id)
     current_session = (
         db.query(PracticeSession)
         .filter(PracticeSession.id == session.id, PracticeSession.user_id == session.user_id)
@@ -703,7 +705,25 @@ def replace_audio_for_session(
     mime_type: str,
     duration_seconds: Optional[float],
 ) -> AudioReplaceResult:
-    """Reserve, upload, activate, and reconcile audio without long DB locks."""
+    """Reserve, upload, activate, and reconcile one account's audio safely."""
+    with account_mutation_guard(db, session.user_id):
+        return _replace_audio_for_session_locked(
+            db,
+            session,
+            data,
+            mime_type,
+            duration_seconds,
+        )
+
+
+def _replace_audio_for_session_locked(
+    db: Session,
+    session: PracticeSession,
+    data: bytes,
+    mime_type: str,
+    duration_seconds: Optional[float],
+) -> AudioReplaceResult:
+    """Perform replacement while deletion is excluded across every commit."""
     stage = prepare_audio_upload(session, data, mime_type, duration_seconds)
     stage, reservation_id = reserve_audio_upload(db, session, stage)
     try:

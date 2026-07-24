@@ -1,35 +1,37 @@
-# BrassTune Release Candidate Evidence
+# BrassTune Completion Candidate
 
-Updated: 2026-07-23. Pre-push code/test revision: `a3f436ea7442c471760e06ed1422ec3ddbbf1217`.
+Updated: 2026-07-24. Candidate final revision: `PENDING_FINAL_SHA`.
 
 ## Decision
 
-Ready for review and merge; not deployed or merged. Web, native, shared-domain, accessibility, and privacy work has current local evidence. `428a123` fixes the duplicate-identity PII race and the full backend suite passes `246 passed, 4 skipped`. Persistent self-hosted runners are restricted to trusted `push` and manual events, so exact-SHA CI runs after merge rather than on pull-request code.
+Local validation is complete for the current working-tree candidate. It is **not deployed** and is not a production-release certification. GitHub Actions is disabled and must not be used as a release gate for this candidate.
 
-## Verified local evidence
+## Local evidence
 
 | Surface | Result | Boundary |
 |---|---|---|
-| Backend | `246 passed, 4 skipped` after the `428a123` duplicate-identity PII race correction | Local result; exact-SHA self-hosted CI remains required. |
-| Web unit/build/dependency audit | `251/251`, production build, `11` lazy non-English locale chunks, `npm audit --omit=dev` with `0` findings | Local only. |
-| Web browser journeys | `443 passed, 7 skipped, 0 failed` | Local automation only. |
-| Shared pitch domain | Swift Core `3/3` | Does not prove physical audio capture. |
-| Native unit/UI | `140/140` units; `17/17` UI tests in one invocation, result bundle `/tmp/brasstune-final-a3f436e-all-ui.xcresult` | Unsigned simulator only. |
-| Native builds | Debug iPhone/iPad and Release iPhone passed with zero warnings | Not an archive, signing, or device result. |
+| Backend | `286 passed, 11 skipped` | Local result only. |
+| Frontend | `253/253` unit tests; production build passed | Local result only. |
+| Device simulation | 12 viewport profiles passed | Simulated browser coverage, not physical devices. |
+| Swift Core | `3/3` | Shared-domain coverage only. |
+| Native iPhone units | `145/145` | Simulator evidence only. |
+| Native iPhone UI | `20/20` | Simulator evidence only. |
+| Native iPad journeys | First-run, main, and class journeys passed | Simulator evidence only. |
+| Localization verifier | 660 keys across 12 locales; 0 issues | Does not prove human linguistic review. |
 
-## Product scope represented in the candidate
+## Required release actions
 
-- A focused tuner-first practice workspace, five-minute guided warm-up, custom Play-Along builder, named metronome presets, favorites/recent shortcuts, weekly goals/reflections, weak-transition drills, drone/interval tuning, and offline packs.
-- Class creation, join/invite workflows, role-aware aggregate practice summaries, and an aggregate-only privacy contract.
-- Twelve production locales: English, Spanish, Simplified Chinese, Traditional Chinese, Arabic, French, German, Russian, Portuguese (Brazil), Japanese, Korean, and Vietnamese. The web loads eleven non-English catalogs lazily.
-- Web and iOS email/password auth plus Google and Apple sign-in surfaces. Google is live on the linked Supabase project; independent Google branding review approved the current native treatment. Apple implementation is complete but the live provider is disabled pending Apple Developer credentials and Supabase setup.
+1. Record the committed release revision as `PENDING_FINAL_SHA`; do not replace this placeholder until the final commit is known.
+2. Reconfirm that `20260724072904_account_deletion_maintenance_heartbeats.sql` remains matched in local and remote Supabase migration history. It was applied on 2026-07-24.
+3. Deploy the backend directly to Render and verify its reported revision/readiness and authenticated maintenance heartbeat behavior.
+4. Deploy the frontend directly to Vercel and verify its reported revision matches the backend and `PENDING_FINAL_SHA`.
+5. Run and record hosted smoke against the deployed web, REST, WebSocket, auth, class, audio, offline, and account-lifecycle surfaces.
 
-## Release blockers and order
+## External blockers
 
-1. Push and merge the locally verified candidate, then run required Backend, Frontend, Security, and Swift checks on the exact merged SHA using the configured self-hosted runners. Confirm the pre-baked SQLite runtime with the action-selected Python in live CI.
-2. Apply the three additive Supabase migrations, then deploy the privacy-aware backend and verify expand cleanup before creating or applying the terminal contract migration.
-3. Sync approved Supabase redirect URLs/configuration, deploy Render and Vercel from the same merged SHA, and pass hosted REST, WebSocket, auth, class, audio, and offline smoke.
-4. Complete human/device gates separately: Apple provider setup, signed archive/TestFlight, physical microphone/audio, accessibility, and localization checks.
-5. Reconnect the outreach Gmail integration as the designated BrassTune sender before creating professor drafts; the currently connected account is not the planned sender and must not receive duplicate drafts.
+- Apple live provider configuration and signing remain external.
+- Google is enabled on the linked Supabase project; Apple remains disabled until its Apple Developer credentials are configured.
+- Physical-device microphone/audio validation remains external.
+- The connected Gmail sender identity is incorrect. Do not create outreach drafts until the designated sender is connected.
 
-No claim in this report establishes production deployment, Apple provider enablement, signed native delivery, or physical-device microphone quality.
+No claim here establishes a deployed revision, live provider enablement, signed native delivery, physical-device microphone quality, or sent/created Gmail drafts.

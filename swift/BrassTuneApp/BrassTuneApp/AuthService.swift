@@ -9,6 +9,7 @@ final class AuthService: NSObject {
     static let oauthCallbackScheme = "com.brasstune.auth"
     static let googleOAuthCallbackHost = "oauth"
     static let googleOAuthCallbackPath = "/google"
+    static let passwordResetWebURLString = "https://brasstune.vercel.app/auth/reset-password"
 
     private let session: URLSession
     private let readSessionPayload: () throws -> String?
@@ -94,9 +95,13 @@ final class AuthService: NSObject {
 
     func requestPasswordReset(email: String, config: AppConfig) async throws {
         guard !email.isEmpty else { throw UserVisibleError.authenticationFailed }
+        guard let redirectURL = URL(string: Self.passwordResetWebURLString) else {
+            throw UserVisibleError.malformedResponse
+        }
         _ = try await requestAuth(
             config: config,
             path: "/auth/v1/recover",
+            query: [URLQueryItem(name: "redirect_to", value: redirectURL.absoluteString)],
             bearerToken: nil,
             body: ["email": email]
         )

@@ -119,8 +119,8 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .btMinimumInteractiveSize(alignment: .leading)
-                .accessibilityValue(advancedTunerExpanded ? "Expanded" : "Collapsed")
-                .accessibilityHint("Advanced tuner settings")
+                .accessibilityValue(Text(verbatim: NativeLocalization.string(advancedTunerExpanded ? "Expanded" : "Collapsed")))
+                .accessibilityHint(Text(verbatim: NativeLocalization.string("Advanced tuner settings")))
                 .accessibilityIdentifier("settings.advancedTunerSettings")
 
                 if advancedTunerExpanded {
@@ -438,7 +438,7 @@ struct NativeGoogleSignInButton: View {
         .buttonStyle(.plain)
         .disabled(model.authOperationInProgress || !model.googleSignInAvailable)
         .opacity(model.authOperationInProgress || !model.googleSignInAvailable ? 0.45 : 1)
-        .accessibilityLabel(Text("Sign in with Google"))
+        .accessibilityLabel(Text(verbatim: NativeLocalization.string("Sign in with Google")))
         .accessibilityIdentifier(identifier)
     }
 
@@ -602,6 +602,19 @@ struct ClassesView: View {
                     title: "Class invitations",
                     subtitle: "You choose whether to join. Pick your own instrument before accepting."
                 )
+                Text(verbatim: NativeLocalization.string(
+                    "Only class-level and student aggregate practice minutes, session counts, and tuning summaries are shared."
+                ))
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(verbatim: NativeLocalization.string(
+                    "Recordings, live microphone audio, imported sheet music, and private reflections are never shown here."
+                ))
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("classes.invitationPrivacy")
                 ForEach(model.ensembleInvitations) { invitation in
                     BTCard(tint: BTTheme.surfaceWarm) {
                         Text(verbatim: invitation.groupName)
@@ -662,7 +675,9 @@ struct ClassesView: View {
                 )
             }
         } label: {
-            Text(accept ? "Accept invitation" : "Decline invitation")
+            Text(verbatim: NativeLocalization.string(
+                accept ? "Accept invitation" : "Decline invitation"
+            ))
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
@@ -676,6 +691,19 @@ struct ClassesView: View {
     private var joinCard: some View {
         BTCard {
             BTSectionHeader(title: "Join another class", subtitle: "Enter the code your teacher shared.")
+            Text(verbatim: NativeLocalization.string(
+                "Only class-level and student aggregate practice minutes, session counts, and tuning summaries are shared."
+            ))
+                .font(.footnote)
+                .foregroundStyle(BTTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: NativeLocalization.string(
+                "Recordings, live microphone audio, imported sheet music, and private reflections are never shown here."
+            ))
+                .font(.footnote)
+                .foregroundStyle(BTTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("classes.joinPrivacy")
             TextField("Class code", text: $joinCode)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
@@ -713,8 +741,8 @@ struct ClassesView: View {
             }
             .buttonStyle(.plain)
             .btMinimumInteractiveSize()
-            .accessibilityValue(createExpanded ? "Expanded" : "Collapsed")
-            .accessibilityHint("Create a class")
+            .accessibilityValue(Text(verbatim: NativeLocalization.string(createExpanded ? "Expanded" : "Collapsed")))
+            .accessibilityHint(Text(verbatim: NativeLocalization.string("Create a class")))
             .accessibilityIdentifier("classes.createDisclosure")
 
             if createExpanded {
@@ -729,7 +757,9 @@ struct ClassesView: View {
                         }
                     }
                 } label: {
-                    Text(model.ensembleMutationInProgress ? "Creating…" : "Create a class")
+                    Text(verbatim: NativeLocalization.string(
+                        model.ensembleMutationInProgress ? "Creating…" : "Create a class"
+                    ))
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BTPrimaryButtonStyle())
@@ -859,7 +889,9 @@ struct ClassesView: View {
                         }
                     }
                 } label: {
-                    Text(model.ensembleMutationInProgress ? "Sending…" : "Send invitation")
+                    Text(verbatim: NativeLocalization.string(
+                        model.ensembleMutationInProgress ? "Sending…" : "Send invitation"
+                    ))
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BTPrimaryButtonStyle())
@@ -979,13 +1011,40 @@ struct ClassesView: View {
             detail: "aggregate",
             tint: BTTheme.secondaryAccent
         )
+        if let averageAbsCents = student.averageAbsCents {
+            BTMetricTile(
+                title: "Average distance",
+                value: .verbatim(NativeLocalization.format(
+                    "%@ cents",
+                    formatClassNumber(averageAbsCents)
+                )),
+                detail: "aggregate"
+            )
+            .accessibilityIdentifier("classes.director.averageDistance.\(student.memberID)")
+        }
+        if let inTunePercentage = student.inTunePercentage {
+            BTMetricTile(
+                title: "In tune",
+                value: .verbatim(NativeLocalization.format(
+                    "%@%% in tune",
+                    formatClassNumber(inTunePercentage)
+                )),
+                detail: "aggregate",
+                tint: BTTheme.success
+            )
+            .accessibilityIdentifier("classes.director.inTune.\(student.memberID)")
+        }
     }
 
     @ViewBuilder
     private var directorSummary: some View {
         if let aggregate = model.selectedEnsembleAggregate {
             BTCard {
-                BTSectionHeader(title: "Roster summary", subtitle: "Aggregate activity since each student joined.")
+                BTSectionHeader(
+                    title: "Roster summary",
+                    subtitle: "Aggregate activity since each student joined."
+                )
+                .accessibilityIdentifier("classes.director.summary")
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: BTSpacing.sm) {
                         aggregateMetrics(aggregate)
@@ -995,7 +1054,6 @@ struct ClassesView: View {
                     }
                 }
             }
-            .accessibilityIdentifier("classes.director.summary")
         }
     }
 
@@ -1015,6 +1073,15 @@ struct ClassesView: View {
             detail: "all students",
             tint: BTTheme.secondaryAccent
         )
+        BTMetricTile(
+            title: "Average distance",
+            value: .verbatim(NativeLocalization.format(
+                "%@ cents",
+                formatClassNumber(aggregate.overall.averageAbsCents)
+            )),
+            detail: "all students"
+        )
+        .accessibilityIdentifier("classes.director.averageDistance.overall")
     }
 
     @ViewBuilder

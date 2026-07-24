@@ -1274,12 +1274,13 @@ enum NativePitchAnalytics {
                 func weight(_ event: NativeNoteEvent) -> Double {
                     totalDuration > 0 ? max(0, Double(event.durationMs)) : 1
                 }
-                let centers = items.map(\.averageSignedCents)
                 let averageSigned = items.reduce(0.0) { $0 + $1.averageSignedCents * weight($1) } / denominator
                 let averageAbsolute = items.reduce(0.0) { $0 + $1.averageAbsoluteCents * weight($1) } / denominator
                 let inTune = items.reduce(0.0) { $0 + $1.inTunePercentage * weight($1) } / denominator
                 let stability = items.reduce(0.0) { $0 + $1.stabilityScore * weight($1) } / denominator
-                let deviation = items.count > 1 ? populationStandardDeviation(centers) : first.standardDeviationCents
+                let deviation = items.count > 1
+                    ? durationWeightedPopulationStandardDeviation(items, value: \.averageSignedCents)
+                    : first.standardDeviationCents
                 let trend = classifyTrend(averageSignedCents: averageSigned, standardDeviationCents: deviation, stabilityScore: stability)
                 let severity = classifyProblem(averageAbsoluteCents: averageAbsolute, inTunePercentage: inTune)
                 let problem = roundedHundredth(averageAbsolute * 2 + deviation + max(0, 80 - inTune) * 0.25)
@@ -1289,7 +1290,7 @@ enum NativePitchAnalytics {
                     noteLabel: "\(first.writtenNote)\(first.writtenOctave)",
                     averageSignedCents: averageSigned,
                     averageAbsoluteCents: averageAbsolute,
-                    medianCents: median(centers),
+                    medianCents: durationWeightedMedian(items, value: \.medianCents),
                     standardDeviationCents: deviation,
                     inTunePercentage: inTune,
                     durationMs: totalDuration,
@@ -1306,6 +1307,56 @@ enum NativePitchAnalytics {
                     ? lhs.writtenNote < rhs.writtenNote
                     : lhs.writtenOctave < rhs.writtenOctave
             }
+    }
+
+    private static func durationWeightedEntries(
+        _ items: [NativeNoteEvent],
+        value: KeyPath<NativeNoteEvent, Double>
+    ) -> [(value: Double, weight: Double)] {
+        let entries = items.map {
+            (value: $0[keyPath: value], weight: max(0, Double($0.durationMs)))
+        }
+        if entries.contains(where: { $0.weight > 0 }) {
+            return entries.filter { $0.weight > 0 }
+        }
+        return entries.map { (value: $0.value, weight: 1) }
+    }
+
+    private static func durationWeightedMedian(
+        _ items: [NativeNoteEvent],
+        value: KeyPath<NativeNoteEvent, Double>
+    ) -> Double {
+        let entries = durationWeightedEntries(items, value: value)
+            .sorted { $0.value < $1.value }
+        guard !entries.isEmpty else { return 0 }
+        let halfway = entries.reduce(0.0) { $0 + $1.weight } / 2
+        var cumulative = 0.0
+        for index in entries.indices {
+            cumulative += entries[index].weight
+            if abs(cumulative - halfway) <= 1e-12 {
+                return index + 1 < entries.count
+                    ? (entries[index].value + entries[index + 1].value) / 2
+                    : entries[index].value
+            }
+            if cumulative > halfway {
+                return entries[index].value
+            }
+        }
+        return entries.last?.value ?? 0
+    }
+
+    private static func durationWeightedPopulationStandardDeviation(
+        _ items: [NativeNoteEvent],
+        value: KeyPath<NativeNoteEvent, Double>
+    ) -> Double {
+        let entries = durationWeightedEntries(items, value: value)
+        guard !entries.isEmpty else { return 0 }
+        let totalWeight = entries.reduce(0.0) { $0 + $1.weight }
+        let center = entries.reduce(0.0) { $0 + $1.value * $1.weight } / totalWeight
+        let variance = entries.reduce(0.0) {
+            $0 + $1.weight * pow($1.value - center, 2)
+        } / totalWeight
+        return sqrt(max(0, variance))
     }
 
     static func recommendation(for stats: NativeNoteStatistics) -> NativePracticeRecommendation {

@@ -83,6 +83,27 @@ describe('web localization', () => {
     }
   });
 
+  it('discloses the Practice Scorer pitch-and-intonation-only scope in every catalog', async () => {
+    const scopeTerms = {
+      en: ['exercise', 'hold', 'rhythm', 'dynamics', 'sheet music'],
+      es: ['ejercicio', 'mantén', 'ritmo', 'dinámica', 'partitura'],
+      'zh-Hans': ['练习', '保持', '节奏', '力度', '乐谱'],
+      'zh-Hant': ['練習', '保持', '節奏', '力度', '樂譜'],
+      ar: ['تمرينًا', 'وثبّت', 'الإيقاع', 'الديناميكيات', 'النوتة الموسيقية'],
+      fr: ['exercice', 'tenez', 'rythme', 'nuances', 'partition'],
+      de: ['Übung', 'halte', 'Rhythmus', 'Dynamik', 'Notenschrift'],
+      ru: ['упражнение', 'удерживайте', 'Ритм', 'динамика', 'нотной записью'],
+      'pt-BR': ['exercício', 'mantenha', 'ritmo', 'dinâmica', 'partitura'],
+      ja: ['練習', '伸ばして', 'リズム', '強弱', '楽譜'],
+      ko: ['연습', '길게', '리듬', '셈여림', '악보'],
+      vi: ['bài tập', 'giữ', 'nhịp điệu', 'cường độ', 'bản nhạc'],
+    } as const;
+    for (const locale of productionLocales) {
+      const message = (await loadMessagesForLocale(locale))['playAlong.description'];
+      for (const term of scopeTerms[locale]) expect(message, `${locale}:${term}`).toContain(term);
+    }
+  });
+
   it('contains no normal English fallback outside invariant names, tokens, and valid loanwords', async () => {
     const invariantKeys = new Set([
       'auth.emailPlaceholder', 'auth.usernamePlaceholder', 'auth.displayNamePlaceholder',

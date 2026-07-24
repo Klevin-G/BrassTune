@@ -278,7 +278,7 @@ export const englishMessages = {
   'metronomePreset.addFavorite': 'Add {name} to favorites',
   'metronomePreset.delete': 'Delete {name}',
   'playAlong.title': 'Practice Scorer',
-  'playAlong.description': 'Pick an exercise and play it. We will listen and tell you how in tune each note is.',
+  'playAlong.description': 'Pick an exercise and hold each note steady. BrassTune checks which note you play and how in tune it is. It does not score rhythm, dynamics, or timing against sheet music.',
   'playAlong.choose': 'Choose an exercise',
   'playAlong.majorScales': 'Major scales',
   'playAlong.minorScales': 'Minor scales',

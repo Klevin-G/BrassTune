@@ -129,6 +129,15 @@ def test_expensive_mutation_budget_spans_rotated_resource_ids(monkeypatch):
     assert rotated.status_code == 429
 
 
+def test_expensive_read_budget_spans_json_and_csv_export_routes(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_EXPENSIVE_READ_RATE_LIMIT_PER_MINUTE", "1")
+    with TestClient(_http_limit_app()) as client:
+        first = client.get("/api/export/session/100.json")
+        second = client.get("/api/export/note-events/101.csv")
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
 def _request_with_forwarded_for(value: str, socket_host: str = "192.0.2.10") -> Request:
     return Request({
         "type": "http",

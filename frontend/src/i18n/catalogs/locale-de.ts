@@ -279,7 +279,7 @@ const messages = {
   "metronomePreset.addFavorite": "Fügen Sie {name} zu Ihren Favoriten hinzu",
   "metronomePreset.delete": "Löschen Sie {name}",
   "playAlong.title": "Übungsbewertung",
-  "playAlong.description": "Wählen Sie eine Übung und spielen Sie sie. Wir hören zu und sagen Ihnen, wie gut jede Note gestimmt ist.",
+  "playAlong.description": "Wähle eine Übung und halte jeden Ton ruhig. BrassTune prüft, welchen Ton du spielst und wie sauber er gestimmt ist. Rhythmus, Dynamik und das Timing zur Notenschrift werden nicht bewertet.",
   "playAlong.choose": "Wählen Sie eine Übung",
   "playAlong.majorScales": "Dur-Tonleitern",
   "playAlong.minorScales": "Moll-Tonleitern",

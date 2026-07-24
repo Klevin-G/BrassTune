@@ -973,6 +973,44 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testPasswordResetRequestUsesTrustedHTTPSWebDestination() async throws {
+        let networkSession = makeStubSession()
+        let authService = makeIsolatedAuthService(session: networkSession)
+        nonisolated(unsafe) var capturedRequest: URLRequest?
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            capturedRequest = request
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data()
+            )
+        }
+
+        try await authService.requestPasswordReset(
+            email: "player@example.com",
+            config: makeAuthConfig()
+        )
+
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/auth/v1/recover")
+        let query = try XCTUnwrap(
+            URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+        ).queryItems ?? []
+        XCTAssertEqual(
+            query.first(where: { $0.name == "redirect_to" })?.value,
+            "https://brasstune.vercel.app/auth/reset-password"
+        )
+        let body = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(requestBodyData(request))) as? [String: String]
+        )
+        XCTAssertEqual(body["email"], "player@example.com")
+        XCTAssertNil(body["code_challenge_method"])
+        XCTAssertNil(body["code_challenge"])
+        XCTAssertNil(body["code_verifier"])
+    }
+
+    @MainActor
     func testProviderSettingsAndGoogleOAuthStoreOnlyExchangedSupabaseSession() async throws {
         let networkSession = makeStubSession()
         let stored = InMemoryAuthSessionStore()
@@ -1263,7 +1301,7 @@ final class BrassTuneAppTests: XCTestCase {
     @MainActor
     func testPasswordResetClearsStaleErrorShowsSuccessAndGuardsDuplicateSubmission() async throws {
         let session = makeStubSession()
-        let authService = AuthService(session: session)
+        let authService = makeIsolatedAuthService(session: session)
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
         model.config = AppConfig(
@@ -1291,7 +1329,10 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(requestCount, 1)
         XCTAssertFalse(model.authOperationInProgress)
         XCTAssertNil(model.lastError)
-        XCTAssertEqual(model.authNotice, "Password reset email sent. Check your inbox.")
+        XCTAssertEqual(
+            model.authNotice,
+            "Password reset email sent. Open the secure web reset page from the email, then return to BrassTune and sign in."
+        )
         XCTAssertFalse(model.authNoticeIsError)
         StubURLProtocol.handler = nil
     }
@@ -1499,6 +1540,10 @@ final class BrassTuneAppTests: XCTestCase {
         await model.signIn(email: "a@example.com", password: "password")
         XCTAssertEqual(model.sessions.map(\.id), [accountASession.id])
         XCTAssertEqual(model.scores.map(\.title), ["Account A score"])
+        // A process relaunch cannot leave its old snapshot writer running.
+        // Flush this still-live test model before constructing its replacement
+        // so the test models that lifecycle instead of two app processes.
+        model.flushPendingPersistence()
 
         let relaunched = AppModel(
             persistenceStore: .ephemeral(fileURL: stateURL),
@@ -1536,6 +1581,60 @@ final class BrassTuneAppTests: XCTestCase {
         await afterDeletionRelaunch.signIn(email: "a@example.com", password: "password")
         XCTAssertTrue(afterDeletionRelaunch.sessions.isEmpty, "A deleted account namespace must stay deleted after relaunch.")
         XCTAssertTrue(afterDeletionRelaunch.scores.isEmpty)
+    }
+
+    @MainActor
+    func testMicrophoneRationaleStatePersistsPerGuestAndAccountNamespace() async throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "BrassTune-microphone-rationale-\(UUID().uuidString).json"
+        )
+        let authService = makeIsolatedAuthService(session: makeStubSession())
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            authService: authService
+        )
+        model.config = makeAuthConfig()
+        defer {
+            StubURLProtocol.handler = nil
+            try? authService.signOut()
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(
+                at: NativeStorageNamespace.account(userID: "rationale-user").stateFile(basedAt: stateURL)
+            )
+        }
+        StubURLProtocol.handler = { request in
+            if request.url?.path == "/auth/v1/logout" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!,
+                    data: Data()
+                )
+            }
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"rationale-user","email":"player@example.com"}}"#.utf8)
+            )
+        }
+
+        model.enterGuestDemo(presentTutorial: false)
+        XCTAssertFalse(model.microphoneRationaleSeen)
+        model.markMicrophoneRationaleSeen()
+        model.flushPendingPersistence()
+        XCTAssertTrue(model.microphoneRationaleSeen)
+
+        await model.signIn(email: "player@example.com", password: "password")
+        XCTAssertFalse(
+            model.microphoneRationaleSeen,
+            "A new account namespace must not inherit the guest rationale state."
+        )
+        model.markMicrophoneRationaleSeen()
+        model.flushPendingPersistence()
+
+        await model.signOut()
+        model.enterGuestDemo(presentTutorial: false)
+        XCTAssertTrue(
+            model.microphoneRationaleSeen,
+            "Returning to the guest namespace must restore its one-time rationale state."
+        )
     }
 
     @MainActor
@@ -2634,6 +2733,52 @@ final class BrassTuneAppTests: XCTestCase {
         }
     }
 
+    func testNativeNoteStatisticsDurationWeightMedianAndDeviationMatchCloudAndWeb() throws {
+        func event(id: Int, durationMs: Int, cents: Double) -> NativeNoteEvent {
+            NativeNoteEvent(
+                writtenNote: "D",
+                writtenOctave: 4,
+                startedAtMs: id * 10_000,
+                endedAtMs: id * 10_000 + max(0, durationMs),
+                durationMs: durationMs,
+                sampleCount: 10,
+                averageSignedCents: cents,
+                averageAbsoluteCents: abs(cents),
+                medianCents: cents,
+                standardDeviationCents: 2,
+                minimumCents: cents,
+                maximumCents: cents,
+                inTunePercentage: 70,
+                stabilityScore: 90
+            )
+        }
+
+        let weighted = try XCTUnwrap(
+            NativePitchAnalytics.calculateNoteStatistics(
+                events: [
+                    event(id: 1, durationMs: 1_000, cents: 0),
+                    event(id: 2, durationMs: 3_000, cents: 12),
+                    event(id: 3, durationMs: 0, cents: -100)
+                ]
+            ).first
+        )
+        XCTAssertEqual(weighted.averageSignedCents, 9, accuracy: 0.000_001)
+        XCTAssertEqual(weighted.medianCents, 12, accuracy: 0.000_001)
+        XCTAssertEqual(weighted.standardDeviationCents, sqrt(27), accuracy: 0.000_001)
+
+        let legacy = try XCTUnwrap(
+            NativePitchAnalytics.calculateNoteStatistics(
+                events: [
+                    event(id: 4, durationMs: 0, cents: 4),
+                    event(id: 5, durationMs: -1_000, cents: 10)
+                ]
+            ).first
+        )
+        XCTAssertEqual(legacy.averageSignedCents, 7, accuracy: 0.000_001)
+        XCTAssertEqual(legacy.medianCents, 7, accuracy: 0.000_001)
+        XCTAssertEqual(legacy.standardDeviationCents, 3, accuracy: 0.000_001)
+    }
+
     func testPitchTrendAndRecommendationUseInclusiveFiveCentCenteredBoundary() {
         let cases: [(cents: Double, trend: String, recommendation: String)] = [
             (-5.01, "Mostly flat", "Flat tendency"),
@@ -3215,7 +3360,80 @@ final class BrassTuneAppTests: XCTestCase {
         let announcement = instrumentSetupAccessibilityAnnouncement()
         XCTAssertTrue(announcement.contains("Choose your instrument"))
         XCTAssertTrue(announcement.contains("written notes"))
+        XCTAssertTrue(announcement.contains("concert-pitch transposition"))
+        XCTAssertTrue(announcement.contains("change it later"))
         XCTAssertFalse(announcement.contains("Step"))
+    }
+
+    @MainActor
+    func testProgressMilestonesAreEarnedOnlyFromRecordedLocalEvidence() {
+        let model = makeModel()
+        model.completeTutorial()
+
+        var milestones = progressOnboardingMilestones(for: model)
+        XCTAssertEqual(milestones.map(\.earned), [true, false, false, false])
+        XCTAssertFalse(progressShouldShowWarmupResume(nil))
+
+        var silentSession = makeSession(name: "Silence", cents: [0])
+        silentSession.frames = [
+            PitchFrame.detected(
+                timestampMs: 0,
+                frequencyHz: nil,
+                confidence: 0,
+                rms: 0,
+                instrumentId: "trumpet",
+                referencePitchHz: 440
+            )
+        ]
+        model.sessions = [silentSession]
+        milestones = progressOnboardingMilestones(for: model)
+        XCTAssertEqual(
+            milestones.map(\.earned),
+            [true, false, false, false],
+            "A silent or invalid detector frame is not a recorded note."
+        )
+
+        model.sessions = [makeSession(name: "First note", cents: [0])]
+        milestones = progressOnboardingMilestones(for: model)
+        XCTAssertEqual(milestones.map(\.earned), [true, true, false, false])
+
+        let warmupStart = Date(timeIntervalSince1970: 1_000)
+        model.startOrResumeWarmup(now: warmupStart)
+        XCTAssertTrue(progressShouldShowWarmupResume(model.currentWarmupCheckpoint))
+        model.advanceWarmup(now: warmupStart.addingTimeInterval(301))
+        XCTAssertFalse(progressShouldShowWarmupResume(model.currentWarmupCheckpoint))
+
+        model.practiceFeatures.playAlongAttempts = [
+            makePlayAlongAttempt(notes: ["C", "D"], rating: .excellent)
+        ]
+        milestones = progressOnboardingMilestones(for: model)
+        XCTAssertEqual(milestones.map(\.earned), [true, true, true, true])
+    }
+
+    func testTunerVoiceOverStateCombinesNoteAndQuantizedCentsWithoutFrameFlooding() {
+        let previous = NativeLocalization.language
+        defer { NativeLocalization.language = previous }
+        NativeLocalization.language = .english
+
+        XCTAssertEqual(
+            tunerVoiceOverState(frame: nil, isListening: false),
+            "Play a note, Ready"
+        )
+        let sharpA = makePlayAlongFrame(note: "A", cents: 11.1, timestampMs: 0)
+        let sharpB = makePlayAlongFrame(note: "A", cents: 12.2, timestampMs: 100)
+        let flat = makePlayAlongFrame(note: "A", cents: -17.4, timestampMs: 200)
+        let centered = makePlayAlongFrame(note: "A", cents: 0, timestampMs: 300)
+        let centeredSharp = makePlayAlongFrame(note: "A", cents: 5, timestampMs: 400)
+        XCTAssertEqual(
+            tunerVoiceOverState(frame: sharpA, isListening: true),
+            tunerVoiceOverState(frame: sharpB, isListening: true),
+            "Small frame-to-frame jitter in one five-cent bucket must not churn the accessibility value."
+        )
+        XCTAssertTrue(tunerVoiceOverState(frame: sharpA, isListening: true).contains("10 cents sharp"))
+        XCTAssertTrue(tunerVoiceOverState(frame: flat, isListening: true).contains("15 cents flat"))
+        XCTAssertTrue(tunerVoiceOverState(frame: sharpA, isListening: true).contains("A4"))
+        XCTAssertTrue(tunerVoiceOverState(frame: centered, isListening: true).contains("0 cents, In tune"))
+        XCTAssertTrue(tunerVoiceOverState(frame: centeredSharp, isListening: true).contains("+5 cents, In tune"))
     }
 
     func testPlayAlongLongSilenceResetsHoldAfterDropoutGrace() {
