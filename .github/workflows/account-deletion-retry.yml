@@ -17,7 +17,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }}
     # Fail closed to the curl-only maintenance runner. This runner has one
     # no-default-labels label and cannot receive general CI jobs.
-    runs-on: ${{ fromJSON(vars.BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER || '["brasstune-production-maintenance"]') }}
+    runs-on: ["brasstune-production-maintenance"]
     timeout-minutes: 5
     environment: production
     env:

@@ -46,16 +46,16 @@ BRASSTUNE_SECURITY_RUNNER=["self-hosted","brasstune","linux","ci"]
 BRASSTUNE_POSTGRES_RUNNER=["self-hosted","brasstune","linux","ci"]
 BRASSTUNE_DEVICE_SIMULATION_RUNNER=["self-hosted","brasstune","linux","ci"]
 BRASSTUNE_SWIFT_RUNNER=["self-hosted","brasstune","macos","xcode"]
-BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER=["brasstune-production-maintenance"]
 ```
 
 General build and test workflows keep hosted defaults so contributors without
 runner variables can use `ubuntu-latest` or `macos-latest`. The production
-account-deletion retry workflow is different: its default fails closed to the
-dedicated maintenance label so exhausted hosted minutes cannot silently skip the
-job and its secret cannot reach the general CI pool. Production deployment and
-smoke selectors remain unassigned to persistent self-hosted runners and are
-executed through reviewed provider tooling.
+account-deletion retry workflow is different: its runner label is hard-coded to
+the dedicated maintenance runner so a repository-variable change cannot route
+the secret elsewhere, exhausted hosted minutes cannot silently skip the job,
+and the secret cannot reach the general CI pool. Production deployment and smoke
+selectors remain unassigned to persistent self-hosted runners and are executed
+through reviewed provider tooling.
 
 ## Security Rules
 
@@ -134,15 +134,32 @@ docker run --rm --entrypoint bash \
   -lc 'test "$(id -u)" = 1001 && command -v curl >/dev/null && for binary in docker git node npm psql python python3 sudo; do ! command -v "${binary}"; done && /opt/actions-runner-template/bin/Runner.Listener --version'
 ```
 
-Register it without placing the one-time token in an argument, environment
-variable, file, log, or shell history. The pipeline sends it only to container
-standard input:
+Register it without placing the one-time token in a host argument, environment
+variable, file, log, or shell history. A short-lived registration container
+reads the token from standard input, writes only the runner registration to the
+dedicated volume, and exits. `config.sh` necessarily receives the token inside
+that isolated container process:
 
 ```bash
 gh api --method POST \
   repos/Klevin-G/BrassTune/actions/runners/registration-token \
   --jq .token |
-docker run --detach --interactive \
+docker run --rm --interactive \
+  --name brasstune-actions-runner-production-maintenance-register \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --pids-limit 128 \
+  --memory 256m \
+  --cpus 0.5 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+  --mount source=brasstune-actions-runner-production-maintenance,target=/opt/actions-runner \
+  --env RUNNER_NAME=brasstune-linux-arm64-production-maintenance \
+  --entrypoint bash \
+  brasstune-actions-runner-maintenance-arm64:2.336.0-r1 \
+  -lc 'set -euo pipefail; cd /opt/actions-runner; test ! -f .runner; if [ ! -x ./config.sh ]; then cp -a /opt/actions-runner-template/. .; fi; IFS= read -r registration_token; test -n "${registration_token}"; ./config.sh --unattended --disableupdate --no-default-labels --url https://github.com/Klevin-G/BrassTune --token "${registration_token}" --name "${RUNNER_NAME}" --labels brasstune-production-maintenance --work _work; unset registration_token'
+
+docker run --detach \
   --name brasstune-actions-runner-production-maintenance \
   --read-only \
   --cap-drop ALL \
@@ -159,15 +176,11 @@ docker run --detach --interactive \
 
 Do not mount host paths or `/var/run/docker.sock`. After registration, confirm
 that the runner is repository-scoped, online, and has only the
-`brasstune-production-maintenance` label before setting the selector:
+`brasstune-production-maintenance` label:
 
 ```bash
 gh api repos/Klevin-G/BrassTune/actions/runners \
   --jq '.runners[] | select(.name == "brasstune-linux-arm64-production-maintenance") | {name,status,labels:[.labels[].name]}'
-
-gh variable set BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER \
-  --repo Klevin-G/BrassTune \
-  --body '["brasstune-production-maintenance"]'
 ```
 
 Verify with one `workflow_dispatch` on `main`, then inspect the job through the
@@ -178,15 +191,17 @@ evidence.
 
 Rollback is fail-closed: stop the container first so no new job can start,
 remove its repository runner registration, preserve any required diagnostics,
-and delete its named volume. Revert the workflow selector and remove the
-repository variable only after hosted billing is restored. Rotate the
-maintenance endpoint secret if compromise or unintended exposure is suspected.
+and delete its named volume. Revert the hard-coded workflow selector only after
+hosted billing is restored. Rotate the maintenance endpoint secret if compromise
+or unintended exposure is suspected.
 
 ## Recovery Sequence
 
 1. Confirm the precise Actions blocker from check-run annotations.
 2. Register only the minimum runner required to start the blocked BrassTune jobs.
-3. Set the matching repository variable with valid JSON labels.
+3. Confirm each workflow selector matches its registered runner labels. General
+   CI pools use repository variables; the production maintenance label is
+   hard-coded.
 4. Complete the documented local release matrix on the exact candidate SHA.
 5. Merge that reviewed SHA, then confirm the post-merge Backend, Frontend, Security,
    and Swift jobs have nonzero steps, use the intended runner, and pass on the exact
