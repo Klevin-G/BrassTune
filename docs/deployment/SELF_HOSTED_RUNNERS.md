@@ -17,7 +17,7 @@ References:
 Linux web/backend runner:
 
 ```json
-["self-hosted","brasstune","linux"]
+["self-hosted","brasstune","linux","ci"]
 ```
 
 macOS native runner:
@@ -31,24 +31,29 @@ macOS native runner:
 Set only the variables for runners that are registered and online. Values must be valid JSON for `runs-on`.
 
 ```text
-BRASSTUNE_BACKEND_RUNNER=["self-hosted","brasstune","linux"]
-BRASSTUNE_FRONTEND_RUNNER=["self-hosted","brasstune","linux"]
-BRASSTUNE_SECURITY_RUNNER=["self-hosted","brasstune","linux"]
-BRASSTUNE_POSTGRES_RUNNER=["self-hosted","brasstune","linux"]
-BRASSTUNE_PRODUCTION_SMOKE_RUNNER=["self-hosted","brasstune","linux"]
-BRASSTUNE_RENDER_KEEPALIVE_RUNNER=["self-hosted","brasstune","linux"]
-BRASSTUNE_DEPLOY_RUNNER=["self-hosted","brasstune","linux"]
-BRASSTUNE_ACCOUNT_DELETION_RETRY_RUNNER=["self-hosted","brasstune","linux"]
-BRASSTUNE_DEVICE_SIMULATION_RUNNER=["self-hosted","brasstune","linux"]
+BRASSTUNE_BACKEND_RUNNER=["self-hosted","brasstune","linux","ci"]
+BRASSTUNE_FRONTEND_RUNNER=["self-hosted","brasstune","linux","ci"]
+BRASSTUNE_SECURITY_RUNNER=["self-hosted","brasstune","linux","ci"]
+BRASSTUNE_POSTGRES_RUNNER=["self-hosted","brasstune","linux","ci"]
+BRASSTUNE_DEVICE_SIMULATION_RUNNER=["self-hosted","brasstune","linux","ci"]
 BRASSTUNE_SWIFT_RUNNER=["self-hosted","brasstune","macos","xcode"]
 ```
 
 Every workflow must keep a hosted default so contributors without these variables still run on `ubuntu-latest` or `macos-latest`.
+Production deployment, smoke, and account-deletion retry selectors are
+intentionally not assigned to the persistent CI pool; they retain clean hosted
+defaults or are executed directly through the reviewed provider tooling.
 
 ## Security Rules
 
 - Prefer repository-scoped runner access for `aryasalem09/BrassTune` only.
-- Do not run untrusted fork pull requests on self-hosted runners.
+- Do not run any pull-request event on these persistent self-hosted runners.
+- Keep Backend, Frontend, Security, and Swift self-hosted checks limited to trusted
+  pushes to `main`. Validate pull requests locally, merge only an exact reviewed
+  SHA, then require the matching post-merge checks before deploy.
+- Never invoke checkout-controlled provisioning through `sudo`, `apt-get`, Docker
+  socket access, or another host-elevation path. Pre-provision runner images; pinned
+  setup actions select the job's Node and Python toolchains.
 - Do not place production deploy secrets in normal PR check jobs.
 - Use protected GitHub Environments for deploy and production smoke jobs.
 - Keep the runner workspace clean between jobs.
@@ -60,14 +65,10 @@ Every workflow must keep a hosted default so contributors without these variable
 Linux runner:
 
 - `git`
-- Node 24 and npm
-- Python 3.11 or 3.12
-- `pip`
-- Docker or an equivalent PostgreSQL 16 service path
+- `libsqlite3.so.0` for the action-selected Python runtime
+- PostgreSQL server/client binaries for an unprivileged per-job cluster
 - Playwright Chromium dependencies
-- `gitleaks` action compatibility
-- `bandit`
-- `pip-audit`
+- Pinned setup actions can install Node and Python without host package mutation
 
 macOS runner:
 
@@ -76,14 +77,38 @@ macOS runner:
 - Available iPhone simulator
 - Node 24 if browser/device workflows are intentionally routed there
 
+## Reproducible Linux Runner Image
+
+The reviewed Linux image definition is in `scripts/ci/linux-runner/`. Build a
+new immutable tag, verify it before replacement, and retain the registration
+volume so the one-time token is never placed in a command or log:
+
+```bash
+docker build \
+  --tag brasstune-actions-runner-linux-arm64:2.336.0-r4 \
+  scripts/ci/linux-runner
+
+docker run --rm --entrypoint bash \
+  brasstune-actions-runner-linux-arm64:2.336.0-r4 \
+  -lc 'test ! -x /usr/bin/sudo && test ! -x /usr/bin/docker && python3.12 -c "import sqlite3; print(sqlite3.sqlite_version)" && pg_config --version'
+```
+
+The runtime container uses a repository-scoped registration, runs as the
+unprivileged `runner` user, and does not mount the Docker socket. PostgreSQL is
+started as a temporary, unprivileged process inside each matching main-branch
+job. Production credentials never run on this persistent CI pool.
+
 ## Recovery Sequence
 
 1. Confirm the precise Actions blocker from check-run annotations.
 2. Register only the minimum runner required to start the blocked BrassTune jobs.
 3. Set the matching repository variable with valid JSON labels.
-4. Rerun PR checks and confirm jobs have nonzero steps and an assigned runner.
-5. Do not remove required checks or bypass branch rules to make the PR green.
-6. Remove or disable temporary runners after hosted capacity or billing is repaired unless the owner elects to keep them.
+4. Complete the documented local release matrix on the exact candidate SHA.
+5. Merge that reviewed SHA, then confirm the post-merge Backend, Frontend, Security,
+   and Swift jobs have nonzero steps, use the intended runner, and pass on the exact
+   merged SHA before deployment.
+6. Do not expose these runners to pull-request events merely to recreate a PR check.
+7. Remove or disable temporary runners after hosted capacity or billing is repaired unless the owner elects to keep them.
 
 ## Fallback CI Mirrors
 

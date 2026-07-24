@@ -194,7 +194,8 @@ jobs:
   browser-smoke:
     name: browser-smoke
     needs: [release_evidence, smoke]
-    runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || vars.BRASSTUNE_FRONTEND_RUNNER || '"ubuntu-latest"') }}
+    # Production credentials never run on the persistent CI runner pool.
+    runs-on: ${{ fromJSON(vars.BRASSTUNE_PRODUCTION_SMOKE_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 20
     if: ${{ needs.release_evidence.outputs.target == 'frontend' }}
     environment: production

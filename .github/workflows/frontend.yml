@@ -1,20 +1,10 @@
 name: Frontend
 
 on:
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - "frontend/**"
-      - "backend/**"
-      - "fixtures/**"
-      - "supabase/**"
-      - "render.yaml"
-      - "vercel.json"
-      - "frontend/vercel.json"
-      - "scripts/ci/setup-self-hosted-linux.sh"
-      - ".github/workflows/frontend.yml"
+  # Persistent self-hosted runners are reserved for trusted revisions. Pull
+  # requests are validated locally, then these gates run after merge to main.
   push:
-    branches: [main, swift-migration]
+    branches: [main]
     paths:
       - "frontend/**"
       - "backend/**"
@@ -38,9 +28,6 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Provision SQLite runtime on self-hosted Linux
-        if: runner.environment == 'self-hosted' && runner.os == 'Linux'
-        run: bash ../scripts/ci/setup-self-hosted-linux.sh --install-sqlite-runtime
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
@@ -62,9 +49,14 @@ jobs:
         run: npm run build
       - name: Dependency audit
         run: npm audit --omit=dev
-      - name: Install Playwright browsers
+      - name: Install Playwright browsers and system dependencies
+        if: runner.environment != 'self-hosted'
         timeout-minutes: 60
         run: npx playwright install --with-deps chromium firefox webkit
+      - name: Install Playwright browsers from pre-provisioned self-hosted runtime
+        if: runner.environment == 'self-hosted'
+        timeout-minutes: 60
+        run: npx playwright install chromium firefox webkit
       - name: Browser release journeys
         timeout-minutes: 35
         env:

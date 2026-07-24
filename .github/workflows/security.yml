@@ -1,20 +1,10 @@
 name: Security
 
 on:
-  pull_request:
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "fixtures/**"
-      - "supabase/**"
-      - "render.yaml"
-      - "vercel.json"
-      - "frontend/vercel.json"
-      - ".github/workflows/deploy.yml"
-      - ".github/tools/vercel-cli/**"
-      - ".github/workflows/security.yml"
+  # Persistent self-hosted runners are reserved for trusted revisions. Pull
+  # requests are validated locally, then these gates run after merge to main.
   push:
-    branches: [main, swift-migration]
+    branches: [main]
     paths:
       - "backend/**"
       - "frontend/**"
@@ -26,11 +16,8 @@ on:
       - ".github/workflows/deploy.yml"
       - ".github/tools/vercel-cli/**"
       - ".github/workflows/security.yml"
-  workflow_dispatch:
-
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   dependency-and-secrets:

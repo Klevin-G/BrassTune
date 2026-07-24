@@ -4,7 +4,7 @@ Updated: 2026-07-23. Pre-push code/test revision: `a3f436ea7442c471760e06ed1422e
 
 ## Decision
 
-Ready to push for exact-SHA self-hosted CI; not deployed or merged. Web, native, shared-domain, accessibility, and privacy work has current local evidence. `428a123` fixes the duplicate-identity PII race and the full backend suite passes `246 passed, 4 skipped`. The self-hosted SQLite runner fix in `c66be02` still requires live exact-head CI evidence.
+Ready for review and merge; not deployed or merged. Web, native, shared-domain, accessibility, and privacy work has current local evidence. `428a123` fixes the duplicate-identity PII race and the full backend suite passes `246 passed, 4 skipped`. Persistent self-hosted runners are restricted to trusted `push` and manual events, so exact-SHA CI runs after merge rather than on pull-request code.
 
 ## Verified local evidence
 
@@ -26,10 +26,10 @@ Ready to push for exact-SHA self-hosted CI; not deployed or merged. Web, native,
 
 ## Release blockers and order
 
-1. Push the exact candidate and run required Backend, Frontend, Security, and Swift checks on the configured self-hosted runners. Confirm the `c66be02` SQLite runner fix in live exact-head CI.
+1. Push and merge the locally verified candidate, then run required Backend, Frontend, Security, and Swift checks on the exact merged SHA using the configured self-hosted runners. Confirm the pre-baked SQLite runtime with the action-selected Python in live CI.
 2. Apply the three additive Supabase migrations, then deploy the privacy-aware backend and verify expand cleanup before creating or applying the terminal contract migration.
 3. Sync approved Supabase redirect URLs/configuration, deploy Render and Vercel from the same merged SHA, and pass hosted REST, WebSocket, auth, class, audio, and offline smoke.
 4. Complete human/device gates separately: Apple provider setup, signed archive/TestFlight, physical microphone/audio, accessibility, and localization checks.
-5. Reconnect the outreach Gmail integration as `brasstune1@gmail.com` before creating professor drafts; the currently connected account is not the planned sender and must not receive duplicate drafts.
+5. Reconnect the outreach Gmail integration as the designated BrassTune sender before creating professor drafts; the currently connected account is not the planned sender and must not receive duplicate drafts.
 
 No claim in this report establishes production deployment, Apple provider enablement, signed native delivery, or physical-device microphone quality.

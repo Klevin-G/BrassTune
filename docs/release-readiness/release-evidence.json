@@ -34,11 +34,11 @@
   ],
   "pending": [
     "independent review",
-    "exact-SHA self-hosted CI, including live confirmation of c66be02 SQLite runner fix",
+    "post-merge exact-SHA self-hosted CI, including live confirmation of the pre-baked SQLite runtime",
     "three Supabase expand migrations and config push",
     "same-SHA Render/Vercel deployment and hosted smoke",
     "terminal privacy contract after expand cleanup",
     "physical-device, signing, TestFlight, and App Store gates",
-    "Gmail reconnect as brasstune1@gmail.com before professor drafts"
+    "Gmail reconnect as the designated BrassTune sender before professor drafts"
   ]
 }
