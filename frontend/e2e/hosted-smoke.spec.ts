@@ -210,6 +210,9 @@ test.describe('hosted read-only smoke', () => {
       }
       await expect(page.locator('body')).not.toContainText(/mixed content/i);
       await expect(page.locator('body')).not.toContainText(/vercel authentication|log in to vercel|single sign-on|authentication required/i);
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+      });
     }
 
     expect(consoleErrors.filter((message) => !harmlessBrowserErrors.has(message))).toEqual([]);
