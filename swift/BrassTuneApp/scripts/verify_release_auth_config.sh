@@ -26,24 +26,19 @@ app_environment=${BRASSTUNE_ENV:-}
 
 case "$supabase_url" in
     ""|*'$('*) fail "set BRASSTUNE_SUPABASE_URL to the public HTTPS project URL." ;;
-    https://?*) ;;
-    *) fail "BRASSTUNE_SUPABASE_URL must be an HTTPS URL." ;;
+    *your-project*|*YOUR_PROJECT*|*example*|*invalid*|*'...'*) fail "BRASSTUNE_SUPABASE_URL must not be a placeholder." ;;
 esac
-
-case "$supabase_url" in
-    https://*.supabase.co) ;;
-    *) fail "BRASSTUNE_SUPABASE_URL must use an approved supabase.co project host." ;;
-esac
-
-case "$supabase_url" in
-    *' '*|*'@'*) fail "BRASSTUNE_SUPABASE_URL must not contain spaces or embedded credentials." ;;
-esac
+if ! printf '%s\n' "$supabase_url" | grep -Eq '^https://[a-z0-9]{20}\.supabase\.co$'; then
+    fail "BRASSTUNE_SUPABASE_URL must be exactly https://<20-character-project-ref>.supabase.co with no path, credentials, port, query, or fragment."
+fi
 
 case "$publishable_key" in
-    sb_publishable_?*) ;;
     ""|*'$('*) fail "set BRASSTUNE_SUPABASE_PUBLISHABLE_KEY to a public sb_publishable_ key." ;;
+    *'...'*) fail "BRASSTUNE_SUPABASE_PUBLISHABLE_KEY must not be a placeholder." ;;
     sb_secret_*|*service_role*) fail "secret and service-role keys are forbidden in the app target." ;;
-    *) fail "archive builds require a public sb_publishable_ key, never a service key." ;;
 esac
+if ! printf '%s\n' "$publishable_key" | grep -Eq '^sb_publishable_[A-Za-z0-9_-]{20,}$'; then
+    fail "archive builds require a complete public sb_publishable_ key, never a placeholder or service key."
+fi
 
 echo "BrassTune release auth preflight passed with public configuration present."

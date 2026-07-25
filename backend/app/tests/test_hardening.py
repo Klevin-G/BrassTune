@@ -73,7 +73,27 @@ from app.services.audio_storage import AudioReplaceResult, delete_audio_for_sess
 from app.services.serializers import session_to_dict
 from app.services.session_service import save_pitch_frames, start_session, stop_session
 
-WEBM_AUDIO_BYTES = b"\x1a\x45\xdf\xa3webm-audio-bytes"
+# Minimal but structurally valid containers. The WAV fixture has one 8-bit PCM
+# sample and can be decoded by standard media tooling without ffprobe.
+WAV_AUDIO_BYTES = (
+    b"RIFF\x26\x00\x00\x00WAVE"
+    b"fmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x40\x1f\x00\x00\x01\x00\x08\x00"
+    b"data\x01\x00\x00\x00\x80\x00"
+)
+WEBM_AUDIO_BYTES = base64.b64decode(
+    "GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAAPcEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTD"
+    "Z1OsggFATbuMU6uEHFO7a1OsggPG7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjEuNy4xMDBXQYxMYXZmNjEuNy4xMDBEiYhAYAAAAAAAABZUrmvlrgEA"
+    "AAAAAABc14EBc8WI6ewAuhtFLQ+cgQAitZyDdW5kiIEAhoZBX09QVVNWqoNjLqBWu4QExLQAg4EC4ZGfgQG1iEDncAAAAAAAYmSBEGOik09wdXNIZWFkAQE4"
+    "AYC7AAAAAAASVMNn/HNzn2PAgGfImUWjh0VOQ09ERVJEh4xMYXZmNjEuNy4xMDBzc9djwItjxYjp7AC6G0UtD2fIokWjh0VOQ09ERVJEh5VMYXZjNjEuMTku"
+    "MTAwIGxpYm9wdXNnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAwLjEyODAwMDAwMAAfQ7Z1Qf/ngQCj3YEAAIB4gae3bJ6ZrAAABFu4jrPccvU+Vmd8QpMoeDxh"
+    "rmExOlPE7sJdmhNrMgzmBAmo/uROy6paU1g/mRPpKPGw6ZXd5X8CPzE5Xby/LlyvrV/xOLLISJSA2IYsBKPCgQAVgHigrzeslQDvpu+HxkmHyB2m0IlkUoGK"
+    "/HKbweiDm7WVjDRpMKUyE3uF8c1oZHGrIsvVQc9IljwcD09B94m9o8KBACmAeJqy33Wc/Es6Rg13p2qgLxKs+7JMMKZD1rvzpS2L7cAXOXTc1UvXznM9JfQD"
+    "eweVhLhvd0tf9dbn9yzdfASjxIEAPYB4mrLfdZz8Re3YCT0oxU7OdhmcH5GTyZ//wrk4TT9rPRU0vjtYLagcyb1H81bGrDu5Zt1Nc8Jlm13UOm9ZSxMNo8aB"
+    "AFGAeJqy33Wc/Ekzv8VKRv0/JtuUzdlQ3/MPXuFo5omgITEBMgEm7Jmc6Gdk5P/Ll2r9mTiX8QUP5p8Qqmnf4GgPSeVEo8eBAGWAeJqyklFFAM5RNQANZj/J"
+    "/W/yX7bl3dhabfKvb3ZEySAnynB9xyyxAtPeZPVSo7fInvzIf04A+eUn9Jtq1Rsu7KLsDaC8obOBAHkAeK2crTDAHUp5LKqRb+9tVBa9VkvXS0pskt2oFZde"
+    "l9wXBTRZpCL60tY6AJ7gZo51ooQAzf5gHFO7a5G7j7OBALeK94EB8YIBwfCBAw=="
+)
 
 
 def _test_db():
@@ -1682,14 +1702,102 @@ def test_audio_upload_playback_and_bad_mime_are_validated():
         assert bad.status_code == 400
         uploaded = client.post(
             f"/api/sessions/{session['id']}/audio",
-            content=WEBM_AUDIO_BYTES,
-            headers={"Content-Type": "audio/webm", "X-Audio-Duration-Seconds": "2.5"},
+            content=WAV_AUDIO_BYTES,
+            headers={"Content-Type": "audio/wav", "X-Audio-Duration-Seconds": "2.5"},
         )
         assert uploaded.status_code == 200
         assert uploaded.json()["audio"]["audio_available"] is True
         playback = client.get(f"/api/sessions/{session['id']}/audio")
         assert playback.status_code == 200
-        assert playback.content == WEBM_AUDIO_BYTES
+        assert playback.content == WAV_AUDIO_BYTES
+
+
+def test_stale_placeholder_audio_is_not_advertised_or_served(monkeypatch, tmp_path):
+    with TestClient(app) as client:
+        session_payload = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        db = SessionLocal()
+        try:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_payload["id"]).one()
+            session.audio_storage_provider = "local"
+            session.audio_object_key = "stale/%s/recording.wav" % session.id
+            session.audio_mime_type = "audio/wav"
+            session.audio_size_bytes = 12
+            db.commit()
+            assert session_to_dict(session)["audio_available"] is False
+        finally:
+            db.close()
+
+        placeholder = tmp_path / "recording.wav"
+        placeholder.write_bytes(b"RIFF....WAVE")
+        monkeypatch.setattr("app.api.routes.local_audio_path", lambda _key: placeholder)
+        playback = client.get(f"/api/sessions/{session_payload['id']}/audio")
+        assert playback.status_code == 404
+
+
+def test_local_audio_playback_rejects_invalid_bytes_even_with_plausible_metadata(monkeypatch, tmp_path):
+    with TestClient(app) as client:
+        session_payload = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        db = SessionLocal()
+        try:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_payload["id"]).one()
+            session.audio_storage_provider = "local"
+            session.audio_object_key = "stale/%s/recording.wav" % session.id
+            session.audio_mime_type = "audio/wav"
+            session.audio_size_bytes = len(WAV_AUDIO_BYTES)
+            db.commit()
+        finally:
+            db.close()
+
+        placeholder = tmp_path / "recording.wav"
+        placeholder.write_bytes(b"RIFF....WAVE")
+        monkeypatch.setattr("app.api.routes.local_audio_path", lambda _key: placeholder)
+        playback = client.get(f"/api/sessions/{session_payload['id']}/audio")
+        assert playback.status_code == 404
+
+
+def test_local_audio_playback_validates_large_file_without_reading_the_whole_object(monkeypatch, tmp_path):
+    """Playback validation must preserve FileResponse streaming for 50 MiB takes."""
+    # A legal WAV can include a large opaque data chunk. The parser should read
+    # headers only, so this fixture never needs to enter a bytes object.
+    data_size = 50 * 1024 * 1024 - 44
+    wav_header = (
+        b"RIFF" + (data_size + 36).to_bytes(4, "little") + b"WAVE"
+        + b"fmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x40\x1f\x00\x00\x01\x00\x08\x00"
+        + b"data" + data_size.to_bytes(4, "little")
+    )
+    path = tmp_path / "large.wav"
+    with path.open("wb") as handle:
+        handle.write(wav_header)
+        handle.seek(data_size - 1, 1)
+        handle.write(b"\x80")
+
+    with TestClient(app) as client:
+        session_payload = client.post(
+            "/api/sessions/start",
+            json={"instrument_id": "trumpet", "reference_pitch_hz": 440},
+        ).json()
+        db = SessionLocal()
+        try:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_payload["id"]).one()
+            session.audio_storage_provider = "local"
+            session.audio_object_key = "stream/%s/recording.wav" % session.id
+            session.audio_mime_type = "audio/wav"
+            session.audio_size_bytes = path.stat().st_size
+            db.commit()
+        finally:
+            db.close()
+
+        monkeypatch.setattr("app.api.routes.local_audio_path", lambda _key: path)
+        monkeypatch.setattr(Path, "read_bytes", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("full read")))
+        playback = client.get(f"/api/sessions/{session_payload['id']}/audio", headers={"Range": "bytes=0-43"})
+    assert playback.status_code in {200, 206}
+    assert playback.content == wav_header
 
 
 def test_audio_upload_rejects_spoofed_audio_mime():
@@ -1703,6 +1811,65 @@ def test_audio_upload_rejects_spoofed_audio_mime():
             )
             assert response.status_code == 400
             assert "format" in response.json()["detail"].lower()
+
+
+@pytest.mark.parametrize(
+    ("mime_type", "payload"),
+    [
+        ("audio/wav", b"RIFF\x00\x00\x00\x00WAVE"),
+        ("audio/webm", b"\x1a\x45\xdf\xa3webm-audio-bytes"),
+        ("audio/mp4", b"\x00\x00\x00\x0cftypmp42"),
+        ("audio/ogg", b"OggS\x00\x00\x00\x00\x00\x00\x00\x00\x00"),
+        ("audio/mpeg", b"ID3\x04\x00\x00\x00\x00\x00\x00"),
+    ],
+)
+def test_audio_upload_rejects_truncated_container_placeholders(mime_type, payload):
+    with pytest.raises(HTTPException) as rejected:
+        audio_storage_module.read_audio_bytes(payload, mime_type)
+    assert rejected.value.status_code == 400
+
+
+def test_audio_upload_accepts_structurally_valid_wav_fixture():
+    data, mime_type = audio_storage_module.read_audio_bytes(WAV_AUDIO_BYTES, "audio/wav")
+    assert mime_type == "audio/wav"
+    assert data == WAV_AUDIO_BYTES
+
+
+def test_audio_upload_rejects_valid_wav_with_trailing_bytes_that_playback_would_not_serve():
+    """Upload and bounded local-playback validation must accept the same file."""
+    with pytest.raises(HTTPException) as rejected:
+        audio_storage_module.read_audio_bytes(WAV_AUDIO_BYTES + b"trailing", "audio/wav")
+    assert rejected.value.status_code == 400
+
+
+def test_audio_upload_accepts_webm_fixture_with_tracks_and_media_blocks():
+    data, mime_type = audio_storage_module.read_audio_bytes(WEBM_AUDIO_BYTES, "audio/webm")
+    assert mime_type == "audio/webm"
+    assert data == WEBM_AUDIO_BYTES
+
+
+def _ebml_size(value: int) -> bytes:
+    for length in range(1, 9):
+        if value < (1 << (7 * length)) - 1:
+            return ((1 << (7 * length)) | value).to_bytes(length, "big")
+    raise ValueError("EBML payload is too large for this fixture")
+
+
+def test_webm_block_group_nesting_is_iterative_and_rejected_with_400():
+    nested = b""
+    for _ in range(1100):
+        nested = b"\xa0" + _ebml_size(len(nested)) + nested
+    # This is only the Cluster payload; the helper must never recurse through
+    # it. Upload-level callers convert the same malformed container to 400.
+    assert audio_storage_module._webm_cluster_has_media_block(nested, 0, len(nested)) is False
+
+    header = b"\x1a\x45\xdf\xa3\x87\x42\x82\x84webm"
+    tracks = b"\x16\x54\xae\x6b\x81\x00"
+    cluster = b"\x1f\x43\xb6\x75" + _ebml_size(len(nested)) + nested
+    payload = header + b"\x18\x53\x80\x67" + _ebml_size(len(tracks) + len(cluster)) + tracks + cluster
+    with pytest.raises(HTTPException) as rejected:
+        audio_storage_module.read_audio_bytes(payload, "audio/webm")
+    assert rejected.value.status_code == 400
 
 
 @pytest.mark.parametrize("duration", ["nan", "inf", "-1", "86401"])
@@ -2078,7 +2245,7 @@ def test_unsupported_audio_storage_backend_is_rejected_before_reservation(monkey
         session = _session(db, 49, "trumpet", dt.datetime(2026, 6, 15))
         monkeypatch.setenv("SESSION_AUDIO_STORAGE_BACKEND", "misspelled-provider")
         with pytest.raises(HTTPException) as blocked:
-            prepare_audio_upload(session, b"RIFF....WAVE", "audio/wav", 4.0)
+            prepare_audio_upload(session, WAV_AUDIO_BYTES, "audio/wav", 4.0)
         assert blocked.value.status_code == 503
         assert db.query(AudioStorageJob).count() == 0
     finally:
@@ -2739,7 +2906,7 @@ def test_cross_mime_audio_replacement_commits_metadata_before_old_cleanup(monkey
 
         monkeypatch.setattr(db, "commit", tracked_commit)
 
-        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 2.5)
+        result = replace_audio_for_session(db, session, WAV_AUDIO_BYTES, "audio/wav", 2.5)
         replacement_key = "52/%s/versions/replacement/recording.wav" % session.id
         assert result.cleanup_pending is False
         assert result.reconciliation_pending is False
@@ -2747,7 +2914,7 @@ def test_cross_mime_audio_replacement_commits_metadata_before_old_cleanup(monkey
         assert session.audio_mime_type == "audio/wav"
         assert calls == [
             ("commit", 1),
-            ("upload", replacement_key, "audio/wav", 12),
+            ("upload", replacement_key, "audio/wav", len(WAV_AUDIO_BYTES)),
             ("commit", 2),
             ("commit", 3),
             ("delete", "52/%s/recording.webm" % session.id),
@@ -2811,7 +2978,7 @@ def test_cross_mime_audio_commit_failure_discards_only_new_object(monkeypatch):
         )
 
         with pytest.raises(HTTPException) as blocked:
-            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 3.0)
+            replace_audio_for_session(db, session, WAV_AUDIO_BYTES, "audio/wav", 3.0)
         assert blocked.value.status_code == 503
         replacement_key = "53/%s/versions/replacement/recording.wav" % session.id
         assert "staged upload was removed" in blocked.value.detail.lower()
@@ -2860,14 +3027,14 @@ def test_cross_mime_post_commit_cleanup_failure_keeps_new_recording_active(monke
 
         monkeypatch.setattr("app.services.audio_storage._delete_supabase_object", fail_old_cleanup)
 
-        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 3.0)
+        result = replace_audio_for_session(db, session, WAV_AUDIO_BYTES, "audio/wav", 3.0)
         assert result.cleanup_pending is True
         assert result.reconciliation_pending is False
         assert calls == [("upload", replacement_key), ("delete", previous_key)]
         db.refresh(session)
         assert session.audio_object_key == replacement_key
         assert session.audio_mime_type == "audio/wav"
-        assert session.audio_size_bytes == 12
+        assert session.audio_size_bytes == len(WAV_AUDIO_BYTES)
         jobs = db.query(AudioStorageJob).order_by(AudioStorageJob.id.asc()).all()
         assert [(job.action, job.status) for job in jobs] == [
             ("reconcile_metadata", "completed"),
@@ -2883,7 +3050,7 @@ def test_audio_upload_truthfully_reports_post_commit_cleanup_pending(monkeypatch
         session.audio_object_key = "%s/%s/versions/new/recording.wav" % (session.user_id, session.id)
         session.audio_mime_type = mime_type
         session.audio_duration_seconds = duration_seconds
-        session.audio_size_bytes = 12
+        session.audio_size_bytes = len(WAV_AUDIO_BYTES)
         db.add(session)
         db.commit()
         db.refresh(session)
@@ -2894,7 +3061,7 @@ def test_audio_upload_truthfully_reports_post_commit_cleanup_pending(monkeypatch
         session = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
         response = client.post(
             f"/api/sessions/{session['id']}/audio",
-            content=b"RIFF....WAVE",
+            content=WAV_AUDIO_BYTES,
             headers={"Content-Type": "audio/wav", "X-Audio-Duration-Seconds": "3"},
         )
     assert response.status_code == 202
@@ -2912,12 +3079,12 @@ def test_audio_refresh_failure_returns_snapshot_and_leaves_durable_reconciliatio
         monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: None)
         monkeypatch.setattr(db, "refresh", lambda _row: (_ for _ in ()).throw(RuntimeError("refresh failed")))
 
-        result = replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+        result = replace_audio_for_session(db, session, WAV_AUDIO_BYTES, "audio/wav", 4.0)
 
         assert result.activation_pending is False
         assert result.reconciliation_pending is True
         assert result.audio_snapshot["audio_mime_type"] == "audio/wav"
-        assert result.audio_snapshot["audio_size_bytes"] == 12
+        assert result.audio_snapshot["audio_size_bytes"] == len(WAV_AUDIO_BYTES)
         job = db.query(AudioStorageJob).one()
         assert job.action == "reconcile_metadata"
         assert job.status == "pending"
@@ -2956,7 +3123,7 @@ def test_failed_staged_cleanup_is_durable_and_operator_retry_is_idempotent(monke
         )
 
         with pytest.raises(HTTPException, match="queued for retry"):
-            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+            replace_audio_for_session(db, session, WAV_AUDIO_BYTES, "audio/wav", 4.0)
 
         job = db.query(AudioStorageJob).one()
         assert job.action == "delete_object"
@@ -2964,7 +3131,7 @@ def test_failed_staged_cleanup_is_durable_and_operator_retry_is_idempotent(monke
         assert job.user_id == session.user_id
         assert job.session_id == session.id
         assert job.provider == "supabase"
-        assert job.size_bytes == 12
+        assert job.size_bytes == len(WAV_AUDIO_BYTES)
         assert job.reason == "metadata_commit_failed_cleanup"
         job.next_retry_at = dt.datetime.utcnow() - dt.timedelta(seconds=1)
         original_object_key = job.object_key
@@ -3052,7 +3219,7 @@ def test_known_over_quota_upload_never_writes_storage(monkeypatch):
         monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: writes.append("upload"))
 
         with pytest.raises(HTTPException) as blocked:
-            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+            replace_audio_for_session(db, session, WAV_AUDIO_BYTES, "audio/wav", 4.0)
 
         assert blocked.value.status_code == 413
         assert writes == []
@@ -3087,7 +3254,7 @@ def test_pending_cleanup_bytes_remain_in_quota_until_retry_completes(monkeypatch
         monkeypatch.setattr("app.services.audio_storage._upload_to_supabase", lambda *_args: writes.append("upload"))
 
         with pytest.raises(HTTPException) as blocked:
-            replace_audio_for_session(db, session, b"RIFF....WAVE", "audio/wav", 4.0)
+            replace_audio_for_session(db, session, WAV_AUDIO_BYTES, "audio/wav", 4.0)
 
         assert blocked.value.status_code == 413
         assert writes == []
@@ -3101,9 +3268,9 @@ def test_account_scoped_upload_budget_blocks_second_outstanding_reservation(monk
         first = _session(db, 59, "trumpet", dt.datetime(2026, 6, 15))
         second = _session(db, 59, "trumpet", dt.datetime(2026, 6, 16))
         monkeypatch.setenv("BRASSTUNE_MAX_PENDING_AUDIO_UPLOADS_PER_USER", "1")
-        first_stage = prepare_audio_upload(first, b"RIFF....WAVE", "audio/wav", 4.0)
+        first_stage = prepare_audio_upload(first, WAV_AUDIO_BYTES, "audio/wav", 4.0)
         reserve_audio_upload(db, first, first_stage)
-        second_stage = prepare_audio_upload(second, b"RIFF....WAVE", "audio/wav", 4.0)
+        second_stage = prepare_audio_upload(second, WAV_AUDIO_BYTES, "audio/wav", 4.0)
 
         with pytest.raises(HTTPException) as blocked:
             reserve_audio_upload(db, second, second_stage)
@@ -3120,10 +3287,10 @@ def test_concurrent_reservations_cannot_overcommit_account_bytes(monkeypatch):
         first = _session(db, 60, "trumpet", dt.datetime(2026, 6, 15))
         second = _session(db, 60, "trumpet", dt.datetime(2026, 6, 16))
         monkeypatch.setenv("BRASSTUNE_MAX_PENDING_AUDIO_UPLOADS_PER_USER", "10")
-        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "20")
-        first_stage = prepare_audio_upload(first, b"RIFF....WAVE", "audio/wav", 4.0)
+        monkeypatch.setenv("BRASSTUNE_MAX_AUDIO_STORAGE_BYTES_PER_USER", "80")
+        first_stage = prepare_audio_upload(first, WAV_AUDIO_BYTES, "audio/wav", 4.0)
         reserve_audio_upload(db, first, first_stage)
-        second_stage = prepare_audio_upload(second, b"RIFF....WAVE", "audio/wav", 4.0)
+        second_stage = prepare_audio_upload(second, WAV_AUDIO_BYTES, "audio/wav", 4.0)
 
         with pytest.raises(HTTPException) as blocked:
             reserve_audio_upload(db, second, second_stage)
@@ -3186,7 +3353,7 @@ def test_postgres_concurrent_reservations_serialize_account_quota(monkeypatch):
                 if name == "second":
                     second_started.set()
                 row = db.query(PracticeSession).filter(PracticeSession.id == session_id).one()
-                stage = prepare_audio_upload(row, b"RIFF....WAVE", "audio/wav", 4.0)
+                stage = prepare_audio_upload(row, WAV_AUDIO_BYTES, "audio/wav", 4.0)
                 reserve_audio_upload(db, row, stage)
                 results[name] = "reserved"
             except HTTPException as exc:

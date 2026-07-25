@@ -1,5 +1,6 @@
 import XCTest
 @testable import BrassTuneApp
+import AVFoundation
 import BrassTuneCore
 import CoreText
 import CryptoKit
@@ -1011,32 +1012,11 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testProviderSettingsAndGoogleOAuthStoreOnlyExchangedSupabaseSession() async throws {
+    func testNativeShippingGateIgnoresRemoteOAuthProviderSettings() async throws {
         let networkSession = makeStubSession()
-        let stored = InMemoryAuthSessionStore()
-        nonisolated(unsafe) var authorizationURL: URL?
-        nonisolated(unsafe) var tokenRequest: CapturedRequest?
+        nonisolated(unsafe) var providerRequestCount = 0
         let authService = AuthService(
-            session: networkSession,
-            readSessionPayload: { stored.payload },
-            saveSessionPayload: { stored.payload = $0 },
-            deleteSessionPayload: { stored.payload = nil },
-            webAuthentication: { url, callbackScheme in
-                authorizationURL = url
-                XCTAssertEqual(callbackScheme, AuthService.oauthCallbackScheme)
-                let authorizationComponents = try XCTUnwrap(
-                    URLComponents(url: url, resolvingAgainstBaseURL: false)
-                )
-                let redirect = try XCTUnwrap(
-                    authorizationComponents.queryItems?.first(where: { $0.name == "redirect_to" })?.value
-                )
-                var callbackComponents = try XCTUnwrap(
-                    URLComponents(string: redirect)
-                )
-                callbackComponents.queryItems = (callbackComponents.queryItems ?? [])
-                    + [URLQueryItem(name: "code", value: "authorization-code")]
-                return try XCTUnwrap(callbackComponents.url)
-            }
+            session: networkSession
         )
         let model = AppModel(
             persistenceStore: .ephemeral(
@@ -1049,43 +1029,26 @@ final class BrassTuneAppTests: XCTestCase {
 
         StubURLProtocol.handler = { request in
             if request.url?.path == "/auth/v1/settings" {
+                providerRequestCount += 1
                 return .init(
                     response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                     data: Data(#"{"external":{"email":true,"apple":false,"google":true}}"#.utf8)
                 )
             }
-            tokenRequest = CapturedRequest(
-                method: request.httpMethod ?? "GET",
-                path: request.url?.path ?? "",
-                authorization: request.value(forHTTPHeaderField: "Authorization"),
-                body: requestBodyData(request)
-            )
             return .init(
-                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                data: Data(#"{"access_token":"google-access","refresh_token":"google-refresh","expires_in":3600,"user":{"id":"google-user","email":"google@example.com"}}"#.utf8)
+                response: HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!,
+                data: Data()
             )
         }
 
         await model.loadAuthProviderConfiguration()
         XCTAssertFalse(model.appleSignInAvailable)
-        XCTAssertTrue(model.googleSignInAvailable)
+        XCTAssertFalse(model.googleSignInAvailable)
+        XCTAssertEqual(model.authProviderConfiguration, AuthProviderConfiguration(apple: false, google: false))
+        XCTAssertEqual(providerRequestCount, 0)
         await model.completeGoogleSignIn()
-
-        XCTAssertEqual(model.authState, .signedIn(email: "google@example.com"))
-        XCTAssertEqual(model.persistenceAccessState, .account(userID: "google-user"))
-        XCTAssertEqual(model.authNotice, "Signed in with Google.")
-        XCTAssertNotNil(authorizationURL)
-        XCTAssertNotNil(stored.payload)
-        XCTAssertFalse(stored.payload?.contains("authorization-code") == true)
-        let request = try XCTUnwrap(tokenRequest)
-        XCTAssertEqual(request.method, "POST")
-        XCTAssertEqual(request.path, "/auth/v1/token")
-        let tokenPayload = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: try XCTUnwrap(request.body)) as? [String: String]
-        )
-        XCTAssertEqual(tokenPayload["auth_code"], "authorization-code")
-        XCTAssertNotNil(tokenPayload["code_verifier"])
-        XCTAssertGreaterThanOrEqual(tokenPayload["code_verifier"]?.count ?? 0, 43)
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertEqual(model.lastError, .oauthProviderUnavailable)
     }
 
     @MainActor
@@ -1107,7 +1070,7 @@ final class BrassTuneAppTests: XCTestCase {
         await model.loadAuthProviderConfiguration()
         XCTAssertFalse(model.appleSignInAvailable)
         XCTAssertFalse(model.googleSignInAvailable)
-        XCTAssertNotNil(model.authProviderRecoveryMessage)
+        XCTAssertNil(model.authProviderRecoveryMessage)
 
         model.reportAuthFailure(.appleSignInCancelled)
         XCTAssertEqual(model.authState, .signedOut)
@@ -1816,59 +1779,20 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testAppleIdentityAgeControlsTutorialWithoutInterruptingKnownReturningUsers() async {
-        let timestamps: [(created: String?, last: String?, expectedRequest: Int, expectedNotice: String)] = [
-            (
-                "2026-07-16T19:00:00.000Z",
-                "2026-07-16T19:00:00.000Z",
-                1,
-                "Signed in with Apple."
-            ),
-            (
-                "2026-06-01T19:00:00.000Z",
-                "2026-07-16T19:00:00.000Z",
-                0,
-                "Signed in with Apple."
-            ),
-            (
-                nil,
-                nil,
-                1,
-                "Signed in with Apple."
-            ),
-        ]
+    func testNativeAppleSignInIsGatedForThisShippingConfiguration() async {
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            )
+        )
+        model.config = makeAuthConfig()
 
-        for expectation in timestamps {
-            let networkSession = makeStubSession()
-            let authService = makeIsolatedAuthService(session: networkSession)
-            let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
-            let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: authService)
-            model.config = makeAuthConfig()
-            var user: [String: String] = ["id": "apple-user", "email": "apple@example.com"]
-            user["created_at"] = expectation.created
-            user["last_sign_in_at"] = expectation.last
-            let payload: [String: Any] = [
-                "access_token": "apple-access-token",
-                "refresh_token": "apple-refresh-token",
-                "expires_in": 3_600,
-                "user": user,
-            ]
-            StubURLProtocol.handler = { request in
-                .init(
-                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                    data: try JSONSerialization.data(withJSONObject: payload)
-                )
-            }
+        await model.completeAppleSignIn(identityToken: Data("apple-id-token".utf8), rawNonce: "nonce")
 
-            await model.completeAppleSignIn(identityToken: Data("apple-id-token".utf8), rawNonce: "nonce")
-
-            XCTAssertEqual(model.authState, .signedIn(email: "apple@example.com"))
-            XCTAssertEqual(model.tutorialPresentationRequest, expectation.expectedRequest)
-            XCTAssertEqual(model.authNotice, expectation.expectedNotice)
-            XCTAssertNil(model.lastError)
-            try? authService.signOut()
-        }
-        StubURLProtocol.handler = nil
+        XCTAssertFalse(AppModel.nativeThirdPartySignInEnabled)
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertEqual(model.lastError, .oauthProviderUnavailable)
+        XCTAssertTrue(model.authNoticeIsError)
     }
 
     @MainActor
@@ -3748,6 +3672,459 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(deactivationCount, 7)
     }
 
+    func testRecordingFileStoreOnlyReturnsAndDeletesOwnedPlayableFiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneRecordings-\(UUID().uuidString)", isDirectory: true)
+        let externalURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("outside-\(UUID().uuidString).caf")
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: externalURL)
+        }
+        let store = NativeRecordingFileStore(
+            storageDirectory: directory,
+            isPlayableAudio: { url in
+                (try? Data(contentsOf: url)) == Data("valid".utf8)
+            }
+        )
+        let ownedURL = store.destinationURL(id: UUID(uuidString: "10000000-0000-0000-0000-000000000099")!)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("valid".utf8).write(to: ownedURL)
+        try Data("valid".utf8).write(to: externalURL)
+
+        XCTAssertEqual(store.availableURL(ownedURL), ownedURL.standardizedFileURL)
+        XCTAssertNil(store.availableURL(externalURL), "A retained URL outside BrassTune's namespaced directory must never be played or deleted.")
+        XCTAssertNil(store.availableURL(directory.appendingPathComponent("missing.caf")))
+        XCTAssertNil(store.availableURL(directory.appendingPathComponent("wrong.m4a")))
+
+        try store.deleteRecording(at: externalURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path), "Cleanup must not touch a URL BrassTune does not own.")
+        try store.deleteRecording(at: ownedURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ownedURL.path))
+    }
+
+    @MainActor
+    func testListenBackUsesPlaybackCategoryAndReleasesOwnershipForPauseStopRouteAndInterruption() throws {
+        var activationCount = 0
+        var deactivationCount = 0
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { activationCount += 1 },
+            deactivateSession: { deactivationCount += 1 }
+        )
+        var playing = false
+        var currentTime: TimeInterval = 0
+        var configuredCategory: AVAudioSession.Category?
+        var configuredMode: AVAudioSession.Mode?
+        var configuredOptions: AVAudioSession.CategoryOptions?
+        let driver = NativeRecordingPlaybackDriver(
+            duration: { 12 },
+            currentTime: { currentTime },
+            setCurrentTime: { currentTime = $0 },
+            isPlaying: { playing },
+            prepareToPlay: { true },
+            play: {
+                playing = true
+                return true
+            },
+            pause: { playing = false },
+            stop: { playing = false }
+        )
+        let player = NativeRecordingPlayer(
+            audioSessionCoordinator: coordinator,
+            makeDriver: { _ in driver },
+            configurePlaybackSession: {
+                NativePlaybackSessionPolicy.configure { category, mode, options in
+                    configuredCategory = category
+                    configuredMode = mode
+                    configuredOptions = options
+                }
+            }
+        )
+        let url = URL(fileURLWithPath: "/app-owned/test.caf")
+
+        player.play(url: url)
+
+        XCTAssertEqual(configuredCategory, .playback, "Listen-back must ignore Ring/Silent like media playback.")
+        XCTAssertEqual(configuredMode, .default)
+        XCTAssertEqual(configuredOptions, [])
+        XCTAssertEqual(player.state, .playing)
+        XCTAssertEqual(coordinator.activeOwners, [.recordingPlayback])
+        XCTAssertEqual(activationCount, 1)
+
+        player.handleRouteChange(rawReason: AVAudioSession.RouteChangeReason.categoryChange.rawValue)
+        XCTAssertEqual(player.state, .playing, "Self-induced category changes are not output loss.")
+
+        player.pause()
+        XCTAssertEqual(player.state, .paused)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertEqual(deactivationCount, 1)
+
+        player.play(url: url)
+        XCTAssertEqual(player.state, .playing)
+        player.handleInterruption(rawType: AVAudioSession.InterruptionType.began.rawValue)
+        XCTAssertEqual(player.state, .paused)
+        XCTAssertTrue(player.notice?.contains("ready") == true)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+
+        player.play(url: url)
+        player.handleRouteChange(rawReason: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue)
+        XCTAssertEqual(player.state, .stopped)
+        XCTAssertTrue(player.notice?.contains("output changed") == true)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertEqual(activationCount, 3)
+        XCTAssertEqual(deactivationCount, 3)
+    }
+
+    @MainActor
+    func testListenBackFailureCopyNamesRecordingForCategoryAndDriverFailures() {
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: {},
+            deactivateSession: {}
+        )
+        let url = URL(fileURLWithPath: "/app-owned/test.caf")
+        let driver = NativeRecordingPlaybackDriver(
+            duration: { 1 },
+            currentTime: { 0 },
+            setCurrentTime: { _ in },
+            isPlaying: { false },
+            prepareToPlay: { true },
+            play: { false },
+            pause: {},
+            stop: {}
+        )
+        let categoryFailurePlayer = NativeRecordingPlayer(
+            audioSessionCoordinator: coordinator,
+            makeDriver: { _ in driver },
+            configurePlaybackSession: { throw NSError(domain: "BrassTuneTests", code: 1) }
+        )
+
+        categoryFailurePlayer.play(url: url)
+
+        XCTAssertEqual(
+            categoryFailurePlayer.notice,
+            "BrassTune couldn't play this recording. Check your audio output and try again."
+        )
+        XCTAssertFalse(categoryFailurePlayer.notice?.localizedCaseInsensitiveContains("reference tone") == true)
+
+        let driverFailurePlayer = NativeRecordingPlayer(
+            audioSessionCoordinator: coordinator,
+            makeDriver: { _ in driver },
+            configurePlaybackSession: {}
+        )
+        driverFailurePlayer.play(url: url)
+
+        XCTAssertEqual(
+            driverFailurePlayer.notice,
+            "BrassTune couldn't play this recording. Check your audio output and try again."
+        )
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+    }
+
+    @MainActor
+    func testAudioEngineIgnoresCategoryChangeButStopsToneForLostOutputRoute() throws {
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: {},
+            deactivateSession: {}
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            simulateTonePlayback: true
+        )
+        try engine.startTone(frequencyHz: 440, volume: 0.2)
+
+        engine.handleRouteChange(rawReason: AVAudioSession.RouteChangeReason.categoryChange.rawValue)
+        XCTAssertTrue(engine.tonePlaying)
+        XCTAssertFalse(engine.routeChanged)
+
+        engine.handleRouteChange(rawReason: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue)
+        XCTAssertFalse(engine.tonePlaying)
+        XCTAssertTrue(engine.routeChanged)
+        XCTAssertTrue(engine.audioNotice?.contains("output changed") == true)
+    }
+
+    @MainActor
+    func testInterruptedCaptureRetainsOneSessionSnapshotAndDeletesItsFileWithSession() throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let recordingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneRecordings-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: recordingDirectory)
+        }
+        let recordingURL = recordingDirectory.appendingPathComponent("interrupted.caf")
+        try makeSilentCAF(at: recordingURL)
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let model = AppModel(
+            persistenceStore: store,
+            recordingStorageDirectory: recordingDirectory
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        let captureID = UUID()
+        let capture = NativeLiveCapture(
+            id: captureID,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_003),
+            frames: [PitchFrame.fixture(index: 0)],
+            recordingURL: recordingURL,
+            recordingRetentionFailure: nil,
+            completionReason: .interruption
+        )
+
+        XCTAssertTrue(model.retainUnexpectedLiveCapture(capture))
+        XCTAssertFalse(model.retainUnexpectedLiveCapture(capture), "The same interruption completion must be retained exactly once.")
+        XCTAssertEqual(model.sessions.count, 1)
+        XCTAssertEqual(model.sessions.first?.retainedRecordingURL, recordingURL.standardizedFileURL)
+        XCTAssertTrue(model.audioEngine.audioNotice?.contains("Saved") == true)
+        model.flushPendingPersistence()
+
+        let restored = AppModel(
+            persistenceStore: store,
+            recordingStorageDirectory: recordingDirectory
+        )
+        restored.enterGuestDemo(presentTutorial: false)
+        let restoredSession = try XCTUnwrap(restored.sessions.first)
+        XCTAssertEqual(restored.availableRecordingURL(for: restoredSession), recordingURL.standardizedFileURL)
+
+        restored.deleteSession(id: restoredSession.id)
+        XCTAssertTrue(restored.sessions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recordingURL.path))
+    }
+
+    @MainActor
+    func testRestoreMigratesMissingRetainedRecordingToUnavailable() throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let recordingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneRecordings-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: recordingDirectory)
+        }
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let seed = AppModel(persistenceStore: store, recordingStorageDirectory: recordingDirectory)
+        seed.enterGuestDemo(presentTutorial: false)
+        var session = makeSession(name: "Older take", cents: [0])
+        session.retainedRecordingURL = recordingDirectory.appendingPathComponent("missing.caf")
+        seed.sessions = [session]
+        seed.flushPendingPersistence()
+
+        let restored = AppModel(persistenceStore: store, recordingStorageDirectory: recordingDirectory)
+        restored.enterGuestDemo(presentTutorial: false)
+
+        XCTAssertNil(restored.sessions.first?.retainedRecordingURL)
+        XCTAssertNil(restored.sessions.first.flatMap(restored.availableRecordingURL(for:)))
+    }
+
+    @MainActor
+    func testClearLocalPracticeDataDeletesRecordingDirectory() throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let recordingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneRecordings-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: recordingDirectory)
+        }
+        let recordingURL = recordingDirectory.appendingPathComponent("clear-me.caf")
+        try makeSilentCAF(at: recordingURL)
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            recordingStorageDirectory: recordingDirectory
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        var session = makeSession(name: "Clear me", cents: [0])
+        session.retainedRecordingURL = recordingURL
+        model.sessions = [session]
+
+        model.clearLocalPracticeData()
+
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recordingURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recordingDirectory.path))
+    }
+
+    @MainActor
+    func testClearLocalPracticeDataRestoresPersistedSnapshotWhenRecordingCleanupFails() throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let recordingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneRecordings-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: recordingDirectory)
+        }
+        let recordingURL = recordingDirectory.appendingPathComponent("keep-me.caf")
+        try makeSilentCAF(at: recordingURL)
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            recordingStorageDirectory: recordingDirectory,
+            recordingFileRemover: { _ in throw CocoaError(.fileWriteNoPermission) }
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        var session = makeSession(name: "Keep me", cents: [0])
+        session.retainedRecordingURL = recordingURL
+        model.sessions = [session]
+        model.flushPendingPersistence()
+
+        model.clearLocalPracticeData()
+
+        XCTAssertEqual(model.sessions, [session])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordingURL.path))
+        XCTAssertEqual(
+            model.lastError,
+            .apiRequestFailed(
+                statusCode: 500,
+                message: "BrassTune couldn't clear its saved local data, so your practice data was kept. Try again."
+            )
+        )
+        let relaunched = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            recordingStorageDirectory: recordingDirectory
+        )
+        relaunched.enterGuestDemo(presentTutorial: false)
+        XCTAssertEqual(relaunched.sessions.count, 1)
+        XCTAssertEqual(relaunched.sessions.first?.id, session.id)
+        XCTAssertEqual(relaunched.sessions.first?.name, session.name)
+        XCTAssertEqual(relaunched.sessions.first?.retainedRecordingURL, recordingURL.standardizedFileURL)
+    }
+
+    func testRecordingRetentionQuotaRejectsDurationAndSizeWithoutAllowingUnboundedCAF() {
+        let quota = NativeRecordingRetentionQuota(maximumDuration: 5, maximumBytes: 100)
+
+        XCTAssertNil(quota.failure(frameCount: 4_410, sampleRate: 44_100, estimatedBytes: 100))
+        XCTAssertEqual(
+            quota.failure(frameCount: 220_501, sampleRate: 44_100, estimatedBytes: 100),
+            .durationLimitReached
+        )
+        XCTAssertEqual(
+            quota.failure(frameCount: 4_410, sampleRate: 44_100, estimatedBytes: 101),
+            .sizeLimitReached
+        )
+    }
+
+    func testQuotaLimitedWriterRetainsThePlayableCappedPortion() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneRecordings-\(UUID().uuidString)", isDirectory: true)
+        let recordingURL = directory.appendingPathComponent("capped.caf")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512))
+        buffer.frameLength = 512
+        buffer.floatChannelData?.pointee.initialize(repeating: 0.1, count: 512)
+        let writer = try NativeAudioFileWriter(
+            destinationURL: recordingURL,
+            inputFormat: format,
+            quota: NativeRecordingRetentionQuota(maximumDuration: 60, maximumBytes: 3_000)
+        )
+
+        writer.write(buffer)
+        writer.write(buffer)
+        let result = writer.finish()
+
+        XCTAssertEqual(result.retentionFailure, .sizeLimitReached)
+        XCTAssertEqual(result.recordingURL, recordingURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordingURL.path))
+        XCTAssertGreaterThan(
+            try XCTUnwrap(recordingURL.resourceValues(forKeys: [.fileSizeKey]).fileSize),
+            0
+        )
+        XCTAssertNoThrow(try NativeRecordingPlaybackDriver.live(url: recordingURL))
+    }
+
+    @MainActor
+    func testWriteFailureSavesPitchResultWithoutAdvertisingListenBack() {
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            )
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        let capture = NativeLiveCapture(
+            id: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_003),
+            frames: [PitchFrame.fixture(index: 0)],
+            recordingURL: nil,
+            recordingRetentionFailure: .writeFailed,
+            completionReason: .interruption
+        )
+
+        XCTAssertTrue(model.retainUnexpectedLiveCapture(capture))
+        XCTAssertEqual(model.sessions.count, 1)
+        XCTAssertNil(model.sessions.first?.retainedRecordingURL)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertTrue(model.audioEngine.audioNotice?.contains("couldn't save") == true)
+    }
+
+    @MainActor
+    func testQuotaLimitedCaptureKeepsPlayablePartialAudioAndFullTuningResult() throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let recordingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneRecordings-\(UUID().uuidString)", isDirectory: true)
+        let recordingURL = recordingDirectory.appendingPathComponent("partial.caf")
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: recordingDirectory)
+        }
+        try makeSilentCAF(at: recordingURL)
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            recordingStorageDirectory: recordingDirectory
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        let capture = NativeLiveCapture(
+            id: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_010),
+            frames: [PitchFrame.fixture(index: 0), PitchFrame.fixture(index: 1)],
+            recordingURL: recordingURL,
+            recordingRetentionFailure: .durationLimitReached,
+            completionReason: .interruption
+        )
+
+        XCTAssertTrue(model.retainUnexpectedLiveCapture(capture))
+        let savedSession = try XCTUnwrap(model.sessions.first)
+        XCTAssertEqual(savedSession.retainedRecordingURL, recordingURL.standardizedFileURL)
+        XCTAssertEqual(model.availableRecordingURL(for: savedSession), recordingURL.standardizedFileURL)
+        XCTAssertNil(model.lastError)
+        XCTAssertTrue(model.audioEngine.audioNotice?.localizedCaseInsensitiveContains("partial") == true)
+        XCTAssertEqual(savedSession.frames, capture.frames)
+    }
+
+    @MainActor
+    func testQuotaCaptureWithCorruptAudioFileDoesNotClaimPartialListenBack() throws {
+        let recordingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneRecordings-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: recordingDirectory) }
+        let corruptRecordingURL = recordingDirectory.appendingPathComponent("corrupt.caf")
+        try FileManager.default.createDirectory(at: recordingDirectory, withIntermediateDirectories: true)
+        try Data([0x00, 0x01, 0x02]).write(to: corruptRecordingURL)
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            ),
+            recordingStorageDirectory: recordingDirectory
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        let capture = NativeLiveCapture(
+            id: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_003),
+            frames: [PitchFrame.fixture(index: 0)],
+            recordingURL: corruptRecordingURL,
+            recordingRetentionFailure: .sizeLimitReached,
+            completionReason: .interruption
+        )
+
+        XCTAssertTrue(model.retainUnexpectedLiveCapture(capture))
+        XCTAssertNil(model.sessions.first?.retainedRecordingURL)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertFalse(model.audioEngine.audioNotice?.localizedCaseInsensitiveContains("partial") == true)
+        XCTAssertTrue(model.audioEngine.audioNotice?.contains("couldn't save") == true)
+    }
+
     func testPlayAlongHidesLowConfidenceFeedbackAndAcceptsEnharmonics() {
         let exercise = PlayAlongExercise(
             id: "enharmonic-test",
@@ -4236,6 +4613,32 @@ final class BrassTuneAppTests: XCTestCase {
             writtenOctave: octave,
             isValidForRecording: item["is_valid_for_recording"] as? Bool ?? defaultValidity
         )
+    }
+
+    private func makeSilentCAF(at url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)
+        )
+        buffer.frameLength = 512
+        if let samples = buffer.floatChannelData?[0] {
+            for index in 0..<Int(buffer.frameLength) {
+                samples[index] = 0
+            }
+        }
+        try file.write(from: buffer)
     }
 
     private func makeSession(

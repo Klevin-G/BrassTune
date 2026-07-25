@@ -15,11 +15,19 @@ function formatBytes(
   return t('sessionAudio.megabytes', { count: formatNumber(size / 1024 / 1024, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) });
 }
 
+export function retryAudioPlayback(audio: Pick<HTMLAudioElement, 'load'> | null): boolean {
+  if (!audio) return false;
+  audio.load();
+  return true;
+}
+
 export function SessionAudioPlayer({ session, compact = false }: { session: PracticeSession; compact?: boolean }) {
   const { t, formatNumber } = useI18n();
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState(false);
   const [loading, setLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const loadingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -50,6 +58,7 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
     const generation = ++requestGenerationRef.current;
     loadingRef.current = true;
     setAudioError(null);
+    setPlaybackError(false);
     setLoading(true);
     try {
       const nextUrl = session.guest_audio_data_url ?? await objectUrlFor(`/api/sessions/${sessionId}/audio`);
@@ -79,6 +88,7 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
     loadingRef.current = false;
     replaceAudioUrl(null);
     setAudioError(null);
+    setPlaybackError(false);
     setLoading(false);
     if (session.audio_available) void loadAudio();
   }, [loadAudio, replaceAudioUrl, session.audio_available, session.id]);
@@ -112,12 +122,36 @@ export function SessionAudioPlayer({ session, compact = false }: { session: Prac
           </em>
         </div>
       </div>
-      {audioError && <em>{audioError}</em>}
+      {audioError && <em role="alert">{audioError}</em>}
       {audioUrl ? (
-        <audio src={audioUrl} controls preload="none" aria-label={t('sessionAudio.listenBack')}>
-          <track kind="captions" />
-          {t('sessionAudio.unsupported')}
-        </audio>
+        <>
+          {playbackError && <em role="alert">{t('sessionAudio.unsupported')}</em>}
+          <audio
+            ref={audioRef}
+            src={audioUrl}
+            controls
+            preload="metadata"
+            aria-label={t('sessionAudio.listenBack')}
+            onError={() => setPlaybackError(true)}
+            onLoadedMetadata={() => setPlaybackError(false)}
+          >
+            <track kind="captions" />
+            {t('sessionAudio.unsupported')}
+          </audio>
+          {playbackError && (
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => {
+                setPlaybackError(false);
+                retryAudioPlayback(audioRef.current);
+              }}
+            >
+              <Play size={17} />
+              {t('sessionAudio.loadPlayback')}
+            </button>
+          )}
+        </>
       ) : (
         <button className="ghost-button" type="button" onClick={loadAudio} disabled={loading}>
           <Play size={17} />

@@ -1,53 +1,59 @@
 {
   "updated": "2026-07-24",
-  "deployed_application_revision": "26683c82c42839016383fb9cab676c9a35d554ca",
-  "decision": "web_backend_and_outreach_draft_gates_passed_pending_external_native_identity_gates",
+  "decision": "local_and_simulator_candidate_passed_pending_deployment_signing_and_physical_device_gates",
+  "deployed_application_revision": null,
   "github_actions": {
-    "status": "disabled",
-    "release_gate": "must_not_be_used"
+    "status": "unused_due_to_exhausted_minutes",
+    "release_path": "direct_provider_deployment_required"
   },
-  "local": {
-    "backend": "286 passed, 11 skipped",
-    "frontend_units": "253/253",
-    "frontend_build": "passed",
-    "device_simulation": "12 viewport profiles passed",
-    "swift_core": "3/3",
-    "native_iphone_units": "145/145",
-    "native_iphone_ui": "20/20",
-    "native_ipad_journeys": "first-run, main, and class passed",
-    "localization": "660 keys across 12 locales, 0 issues"
+  "verified": {
+    "backend": "299 passed, 11 skipped",
+    "frontend_units": "261 passed",
+    "frontend_production_build": "passed",
+    "local_playwright": "443 passed, 7 expected skips across five browser/device projects",
+    "device_simulation": "12 viewports passed",
+    "swift_core": "3 passed",
+    "native_unit_tests": "158 passed in simulator",
+    "native_ui_tests": "20 scenarios passed in bounded simulator batches",
+    "simulator_build_run": "zero warnings and errors",
+    "localization": "12 locales, zero coverage gaps"
   },
-  "supabase": {
-    "heartbeat_migration": "20260724072904 applied; local and remote histories matched on 2026-07-24",
-    "google_provider": "enabled",
-    "apple_provider": "disabled_pending_apple_developer_credentials"
-  },
-  "production": {
-    "render": {
-      "deployment_id": "dep-d9hinqjeo5us73e9eqng",
-      "status": "live",
-      "reported_revision": "26683c82c42839016383fb9cab676c9a35d554ca"
+  "dependency_audit": {
+    "remaining_high_dependency_entries": {
+      "direct": ["react-router-dom"],
+      "indirect": ["react-router"]
     },
-    "vercel": {
-      "deployment_id": "dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v",
-      "status": "ready",
-      "canonical_url": "https://brasstune.vercel.app"
+    "react_router_ghsa_qwww_vcr4_c8h2": "non-applicable to this client-only Vite SPA because it uses no unstable React Server Components APIs",
+    "status": "audit findings remain open for dependency maintenance"
+  },
+  "native_auth": {
+    "apple_sign_in": "hidden_pending_apple_configuration",
+    "google_sign_in": "hidden_on_native_pending_apple_and_dual_provider_verification"
+  },
+  "supabase_live_configuration": {
+    "project_ref": "yznziwewxrlwnwiynlvl",
+    "status": "active_healthy_at_time_of_cli_check",
+    "migration_history": "local and remote match through 20260724072904",
+    "session_audio_bucket": {
+      "public": false,
+      "file_size_limit_bytes": 52428800,
+      "allowed_mime_types": ["webm", "mp4", "mpeg", "wav", "ogg"],
+      "browser_facing_storage_policies": 0
     },
-    "hosted_smoke": "8/8 passed",
-    "provider_error_scan": "no errors returned in checked post-deploy window",
-    "gmail_outreach": {
-      "sender": "brasstune1@gmail.com",
-      "drafts": 44,
-      "unique_recipients": 44,
-      "unique_subjects": 44,
-      "duplicates": 0,
-      "sent": 0
-    }
+    "database_access": "all public tables have RLS; anon and authenticated have no DML grants",
+    "security_advisor_warnings": [
+      "pg_net extension is installed in public",
+      "leaked-password protection is disabled; Supabase documentation says the feature requires a Pro plan"
+    ],
+    "boundary": "point-in-time live configuration evidence, not a migration or blanket security certification"
   },
   "pending": {
-    "apple_provider_and_signing": "external",
-    "physical_device_microphone": "external",
-    "disposable_live_account_lifecycle": "not_completed",
-    "human_language_and_accessibility_review": "external"
+    "direct_render_vercel_deployment": "not_recorded",
+    "hosted_smoke": "not_recorded",
+    "exact_deployed_sha": "not_recorded",
+    "signed_archive_testflight": "external",
+    "physical_device_audio": "external: Ring-Silent, microphone, Bluetooth/routes, interruptions, recording deletion, file protection",
+    "app_store_connect": "external: privacy answers, review metadata/access, age rating, export compliance",
+    "human_language_review": "external"
   }
 }

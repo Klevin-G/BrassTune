@@ -1,6 +1,6 @@
 # Platform Requirements
 
-Updated: 2026-06-20 UTC. Primary sources were checked during this run; links are included for traceability.
+Updated: 2026-07-24 UTC. Primary sources were checked during this run; links are included for traceability.
 
 ## Apple
 
@@ -10,8 +10,8 @@ Updated: 2026-06-20 UTC. Primary sources were checked during this run; links are
 | [Account deletion guidance](https://developer.apple.com/support/offering-account-deletion-in-your-app/) | Account-creation apps must let users initiate deletion in app. | Web/native account lifecycle surfaces exist; web export/delete tests exist locally. | Live Supabase identity/storage deletion still needs disposable-provider verification. |
 | [Cocoa keys](https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CocoaKeys.html) | Camera and microphone access require purpose strings. | Native microphone usage description is configured. | Native score scanner/camera flow and final camera purpose string are not complete. |
 | [VisionKit document camera](https://developer.apple.com/documentation/visionkit/vndocumentcameraviewcontroller) | Native document scanning should use system document camera where available. | Native scanner is documented as deferred. | Implement VisionKit scan, fallback paths, tests, and purpose-string review. |
-| [Privacy manifests](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files) and [required-reason APIs](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api) | App and SDK privacy practices and required-reason APIs must be declared. | `PrivacyInfo.xcprivacy` exists. | Final SDK/privacy audit after production native dependencies are pinned. |
-| [Sign in with Apple](https://developer.apple.com/documentation/signinwithapple/authenticating-users-with-sign-in-with-apple) | Apple sign-in needs entitlement/provider configuration. | Web UI exposes Apple sign-in only when auth is configured. | Apple developer capability, Supabase Apple provider, and native callback setup remain. |
+| [Privacy manifests](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files) and [required-reason APIs](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api) | App and SDK privacy practices and required-reason APIs must be declared. | `PrivacyInfo.xcprivacy` records linked email, user ID, and user content; local-only raw microphone capture is not declared as collected. | Final SDK/privacy audit and App Store Connect answer reconciliation after a signed candidate is available. |
+| [Sign in with Apple](https://developer.apple.com/documentation/signinwithapple/authenticating-users-with-sign-in-with-apple) | Apple sign-in needs entitlement/provider configuration. | Apple entitlement and native third-party OAuth controls are deferred; guest and first-party email/password remain. | Apple developer capability, Supabase Apple provider, native callback setup, and live dual-provider verification are required before re-enabling. |
 | [TestFlight overview](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/) | TestFlight requires App Store Connect app record and uploaded signed build. | Simulator builds/tests are documented. | Signed archive, upload, groups, feedback process, and export logs are missing. |
 
 ## Google Identity

@@ -5,7 +5,7 @@ import UIKit
 
 @MainActor
 final class NativeAudioSessionCoordinator {
-    enum Owner: Hashable { case capture, tone, metronome }
+    enum Owner: Hashable { case capture, tone, metronome, recordingPlayback }
 
     static let shared = NativeAudioSessionCoordinator()
 
@@ -68,6 +68,385 @@ final class NativeAudioSessionCoordinator {
     func isActive(_ owner: Owner) -> Bool { owners.contains(owner) }
 }
 
+enum NativeLiveCaptureCompletionReason: Equatable {
+    case userStopped
+    case interruption
+    case routeLoss
+}
+
+enum NativeRecordingRetentionFailure: Equatable {
+    case durationLimitReached
+    case sizeLimitReached
+    case writeFailed
+}
+
+struct NativeLiveCapture: Equatable, Identifiable {
+    let id: UUID
+    let startedAt: Date
+    let endedAt: Date
+    let frames: [PitchFrame]
+    let recordingURL: URL?
+    let recordingRetentionFailure: NativeRecordingRetentionFailure?
+    let completionReason: NativeLiveCaptureCompletionReason
+}
+
+struct NativeRecordingRetentionQuota: Equatable {
+    /// A five-minute cap keeps local, uncompressed CAF takes bounded while
+    /// still covering a focused practice pass.
+    static let shipping = NativeRecordingRetentionQuota(
+        maximumDuration: 5 * 60,
+        maximumBytes: 64 * 1024 * 1024
+    )
+
+    let maximumDuration: TimeInterval
+    let maximumBytes: Int64
+
+    func failure(
+        frameCount: Int64,
+        sampleRate: Double,
+        estimatedBytes: Int64
+    ) -> NativeRecordingRetentionFailure? {
+        if sampleRate > 0, Double(frameCount) / sampleRate > maximumDuration {
+            return .durationLimitReached
+        }
+        if estimatedBytes > maximumBytes {
+            return .sizeLimitReached
+        }
+        return nil
+    }
+}
+
+struct NativePlaybackSessionPolicy {
+    static func configure(
+        _ apply: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions) throws -> Void
+    ) rethrows {
+        // `.playback` deliberately ignores the Ring/Silent switch. A saved
+        // practice take should behave like media, not like a notification.
+        try apply(.playback, .default, [])
+    }
+}
+
+final class NativeAudioFileWriter: @unchecked Sendable {
+    struct FinishResult {
+        let recordingURL: URL?
+        let retentionFailure: NativeRecordingRetentionFailure?
+    }
+
+    private let lock = NSLock()
+    private var audioFile: AVAudioFile?
+    private var retentionFailure: NativeRecordingRetentionFailure?
+    private var writtenFrames: Int64 = 0
+    private var estimatedBytes: Int64 = 0
+    private let sampleRate: Double
+    private let bytesPerFrame: Int64
+    private let quota: NativeRecordingRetentionQuota
+
+    let destinationURL: URL
+
+    init(
+        destinationURL: URL,
+        inputFormat: AVAudioFormat,
+        quota: NativeRecordingRetentionQuota = .shipping
+    ) throws {
+        self.destinationURL = destinationURL
+        self.quota = quota
+        self.sampleRate = inputFormat.sampleRate
+        let declaredBytesPerFrame = Int64(inputFormat.streamDescription.pointee.mBytesPerFrame)
+        let bytesPerBufferFrame = max(
+            1,
+            declaredBytesPerFrame == 0
+                ? Int64(MemoryLayout<Float>.size)
+                : declaredBytesPerFrame
+        )
+        // In non-interleaved PCM, the ASBD byte count is per channel buffer.
+        // Account for all channel buffers before deciding a take can grow.
+        let bufferCount = inputFormat.isInterleaved ? 1 : max(1, Int64(inputFormat.channelCount))
+        self.bytesPerFrame = bytesPerBufferFrame * bufferCount
+        try FileManager.default.createDirectory(
+            at: destinationURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        audioFile = try AVAudioFile(
+            forWriting: destinationURL,
+            settings: inputFormat.settings,
+            commonFormat: inputFormat.commonFormat,
+            interleaved: inputFormat.isInterleaved
+        )
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: destinationURL.path
+        )
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        var mutableURL = destinationURL
+        try? mutableURL.setResourceValues(resourceValues)
+    }
+
+    func write(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let audioFile, retentionFailure == nil else { return }
+        let nextFrameCount = writtenFrames + Int64(buffer.frameLength)
+        let nextEstimatedBytes = estimatedBytes + Int64(buffer.frameLength) * bytesPerFrame
+        if let quotaFailure = quota.failure(
+            frameCount: nextFrameCount,
+            sampleRate: sampleRate,
+            estimatedBytes: nextEstimatedBytes
+        ) {
+            retentionFailure = quotaFailure
+            return
+        }
+        do {
+            try audioFile.write(from: buffer)
+            writtenFrames = nextFrameCount
+            estimatedBytes = nextEstimatedBytes
+        } catch {
+            retentionFailure = .writeFailed
+        }
+    }
+
+    func finish() -> FinishResult {
+        lock.lock()
+        let failure = retentionFailure
+        audioFile = nil
+        lock.unlock()
+
+        let preservesCappedAudio = failure == .durationLimitReached || failure == .sizeLimitReached
+        guard (failure == nil || preservesCappedAudio),
+              FileManager.default.fileExists(atPath: destinationURL.path),
+              ((try? destinationURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) > 0 else {
+            try? FileManager.default.removeItem(at: destinationURL)
+            return FinishResult(recordingURL: nil, retentionFailure: failure)
+        }
+        return FinishResult(recordingURL: destinationURL, retentionFailure: failure)
+    }
+
+    func discard() {
+        lock.lock()
+        audioFile = nil
+        lock.unlock()
+        try? FileManager.default.removeItem(at: destinationURL)
+    }
+}
+
+struct NativeRecordingPlaybackDriver {
+    let duration: () -> TimeInterval
+    let currentTime: () -> TimeInterval
+    let setCurrentTime: (TimeInterval) -> Void
+    let isPlaying: () -> Bool
+    let prepareToPlay: () -> Bool
+    let play: () -> Bool
+    let pause: () -> Void
+    let stop: () -> Void
+
+    static func live(url: URL) throws -> NativeRecordingPlaybackDriver {
+        let player = try AVAudioPlayer(contentsOf: url)
+        return NativeRecordingPlaybackDriver(
+            duration: { player.duration },
+            currentTime: { player.currentTime },
+            setCurrentTime: { player.currentTime = $0 },
+            isPlaying: { player.isPlaying },
+            prepareToPlay: { player.prepareToPlay() },
+            play: { player.play() },
+            pause: { player.pause() },
+            stop: { player.stop() }
+        )
+    }
+}
+
+@MainActor
+final class NativeRecordingPlayer: ObservableObject {
+    enum State: Equatable {
+        case stopped
+        case playing
+        case paused
+    }
+
+    @Published private(set) var state: State = .stopped
+    @Published private(set) var loadedURL: URL?
+    @Published private(set) var currentTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
+    @Published private(set) var notice: String?
+
+    private let audioSessionCoordinator: NativeAudioSessionCoordinator
+    private let makeDriver: (URL) throws -> NativeRecordingPlaybackDriver
+    private let configurePlaybackSession: () throws -> Void
+    private var driver: NativeRecordingPlaybackDriver?
+    private var progressTimer: Timer?
+    nonisolated(unsafe) private var routeChangeObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var interruptionObserver: NSObjectProtocol?
+    private var prepareForPlayback: (() -> Void)?
+
+    init(
+        audioSessionCoordinator: NativeAudioSessionCoordinator = .shared,
+        makeDriver: @escaping (URL) throws -> NativeRecordingPlaybackDriver = NativeRecordingPlaybackDriver.live,
+        configurePlaybackSession: (() throws -> Void)? = nil
+    ) {
+        self.audioSessionCoordinator = audioSessionCoordinator
+        self.makeDriver = makeDriver
+        self.configurePlaybackSession = configurePlaybackSession ?? {
+            let session = AVAudioSession.sharedInstance()
+            try NativePlaybackSessionPolicy.configure { category, mode, options in
+                try session.setCategory(category, mode: mode, options: options)
+            }
+        }
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            Task { @MainActor in
+                self?.handleRouteChange(rawReason: rawReason)
+            }
+        }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            Task { @MainActor in
+                self?.handleInterruption(rawType: rawType)
+            }
+        }
+    }
+
+    deinit {
+        if let routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+        }
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+    }
+
+    func setPlaybackPreparation(_ preparation: @escaping () -> Void) {
+        prepareForPlayback = preparation
+    }
+
+    func togglePlayback(url: URL) {
+        if loadedURL == url, state == .playing {
+            pause()
+        } else {
+            play(url: url)
+        }
+    }
+
+    func play(url: URL) {
+        notice = nil
+        if loadedURL != url {
+            stopAndUnload()
+            do {
+                driver = try makeDriver(url)
+                loadedURL = url
+                duration = max(0, driver?.duration() ?? 0)
+            } catch {
+                notice = NativeLocalization.string("This recording is no longer on this device.")
+                return
+            }
+        }
+
+        prepareForPlayback?()
+        guard !audioSessionCoordinator.isActive(.capture) else {
+            notice = NativeLocalization.string("Stop and save recording")
+            return
+        }
+
+        do {
+            try audioSessionCoordinator.acquire(.recordingPlayback) {
+                try configurePlaybackSession()
+            }
+        } catch {
+            notice = Self.recordingPlaybackFailureNotice()
+            return
+        }
+
+        guard let driver else {
+            audioSessionCoordinator.release(.recordingPlayback)
+            return
+        }
+        _ = driver.prepareToPlay()
+        guard driver.play() else {
+            audioSessionCoordinator.release(.recordingPlayback)
+            notice = Self.recordingPlaybackFailureNotice()
+            return
+        }
+        state = .playing
+        currentTime = driver.currentTime()
+        scheduleProgressTimer()
+    }
+
+    private static func recordingPlaybackFailureNotice() -> String {
+        NativeLocalization.string(
+            "BrassTune couldn't play this recording. Check your audio output and try again."
+        )
+    }
+
+    func pause() {
+        guard state == .playing, let driver else { return }
+        driver.pause()
+        currentTime = driver.currentTime()
+        state = .paused
+        invalidateProgressTimer()
+        audioSessionCoordinator.release(.recordingPlayback)
+    }
+
+    func stop() {
+        driver?.stop()
+        driver?.setCurrentTime(0)
+        currentTime = 0
+        state = .stopped
+        invalidateProgressTimer()
+        audioSessionCoordinator.release(.recordingPlayback)
+    }
+
+    func stopAndUnload() {
+        stop()
+        driver = nil
+        loadedURL = nil
+        duration = 0
+        notice = nil
+    }
+
+    func handleRouteChange(rawReason: UInt?) {
+        guard Self.isOutputLossRouteChange(rawReason: rawReason),
+              state == .playing || state == .paused else { return }
+        stop()
+        notice = NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
+    }
+
+    func handleInterruption(rawType: UInt?) {
+        guard rawType == AVAudioSession.InterruptionType.began.rawValue,
+              state == .playing else { return }
+        pause()
+        notice = NativeLocalization.string("Try again when you're ready.")
+    }
+
+    static func isOutputLossRouteChange(rawReason: UInt?) -> Bool {
+        rawReason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
+            || rawReason == AVAudioSession.RouteChangeReason.noSuitableRouteForCategory.rawValue
+    }
+
+    private func scheduleProgressTimer() {
+        invalidateProgressTimer()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let driver = self.driver else { return }
+                self.currentTime = driver.currentTime()
+                if !driver.isPlaying(), self.currentTime >= max(0, self.duration - 0.05) {
+                    self.stop()
+                }
+            }
+        }
+    }
+
+    private func invalidateProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+}
+
 @MainActor
 final class NativeAudioEngine: ObservableObject {
     @Published private(set) var recording = false
@@ -89,6 +468,7 @@ final class NativeAudioEngine: ObservableObject {
     private var fixtureReferencePitchHz = 440.0
     private var liveStartedAt: Date?
     private var liveCaptureID: UUID?
+    private var liveFileWriter: NativeAudioFileWriter?
     private var liveStartRequestID: UUID?
     private let maxLiveFrames = 18_000
     private let pitchProcessingQueue = DispatchQueue(label: "com.brasstune.native.pitch-processing", qos: .userInitiated)
@@ -98,6 +478,7 @@ final class NativeAudioEngine: ObservableObject {
     private let microphonePermissionRequester: @MainActor () async -> Bool
     private let simulateTonePlayback: Bool
     private var prepareForTonePlayback: (() -> Void)?
+    private var unexpectedCaptureCompletion: ((NativeLiveCapture) -> Void)?
 
     static var defaultRecordingSource: PracticeSessionSource {
         NativeTestFixtures.areEnabled ? .sample : .live
@@ -119,15 +500,10 @@ final class NativeAudioEngine: ObservableObject {
             forName: AVAudioSession.routeChangeNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
             Task { @MainActor in
-                guard let self else { return }
-                let wasPlayingTone = self.tonePlaying
-                if wasPlayingTone { self.stopTone() }
-                self.routeChanged = true
-                self.audioNotice = wasPlayingTone
-                    ? NativeLocalization.string("The reference tone stopped because your audio output changed. Check your headphones or speaker before restarting.")
-                    : NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
+                self?.handleRouteChange(rawReason: rawReason)
             }
         }
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -137,11 +513,7 @@ final class NativeAudioEngine: ObservableObject {
         ) { [weak self] notification in
             let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
             Task { @MainActor in
-                guard let self else { return }
-                if typeValue == AVAudioSession.InterruptionType.began.rawValue {
-                    self.stopAndResetAudioEngine()
-                    self.audioNotice = NativeLocalization.string("Recording stopped because the audio session was interrupted.")
-                }
+                self?.handleInterruption(rawType: typeValue)
             }
         }
         if ProcessInfo.processInfo.arguments.contains("UITEST_MIC_DENIED") {
@@ -194,7 +566,11 @@ final class NativeAudioEngine: ObservableObject {
         return frames
     }
 
-    func startLiveRecording(instrumentId: String, referencePitchHz: Double) async throws -> Bool {
+    func startLiveRecording(
+        instrumentId: String,
+        referencePitchHz: Double,
+        recordingURL: URL? = nil
+    ) async throws -> Bool {
         if Self.testFixturesEnabled {
             // Simulate a live capture so the tuner's recording UI is drivable in
             // UI tests without a physical microphone. activeSource stays .live so
@@ -221,7 +597,11 @@ final class NativeAudioEngine: ObservableObject {
             currentFrame = nil
             return false
         }
-        try configureAndStartLiveEngine(instrumentId: instrumentId, referencePitchHz: referencePitchHz)
+        try configureAndStartLiveEngine(
+            instrumentId: instrumentId,
+            referencePitchHz: referencePitchHz,
+            recordingURL: recordingURL
+        )
         return true
     }
 
@@ -233,12 +613,18 @@ final class NativeAudioEngine: ObservableObject {
         prepareForTonePlayback = preparation
     }
 
-    func stopLiveRecording() -> [PitchFrame] {
-        let captured = frames
-        stopAndResetAudioEngine()
-        frames = captured
-        currentFrame = captured.last
-        return captured
+    func setUnexpectedCaptureCompletion(_ completion: @escaping (NativeLiveCapture) -> Void) {
+        unexpectedCaptureCompletion = completion
+    }
+
+    func stopLiveRecording() -> NativeLiveCapture {
+        finishLiveCapture(reason: .userStopped)
+    }
+
+    func discardLiveRecording() {
+        resetAudioEngine(discardCaptureFile: true)
+        frames.removeAll()
+        currentFrame = nil
     }
 
     func startTone(frequencyHz: Double, volume: Double) throws {
@@ -326,9 +712,58 @@ final class NativeAudioEngine: ObservableObject {
     }
 
     func stopAndResetAudioEngine() {
+        resetAudioEngine(discardCaptureFile: true)
+    }
+
+    func handleRouteChange(rawReason: UInt?) {
+        guard NativeRecordingPlayer.isOutputLossRouteChange(rawReason: rawReason) else {
+            // `.categoryChange` is emitted for BrassTune's own session
+            // reconfiguration. Treating it as output loss stops tones that just
+            // started and makes listen-back appear broken.
+            return
+        }
+
+        let wasPlayingTone = tonePlaying
+        let wasCapturingLive = recording && activeSource == .live
+        if wasCapturingLive {
+            let capture = finishLiveCapture(reason: .routeLoss)
+            routeChanged = true
+            audioNotice = NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
+            unexpectedCaptureCompletion?(capture)
+            return
+        } else if wasPlayingTone {
+            stopTone()
+        }
+        routeChanged = true
+        if wasPlayingTone {
+            audioNotice = NativeLocalization.string("The reference tone stopped because your audio output changed. Check your headphones or speaker before restarting.")
+        } else {
+            audioNotice = NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
+        }
+    }
+
+    func handleInterruption(rawType: UInt?) {
+        guard rawType == AVAudioSession.InterruptionType.began.rawValue else { return }
+        if recording, activeSource == .live {
+            let capture = finishLiveCapture(reason: .interruption)
+            audioNotice = NativeLocalization.string("Recording stopped because the audio session was interrupted.")
+            unexpectedCaptureCompletion?(capture)
+        } else if tonePlaying {
+            stopTone()
+            audioNotice = NativeLocalization.string("The reference tone stopped because your audio output changed. Check your headphones or speaker before restarting.")
+        }
+    }
+
+    private func resetAudioEngine(discardCaptureFile: Bool) {
         tonePlayer.stop()
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
+        if discardCaptureFile {
+            liveFileWriter?.discard()
+        } else {
+            _ = liveFileWriter?.finish()
+        }
+        liveFileWriter = nil
         recording = false
         tonePlaying = false
         toneFrequencyHz = nil
@@ -341,7 +776,11 @@ final class NativeAudioEngine: ObservableObject {
         audioSessionCoordinator.release(.tone)
     }
 
-    private func configureAndStartLiveEngine(instrumentId: String, referencePitchHz: Double) throws {
+    private func configureAndStartLiveEngine(
+        instrumentId: String,
+        referencePitchHz: Double,
+        recordingURL: URL?
+    ) throws {
         stopAndResetAudioEngine()
         let session = AVAudioSession.sharedInstance()
         let startedAt = Date()
@@ -361,16 +800,21 @@ final class NativeAudioEngine: ObservableObject {
                 guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
                     throw NativeAudioEngineError.inputUnavailable
                 }
+                let fileWriter = try recordingURL.map {
+                    try NativeAudioFileWriter(destinationURL: $0, inputFormat: inputFormat)
+                }
 
                 frames.removeAll()
                 currentFrame = nil
                 activeSource = .live
                 liveStartedAt = startedAt
                 liveCaptureID = captureID
+                liveFileWriter = fileWriter
                 audioNotice = nil
                 routeChanged = false
 
-                inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+                inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self, fileWriter] buffer, _ in
+                    fileWriter?.write(buffer)
                     let timestampMs = Int(max(0, Date().timeIntervalSince(startedAt) * 1000))
                     let sampleRate = buffer.format.sampleRate
                     guard let samples = NativePitchDetector.samples(from: buffer), let self else { return }
@@ -400,6 +844,39 @@ final class NativeAudioEngine: ObservableObject {
         }
 
         recording = true
+    }
+
+    private func finishLiveCapture(reason: NativeLiveCaptureCompletionReason) -> NativeLiveCapture {
+        let captureID = liveCaptureID ?? UUID()
+        let startedAt = liveStartedAt ?? Date()
+        let endedAt = Date()
+        let capturedFrames = frames
+        tonePlayer.stop()
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        let recordingResult = liveFileWriter?.finish()
+        liveFileWriter = nil
+        recording = false
+        tonePlaying = false
+        toneFrequencyHz = nil
+        toneFrequenciesHz = []
+        fixtureStartedAt = nil
+        liveStartedAt = nil
+        liveCaptureID = nil
+        liveStartRequestID = nil
+        audioSessionCoordinator.release(.capture)
+        audioSessionCoordinator.release(.tone)
+        frames = capturedFrames
+        currentFrame = capturedFrames.last
+        return NativeLiveCapture(
+            id: captureID,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            frames: capturedFrames,
+            recordingURL: recordingResult?.recordingURL,
+            recordingRetentionFailure: recordingResult?.retentionFailure,
+            completionReason: reason
+        )
     }
 
     private func appendLiveFrame(_ frame: PitchFrame, captureID: UUID) {

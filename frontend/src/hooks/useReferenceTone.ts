@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { referenceToneVoice } from '../domain/referenceTone';
+import { setWebAudioSessionType } from '../domain/webAudioSession';
 
 export function useReferenceTone() {
   const contextRef = useRef<AudioContext | null>(null);
@@ -22,6 +23,7 @@ export function useReferenceTone() {
         oscillator.disconnect();
       });
     }, 120);
+    setWebAudioSessionType('auto');
     setPlaying(false);
   }, []);
 
@@ -29,10 +31,14 @@ export function useReferenceTone() {
     stop();
     const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass || frequencies.length === 0) return false;
+    setWebAudioSessionType('playback');
     const context = contextRef.current ?? new AudioContextClass();
     contextRef.current = context;
     if (context.state !== 'running') await context.resume().catch(() => undefined);
-    if (context.state !== 'running') return false;
+    if (context.state !== 'running') {
+      stop();
+      return false;
+    }
     const gain = context.createGain();
     gain.gain.setValueAtTime(0.0001, context.currentTime);
     gain.gain.exponentialRampToValueAtTime(frequencies.length > 1 ? 0.035 : 0.055, context.currentTime + 0.08);
@@ -62,6 +68,7 @@ export function useReferenceTone() {
     const context = contextRef.current;
     contextRef.current = null;
     void context?.close().catch(() => undefined);
+    setWebAudioSessionType('auto');
   }, []);
 
   return { playing, start, stop };

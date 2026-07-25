@@ -1,6 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page, type Route } from 'playwright/test';
 
+// 100 ms of unsigned 8-bit PCM silence at 8 kHz. Keep this a parseable WAV so
+// the listen-back journey tests browser metadata readiness rather than a broken
+// fixture masquerading as an audio failure.
+const validGuestWavDataUrl = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+
 const guestSession = {
   id: -101,
   user_id: 0,
@@ -17,10 +22,10 @@ const guestSession = {
   in_tune_percentage: 100,
   audio_available: true,
   audio_mime_type: 'audio/wav',
-  audio_duration_seconds: 5,
-  audio_size_bytes: 44,
+  audio_duration_seconds: 0.1,
+  audio_size_bytes: 844,
   audio_uploaded_at: '2026-07-22T18:00:05.000Z',
-  guest_audio_data_url: 'data:audio/wav;base64,UklGRg==',
+  guest_audio_data_url: validGuestWavDataUrl,
   guest_session: true,
   samples_count: 0,
   note_events: [],
@@ -139,7 +144,28 @@ test('guest workspace can list, review, play, and export its local recording', a
   await expect(guestLink).toBeVisible();
   await expect(guestLink).toContainText('Saved on this device');
   await page.getByRole('button', { name: 'Listen back' }).click();
-  await expect(page.locator('audio[src^="data:audio/wav"]')).toBeVisible();
+  const audio = page.locator('audio[src^="data:audio/wav"]');
+  await expect(audio).toBeVisible();
+  await expect.poll(() => audio.evaluate((element) => element.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+
+  // The source is valid; simulate the browser's decode/playback event to keep
+  // the retry affordance deterministic across Chromium audio backends.
+  await audio.evaluate((element) => {
+    const originalLoad = element.load.bind(element);
+    (window as typeof window & { __brassTuneAudioReloads?: number }).__brassTuneAudioReloads = 0;
+    element.load = () => {
+      const instrumentedWindow = window as typeof window & { __brassTuneAudioReloads?: number };
+      instrumentedWindow.__brassTuneAudioReloads = (instrumentedWindow.__brassTuneAudioReloads ?? 0) + 1;
+      originalLoad();
+    };
+  });
+  await audio.evaluate((element) => element.dispatchEvent(new Event('error')));
+  await expect(page.getByRole('alert')).toHaveText('Your browser cannot play this audio.');
+  await page.getByRole('button', { name: 'Load playback' }).click();
+  await expect.poll(() => page.evaluate(
+    () => (window as typeof window & { __brassTuneAudioReloads?: number }).__brassTuneAudioReloads ?? 0,
+  )).toBe(1);
+  await expect(page.getByRole('alert')).toHaveCount(0);
 
   await page.goto('/sessions/-101');
   await expect(page.getByRole('heading', { name: 'Private guest audio' })).toBeVisible();

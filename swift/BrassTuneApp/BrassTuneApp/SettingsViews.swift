@@ -59,8 +59,12 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings.createAccount")
                     }
 
-                    NativeAppleSignInButton(identifier: "settings.appleSignIn")
-                    NativeGoogleSignInButton(identifier: "settings.googleSignIn")
+                    if model.appleSignInAvailable {
+                        NativeAppleSignInButton(identifier: "settings.appleSignIn")
+                        if model.googleSignInAvailable {
+                            NativeGoogleSignInButton(identifier: "settings.googleSignIn")
+                        }
+                    }
 
                     if model.authProviderConfigurationLoading {
                         ProgressView("Checking sign-in providers…")
@@ -1178,7 +1182,8 @@ struct LegalDetailView: View {
                     messages: [
                         "BrassTune uses account and practice data to provide tuning feedback and saved progress.",
                         "Practice recordings and imported sheet music stay on this device unless you choose to share or export them.",
-                    ]
+                    ],
+                    destination: URL(string: "https://brasstune.vercel.app/privacy")!
                 )
             case .terms:
                 LegalCard(
@@ -1186,7 +1191,8 @@ struct LegalDetailView: View {
                     messages: [
                         "Use BrassTune only with consent and within the policies of the school, studio, or organization providing access.",
                         "BrassTune is practice analytics software and does not replace instruction or hearing-safety guidance.",
-                    ]
+                    ],
+                    destination: URL(string: "https://brasstune.vercel.app/terms")!
                 )
             case .support:
                 LegalCard(
@@ -1194,7 +1200,8 @@ struct LegalDetailView: View {
                     messages: [
                         "Contact the teacher, director, or organization that provided BrassTune access.",
                         "Tell them what you were doing, which screen you were on, and about when the problem happened.",
-                    ]
+                    ],
+                    destination: URL(string: "https://brasstune.vercel.app/support")!
                 )
             }
         }
@@ -1214,6 +1221,7 @@ struct LegalDetailView: View {
 private struct LegalCard: View {
     let title: BTCopy
     let messages: [BTCopy]
+    let destination: URL
 
     var body: some View {
         BTCard {
@@ -1224,6 +1232,11 @@ private struct LegalCard: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Link(destination: destination) {
+                Label("Open full policy and contact details", systemImage: "safari")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
         }
     }
 }

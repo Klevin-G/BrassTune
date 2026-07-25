@@ -18,6 +18,9 @@ swift/**/*.xcodeproj/xcuserdata/
 DerivedData/
 *.xcresult
 *.xcarchive
+*.ipa
+build/ios/
+swift/BrassTuneApp/build/
 .DS_Store
 .idea/
 .omo/evidence/

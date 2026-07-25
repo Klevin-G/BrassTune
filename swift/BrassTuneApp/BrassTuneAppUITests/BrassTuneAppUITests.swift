@@ -126,13 +126,9 @@ final class BrassTuneAppUITests: XCTestCase {
             assertVisibleAndHittable(action, in: app)
             action.tap()
 
-            let apple = app.descendants(matching: .any)["gateway.authAppleSignIn"]
-            let google = app.descendants(matching: .any)["gateway.authGoogleSignIn"]
-            XCTAssertTrue(apple.waitForExistence(timeout: 5))
-            XCTAssertFalse(apple.isEnabled)
-            XCTAssertTrue(google.exists)
-            XCTAssertFalse(google.isEnabled)
-            XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.descendants(matching: .any)["gateway.authAppleSignIn"].exists)
+            XCTAssertFalse(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
+            XCTAssertFalse(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
             XCTAssertTrue(app.descendants(matching: .any)["gateway.authUnavailable"].exists)
             XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
             XCTAssertTrue(app.buttons["Not now"].exists)
@@ -154,11 +150,9 @@ final class BrassTuneAppUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["gateway.classIntent"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authUnavailable"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authAppleSignIn"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["gateway.authAppleSignIn"].isEnabled)
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["gateway.authGoogleSignIn"].isEnabled)
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authAppleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["gateway.email"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["gateway.password"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["gateway.submitAuth"].exists)
@@ -185,13 +179,9 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["classes.appleSignIn"].exists)
         signIn.tap()
 
-        let apple = app.descendants(matching: .any)["gateway.authAppleSignIn"]
-        let google = app.descendants(matching: .any)["gateway.authGoogleSignIn"]
-        XCTAssertTrue(apple.waitForExistence(timeout: 5))
-        XCTAssertFalse(apple.isEnabled)
-        XCTAssertTrue(google.exists)
-        XCTAssertFalse(google.isEnabled)
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authAppleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
     }
 
@@ -282,9 +272,11 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("Settings", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
-        let unavailableAccount = app.descendants(matching: .any)["settings.accountConfigurationUnavailable"]
-        XCTAssertTrue(unavailableAccount.waitForExistence(timeout: 5))
-        XCTAssertTrue(unavailableAccount.label.localizedCaseInsensitiveContains("Account sign-in needs secure"))
+        XCTAssertEqual(app.descendants(matching: .any)["settings.accountStatus"].label, "Guest practice")
+        XCTAssertFalse(app.descendants(matching: .any)["settings.signIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings.createAccount"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings.appleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings.googleSignIn"].exists)
 
         let advancedTuner = app.descendants(matching: .any)["settings.advancedTunerSettings"]
         XCTAssertTrue(advancedTuner.waitForExistence(timeout: 5))
@@ -451,9 +443,9 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["microphone.rationaleContinue"].isHittable)
         let disclosure = app.staticTexts["microphone.rationaleDisclosure"]
         XCTAssertTrue(disclosure.exists)
-        XCTAssertTrue(disclosure.label.contains("save practice results"))
-        XCTAssertTrue(disclosure.label.contains("Raw microphone audio is not saved"))
-        XCTAssertFalse(disclosure.label.contains("save recordings"))
+        XCTAssertTrue(disclosure.label.contains("Practice recordings"))
+        XCTAssertTrue(disclosure.label.contains("stay on this device"))
+        XCTAssertTrue(disclosure.label.contains("share or export"))
         let notNow = app.descendants(matching: .any)["microphone.rationaleNotNow"]
         XCTAssertTrue(notNow.isHittable)
         XCTAssertFalse(app.descendants(matching: .any)["tuner.floating.stop"].exists)
@@ -683,8 +675,8 @@ final class BrassTuneAppUITests: XCTestCase {
             "-UIPreferredContentSizeCategoryName",
             "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
         ]
-        app.launchEnvironment["BRASSTUNE_SUPABASE_URL"] = "https://ui-tests.invalid"
-        app.launchEnvironment["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"] = "sb_publishable_ui_tests"
+        app.launchEnvironment["BRASSTUNE_SUPABASE_URL"] = "https://abcdefghijklmnopqrst.supabase.co"
+        app.launchEnvironment["BRASSTUNE_SUPABASE_PUBLISHABLE_KEY"] = "sb_publishable_0123456789abcdefghij"
         app.launch()
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
@@ -701,8 +693,10 @@ final class BrassTuneAppUITests: XCTestCase {
         keepScreenshot(named: "Maximum Dynamic Type - account gateway", from: app)
 
         app.descendants(matching: .any)["gateway.signIn"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authAppleSignIn"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authAppleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.email"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.password"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.passwordReset"].exists)
         XCTAssertTrue(app.buttons["Not now"].exists)
         app.buttons["Not now"].tap()
@@ -727,7 +721,7 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
-    func testConfiguredAuthShowsGoogleEmailAndUnavailableAppleWithGuestEscape() throws {
+    func testConfiguredAuthDefersThirdPartyOAuthAndPreservesEmailGuestRecovery() throws {
         let app = XCUIApplication()
         app.launchArguments = [
             "UITEST_RESET_STATE",
@@ -742,19 +736,17 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["gateway.signIn"].waitForExistence(timeout: 8))
         app.descendants(matching: .any)["gateway.signIn"].tap()
 
-        let apple = app.descendants(matching: .any)["gateway.authAppleSignIn"]
-        let google = app.descendants(matching: .any)["gateway.authGoogleSignIn"]
-        XCTAssertTrue(apple.waitForExistence(timeout: 5))
-        XCTAssertFalse(apple.isEnabled)
-        XCTAssertTrue(google.exists)
-        XCTAssertTrue(google.isEnabled)
-        XCTAssertEqual(google.label, "Sign in with Google")
-        XCTAssertGreaterThanOrEqual(google.frame.height, 50)
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.email"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authAppleSignIn"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authGoogleSignIn"].exists)
+        let email = app.descendants(matching: .any)["gateway.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 5))
+        XCTAssertTrue(email.isHittable)
         XCTAssertTrue(app.descendants(matching: .any)["gateway.password"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authProvidersRecovery"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["gateway.authProvidersRetry"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.authGuestEscape"].exists)
         XCTAssertTrue(app.buttons["Not now"].exists)
-        keepScreenshot(named: "Native auth providers - Google available Apple recovery", from: app)
+        keepScreenshot(named: "Native auth - email and guest recovery without third-party OAuth", from: app)
     }
 
     @MainActor

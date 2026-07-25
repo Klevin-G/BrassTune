@@ -341,28 +341,34 @@ struct GatewayAuthForm: View {
 
     @ViewBuilder
     private var providerSignInSection: some View {
-        Section {
-            NativeAppleSignInButton(identifier: "gateway.authAppleSignIn")
-            NativeGoogleSignInButton(identifier: "gateway.authGoogleSignIn")
-            if model.authProviderConfigurationLoading {
-                ProgressView("Checking sign-in providers…")
-                    .accessibilityIdentifier("gateway.authProvidersLoading")
-            }
-            if let recovery = model.authProviderRecoveryMessage {
-                Text(verbatim: recovery)
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("gateway.authProvidersRecovery")
-                if model.accountFeaturesEnabled {
-                    Button("Retry provider check") {
-                        Task { await model.loadAuthProviderConfiguration(force: true) }
+        if model.appleSignInAvailable || model.authProviderConfigurationLoading || model.authProviderRecoveryMessage != nil {
+            Section {
+                if model.appleSignInAvailable {
+                    NativeAppleSignInButton(identifier: "gateway.authAppleSignIn")
+                    if model.googleSignInAvailable {
+                        NativeGoogleSignInButton(identifier: "gateway.authGoogleSignIn")
                     }
-                    .accessibilityIdentifier("gateway.authProvidersRetry")
                 }
+                if model.authProviderConfigurationLoading {
+                    ProgressView("Checking sign-in providers…")
+                        .accessibilityIdentifier("gateway.authProvidersLoading")
+                }
+                if let recovery = model.authProviderRecoveryMessage {
+                    Text(verbatim: recovery)
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("gateway.authProvidersRecovery")
+                    if model.accountFeaturesEnabled {
+                        Button("Retry provider check") {
+                            Task { await model.loadAuthProviderConfiguration(force: true) }
+                        }
+                        .accessibilityIdentifier("gateway.authProvidersRetry")
+                    }
+                }
+            } header: {
+                Text("Other sign-in options")
             }
-        } header: {
-            Text("Apple and Google")
         }
     }
 

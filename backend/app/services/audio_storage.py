@@ -4,6 +4,7 @@ import json
 import math
 import os
 import secrets
+import struct
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,7 +20,7 @@ from app.core.security import LOCAL_ENVIRONMENTS, app_environment
 from app.db.database import DATA_DIR
 from app.models.db import AudioStorageJob, PracticeSession, User
 from app.services.account_mutation import account_mutation_guard, assert_account_accepts_mutation
-from app.services.serializers import session_to_dict
+from app.services.serializers import audio_metadata_is_plausible, session_to_dict
 
 ALLOWED_AUDIO_MIME_TYPES = {
     "audio/webm": ".webm",
@@ -27,13 +28,6 @@ ALLOWED_AUDIO_MIME_TYPES = {
     "audio/mpeg": ".mp3",
     "audio/wav": ".wav",
     "audio/ogg": ".ogg",
-}
-MAGIC_BYTES = {
-    "audio/webm": (b"\x1a\x45\xdf\xa3",),
-    "audio/mp4": (b"ftyp",),
-    "audio/mpeg": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
-    "audio/wav": (b"RIFF",),
-    "audio/ogg": (b"OggS",),
 }
 MAX_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_AUDIO_DURATION_SECONDS = 24 * 60 * 60
@@ -44,6 +38,10 @@ AUDIO_JOB_TERMINAL_STATUSES = ("completed", "cancelled")
 DEFAULT_AUDIO_JOB_TERMINAL_RETENTION_DAYS = 7
 MAX_AUDIO_JOB_TERMINAL_RETENTION_DAYS = 30
 MAX_AUDIO_JOB_PURGE_BATCH = 1000
+# Structural playback verification must remain cheap enough to perform before
+# every local download. This bounds parser work for adversarial legacy files
+# without ever loading the recording body into application memory.
+MAX_AUDIO_STRUCTURE_ELEMENTS = 100_000
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -151,6 +149,530 @@ def audio_extension(mime_type: str) -> str:
     return ALLOWED_AUDIO_MIME_TYPES[mime_type]
 
 
+def _read_ebml_vint(data: bytes, offset: int, *, for_id: bool = False) -> Optional[tuple[int, int, bool]]:
+    """Read one EBML ID/size vint without relying on a media decoder."""
+    if offset >= len(data):
+        return None
+    first = data[offset]
+    length = next((size for size in range(1, 9) if first & (0x80 >> (size - 1))), 0)
+    if not length or offset + length > len(data):
+        return None
+    raw = int.from_bytes(data[offset : offset + length], "big")
+    if for_id:
+        return raw, length, False
+    value = raw & ((1 << (7 * length)) - 1)
+    return value, length, value == (1 << (7 * length)) - 1
+
+
+def _is_valid_wav(data: bytes) -> bool:
+    if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return False
+    riff_size = struct.unpack_from("<I", data, 4)[0]
+    if riff_size + 8 != len(data):
+        return False
+    offset = 12
+    has_fmt = False
+    has_audio_data = False
+    while offset + 8 <= len(data):
+        chunk_size = struct.unpack_from("<I", data, offset + 4)[0]
+        chunk_end = offset + 8 + chunk_size
+        if chunk_end > len(data):
+            return False
+        chunk_id = data[offset : offset + 4]
+        if chunk_id == b"fmt ":
+            if chunk_size < 16:
+                return False
+            channels = struct.unpack_from("<H", data, offset + 10)[0]
+            sample_rate = struct.unpack_from("<I", data, offset + 12)[0]
+            bits_per_sample = struct.unpack_from("<H", data, offset + 22)[0]
+            if not channels or not sample_rate or not bits_per_sample:
+                return False
+            has_fmt = True
+        elif chunk_id == b"data" and chunk_size:
+            has_audio_data = True
+        offset = chunk_end + (chunk_size & 1)
+    return has_fmt and has_audio_data and offset == len(data)
+
+
+def _is_valid_webm(data: bytes) -> bool:
+    header_id = _read_ebml_vint(data, 0, for_id=True)
+    if header_id is None or header_id[0] != 0x1A45DFA3:
+        return False
+    header_size = _read_ebml_vint(data, header_id[1])
+    if header_size is None or header_size[2]:
+        return False
+    header_end = header_id[1] + header_size[1] + header_size[0]
+    if header_end > len(data):
+        return False
+    offset = header_id[1] + header_size[1]
+    doc_type = False
+    while offset < header_end:
+        element_id = _read_ebml_vint(data, offset, for_id=True)
+        if element_id is None:
+            return False
+        element_size = _read_ebml_vint(data, offset + element_id[1])
+        if element_size is None or element_size[2]:
+            return False
+        value_start = offset + element_id[1] + element_size[1]
+        value_end = value_start + element_size[0]
+        if value_end > header_end:
+            return False
+        if element_id[0] == 0x4282 and data[value_start:value_end].lower() == b"webm":
+            doc_type = True
+        offset = value_end
+    segment_id = _read_ebml_vint(data, header_end, for_id=True)
+    segment_size = _read_ebml_vint(data, header_end + (segment_id[1] if segment_id else 0)) if segment_id else None
+    if not segment_id or segment_id[0] != 0x18538067 or segment_size is None or not doc_type:
+        return False
+    segment_start = header_end + segment_id[1] + segment_size[1]
+    segment_end = len(data) if segment_size[2] else segment_start + segment_size[0]
+    if segment_end != len(data):
+        return False
+
+    has_tracks = False
+    has_media_block = False
+    offset = segment_start
+    while offset < segment_end:
+        element_id = _read_ebml_vint(data, offset, for_id=True)
+        if element_id is None:
+            return False
+        element_size = _read_ebml_vint(data, offset + element_id[1])
+        if element_size is None or element_size[2]:
+            return False
+        value_start = offset + element_id[1] + element_size[1]
+        value_end = value_start + element_size[0]
+        if value_end > segment_end:
+            return False
+        if element_id[0] == 0x1654AE6B and element_size[0] > 0:  # Tracks
+            has_tracks = True
+        elif element_id[0] == 0x1F43B675 and _webm_cluster_has_media_block(data, value_start, value_end):
+            has_media_block = True
+        offset = value_end
+    return has_tracks and has_media_block
+
+
+def _webm_cluster_has_media_block(data: bytes, start: int, end: int) -> bool:
+    """Require a complete SimpleBlock/Block payload without recursive parsing.
+
+    BlockGroup (0xA0) is legally nested. Treating it recursively makes a tiny
+    malicious payload capable of exceeding Python's recursion limit during an
+    authenticated upload. An explicit interval stack is bounded by the input
+    and keeps malformed containers a 400 instead of a 500.
+    """
+    intervals = [(start, end)]
+    elements_seen = 0
+    while intervals:
+        offset, interval_end = intervals.pop()
+        while offset < interval_end:
+            elements_seen += 1
+            if elements_seen > MAX_AUDIO_STRUCTURE_ELEMENTS:
+                return False
+            element_id = _read_ebml_vint(data, offset, for_id=True)
+            element_size = _read_ebml_vint(data, offset + (element_id[1] if element_id else 0)) if element_id else None
+            if element_id is None or element_size is None or element_size[2]:
+                return False
+            value_start = offset + element_id[1] + element_size[1]
+            value_end = value_start + element_size[0]
+            if value_end > interval_end:
+                return False
+            if element_id[0] in {0xA1, 0xA3} and element_size[0] > 4:  # Block / SimpleBlock
+                return True
+            if element_id[0] == 0xA0:
+                intervals.append((value_start, value_end))
+            offset = value_end
+    return False
+
+
+def _is_valid_mp4(data: bytes) -> bool:
+    offset = 0
+    has_ftyp = has_media = has_index = False
+    while offset + 8 <= len(data):
+        size = struct.unpack_from(">I", data, offset)[0]
+        box_type = data[offset + 4 : offset + 8]
+        header_size = 8
+        if size == 1:
+            if offset + 16 > len(data):
+                return False
+            size = struct.unpack_from(">Q", data, offset + 8)[0]
+            header_size = 16
+        elif size == 0:
+            size = len(data) - offset
+        if size < header_size or offset + size > len(data):
+            return False
+        if box_type == b"ftyp":
+            if size < 16:
+                return False
+            has_ftyp = True
+        elif box_type == b"mdat" and size > header_size:
+            has_media = True
+        elif box_type in {b"moov", b"moof"}:
+            has_index = True
+        offset += size
+    return offset == len(data) and has_ftyp and has_media and has_index
+
+
+def _is_valid_ogg(data: bytes) -> bool:
+    offset = 0
+    pages = 0
+    has_payload = False
+    while offset < len(data):
+        if offset + 27 > len(data) or data[offset : offset + 4] != b"OggS" or data[offset + 4] != 0:
+            return False
+        segment_count = data[offset + 26]
+        table_end = offset + 27 + segment_count
+        if table_end > len(data):
+            return False
+        payload_size = sum(data[offset + 27 : table_end])
+        page_end = table_end + payload_size
+        if page_end > len(data):
+            return False
+        has_payload = has_payload or payload_size > 0
+        pages += 1
+        offset = page_end
+    return pages > 0 and has_payload
+
+
+def _is_valid_mp3(data: bytes) -> bool:
+    offset = 0
+    if data.startswith(b"ID3"):
+        if len(data) < 10 or any(byte & 0x80 for byte in data[6:10]):
+            return False
+        offset = 10 + sum((data[6 + index] & 0x7F) << (7 * (3 - index)) for index in range(4))
+    if offset + 4 > len(data):
+        return False
+    header = int.from_bytes(data[offset : offset + 4], "big")
+    if header >> 21 != 0x7FF:
+        return False
+    version = (header >> 19) & 0b11
+    layer = (header >> 17) & 0b11
+    bitrate_index = (header >> 12) & 0b1111
+    sample_rate_index = (header >> 10) & 0b11
+    if version == 1 or layer == 0 or bitrate_index in {0, 15} or sample_rate_index == 3:
+        return False
+    sample_rates = {
+        3: (44100, 48000, 32000),
+        2: (22050, 24000, 16000),
+        0: (11025, 12000, 8000),
+    }
+    bitrates = {
+        (3, 3): (0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448),
+        (3, 2): (0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384),
+        (3, 1): (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320),
+        (2, 3): (0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256),
+        (2, 2): (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
+        (2, 1): (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
+    }
+    bitrate_kbps = bitrates[(3 if version == 3 else 2, layer)][bitrate_index]
+    sample_rate = sample_rates[version][sample_rate_index]
+    padding = (header >> 9) & 1
+    coefficient = 12 if layer == 3 else (72 if version != 3 and layer == 1 else 144)
+    frame_size = (coefficient * bitrate_kbps * 1000 // sample_rate + padding) * (4 if layer == 3 else 1)
+    return frame_size >= 4 and len(data) - offset >= frame_size
+
+
+def is_structurally_valid_audio(data: bytes, mime_type: str) -> bool:
+    validators = {
+        "audio/wav": _is_valid_wav,
+        "audio/webm": _is_valid_webm,
+        "audio/mp4": _is_valid_mp4,
+        "audio/ogg": _is_valid_ogg,
+        "audio/mpeg": _is_valid_mp3,
+    }
+    validator = validators.get(mime_type)
+    return bool(validator and validator(data))
+
+
+def is_audio_available_for_playback(session: PracticeSession, data: Optional[bytes] = None) -> bool:
+    """Keep known placeholder rows unavailable; validate bytes when locally readable."""
+    if not audio_metadata_is_plausible(session):
+        return False
+    return data is None or is_structurally_valid_audio(data, session.audio_mime_type)
+
+
+class _AudioFileReader:
+    """Small random-access reader for structural validation of local audio.
+
+    The route must not materialize a 50 MiB recording merely to inspect its
+    container. Every read is header-sized; payloads are skipped with seek.
+    """
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.size = path.stat().st_size
+        self._file = None
+        self.elements_seen = 0
+
+    def __enter__(self):
+        self._file = self.path.open("rb")
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self._file is not None:
+            self._file.close()
+
+    def read_exact(self, offset: int, size: int) -> Optional[bytes]:
+        if offset < 0 or size < 0 or offset + size > self.size or self._file is None:
+            return None
+        self._file.seek(offset)
+        value = self._file.read(size)
+        return value if len(value) == size else None
+
+    def next_element(self) -> bool:
+        self.elements_seen += 1
+        return self.elements_seen <= MAX_AUDIO_STRUCTURE_ELEMENTS
+
+
+def _read_file_ebml_vint(reader: _AudioFileReader, offset: int, *, for_id: bool = False) -> Optional[tuple[int, int, bool]]:
+    first_byte = reader.read_exact(offset, 1)
+    if first_byte is None:
+        return None
+    first = first_byte[0]
+    length = next((size for size in range(1, 9) if first & (0x80 >> (size - 1))), 0)
+    raw_bytes = reader.read_exact(offset, length) if length else None
+    if raw_bytes is None:
+        return None
+    raw = int.from_bytes(raw_bytes, "big")
+    if for_id:
+        return raw, length, False
+    value = raw & ((1 << (7 * length)) - 1)
+    return value, length, value == (1 << (7 * length)) - 1
+
+
+def _is_valid_wav_file(reader: _AudioFileReader) -> bool:
+    header = reader.read_exact(0, 12)
+    if header is None or reader.size < 44 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+        return False
+    if struct.unpack_from("<I", header, 4)[0] + 8 != reader.size:
+        return False
+    offset = 12
+    has_fmt = has_audio_data = False
+    while offset < reader.size:
+        if not reader.next_element():
+            return False
+        chunk_header = reader.read_exact(offset, 8)
+        if chunk_header is None:
+            return False
+        chunk_id = chunk_header[:4]
+        chunk_size = struct.unpack_from("<I", chunk_header, 4)[0]
+        value_start = offset + 8
+        chunk_end = value_start + chunk_size
+        padded_end = chunk_end + (chunk_size & 1)
+        if padded_end > reader.size:
+            return False
+        if chunk_id == b"fmt ":
+            details = reader.read_exact(value_start, 16) if chunk_size >= 16 else None
+            if details is None:
+                return False
+            channels = struct.unpack_from("<H", details, 2)[0]
+            sample_rate = struct.unpack_from("<I", details, 4)[0]
+            bits_per_sample = struct.unpack_from("<H", details, 14)[0]
+            if not channels or not sample_rate or not bits_per_sample:
+                return False
+            has_fmt = True
+        elif chunk_id == b"data" and chunk_size:
+            has_audio_data = True
+        offset = padded_end
+    return has_fmt and has_audio_data
+
+
+def _webm_file_cluster_has_media_block(reader: _AudioFileReader, start: int, end: int) -> bool:
+    intervals = [(start, end)]
+    while intervals:
+        offset, interval_end = intervals.pop()
+        while offset < interval_end:
+            if not reader.next_element():
+                return False
+            element_id = _read_file_ebml_vint(reader, offset, for_id=True)
+            element_size = _read_file_ebml_vint(reader, offset + (element_id[1] if element_id else 0)) if element_id else None
+            if element_id is None or element_size is None or element_size[2]:
+                return False
+            value_start = offset + element_id[1] + element_size[1]
+            value_end = value_start + element_size[0]
+            if value_end > interval_end:
+                return False
+            if element_id[0] in {0xA1, 0xA3} and element_size[0] > 4:
+                return True
+            if element_id[0] == 0xA0:
+                intervals.append((value_start, value_end))
+            offset = value_end
+    return False
+
+
+def _is_valid_webm_file(reader: _AudioFileReader) -> bool:
+    header_id = _read_file_ebml_vint(reader, 0, for_id=True)
+    header_size = _read_file_ebml_vint(reader, header_id[1]) if header_id else None
+    if header_id is None or header_id[0] != 0x1A45DFA3 or header_size is None or header_size[2]:
+        return False
+    header_start = header_id[1] + header_size[1]
+    header_end = header_start + header_size[0]
+    if header_end > reader.size:
+        return False
+    doc_type = False
+    offset = header_start
+    while offset < header_end:
+        if not reader.next_element():
+            return False
+        element_id = _read_file_ebml_vint(reader, offset, for_id=True)
+        element_size = _read_file_ebml_vint(reader, offset + (element_id[1] if element_id else 0)) if element_id else None
+        if element_id is None or element_size is None or element_size[2]:
+            return False
+        value_start = offset + element_id[1] + element_size[1]
+        value_end = value_start + element_size[0]
+        if value_end > header_end:
+            return False
+        if element_id[0] == 0x4282 and element_size[0] == 4:
+            doc_type = reader.read_exact(value_start, 4) == b"webm"
+        offset = value_end
+    segment_id = _read_file_ebml_vint(reader, header_end, for_id=True)
+    segment_size = _read_file_ebml_vint(reader, header_end + (segment_id[1] if segment_id else 0)) if segment_id else None
+    if segment_id is None or segment_id[0] != 0x18538067 or segment_size is None or not doc_type:
+        return False
+    segment_start = header_end + segment_id[1] + segment_size[1]
+    segment_end = reader.size if segment_size[2] else segment_start + segment_size[0]
+    if segment_end != reader.size:
+        return False
+    has_tracks = has_media_block = False
+    offset = segment_start
+    while offset < segment_end:
+        if not reader.next_element():
+            return False
+        element_id = _read_file_ebml_vint(reader, offset, for_id=True)
+        element_size = _read_file_ebml_vint(reader, offset + (element_id[1] if element_id else 0)) if element_id else None
+        if element_id is None or element_size is None or element_size[2]:
+            return False
+        value_start = offset + element_id[1] + element_size[1]
+        value_end = value_start + element_size[0]
+        if value_end > segment_end:
+            return False
+        if element_id[0] == 0x1654AE6B and element_size[0] > 0:
+            has_tracks = True
+        elif element_id[0] == 0x1F43B675 and _webm_file_cluster_has_media_block(reader, value_start, value_end):
+            has_media_block = True
+        offset = value_end
+    return has_tracks and has_media_block
+
+
+def _is_valid_mp4_file(reader: _AudioFileReader) -> bool:
+    offset = 0
+    has_ftyp = has_media = has_index = False
+    while offset < reader.size:
+        if not reader.next_element():
+            return False
+        header = reader.read_exact(offset, 8)
+        if header is None:
+            return False
+        size = struct.unpack_from(">I", header, 0)[0]
+        box_type = header[4:8]
+        header_size = 8
+        if size == 1:
+            extended = reader.read_exact(offset + 8, 8)
+            if extended is None:
+                return False
+            size = struct.unpack(">Q", extended)[0]
+            header_size = 16
+        elif size == 0:
+            size = reader.size - offset
+        if size < header_size or offset + size > reader.size:
+            return False
+        if box_type == b"ftyp":
+            if size < 16:
+                return False
+            has_ftyp = True
+        elif box_type == b"mdat" and size > header_size:
+            has_media = True
+        elif box_type in {b"moov", b"moof"}:
+            has_index = True
+        offset += size
+    return has_ftyp and has_media and has_index
+
+
+def _is_valid_ogg_file(reader: _AudioFileReader) -> bool:
+    offset = 0
+    pages = 0
+    has_payload = False
+    while offset < reader.size:
+        if not reader.next_element():
+            return False
+        header = reader.read_exact(offset, 27)
+        if header is None or header[:4] != b"OggS" or header[4] != 0:
+            return False
+        lacing = reader.read_exact(offset + 27, header[26])
+        if lacing is None:
+            return False
+        payload_size = sum(lacing)
+        page_end = offset + 27 + len(lacing) + payload_size
+        if page_end > reader.size:
+            return False
+        has_payload = has_payload or payload_size > 0
+        pages += 1
+        offset = page_end
+    return pages > 0 and has_payload
+
+
+def _is_valid_mp3_file(reader: _AudioFileReader) -> bool:
+    prefix = reader.read_exact(0, min(10, reader.size))
+    if prefix is None:
+        return False
+    offset = 0
+    if prefix.startswith(b"ID3"):
+        if len(prefix) < 10 or any(byte & 0x80 for byte in prefix[6:10]):
+            return False
+        offset = 10 + sum((prefix[6 + index] & 0x7F) << (7 * (3 - index)) for index in range(4))
+    header_bytes = reader.read_exact(offset, 4)
+    if header_bytes is None:
+        return False
+    header = int.from_bytes(header_bytes, "big")
+    if header >> 21 != 0x7FF:
+        return False
+    version = (header >> 19) & 0b11
+    layer = (header >> 17) & 0b11
+    bitrate_index = (header >> 12) & 0b1111
+    sample_rate_index = (header >> 10) & 0b11
+    if version == 1 or layer == 0 or bitrate_index in {0, 15} or sample_rate_index == 3:
+        return False
+    sample_rates = {3: (44100, 48000, 32000), 2: (22050, 24000, 16000), 0: (11025, 12000, 8000)}
+    bitrates = {
+        (3, 3): (0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448),
+        (3, 2): (0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384),
+        (3, 1): (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320),
+        (2, 3): (0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 192, 224, 256),
+        (2, 2): (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
+        (2, 1): (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
+    }
+    bitrate_kbps = bitrates[(3 if version == 3 else 2, layer)][bitrate_index]
+    sample_rate = sample_rates[version][sample_rate_index]
+    padding = (header >> 9) & 1
+    coefficient = 12 if layer == 3 else (72 if version != 3 and layer == 1 else 144)
+    frame_size = (coefficient * bitrate_kbps * 1000 // sample_rate + padding) * (4 if layer == 3 else 1)
+    return frame_size >= 4 and reader.size - offset >= frame_size
+
+
+def is_local_audio_available_for_playback(session: PracticeSession, path: Path) -> bool:
+    """Validate a local legacy object with bounded header reads before serving.
+
+    A matching stored size prevents serving a replaced/truncated file. The
+    container parser then verifies all boundaries while skipping media payloads
+    with seek, preserving FileResponse streaming and range support.
+    """
+    if not is_audio_available_for_playback(session):
+        return False
+    try:
+        if not path.is_file() or path.stat().st_size != int(session.audio_size_bytes):
+            return False
+        with _AudioFileReader(path) as reader:
+            validators = {
+                "audio/wav": _is_valid_wav_file,
+                "audio/webm": _is_valid_webm_file,
+                "audio/mp4": _is_valid_mp4_file,
+                "audio/ogg": _is_valid_ogg_file,
+                "audio/mpeg": _is_valid_mp3_file,
+            }
+            validator = validators.get(session.audio_mime_type)
+            return bool(validator and validator(reader))
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def read_audio_bytes(data: bytes, mime_type: str) -> Tuple[bytes, str]:
     mime_type = (mime_type or "application/octet-stream").split(";", 1)[0].strip().lower()
     audio_extension(mime_type)
@@ -158,14 +680,7 @@ def read_audio_bytes(data: bytes, mime_type: str) -> Tuple[bytes, str]:
         raise HTTPException(status_code=400, detail="Audio upload was empty.")
     if len(data) > audio_upload_limit_bytes():
         raise HTTPException(status_code=413, detail="Audio upload is too large.")
-    signatures = MAGIC_BYTES.get(mime_type, ())
-    if mime_type == "audio/mp4":
-        if len(data) < 12 or data[4:8] not in signatures:
-            raise HTTPException(status_code=400, detail="Audio upload does not match its declared format.")
-    elif mime_type == "audio/wav":
-        if len(data) < 12 or not data.startswith(b"RIFF") or data[8:12] != b"WAVE":
-            raise HTTPException(status_code=400, detail="Audio upload does not match its declared format.")
-    elif signatures and not any(data.startswith(signature) for signature in signatures):
+    if not is_structurally_valid_audio(data, mime_type):
         raise HTTPException(status_code=400, detail="Audio upload does not match its declared format.")
     return data, mime_type
 
@@ -1125,14 +1640,16 @@ def delete_audio_for_session(session: PracticeSession) -> None:
 
 
 def audio_bytes_for_export(session: PracticeSession) -> Optional[Tuple[str, bytes]]:
-    if not session.audio_object_key:
+    if not is_audio_available_for_playback(session):
         return None
     filename = Path(session.audio_object_key).name
     if session.audio_storage_provider == "local":
         path = local_audio_path(session.audio_object_key)
         if not path.exists():
             return None
-        return filename, path.read_bytes()
+        data = path.read_bytes()
+        return (filename, data) if is_audio_available_for_playback(session, data) else None
     if session.audio_storage_provider == "supabase":
-        return filename, _read_supabase_object(session.audio_object_key)
+        data = _read_supabase_object(session.audio_object_key)
+        return (filename, data) if is_audio_available_for_playback(session, data) else None
     return None

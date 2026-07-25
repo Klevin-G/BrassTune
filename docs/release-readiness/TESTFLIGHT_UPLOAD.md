@@ -1,9 +1,9 @@
-# TestFlight upload — one-command archive + export
+# TestFlight upload — signed archive + export handoff
 
-The app is archive-ready. Verified locally: Release build archives cleanly for
-`generic/platform=iOS` (unsigned), the Sign in with Apple entitlement is in the
-target, the app icon and privacy manifest are present, and the mic/photo usage
-strings are set. Signing + upload need your Apple Developer account.
+This script prepares a signed archive only when owner-owned Apple signing and the
+required public production configuration are supplied. It does not create a
+signed archive or upload a build by itself in this repository state. The Apple
+entitlement and native third-party OAuth controls are intentionally deferred.
 
 ## One-time setup (owner)
 
@@ -12,21 +12,22 @@ strings are set. Signing + upload need your Apple Developer account.
    create certificates/profiles), or create an **App Store Connect API key**
    (App Store Connect → Users and Access → Integrations → Keys) for CLI signing/upload.
 3. In **App Store Connect**, create the app record (New App) using a bundle id you
-   own, e.g. `com.brasstune.BrassTuneApp` (default) — or pick your own and pass it
-   via `BRASSTUNE_BUNDLE_ID`.
+   own, then pass that registered identifier via `BRASSTUNE_BUNDLE_ID`.
 4. Note your **Team ID** (Apple Developer → Membership).
 
 ## Build + export the .ipa
 
 ```bash
-APPLE_TEAM_ID=YOURTEAMID scripts/ios/build-testflight.sh
-# or a custom bundle id:
-APPLE_TEAM_ID=YOURTEAMID BRASSTUNE_BUNDLE_ID=com.yourorg.BrassTune scripts/ios/build-testflight.sh
+APPLE_TEAM_ID=YOURTEAMID \
+BRASSTUNE_BUNDLE_ID=com.yourorg.BrassTune \
+BRASSTUNE_SUPABASE_URL=https://<20-character-project-ref>.supabase.co \
+BRASSTUNE_SUPABASE_PUBLISHABLE_KEY=<complete-public-publishable-key> \
+scripts/ios/build-testflight.sh
 ```
 
-This archives Release with automatic signing (`-allowProvisioningUpdates` registers
-the App ID + Sign in with Apple capability + a distribution profile on first run),
-then exports `build/ios/export/BrassTuneApp.ipa`.
+This validates the public runtime configuration, archives Release with automatic
+signing and `CODE_SIGNING_ALLOWED=YES`, then exports
+`build/ios/export/BrassTuneApp.ipa`. It does not enable Sign in with Apple.
 
 ## Upload to TestFlight (pick one)
 
@@ -45,5 +46,4 @@ takes a few minutes; the first external build needs a short Beta App Review.
 - Marketing version: `0.1.0`, build: `1` (bump `CURRENT_PROJECT_VERSION` per upload,
   or the export sets `manageAppVersionAndBuildNumber`).
 - Display name: **BrassTune**. Deployment target: iOS 17. Devices: iPhone + iPad.
-- App icon: brass tuning-fork placeholder — replace `AppIcon-1024.png` with final art.
 - See `APP_STORE_CHECKLIST.md` for the full store-metadata checklist.

@@ -153,6 +153,9 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
         <p>{t('legal.dataBody1')}</p>
         <p>{t('legal.dataBody2')}</p>
       </SectionCard>
+      <SectionCard title={t('legal.classTitle')}>
+        <p>{t('legal.classBody')}</p>
+      </SectionCard>
       <SectionCard title={t('legal.controlTitle')}>
         <p>{t('legal.controlBody')}</p>
         <Link className="primary-button" to="/settings">{t('legal.manage')}</Link>

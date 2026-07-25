@@ -6,10 +6,10 @@ Updated: 2026-07-24. Do not put credentials in Git, logs, screenshots, or this d
 
 | Provider | Web | iOS | Linked Supabase state |
 |---|---|---|---|
-| Google | Supabase OAuth with PKCE and a Google-branded button | Ephemeral `ASWebAuthenticationSession`, PKCE/state validation, exact callback, Keychain handoff | Enabled; an authorize-start redirect to Google was verified. |
-| Apple | Supabase OAuth button and unavailable state | `SignInWithAppleButton`, hashed nonce, ID-token exchange | Disabled; Apple Developer credentials and Supabase provider configuration are still required. |
+| Google | Supabase OAuth with PKCE and a Google-branded button | Code remains implemented for later dual-provider enablement; it is not presented in this Apple-deferred native build. | Enabled on the linked provider configuration; native presentation is intentionally deferred. |
+| Apple | Supabase OAuth button and unavailable state | Deferred: the entitlement and native control are absent until Apple Developer credentials and provider configuration are verified. | Disabled; Apple Developer credentials and Supabase provider configuration are still required. |
 
-Provider buttons are intentionally visible even when unavailable. They explain the unavailable state instead of disappearing. The production deployment workflow synchronizes Google enabled and `VITE_AUTH_APPLE_ENABLED=false` until Apple setup and a live authorize flow are verified.
+Native unavailable provider controls are hidden, not disabled. Because Apple is deferred, native Google OAuth is also not presented in this build; guest practice and first-party email/password remain available. This keeps the native release path within App Review Guideline 4.8 until both third-party-provider parity and live verification exist. The Google implementation remains in source for later dual-provider enablement.
 
 ## Credential and CLI boundary
 
