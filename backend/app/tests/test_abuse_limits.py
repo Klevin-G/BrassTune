@@ -38,6 +38,7 @@ def reset_abuse_state(monkeypatch):
     monkeypatch.setenv("BRASSTUNE_CLASS_JOIN_RATE_LIMIT_PER_MINUTE", "10")
     monkeypatch.setenv("BRASSTUNE_EXPENSIVE_MUTATION_RATE_LIMIT_PER_MINUTE", "60")
     monkeypatch.setenv("BRASSTUNE_EXPENSIVE_READ_RATE_LIMIT_PER_MINUTE", "10")
+    monkeypatch.setenv("BRASSTUNE_AUDIO_PLAYBACK_RATE_LIMIT_PER_MINUTE", "100")
     monkeypatch.delenv("BRASSTUNE_TRUST_PROXY", raising=False)
     main_module._RATE_LIMIT_BUCKETS.clear()
     main_module._GLOBAL_RATE_LIMIT_BUCKETS.clear()
@@ -134,6 +135,15 @@ def test_expensive_read_budget_spans_json_and_csv_export_routes(monkeypatch):
     with TestClient(_http_limit_app()) as client:
         first = client.get("/api/export/session/100.json")
         second = client.get("/api/export/note-events/101.csv")
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_audio_playback_has_a_dedicated_budget_across_direct_and_export_routes(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_AUDIO_PLAYBACK_RATE_LIMIT_PER_MINUTE", "1")
+    with TestClient(_http_limit_app()) as client:
+        first = client.get("/api/sessions/100/audio")
+        second = client.get("/api/export/session/101/audio")
     assert first.status_code == 200
     assert second.status_code == 429
 

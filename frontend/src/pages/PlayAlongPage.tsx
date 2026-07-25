@@ -20,14 +20,79 @@ import {
   type NoteGrade,
 } from '../domain/playAlong';
 import { describeCents, describeInTunePercent, starsForPercent } from '../domain/tuningLanguage';
-import { writtenNoteFrequency } from '../domain/referenceTone';
+import { WRITTEN_MIDI_MAX, WRITTEN_MIDI_MIN, writtenNoteFrequency } from '../domain/referenceTone';
 import { useAppSettings } from '../state/AppSettingsContext';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import { ownerBestScorePrefix } from '../domain/practiceLibrary';
 import { useI18n } from '../i18n/LocaleContext';
 import type { MessageId } from '../i18n/messages.base';
+import { setWebAudioSessionType } from '../domain/webAudioSession';
 
 type Phase = 'idle' | 'running' | 'done';
+
+export const REFERENCE_SEQUENCE_NOTE_SECONDS = 0.55;
+export const REFERENCE_SEQUENCE_GAP_SECONDS = 0.07;
+export const REFERENCE_SEQUENCE_ATTACK_SECONDS = 0.025;
+export const REFERENCE_SEQUENCE_RELEASE_SECONDS = 0.06;
+
+export type ReferenceSequenceStep = {
+  writtenNote: string;
+  startTime: number;
+  stopTime: number;
+};
+
+const PITCH_CLASS_SEMITONES: Record<string, number> = {
+  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5,
+  'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11,
+};
+
+const REFERENCE_SEQUENCE_START_MIDI = 60;
+
+function closestPlayableMidi(pitchClass: number, previousMidi: number | null): number {
+  const baseMidi = REFERENCE_SEQUENCE_START_MIDI + pitchClass;
+  const firstOctaveOffset = Math.ceil((WRITTEN_MIDI_MIN - baseMidi) / 12);
+  const lastOctaveOffset = Math.floor((WRITTEN_MIDI_MAX - baseMidi) / 12);
+  let closest = baseMidi;
+
+  for (let octaveOffset = firstOctaveOffset; octaveOffset <= lastOctaveOffset; octaveOffset += 1) {
+    const candidate = baseMidi + octaveOffset * 12;
+    if (previousMidi == null) {
+      if (candidate === baseMidi) return candidate;
+      continue;
+    }
+    const candidateDistance = Math.abs(candidate - previousMidi);
+    const closestDistance = Math.abs(closest - previousMidi);
+    // A tritone is ambiguous; prefer the upward option so an ascending phrase
+    // retains its contour. Other intervals use the nearest playable octave.
+    if (candidateDistance < closestDistance || (candidateDistance === closestDistance && candidate > closest)) {
+      closest = candidate;
+    }
+  }
+
+  return closest;
+}
+
+function inferPlayableReferenceNote(note: string, previousMidi: number | null): { note: string; midi: number | null } {
+  const normalized = note.trim().replace(/♯/g, '#').replace(/♭/g, 'b');
+  if (!/^[A-G](?:#|b)?$/.test(normalized) || PITCH_CLASS_SEMITONES[normalized] == null) return { note: normalized, midi: null };
+  const midi = closestPlayableMidi(PITCH_CLASS_SEMITONES[normalized], previousMidi);
+  return { note: `${normalized}${Math.floor(midi / 12) - 1}`, midi };
+}
+
+/** Builds a deterministic preview timeline, including repeated written notes. */
+export function referenceSequencePlan(notes: readonly string[]): ReferenceSequenceStep[] {
+  const stride = REFERENCE_SEQUENCE_NOTE_SECONDS + REFERENCE_SEQUENCE_GAP_SECONDS;
+  let previousMidi: number | null = null;
+  return notes.map((note, index) => {
+    const sequencedNote = inferPlayableReferenceNote(note, previousMidi);
+    previousMidi = sequencedNote.midi ?? previousMidi;
+    return {
+      writtenNote: sequencedNote.note,
+      startTime: index * stride,
+      stopTime: index * stride + REFERENCE_SEQUENCE_NOTE_SECONDS,
+    };
+  });
+}
 
 export function canStartReferenceTone(phase: Phase, referenceToneActive: boolean): boolean {
   return phase !== 'running' && !referenceToneActive;
@@ -124,8 +189,9 @@ export function PlayAlongPage() {
   const startGenerationRef = useRef(0);
   const exerciseIdRef = useRef(exerciseId);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const referenceToneOscillatorRef = useRef<OscillatorNode | null>(null);
+  const referenceToneOscillatorRef = useRef<Array<{ oscillator: OscillatorNode; gain: GainNode }>>([]);
   const referenceToneActiveRef = useRef(false);
+  const referenceToneGenerationRef = useRef(0);
   const [referenceToneActive, setReferenceToneActive] = useState(false);
   const completionRecordedRef = useRef(false);
   const scoreFocusRef = useRef<HTMLDivElement | null>(null);
@@ -212,68 +278,100 @@ export function PlayAlongPage() {
   }, []); // stop mic on unmount
 
   const stopReferenceTone = useCallback(() => {
-    const oscillator = referenceToneOscillatorRef.current;
-    referenceToneOscillatorRef.current = null;
+    referenceToneGenerationRef.current += 1;
+    const nodes = referenceToneOscillatorRef.current;
+    referenceToneOscillatorRef.current = [];
     referenceToneActiveRef.current = false;
     setReferenceToneActive(false);
-    if (!oscillator) return;
-    oscillator.onended = null;
-    try { oscillator.stop(); } catch { /* already stopped */ }
-    oscillator.disconnect();
+    const now = audioCtxRef.current?.currentTime ?? 0;
+    for (const { oscillator, gain } of nodes) {
+      oscillator.onended = null;
+      try {
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + REFERENCE_SEQUENCE_RELEASE_SECONDS);
+        oscillator.onended = () => {
+          oscillator.disconnect();
+          gain.disconnect();
+        };
+        oscillator.stop(now + REFERENCE_SEQUENCE_RELEASE_SECONDS);
+      } catch { /* already stopped */ }
+    }
+    setWebAudioSessionType('auto');
   }, []);
 
   useEffect(() => () => {
-    const oscillator = referenceToneOscillatorRef.current;
-    referenceToneOscillatorRef.current = null;
-    referenceToneActiveRef.current = false;
-    if (oscillator) {
-      oscillator.onended = null;
-      try { oscillator.stop(); } catch { /* already stopped */ }
-      oscillator.disconnect();
-    }
+    stopReferenceTone();
     audioCtxRef.current?.close().catch(() => undefined);
-  }, []); // release the reference-tone audio context on unmount
+  }, [stopReferenceTone]); // release the reference-tone audio context on unmount
 
-  // Play the concert pitch of a written note as a short reference tone.
-  const hearNote = useCallback(
-    (writtenNote: string) => {
+  useEffect(() => {
+    stopReferenceTone();
+  }, [exerciseId, stopReferenceTone]);
+
+  // Play the complete exercise at concert pitch, with one short, separated tone per written note.
+  const hearExercise = useCallback(
+    async (writtenNotes: readonly string[]) => {
       if (!canStartReferenceTone(phaseRef.current, referenceToneActiveRef.current)) return;
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextClass) return;
+      setWebAudioSessionType('playback');
       let ctx = audioCtxRef.current;
-      if (!ctx) {
+      if (!ctx || ctx.state === 'closed') {
         ctx = new AudioContextClass();
         audioCtxRef.current = ctx;
       }
-      if (ctx.state === 'suspended') void ctx.resume();
-
-      const frequency = writtenNoteFrequency(writtenNote, instrumentId, referencePitch);
-      if (frequency == null) return;
-
-      const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = frequency;
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.22, now + 0.04);
-      gain.gain.setValueAtTime(0.22, now + 1.0);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.35);
-      osc.connect(gain).connect(ctx.destination);
+      const generation = ++referenceToneGenerationRef.current;
       referenceToneActiveRef.current = true;
-      referenceToneOscillatorRef.current = osc;
-      setReferenceToneActive(true);
-      osc.onended = () => {
-        if (referenceToneOscillatorRef.current !== osc) return;
-        referenceToneOscillatorRef.current = null;
-        referenceToneActiveRef.current = false;
-        setReferenceToneActive(false);
-        osc.disconnect();
-      };
-      osc.start(now);
-      osc.stop(now + 1.4);
+      setReferenceToneActive(true); // includes the resume interval, so the button can cancel it.
+      try {
+        if (ctx.state !== 'running') await ctx.resume();
+        if (generation !== referenceToneGenerationRef.current || phaseRef.current === 'running') return;
+
+        const now = ctx.currentTime;
+        const nodes = referenceSequencePlan(writtenNotes).flatMap(({ writtenNote, startTime, stopTime }) => {
+          const frequency = writtenNoteFrequency(writtenNote, instrumentId, referencePitch);
+          if (frequency == null) return [];
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
+          oscillator.type = 'sine';
+          oscillator.frequency.value = frequency;
+          gain.gain.setValueAtTime(0.0001, now + startTime);
+          gain.gain.exponentialRampToValueAtTime(0.22, now + startTime + REFERENCE_SEQUENCE_ATTACK_SECONDS);
+          gain.gain.setValueAtTime(0.22, now + stopTime - REFERENCE_SEQUENCE_RELEASE_SECONDS);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + stopTime);
+          oscillator.connect(gain).connect(ctx.destination);
+          oscillator.start(now + startTime);
+          oscillator.stop(now + stopTime);
+          return [{ oscillator, gain }];
+        });
+        if (generation !== referenceToneGenerationRef.current || nodes.length === 0) {
+          for (const { oscillator, gain } of nodes) {
+            try { oscillator.stop(); } catch { /* already stopped */ }
+            oscillator.disconnect();
+            gain.disconnect();
+          }
+          if (generation === referenceToneGenerationRef.current) stopReferenceTone();
+          return;
+        }
+        referenceToneOscillatorRef.current = nodes;
+        const finalOscillator = nodes[nodes.length - 1].oscillator;
+        finalOscillator.onended = () => {
+          if (generation !== referenceToneGenerationRef.current) return;
+          referenceToneOscillatorRef.current = [];
+          referenceToneActiveRef.current = false;
+          setReferenceToneActive(false);
+          for (const { oscillator, gain } of nodes) {
+            oscillator.disconnect();
+            gain.disconnect();
+          }
+          setWebAudioSessionType('auto');
+        };
+      } catch {
+        if (generation === referenceToneGenerationRef.current) stopReferenceTone();
+      }
     },
-    [instrumentId, referencePitch],
+    [instrumentId, referencePitch, stopReferenceTone],
   );
 
   const start = async () => {
@@ -347,6 +445,7 @@ export function PlayAlongPage() {
 
   const selectedTarget = { kind: 'play-along' as const, id: exercise.id, label: localizedExerciseLabel, href: `/practice/scorer?exercise=${encodeURIComponent(exercise.id)}` };
   const selectExercise = (id: string) => {
+    stopReferenceTone();
     setExerciseId(id);
     setSearchParams({ exercise: id }, { replace: true });
   };
@@ -412,9 +511,15 @@ export function PlayAlongPage() {
               </p>
               <p className="pa-selected-help">{exerciseHelp(exercise)}</p>
             </div>
-            <button className="ghost-button pa-hear" type="button" disabled={referenceToneActive} onClick={() => hearNote(exercise.notes[0])}>
+            <button
+              className="ghost-button pa-hear"
+              type="button"
+              aria-label={t(referenceToneActive ? 'playAlong.stop' : 'playAlong.hearIt')}
+              aria-pressed={referenceToneActive}
+              onClick={() => referenceToneActive ? stopReferenceTone() : void hearExercise(exercise.notes)}
+            >
               <Volume2 size={17} />
-              {t('playAlong.hearIt')}
+              {t(referenceToneActive ? 'playAlong.stop' : 'playAlong.hearIt')}
             </button>
             <button className="ghost-button" type="button" aria-pressed={practiceLibrary.isFavorite(selectedTarget)} onClick={() => practiceLibrary.toggleFavorite(selectedTarget)}>
               <Star size={17} fill={practiceLibrary.isFavorite(selectedTarget) ? 'currentColor' : 'none'} />

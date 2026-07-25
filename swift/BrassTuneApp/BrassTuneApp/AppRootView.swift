@@ -150,6 +150,7 @@ struct AppRootView: View {
                         }
                     }
                     if oldTab != newTab {
+                        model.stopRecordingPlayback()
                         model.handlePracticeBackground()
                     }
                 }
@@ -184,7 +185,10 @@ struct AppRootView: View {
                 cancelTunerStart: model.cancelRecordingStart,
                 isTunerRecording: { model.audioEngine.recording },
                 stopTunerRecording: model.stopRecording,
-                releasePracticeAudio: { model.handlePracticeBackground() }
+                releasePracticeAudio: {
+                    model.stopRecordingPlayback()
+                    model.handlePracticeBackground()
+                }
             )
             if previousPhase == .active, currentPhase != .active {
                 model.flushPendingPersistence()
@@ -803,7 +807,7 @@ private struct MicrophoneRationaleView: View {
                     .font(.title2.weight(.bold))
                     .accessibilityAddTraits(.isHeader)
                 Text(verbatim: NativeLocalization.string(
-                    "BrassTune listens only while you practice to show pitch and save practice results. Raw microphone audio is not saved."
+                    "Practice recordings and imported sheet music stay on this device unless you choose to share or export them."
                 ))
                     .foregroundStyle(BTTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1228,6 +1232,12 @@ struct SessionDetailView: View {
                         .foregroundStyle(BTTheme.muted)
                 }
 
+                SessionListenBackCard(
+                    player: model.recordingPlayer,
+                    session: session,
+                    recordingURL: model.availableRecordingURL(for: session)
+                )
+
                 PracticeReflectionCard(sessionID: session.id)
 
                 BTCard {
@@ -1267,6 +1277,103 @@ struct SessionDetailView: View {
         } message: {
             Text("This can't be undone.")
         }
+        .onDisappear {
+            guard let session,
+                  model.recordingPlayer.loadedURL == model.availableRecordingURL(for: session) else { return }
+            model.stopRecordingPlayback()
+        }
+    }
+}
+
+private struct SessionListenBackCard: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject var player: NativeRecordingPlayer
+    let session: PracticeSession
+    let recordingURL: URL?
+
+    private var isThisRecordingPlaying: Bool {
+        player.loadedURL == recordingURL && player.state == .playing
+    }
+
+    var body: some View {
+        BTCard(tint: recordingURL == nil ? BTTheme.surfaceWarm : BTTheme.surface) {
+            if recordingURL != nil {
+                BTSectionHeader(
+                    title: "Listen back",
+                    subtitle: "Hear your take and choose one small thing to improve next time."
+                )
+
+                if player.loadedURL == recordingURL {
+                    ProgressView(
+                        value: min(max(0, player.currentTime), max(0.01, player.duration)),
+                        total: max(0.01, player.duration)
+                    )
+                    .tint(BTTheme.accent)
+                    .accessibilityLabel("Recording progress")
+                    Text(verbatim: "\(playbackTime(player.currentTime)) / \(playbackTime(player.duration))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(BTTheme.muted)
+                }
+
+                HStack(spacing: BTSpacing.sm) {
+                    Button {
+                        model.toggleRecordingPlayback(for: session)
+                    } label: {
+                        Label {
+                            Text(verbatim: NativeLocalization.string(
+                                isThisRecordingPlaying
+                                    ? "Pause"
+                                    : (player.state == .paused && player.loadedURL == recordingURL ? "Resume" : "Play recording")
+                            ))
+                        } icon: {
+                            Image(systemName: isThisRecordingPlaying ? "pause.fill" : "play.fill")
+                        }
+                    }
+                    .buttonStyle(BTPrimaryButtonStyle())
+                    .accessibilityIdentifier("session.listenBack.toggle")
+
+                    Button {
+                        player.stop()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .disabled(player.loadedURL != recordingURL || player.state == .stopped)
+                    .accessibilityIdentifier("session.listenBack.stop")
+                }
+
+                Text("Saved only inside BrassTune on this device. Listen-back uses media playback, so the Ring/Silent switch does not mute it.")
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+
+                if let notice = player.notice {
+                    Label {
+                        Text(verbatim: notice)
+                    } icon: {
+                        Image(systemName: "speaker.badge.exclamationmark")
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(BTTheme.warning)
+                    .accessibilityIdentifier("session.listenBack.notice")
+                }
+            } else {
+                BTSectionHeader(
+                    title: "Listen-back unavailable",
+                    subtitle: "This session still has its pitch results, but it does not have a usable audio file on this device."
+                )
+                Label("Your practice details are safe.", systemImage: "waveform.badge.exclamationmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BTTheme.muted)
+                    .accessibilityIdentifier("session.listenBack.unavailable")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("session.listenBack")
+    }
+
+    private func playbackTime(_ value: TimeInterval) -> String {
+        let seconds = max(0, Int(value.rounded(.down)))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 

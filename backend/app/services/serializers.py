@@ -2,10 +2,29 @@ import datetime as dt
 from typing import Any, Dict
 
 
+MIN_AUDIO_BYTES_BY_MIME_TYPE = {
+    "audio/wav": 45,
+    "audio/webm": 36,
+    "audio/mp4": 33,
+    "audio/ogg": 29,
+    "audio/mpeg": 24,
+}
+
+
 def iso(value):
     if isinstance(value, dt.datetime):
         return value.isoformat()
     return value
+
+
+def audio_metadata_is_plausible(session) -> bool:
+    """Conservatively hide legacy placeholder rows without deleting objects."""
+    minimum_size = MIN_AUDIO_BYTES_BY_MIME_TYPE.get(getattr(session, "audio_mime_type", None))
+    try:
+        size_bytes = int(getattr(session, "audio_size_bytes", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(getattr(session, "audio_object_key", None) and minimum_size and size_bytes >= minimum_size)
 
 
 def session_to_dict(session) -> Dict[str, Any]:
@@ -26,7 +45,7 @@ def session_to_dict(session) -> Dict[str, Any]:
         "audio_duration_seconds": session.audio_duration_seconds,
         "audio_size_bytes": session.audio_size_bytes,
         "audio_uploaded_at": iso(session.audio_uploaded_at),
-        "audio_available": bool(session.audio_object_key),
+        "audio_available": audio_metadata_is_plausible(session),
         "created_at": iso(session.created_at),
     }
 

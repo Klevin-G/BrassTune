@@ -14,6 +14,12 @@ from app.schemas.schemas import AccountDeletionRequest
 from app.services.audio_storage import replace_audio_for_session
 from app.services.session_service import start_session
 
+WAV_AUDIO_BYTES = (
+    b"RIFF\x26\x00\x00\x00WAVE"
+    b"fmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x40\x1f\x00\x00\x01\x00\x08\x00"
+    b"data\x01\x00\x00\x00\x80\x00"
+)
+
 
 def _create_account_with_session(user_id: int) -> int:
     Base.metadata.create_all(bind=engine)
@@ -159,7 +165,7 @@ def test_account_deletion_serializes_concurrent_audio_upload(
             results["upload"] = replace_audio_for_session(
                 db,
                 session,
-                b"RIFF....WAVE",
+                WAV_AUDIO_BYTES,
                 "audio/wav",
                 1.0,
             )
@@ -291,7 +297,7 @@ def test_audio_activation_that_wins_race_is_included_in_account_deletion(
             results["upload"] = replace_audio_for_session(
                 db,
                 session,
-                b"RIFF....WAVE",
+                WAV_AUDIO_BYTES,
                 "audio/wav",
                 1.0,
             )
@@ -319,13 +325,13 @@ def test_audio_activation_that_wins_race_is_included_in_account_deletion(
     assert not deletion.is_alive()
     assert "upload_error" not in results
     assert "deletion_error" not in results
-    assert results["upload"].audio_snapshot["audio_size_bytes"] == len(b"RIFF....WAVE")
+    assert results["upload"].audio_snapshot["audio_size_bytes"] == len(WAV_AUDIO_BYTES)
     assert results["deletion"]["deleted"] is True
     assert cleaned_audio == [
         (
             uploaded_objects[0][0],
             uploaded_objects[0][1],
-            len(b"RIFF....WAVE"),
+            len(WAV_AUDIO_BYTES),
         )
     ]
     db = SessionLocal()
@@ -374,7 +380,7 @@ def test_account_mutations_are_rejected_after_durable_deletion_marker(
             replace_audio_for_session(
                 db,
                 session,
-                b"RIFF....WAVE",
+                WAV_AUDIO_BYTES,
                 "audio/wav",
                 1.0,
             )

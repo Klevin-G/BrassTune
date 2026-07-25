@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nextDemoPitchFrame } from '../domain/demoPitch';
 import { pitchFrameFromPcm } from '../domain/localPitchDetection';
+import { setWebAudioSessionType } from '../domain/webAudioSession';
 import type { PitchFrame } from '../domain/types';
 import { recordPitchFramesInBatches } from '../api/client';
 import { useI18n } from '../i18n/LocaleContext';
@@ -419,6 +420,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     audioContextRef.current = null;
     microphoneStartingRef.current = false;
     microphoneStartPromiseRef.current = null;
+    setWebAudioSessionType('auto');
     analyzedMsRef.current = 0;
     audioFrameTimingRef.current = EMPTY_AUDIO_FRAME_TIMING;
     if (mountedRef.current) {
@@ -478,6 +480,7 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
       let stream: MediaStream | null = null;
       let audioContext: AudioContext | null = null;
       try {
+        setWebAudioSessionType('play-and-record');
         stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
         if (!mountedRef.current || demoModeRef.current || generation !== microphoneGenerationRef.current) {
           stream.getTracks().forEach((track) => track.stop());

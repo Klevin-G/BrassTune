@@ -565,7 +565,10 @@ test('Play-Along serializes repeated Start activation while permission is pendin
 
 test('Play-Along serializes Hear it and disables speaker output while grading', async ({ page }) => {
   await page.addInitScript(() => {
-    const state = { oscillators: [] as Array<{ stopCalls: number; disconnected: number }> };
+    const state = {
+      oscillators: [] as Array<{ stopCalls: number; disconnected: number }>,
+      gains: [] as Array<{ cancelled: number; disconnected: number }>,
+    };
     class FakeAudioContext {
       state: AudioContextState = 'running';
       currentTime = 0;
@@ -586,12 +589,17 @@ test('Play-Along serializes Hear it and disables speaker output while grading', 
         };
       }
       createGain() {
+        const record = { cancelled: 0, disconnected: 0 };
+        state.gains.push(record);
         return {
           gain: {
+            value: 0.22,
+            cancelScheduledValues: () => { record.cancelled += 1; },
             setValueAtTime: () => undefined,
             exponentialRampToValueAtTime: () => undefined,
           },
           connect() { return this; },
+          disconnect: () => { record.disconnected += 1; },
         };
       }
     }
@@ -605,16 +613,27 @@ test('Play-Along serializes Hear it and disables speaker output while grading', 
 
   await page.goto('/practice/play-along');
   const hear = page.getByRole('button', { name: 'Hear it', exact: true }).first();
-  await hear.evaluate((button) => {
-    (button as HTMLButtonElement).click();
-    (button as HTMLButtonElement).click();
-  });
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __referenceToneTest: { oscillators: unknown[] } }).__referenceToneTest.oscillators.length)).toBe(1);
-  await expect(hear).toBeDisabled();
+  await hear.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __referenceToneTest: { oscillators: unknown[] } }).__referenceToneTest.oscillators.length)).toBe(8);
+  const stopReference = page.getByRole('button', { name: 'Stop', exact: true });
+  await expect(stopReference).toBeEnabled();
+  await expect(stopReference).toHaveAttribute('aria-pressed', 'true');
 
+  await stopReference.click();
+  await expect(hear).toBeEnabled();
+  await expect(hear).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __referenceToneTest: { oscillators: Array<{ stopCalls: number }>; gains: Array<{ cancelled: number }> } }
+  ).__referenceToneTest.oscillators.every((oscillator) => oscillator.stopCalls >= 2)
+    && (window as unknown as { __referenceToneTest: { gains: Array<{ cancelled: number }> } }).__referenceToneTest.gains.every((gain) => gain.cancelled >= 1))).toBe(true);
+
+  await hear.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __referenceToneTest: { oscillators: unknown[] } }).__referenceToneTest.oscillators.length)).toBe(16);
   await page.getByRole('button', { name: 'Start', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Hear it', exact: true })).toBeDisabled();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __referenceToneTest: { oscillators: Array<{ stopCalls: number }> } }).__referenceToneTest.oscillators[0].stopCalls)).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __referenceToneTest: { oscillators: Array<{ stopCalls: number }> } }
+  ).__referenceToneTest.oscillators.every((oscillator) => oscillator.stopCalls >= 2))).toBe(true);
 });
 
 test('an ended audio track from a minimal MediaStream fixture returns the tuner to microphone recovery', async ({ page }) => {

@@ -1,37 +1,47 @@
-# BrassTune Completion Candidate
+# BrassTune Release Evidence
 
-Updated: 2026-07-24. Deployed application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
+Updated: 2026-07-24. This report records local and simulator evidence for the current source candidate. It is not a deployment or App Store release decision.
 
 ## Decision
 
-The verified web/backend candidate is deployed at the exact merged revision above. Direct Render/Vercel deployment, revision checks, hosted smoke, provider error scans, and the linked Supabase migration state pass. This does not certify Apple distribution, physical-device audio, or every live identity/account-lifecycle path. GitHub Actions remained disabled and was not used.
+The source candidate has passed the recorded local web, backend, Swift, simulator, localization, and browser-device checks. GitHub Actions was not used because its minutes are exhausted. A production release is still pending direct deployment, hosted verification, exact deployed-SHA recording, Apple signing, and physical-device validation.
 
-## Local evidence
+## Verified evidence
 
 | Surface | Result | Boundary |
-|---|---|---|
-| Backend | `286 passed, 11 skipped` | Local result only. |
-| Frontend | `253/253` unit tests; production build passed | Local result only. |
-| Device simulation | 12 viewport profiles passed | Simulated browser coverage, not physical devices. |
-| Swift Core | `3/3` | Shared-domain coverage only. |
-| Native iPhone units | `145/145` | Simulator evidence only. |
-| Native iPhone UI | `20/20` | Simulator evidence only. |
-| Native iPad journeys | First-run, main, and class journeys passed | Simulator evidence only. |
-| Localization verifier | 660 keys across 12 locales; 0 issues | Does not prove human linguistic review. |
+|---|---:|---|
+| Backend | `299 passed, 11 skipped` | Local automated suite. |
+| Frontend units | `261` passed | Local automated suite. |
+| Frontend production build | Passed | Local Vite production artifact. |
+| Local Playwright | `443 passed, 7 expected skips` | Five browser/device projects; local only. |
+| Device simulation | 12 viewports passed | Simulated browser coverage, not physical devices. |
+| Swift Core | `3` passed | Shared-domain package coverage. |
+| Native unit tests | `158` passed | Simulator evidence only. |
+| Native UI tests | All 20 scenarios passed | Completed in bounded batches, not one monolithic run; simulator evidence only. |
+| Simulator build/run | Zero warnings and errors | Unsigned simulator evidence only. |
+| Localization | 12 locales, zero coverage gaps | Does not establish human linguistic review. |
 
-## Production deployment record
+## Security and dependency boundary
 
-1. Supabase migration history matched through `20260724072904_account_deletion_maintenance_heartbeats.sql`.
-2. Render deployment `dep-d9hinqjeo5us73e9eqng` is live and reports commit `26683c82c42839016383fb9cab676c9a35d554ca`.
-3. Vercel deployment `dpl_5izYQzxQu4ZjwUn6gJxrHYArBD8v` is ready and owns `https://brasstune.vercel.app`.
-4. Hosted smoke passed web root, readiness, exact version, two CORS paths, WebSocket app response, query-token rejection, and bad-Origin rejection.
-5. Render and Vercel post-deploy error queries returned no errors for the checked window.
-6. Gmail outreach preparation completed in `brasstune1@gmail.com`: 44 drafts, 44 unique recipients, 44 unique subjects, and no duplicates. No message was sent.
+`npm audit` continues to report two high-severity dependency entries: direct `react-router-dom` and its indirect `react-router` dependency. The identified React Router advisory `GHSA-qwww-vcr4-c8h2` is non-applicable to the current client-only Vite SPA because it does not use unstable React Server Components APIs. The audit findings remain tracked for dependency maintenance; this statement does not suppress the audit result.
 
-## External blockers
+## Current product/release configuration
 
-- Apple live provider configuration and signing remain external.
-- Google is enabled on the linked Supabase project; Apple remains disabled until its Apple Developer credentials are configured.
-- Physical-device microphone/audio validation remains external.
+- GitHub Actions remains unused for this candidate.
+- Apple sign-in and native Google sign-in controls are hidden. They must remain hidden until Apple sign-in is configured and both native providers are verified together.
+- Native local recordings are distinct from signed-in web recordings; App Store privacy answers must be reconciled against the signed build and live web behavior.
 
-No claim here establishes Apple live-provider enablement, signed native delivery, physical-device microphone quality, disposable live-account lifecycle completion, or sent Gmail messages.
+## Point-in-time Supabase configuration evidence
+
+The linked active/healthy Supabase project `yznziwewxrlwnwiynlvl` was checked with the Supabase CLI. Local and remote migration histories matched through `20260724072904`. The `session-audio` bucket was private, had a 52,428,800-byte limit, allowed `webm`, `mp4`, `mpeg`, `wav`, and `ogg`, and had zero browser-facing storage policies. Every public table had RLS enabled, and `anon` and `authenticated` had no DML grants.
+
+Security advisors returned two warnings: the `pg_net` extension is installed in `public`, and leaked-password protection is disabled. Supabase documentation notes that leaked-password protection requires a Pro plan. This is point-in-time live configuration evidence, not a blanket security certification or proof of application behavior.
+
+## Remaining external gates
+
+- Direct Render/Vercel deployment, hosted smoke, and an exact deployed SHA.
+- Signed archive and TestFlight upload.
+- Physical iPhone/iPad checks for Ring/Silent behavior, microphone/brass input, Bluetooth/audio routes, interruptions, local recording deletion, and file-protection behavior.
+- Live App Store Connect privacy answers, review metadata, age rating, export compliance, and review access.
+
+No claim in this report establishes a production deployment, hosted smoke result, signed archive, TestFlight build, App Store approval, or physical-device audio behavior.

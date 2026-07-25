@@ -198,6 +198,10 @@ def _expensive_operation_family(request: Request, canonical_path: str) -> tuple[
             family = "account-mutation"
         return family, _positive_int_env("BRASSTUNE_EXPENSIVE_MUTATION_RATE_LIMIT_PER_MINUTE", 60)
 
+    if method == "GET" and canonical_path == "/api/sessions/{id}/audio":
+        return "audio-playback", _positive_int_env("BRASSTUNE_AUDIO_PLAYBACK_RATE_LIMIT_PER_MINUTE", 30)
+    if method == "GET" and canonical_path == "/api/export/session/{id}/audio":
+        return "audio-playback", _positive_int_env("BRASSTUNE_AUDIO_PLAYBACK_RATE_LIMIT_PER_MINUTE", 30)
     if method == "GET" and (
         canonical_path.startswith("/api/export/")
         or canonical_path == "/api/users/me/export.zip"

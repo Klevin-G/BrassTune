@@ -35,7 +35,7 @@ from app.db.readiness import public_readiness_report, readiness_report, version_
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, MaintenanceHeartbeat, MaintenanceRequestNonce, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
+from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, is_audio_available_for_playback, is_local_audio_available_for_playback, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
 from app.services.account_deletion import (
     DeletionTombstoneSecretError,
     complete_and_scrub_account_deletion_job,
@@ -570,13 +570,15 @@ async def upload_session_audio(
 @router.get("/sessions/{session_id}/audio")
 def get_session_audio(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     session = _require_session_access(db, session_id, auth)
-    if not session.audio_object_key:
+    if not is_audio_available_for_playback(session):
         raise HTTPException(status_code=404, detail="No audio was saved for this session.")
     if session.audio_storage_provider == "supabase":
         return RedirectResponse(create_supabase_signed_url(session.audio_object_key))
     path = local_audio_path(session.audio_object_key)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Audio file is missing from local storage.")
+    if not is_local_audio_available_for_playback(session, path):
+        raise HTTPException(status_code=404, detail="Audio file is unavailable for playback.")
     return FileResponse(path, media_type=session.audio_mime_type or "application/octet-stream", filename=path.name)
 
 
