@@ -1,10 +1,10 @@
 {
   "updated": "2026-07-24",
-  "decision": "local_and_simulator_candidate_passed_pending_deployment_signing_and_physical_device_gates",
-  "deployed_application_revision": null,
+  "decision": "web_backend_production_verified_pending_apple_signing_physical_device_and_app_store_gates",
+  "deployed_application_revision": "cfaa3c59d34676d180907c78d7cdd1b9de3299f7",
   "github_actions": {
     "status": "unused_due_to_exhausted_minutes",
-    "release_path": "direct_provider_deployment_required"
+    "release_path": "direct_provider_deployment_completed"
   },
   "verified": {
     "backend": "299 passed, 11 skipped",
@@ -47,12 +47,27 @@
     ],
     "boundary": "point-in-time live configuration evidence, not a migration or blanket security certification"
   },
+  "production": {
+    "render": {
+      "deployment_id": "dep-d9i309jh2c0s7382bc8g",
+      "status": "live",
+      "reported_revision": "cfaa3c59d34676d180907c78d7cdd1b9de3299f7"
+    },
+    "vercel": {
+      "deployment_id": "dpl_5TjKnoJ3cV5nwSjpiTCTmTEAPg8v",
+      "status": "ready_production",
+      "canonical_url": "https://brasstune.vercel.app",
+      "reported_revision": "cfaa3c59d34676d180907c78d7cdd1b9de3299f7",
+      "frontend_sha_injection": "explicit_for_prebuilt_deployment"
+    },
+    "hosted_infrastructure_smoke": "8/8 passed",
+    "strict_hosted_browser_matrix": "50/50 passed across five projects",
+    "post_deploy_error_scan": "no Render error-level or 5xx logs and no Vercel error logs in the checked window"
+  },
   "pending": {
-    "direct_render_vercel_deployment": "not_recorded",
-    "hosted_smoke": "not_recorded",
-    "exact_deployed_sha": "not_recorded",
     "signed_archive_testflight": "external",
     "physical_device_audio": "external: Ring-Silent, microphone, Bluetooth/routes, interruptions, recording deletion, file protection",
+    "signed_in_private_audio_lifecycle": "not_established_by_hosted_evidence",
     "app_store_connect": "external: privacy answers, review metadata/access, age rating, export compliance",
     "human_language_review": "external"
   }

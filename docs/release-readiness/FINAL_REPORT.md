@@ -1,10 +1,10 @@
 # BrassTune Release Evidence
 
-Updated: 2026-07-24. This report records local and simulator evidence for the current source candidate. It is not a deployment or App Store release decision.
+Updated: 2026-07-24. Deployed application revision: `cfaa3c59d34676d180907c78d7cdd1b9de3299f7`.
 
 ## Decision
 
-The source candidate has passed the recorded local web, backend, Swift, simulator, localization, and browser-device checks. GitHub Actions was not used because its minutes are exhausted. A production release is still pending direct deployment, hosted verification, exact deployed-SHA recording, Apple signing, and physical-device validation.
+The web/backend production candidate is verified at the deployed revision above. Direct Render and Vercel identities report that exact SHA, hosted infrastructure smoke passed, and the strict hosted browser matrix passed. GitHub Actions was not used because its minutes are exhausted. This is not an Apple distribution or physical-device release decision.
 
 ## Verified evidence
 
@@ -20,6 +20,15 @@ The source candidate has passed the recorded local web, backend, Swift, simulato
 | Native UI tests | All 20 scenarios passed | Completed in bounded batches, not one monolithic run; simulator evidence only. |
 | Simulator build/run | Zero warnings and errors | Unsigned simulator evidence only. |
 | Localization | 12 locales, zero coverage gaps | Does not establish human linguistic review. |
+
+## Production deployment evidence
+
+- Render deployment `dep-d9i309jh2c0s7382bc8g` is live and reports `cfaa3c59d34676d180907c78d7cdd1b9de3299f7`.
+- Vercel deployment `dpl_5TjKnoJ3cV5nwSjpiTCTmTEAPg8v` is READY in production at [brasstune.vercel.app](https://brasstune.vercel.app) and reports the same SHA.
+- The frontend SHA injection was explicit for the prebuilt deployment, so the production bundle reports the intended revision rather than an inferred build identity.
+- Hosted infrastructure smoke passed `8/8` checks.
+- The strict hosted browser matrix passed `50/50` checks across five projects.
+- Render returned no error-level or 5xx logs after the final deploy, and Vercel returned no error logs for the final production deployment in the checked window.
 
 ## Security and dependency boundary
 
@@ -39,9 +48,9 @@ Security advisors returned two warnings: the `pg_net` extension is installed in 
 
 ## Remaining external gates
 
-- Direct Render/Vercel deployment, hosted smoke, and an exact deployed SHA.
 - Signed archive and TestFlight upload.
 - Physical iPhone/iPad checks for Ring/Silent behavior, microphone/brass input, Bluetooth/audio routes, interruptions, local recording deletion, and file-protection behavior.
 - Live App Store Connect privacy answers, review metadata, age rating, export compliance, and review access.
+- Human language review.
 
-No claim in this report establishes a production deployment, hosted smoke result, signed archive, TestFlight build, App Store approval, or physical-device audio behavior.
+No claim in this report establishes a signed archive, TestFlight build, App Store approval, signed-in private-audio lifecycle, or physical-device audio behavior.
