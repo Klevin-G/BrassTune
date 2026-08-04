@@ -210,6 +210,15 @@ export interface SessionAudioUploadResponse {
   message?: string;
 }
 
+export interface SessionAudioDeleteResponse {
+  deleted: boolean;
+  /**
+   * The session no longer references its audio. The storage worker will retry
+   * removing a remote object when this is true.
+   */
+  cleanup_pending: boolean;
+}
+
 export function uploadSessionAudio(sessionId: number, blob: Blob, durationSeconds?: number) {
   const headers: Record<string, string> = { 'Content-Type': blob.type || 'audio/webm' };
   if (durationSeconds !== undefined) headers['X-Audio-Duration-Seconds'] = String(durationSeconds);
@@ -222,6 +231,12 @@ export function uploadSessionAudio(sessionId: number, blob: Blob, durationSecond
 
 export function sessionAudioUrl(sessionId: number | string) {
   return exportUrl(`/api/sessions/${sessionId}/audio`);
+}
+
+export function deleteSessionAudio(sessionId: number | string) {
+  return request<SessionAudioDeleteResponse>(`/api/sessions/${sessionId}/audio`, {
+    method: 'DELETE',
+  });
 }
 
 export async function downloadExport(path: string, filename: string) {

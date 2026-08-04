@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { shouldShowCloudAudioExport } from '../components/ExportButtons';
 import {
   invalidRangeOwnerTransition,
@@ -10,7 +10,14 @@ import {
   validateProgressRange,
 } from './ProgressPage';
 import { classifySessionReviewError } from './SessionReviewPage';
-import { resolveDeleteDialogReturnTarget, resolvePostDeleteFocusTarget } from './SessionsPage';
+import {
+  deleteDialogMessageIds,
+  executeSessionDeletion,
+  resolveDeleteDialogReturnTarget,
+  resolvePostDeleteFocusTarget,
+  sessionAfterAudioDeletion,
+  sessionAudioDeletionStatusId,
+} from './SessionsPage';
 import { LocaleProvider } from '../i18n/LocaleContext';
 
 describe('recording and progress data-view safeguards', () => {
@@ -105,6 +112,151 @@ describe('recording and progress data-view safeguards', () => {
     } as unknown as Document;
 
     expect(resolvePostDeleteFocusTarget(removedSummary, root)).toBe(newRecording);
+  });
+
+  it('removes cloud audio metadata without removing the practice session', () => {
+    const session = {
+      id: 24,
+      user_id: 7,
+      instrument_id: 'trumpet',
+      name: 'Long tones',
+      started_at: '2026-08-04T12:00:00Z',
+      ended_at: '2026-08-04T12:01:00Z',
+      duration_seconds: 60,
+      reference_pitch_hz: 440,
+      notes_count: 20,
+      average_signed_cents: 1,
+      average_abs_cents: 4,
+      in_tune_percentage: 91,
+      audio_available: true,
+      audio_mime_type: 'audio/webm',
+      audio_duration_seconds: 60,
+      audio_size_bytes: 1024,
+      audio_uploaded_at: '2026-08-04T12:01:00Z',
+      created_at: '2026-08-04T12:00:00Z',
+    };
+
+    expect(sessionAfterAudioDeletion(session)).toMatchObject({
+      id: 24,
+      notes_count: 20,
+      audio_available: false,
+      audio_mime_type: null,
+      audio_duration_seconds: null,
+      audio_size_bytes: null,
+      audio_uploaded_at: null,
+    });
+  });
+
+  it('uses distinct destructive-confirmation copy for cloud audio and preserves guest recording copy', () => {
+    expect(deleteDialogMessageIds(false)).toEqual({
+      title: 'sessions.deleteAudioTitle',
+      body: 'sessions.deleteAudioBody',
+      cancel: 'sessions.keepAudio',
+    });
+    expect(deleteDialogMessageIds(true)).toEqual({
+      title: 'sessions.deleteTitle',
+      body: 'sessions.deleteBody',
+      cancel: 'sessions.keep',
+    });
+  });
+
+  it('distinguishes immediate and deferred cloud-audio cleanup status', () => {
+    expect(sessionAudioDeletionStatusId(false)).toBe('sessions.audioDeleted');
+    expect(sessionAudioDeletionStatusId(true)).toBe('sessions.audioDeletePending');
+  });
+
+  it('deletes a guest session locally without invoking the cloud audio endpoint', async () => {
+    const deleteGuestSession = vi.fn(() => true);
+    const deleteCloudAudio = vi.fn();
+    const detachReflections = vi.fn();
+    const session = {
+      id: -24,
+      user_id: 0,
+      instrument_id: 'trumpet',
+      name: 'Guest long tones',
+      started_at: '2026-08-04T12:00:00Z',
+      ended_at: '2026-08-04T12:01:00Z',
+      duration_seconds: 60,
+      reference_pitch_hz: 440,
+      notes_count: 20,
+      average_signed_cents: 1,
+      average_abs_cents: 4,
+      in_tune_percentage: 91,
+      guest_session: true,
+      created_at: '2026-08-04T12:00:00Z',
+    };
+
+    await expect(executeSessionDeletion(session, { deleteGuestSession, deleteCloudAudio, detachReflections })).resolves.toEqual({
+      type: 'guest-session-deleted',
+      updatedSession: null,
+    });
+    expect(deleteGuestSession).toHaveBeenCalledWith(-24);
+    expect(detachReflections).toHaveBeenCalledWith('-24');
+    expect(deleteCloudAudio).not.toHaveBeenCalled();
+  });
+
+  it('deletes only cloud audio and retains the session results for immediate and deferred cleanup', async () => {
+    const session = {
+      id: 24,
+      user_id: 7,
+      instrument_id: 'trumpet',
+      name: 'Long tones',
+      started_at: '2026-08-04T12:00:00Z',
+      ended_at: '2026-08-04T12:01:00Z',
+      duration_seconds: 60,
+      reference_pitch_hz: 440,
+      notes_count: 20,
+      average_signed_cents: 1,
+      average_abs_cents: 4,
+      in_tune_percentage: 91,
+      audio_available: true,
+      audio_mime_type: 'audio/webm',
+      audio_duration_seconds: 60,
+      audio_size_bytes: 1024,
+      audio_uploaded_at: '2026-08-04T12:01:00Z',
+      created_at: '2026-08-04T12:00:00Z',
+    };
+    const deleteGuestSession = vi.fn();
+    const detachReflections = vi.fn();
+    const deleteCloudAudio = vi.fn()
+      .mockResolvedValueOnce({ deleted: true, cleanup_pending: false })
+      .mockResolvedValueOnce({ deleted: true, cleanup_pending: true });
+
+    const immediate = await executeSessionDeletion(session, { deleteGuestSession, deleteCloudAudio, detachReflections });
+    const deferred = await executeSessionDeletion(session, { deleteGuestSession, deleteCloudAudio, detachReflections });
+
+    expect(immediate).toMatchObject({ type: 'cloud-audio-deleted', cleanupPending: false, updatedSession: { id: 24, notes_count: 20, audio_available: false } });
+    expect(deferred).toMatchObject({ type: 'cloud-audio-deleted', cleanupPending: true, updatedSession: { id: 24, notes_count: 20, audio_available: false } });
+    expect(deleteCloudAudio).toHaveBeenCalledTimes(2);
+    expect(deleteCloudAudio).toHaveBeenCalledWith(24);
+    expect(deleteGuestSession).not.toHaveBeenCalled();
+    expect(detachReflections).not.toHaveBeenCalled();
+  });
+
+  it('keeps the delete dialog open with an alert contract when cloud audio deletion fails', async () => {
+    const failure = new Error('network failed');
+    const result = await executeSessionDeletion({
+      id: 24,
+      user_id: 7,
+      instrument_id: 'trumpet',
+      name: 'Long tones',
+      started_at: '2026-08-04T12:00:00Z',
+      ended_at: '2026-08-04T12:01:00Z',
+      duration_seconds: 60,
+      reference_pitch_hz: 440,
+      notes_count: 20,
+      average_signed_cents: 1,
+      average_abs_cents: 4,
+      in_tune_percentage: 91,
+      audio_available: true,
+      created_at: '2026-08-04T12:00:00Z',
+    }, {
+      deleteGuestSession: vi.fn(),
+      deleteCloudAudio: vi.fn().mockRejectedValue(failure),
+      detachReflections: vi.fn(),
+    });
+
+    expect(result).toEqual({ type: 'failed', error: failure, keepDialogOpen: true, alertRole: 'alert' });
   });
 
   it('rejects a custom range whose start is after its end', () => {

@@ -119,6 +119,37 @@ describe('API client runtime URLs', () => {
     await expect(uploadSessionAudio(7, new Blob(['audio'], { type: 'audio/webm' }))).resolves.toEqual(accepted);
   });
 
+  it('deletes only the requested session audio with the signed-in authorization header', async () => {
+    const { deleteSessionAudio, setAuthTokenProvider } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({ deleted: true, cleanup_pending: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    setAuthTokenProvider(async () => 'signed-in-token');
+
+    await expect(deleteSessionAudio(42)).resolves.toEqual({ deleted: true, cleanup_pending: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/sessions/42/audio',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    const headers = new Headers(fetchMock.mock.calls[0][1].headers);
+    expect(headers.get('authorization')).toBe('Bearer signed-in-token');
+  });
+
+  it('preserves an immediate audio-deletion completion response', async () => {
+    const { deleteSessionAudio } = await loadClient('', 'https://api.example.test');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ deleted: true, cleanup_pending: false }),
+    }));
+
+    await expect(deleteSessionAudio(42)).resolves.toEqual({ deleted: true, cleanup_pending: false });
+  });
+
   it('leaves only the requested class membership through the self-service endpoint', async () => {
     const { leaveEnsembleGroup, setAuthTokenProvider } = await loadClient('', 'https://api.example.test');
     const fetchMock = vi.fn().mockResolvedValue({

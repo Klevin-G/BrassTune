@@ -1,7 +1,7 @@
 import { Mic, MoreHorizontal, Music2, Play, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { listSessions } from '../api/client';
+import { deleteSessionAudio, friendlyUserFacingError, listSessions, type SessionAudioDeleteResponse } from '../api/client';
 import { ExportButtons } from '../components/ExportButtons';
 import { SessionAudioPlayer } from '../components/SessionAudioPlayer';
 import { EmptyActionState, LoadingSkeleton, PageHeader, ScreenContainer, SectionCard, SelectionChip, StatusBadge } from '../components/ui/AppPrimitives';
@@ -35,6 +35,54 @@ export function resolvePostDeleteFocusTarget(savedTarget: HTMLElement | null, ro
   return isUsableFocusTarget(heading) ? heading : null;
 }
 
+export function sessionAfterAudioDeletion(session: PracticeSession): PracticeSession {
+  return {
+    ...session,
+    audio_available: false,
+    audio_mime_type: null,
+    audio_duration_seconds: null,
+    audio_size_bytes: null,
+    audio_uploaded_at: null,
+  };
+}
+
+export function deleteDialogMessageIds(isGuest: boolean): { title: MessageId; body: MessageId; cancel: MessageId } {
+  return isGuest
+    ? { title: 'sessions.deleteTitle', body: 'sessions.deleteBody', cancel: 'sessions.keep' }
+    : { title: 'sessions.deleteAudioTitle', body: 'sessions.deleteAudioBody', cancel: 'sessions.keepAudio' };
+}
+
+export function sessionAudioDeletionStatusId(cleanupPending: boolean): MessageId {
+  return cleanupPending ? 'sessions.audioDeletePending' : 'sessions.audioDeleted';
+}
+
+export type SessionDeletionResult =
+  | { type: 'guest-session-deleted'; updatedSession: null }
+  | { type: 'cloud-audio-deleted'; cleanupPending: boolean; updatedSession: PracticeSession }
+  | { type: 'failed'; error: unknown; keepDialogOpen: true; alertRole: 'alert' };
+
+export async function executeSessionDeletion(
+  session: PracticeSession,
+  operations: {
+    deleteGuestSession: (sessionId: number) => boolean;
+    deleteCloudAudio(sessionId: number): Promise<SessionAudioDeleteResponse>;
+    detachReflections: (sessionId: string) => void;
+  },
+): Promise<SessionDeletionResult> {
+  try {
+    if (session.guest_session) {
+      if (!operations.deleteGuestSession(session.id)) throw new Error();
+      operations.detachReflections(String(session.id));
+      return { type: 'guest-session-deleted', updatedSession: null };
+    }
+    const result = await operations.deleteCloudAudio(session.id);
+    if (!result.deleted) throw new Error();
+    return { type: 'cloud-audio-deleted', cleanupPending: result.cleanup_pending, updatedSession: sessionAfterAudioDeletion(session) };
+  } catch (error) {
+    return { type: 'failed', error, keepDialogOpen: true, alertRole: 'alert' };
+  }
+}
+
 export function SessionsPage() {
   const { t, formatDate } = useI18n();
   const auth = useAuth();
@@ -46,6 +94,7 @@ export function SessionsPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PracticeSession | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [loadState, setLoadState] = useState<SessionsLoadState>('loading');
   const [retryKey, setRetryKey] = useState(0);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -97,28 +146,44 @@ export function SessionsPage() {
 
   const dismissDeleteDialog = useCallback(() => {
     if (deleteBusy) return;
+    setDeleteError('');
     setPendingDelete(null);
     restoreDeleteFocus();
   }, [deleteBusy, restoreDeleteFocus]);
 
   const confirmDelete = async () => {
     const session = pendingDelete;
-    if (!session || !session.guest_session) {
+    if (!session) {
       setPendingDelete(null);
       restoreDeleteFocus();
       return;
     }
     setDeleteBusy(true);
+    setDeleteError('');
+    const result = await executeSessionDeletion(session, {
+      deleteGuestSession: (sessionId) => deleteGuestSession(sessionId, guestAccess),
+      deleteCloudAudio: deleteSessionAudio,
+      detachReflections: detachReflectionsForSession,
+    });
+    if (result.type === 'failed') {
+      const message = session.guest_session ? t('sessions.deleteFailed') : friendlyUserFacingError(result.error);
+      setDeleteError(message);
+      setDeleteBusy(false);
+      return;
+    }
     try {
-      const deleted = deleteGuestSession(session.id, guestAccess);
-      if (!deleted) throw new Error('Guest workspace access is unavailable.');
-      detachReflectionsForSession(String(session.id));
-      setSessions((current) => current.filter((item) => item.id !== session.id));
-      setStatus(t('sessions.deleted'));
+      if (result.type === 'guest-session-deleted') {
+        setSessions((current) => current.filter((item) => item.id !== session.id));
+        setStatus(t('sessions.deleted'));
+      } else {
+        setSessions((current) => current.map((item) => (item.id === session.id ? result.updatedSession : item)));
+        if (expandedId === session.id) setExpandedId(null);
+        setStatus(t(sessionAudioDeletionStatusId(result.cleanupPending)));
+      }
       setPendingDelete(null);
       restoreDeleteFocus();
     } catch {
-      setStatus(t('sessions.deleteFailed'));
+      setDeleteError(session.guest_session ? t('sessions.deleteFailed') : friendlyUserFacingError(undefined));
     } finally {
       setDeleteBusy(false);
     }
@@ -228,6 +293,7 @@ export function SessionsPage() {
               {filtered.map((session) => {
                 const verdict = describeInTunePercent(session.in_tune_percentage);
                 const isGuest = Boolean(session.guest_session);
+                const canDeleteCloudAudio = !isGuest && Boolean(session.audio_available);
                 const expanded = expandedId === session.id;
                 return (
                   <li className="ps-item" key={session.id}>
@@ -271,7 +337,7 @@ export function SessionsPage() {
                               guestSession={isGuest ? (session as GuestSessionDetail) : null}
                               audioAvailable={Boolean(session.audio_available)}
                             />
-                            {isGuest && (
+                            {(isGuest || canDeleteCloudAudio) && (
                               <button
                                 type="button"
                                 className="ps-overflow-delete"
@@ -279,11 +345,12 @@ export function SessionsPage() {
                                   const details = event.currentTarget.closest('details');
                                   deleteOpenerRef.current = resolveDeleteDialogReturnTarget(event.currentTarget);
                                   details?.removeAttribute('open');
+                                  setDeleteError('');
                                   setPendingDelete(session);
                                 }}
                               >
                                 <Trash2 size={16} />
-                                {t('sessions.deleteRecording')}
+                                {t(isGuest ? 'sessions.deleteRecording' : 'sessions.deleteAudio')}
                               </button>
                             )}
                           </div>
@@ -317,11 +384,12 @@ export function SessionsPage() {
             onClick={(event) => event.stopPropagation()}
             onKeyDown={handleDialogKeyDown}
           >
-            <h2 id="ps-delete-title">{t('sessions.deleteTitle')}</h2>
-            <p id="ps-delete-description">{t('sessions.deleteBody')}</p>
+            <h2 id="ps-delete-title">{t(deleteDialogMessageIds(Boolean(pendingDelete.guest_session)).title)}</h2>
+            <p id="ps-delete-description">{t(deleteDialogMessageIds(Boolean(pendingDelete.guest_session)).body)}</p>
+            {deleteError && <p role="alert">{deleteError}</p>}
             <div className="ps-dialog-actions">
               <button ref={cancelButtonRef} className="ghost-button" type="button" onClick={dismissDeleteDialog} disabled={deleteBusy}>
-                {t('sessions.keep')}
+                {t(deleteDialogMessageIds(Boolean(pendingDelete.guest_session)).cancel)}
               </button>
               <button className="ps-dialog-delete" type="button" onClick={confirmDelete} disabled={deleteBusy}>
                 {t(deleteBusy ? 'sessions.deleting' : 'common.delete')}

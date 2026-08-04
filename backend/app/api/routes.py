@@ -18,11 +18,12 @@ from typing import List, Optional
 from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from sqlalchemy import and_, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from starlette.concurrency import run_in_threadpool
+from starlette.background import BackgroundTask
 
 from app.api.auth import AuthContext, delete_supabase_identity, get_auth_context, require_roles, supabase_global_sign_out
 from app.core.security import DEPLOYED_ENVIRONMENTS, app_environment
@@ -35,7 +36,7 @@ from app.db.readiness import public_readiness_report, readiness_report, version_
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, MaintenanceHeartbeat, MaintenanceRequestNonce, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
 from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
-from app.services.audio_storage import audio_bytes_for_export, audio_upload_limit_bytes, create_supabase_signed_url, delete_audio_for_session, is_audio_available_for_playback, is_local_audio_available_for_playback, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, replace_audio_for_session, retry_audio_storage_jobs
+from app.services.audio_storage import audio_bytes_for_export, audio_extension, audio_upload_limit_bytes, delete_audio_for_session, is_audio_available_for_playback, is_local_audio_available_for_playback, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, read_supabase_audio_for_playback, replace_audio_for_session, retry_audio_storage_jobs
 from app.services.account_deletion import (
     DeletionTombstoneSecretError,
     complete_and_scrub_account_deletion_job,
@@ -567,13 +568,74 @@ async def upload_session_audio(
     return {"uploaded": True, "audio": result.audio_snapshot}
 
 
+def _single_audio_range(range_header: Optional[str], size_bytes: int) -> Optional[tuple[int, int]]:
+    if not range_header:
+        return None
+    value = range_header.strip()
+    match = re.fullmatch(r"bytes=(?:(\d+)-(\d*)|-(\d+))", value)
+    if match is None or any(len(group) > 19 for group in match.groups() if group):
+        raise HTTPException(status_code=416, detail="Invalid audio range.", headers={"Content-Range": "bytes */%d" % size_bytes})
+    if match.group(3):
+        suffix_size = int(match.group(3))
+        if suffix_size <= 0:
+            raise HTTPException(status_code=416, detail="Invalid audio range.", headers={"Content-Range": "bytes */%d" % size_bytes})
+        start = max(0, size_bytes - suffix_size)
+        return start, size_bytes - 1
+    start = int(match.group(1))
+    requested_end = int(match.group(2)) if match.group(2) else size_bytes - 1
+    if start >= size_bytes or requested_end < start:
+        raise HTTPException(status_code=416, detail="Invalid audio range.", headers={"Content-Range": "bytes */%d" % size_bytes})
+    return start, min(requested_end, size_bytes - 1)
+
+
+def _stream_spooled_audio(source):
+    try:
+        while chunk := source.read(64 * 1024):
+            yield chunk
+    finally:
+        source.close()
+
+
 @router.get("/sessions/{session_id}/audio")
-def get_session_audio(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+def get_session_audio(
+    request: Request,
+    session_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_auth_context),
+):
     session = _require_session_access(db, session_id, auth)
     if not is_audio_available_for_playback(session):
         raise HTTPException(status_code=404, detail="No audio was saved for this session.")
     if session.audio_storage_provider == "supabase":
-        return RedirectResponse(create_supabase_signed_url(session.audio_object_key))
+        size_bytes = int(session.audio_size_bytes)
+        if size_bytes > audio_upload_limit_bytes():
+            raise HTTPException(status_code=404, detail="Audio file is unavailable for playback.")
+        byte_range = _single_audio_range(request.headers.get("range"), size_bytes)
+        result = read_supabase_audio_for_playback(session, byte_range)
+        expected_response_size = size_bytes if byte_range is None else byte_range[1] - byte_range[0] + 1
+        if result is None:
+            raise HTTPException(status_code=404, detail="Audio file is unavailable for playback.")
+        source, actual_size = result
+        if actual_size != expected_response_size:
+            source.close()
+            raise HTTPException(status_code=404, detail="Audio file is unavailable for playback.")
+        filename = "recording%s" % audio_extension(session.audio_mime_type)
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": "inline; filename*=UTF-8''%s" % quote(filename, safe=""),
+            "Pragma": "no-cache",
+        }
+        if byte_range is not None:
+            headers["Content-Range"] = "bytes %d-%d/%d" % (*byte_range, size_bytes)
+        headers["Content-Length"] = str(expected_response_size)
+        return StreamingResponse(
+            _stream_spooled_audio(source),
+            status_code=206 if byte_range is not None else 200,
+            media_type=session.audio_mime_type or "application/octet-stream",
+            headers=headers,
+            background=BackgroundTask(source.close),
+        )
     path = local_audio_path(session.audio_object_key)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Audio file is missing from local storage.")
@@ -760,8 +822,13 @@ def export_note_events_csv(session_id: int, db: Session = Depends(get_db), auth:
 
 
 @router.get("/export/session/{session_id}/audio")
-def export_session_audio(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    return get_session_audio(session_id, db, auth)
+def export_session_audio(
+    session_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_auth_context),
+):
+    return get_session_audio(request, session_id, db, auth)
 
 
 @router.get("/export/session/{session_id}.zip")
