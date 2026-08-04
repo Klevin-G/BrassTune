@@ -8,6 +8,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import zipfile
 from pathlib import Path
@@ -45,6 +46,7 @@ from app.api.routes import (
     join_ensemble_by_code,
     leave_ensemble_group,
     list_ensemble_groups,
+    get_session_audio,
     retry_account_deletion_jobs,
     rotate_ensemble_join_code,
     update_ensemble_member,
@@ -1710,6 +1712,198 @@ def test_audio_upload_playback_and_bad_mime_are_validated():
         playback = client.get(f"/api/sessions/{session['id']}/audio")
         assert playback.status_code == 200
         assert playback.content == WAV_AUDIO_BYTES
+
+
+def test_supabase_audio_playback_proxy_is_private_range_aware_and_authorized(monkeypatch):
+    with TestClient(app) as client:
+        session_payload = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        object_key = "1/%s/versions/private-token/recording.wav" % session_payload["id"]
+        db = SessionLocal()
+        try:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_payload["id"]).one()
+            session.audio_storage_provider = "supabase"
+            session.audio_object_key = object_key
+            session.audio_mime_type = "audio/wav"
+            session.audio_size_bytes = len(WAV_AUDIO_BYTES)
+            db.commit()
+        finally:
+            db.close()
+
+        def fake_playback(_session, byte_range=None):
+            data = WAV_AUDIO_BYTES if byte_range is None else WAV_AUDIO_BYTES[byte_range[0] : byte_range[1] + 1]
+            source = tempfile.SpooledTemporaryFile(mode="w+b")
+            source.write(data)
+            source.seek(0)
+            return source, len(data)
+
+        monkeypatch.setattr("app.api.routes.read_supabase_audio_for_playback", fake_playback)
+
+        playback = client.get(f"/api/sessions/{session_payload['id']}/audio")
+        ranged = client.get(f"/api/sessions/{session_payload['id']}/audio", headers={"Range": "bytes=1-8"})
+        suffix = client.get(f"/api/sessions/{session_payload['id']}/audio", headers={"Range": "bytes=-5"})
+        clamped = client.get(f"/api/sessions/{session_payload['id']}/audio", headers={"Range": "bytes=1-999"})
+        invalid_range = client.get(f"/api/sessions/{session_payload['id']}/audio", headers={"Range": "bytes=999-"})
+        absurd_range = client.get(f"/api/sessions/{session_payload['id']}/audio", headers={"Range": "bytes=" + ("9" * 20) + "-"})
+        cross_user = client.get(f"/api/sessions/{session_payload['id']}/audio", headers={"Authorization": "Bearer dev-user-2"})
+        db = SessionLocal()
+        try:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_payload["id"]).one()
+            session.audio_storage_provider = None
+            session.audio_object_key = None
+            session.audio_mime_type = None
+            session.audio_size_bytes = None
+            db.commit()
+        finally:
+            db.close()
+
+    assert playback.status_code == 200
+    assert playback.content == WAV_AUDIO_BYTES
+    assert playback.headers["content-type"] == "audio/wav"
+    assert playback.headers["accept-ranges"] == "bytes"
+    assert playback.headers["cache-control"] == "private, no-store"
+    assert playback.headers["content-disposition"].startswith("inline;")
+    assert "location" not in playback.headers
+    assert object_key not in str(dict(playback.headers))
+    assert ranged.status_code == 206
+    assert ranged.content == WAV_AUDIO_BYTES[1:9]
+    assert ranged.headers["content-range"] == "bytes 1-8/%d" % len(WAV_AUDIO_BYTES)
+    assert suffix.status_code == 206
+    assert suffix.content == WAV_AUDIO_BYTES[-5:]
+    assert clamped.status_code == 206
+    assert clamped.content == WAV_AUDIO_BYTES[1:]
+    assert invalid_range.status_code == 416
+    assert invalid_range.headers["content-range"] == "bytes */%d" % len(WAV_AUDIO_BYTES)
+    assert absurd_range.status_code == 416
+    assert cross_user.status_code == 403
+
+
+def test_supabase_audio_playback_proxy_rejects_bad_data_and_masks_upstream_failure(monkeypatch):
+    with TestClient(app) as client:
+        session_payload = client.post("/api/sessions/start", json={"instrument_id": "trumpet", "reference_pitch_hz": 440}).json()
+        db = SessionLocal()
+        try:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_payload["id"]).one()
+            session.audio_storage_provider = "supabase"
+            session.audio_object_key = "1/%s/private/recording.wav" % session.id
+            session.audio_mime_type = "audio/wav"
+            session.audio_size_bytes = len(WAV_AUDIO_BYTES)
+            db.commit()
+        finally:
+            db.close()
+
+        monkeypatch.setattr("app.api.routes.read_supabase_audio_for_playback", lambda *_args: None)
+        missing = client.get(f"/api/sessions/{session_payload['id']}/audio")
+        monkeypatch.setattr("app.api.routes.read_supabase_audio_for_playback", lambda *_args: (tempfile.SpooledTemporaryFile(mode="w+b"), len(WAV_AUDIO_BYTES) - 1))
+        mismatched = client.get(f"/api/sessions/{session_payload['id']}/audio")
+        monkeypatch.setattr(
+            "app.api.routes.read_supabase_audio_for_playback",
+            lambda *_args: (_ for _ in ()).throw(HTTPException(status_code=502, detail="Audio storage playback failed.")),
+        )
+        upstream_failure = client.get(f"/api/sessions/{session_payload['id']}/audio")
+        db = SessionLocal()
+        try:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_payload["id"]).one()
+            session.audio_size_bytes = audio_storage_module.audio_upload_limit_bytes() + 1
+            db.commit()
+        finally:
+            db.close()
+        oversized = client.get(f"/api/sessions/{session_payload['id']}/audio")
+        db = SessionLocal()
+        try:
+            session = db.query(PracticeSession).filter(PracticeSession.id == session_payload["id"]).one()
+            session.audio_storage_provider = None
+            session.audio_object_key = None
+            session.audio_mime_type = None
+            session.audio_size_bytes = None
+            db.commit()
+        finally:
+            db.close()
+
+    assert missing.status_code == 404
+    assert mismatched.status_code == 404
+    assert upstream_failure.status_code == 502
+    assert "private/recording" not in upstream_failure.text
+    assert oversized.status_code == 404
+
+
+def test_supabase_playback_reader_bounds_and_validates_upstream_responses(monkeypatch):
+    session = SimpleNamespace(
+        audio_storage_provider="supabase",
+        audio_object_key="1/2/private/recording.wav",
+        audio_mime_type="audio/wav",
+        audio_size_bytes=len(WAV_AUDIO_BYTES),
+    )
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-service-key-placeholder")
+
+    class FakeResponse:
+        def __init__(self, payload, headers):
+            self.payload = payload
+            self.headers = headers
+            self.read_sizes = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, size):
+            self.read_sizes.append(size)
+            chunk, self.payload = self.payload[:size], self.payload[size:]
+            return chunk
+
+    real_spooled_temporary_file = tempfile.SpooledTemporaryFile
+    opened_sources = []
+
+    def tracked_spooled_temporary_file(*args, **kwargs):
+        source = real_spooled_temporary_file(*args, **kwargs)
+        opened_sources.append(source)
+        return source
+
+    monkeypatch.setattr(audio_storage_module.tempfile, "SpooledTemporaryFile", tracked_spooled_temporary_file)
+
+    overrun = FakeResponse(WAV_AUDIO_BYTES + b"x", {"Content-Length": str(len(WAV_AUDIO_BYTES))})
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: overrun)
+    assert audio_storage_module.read_supabase_audio_for_playback(session) is None
+    assert max(overrun.read_sizes, default=0) <= 64 * 1024
+    assert opened_sources[-1].closed is True
+
+    wrong_length = FakeResponse(WAV_AUDIO_BYTES, {"Content-Length": "999"})
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: wrong_length)
+    assert audio_storage_module.read_supabase_audio_for_playback(session) is None
+    assert wrong_length.read_sizes == []
+    assert opened_sources[-1].closed is True
+
+    wrong_range = FakeResponse(WAV_AUDIO_BYTES[1:9], {"Content-Length": "8", "Content-Range": "bytes 2-9/%d" % len(WAV_AUDIO_BYTES)})
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: wrong_range)
+    assert audio_storage_module.read_supabase_audio_for_playback(session, (1, 8)) is None
+    assert wrong_range.read_sizes == []
+    assert opened_sources[-1].closed is True
+
+    ranged = FakeResponse(WAV_AUDIO_BYTES[1:9], {"Content-Length": "8", "Content-Range": "bytes 1-8/%d" % len(WAV_AUDIO_BYTES)})
+    request_headers = []
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, **_kwargs: request_headers.append(request.get_header("Range")) or ranged,
+    )
+    result = audio_storage_module.read_supabase_audio_for_playback(session, (1, 8))
+    assert result is not None
+    source, size = result
+    try:
+        assert (size, source.read()) == (8, WAV_AUDIO_BYTES[1:9])
+    finally:
+        source.close()
+    assert request_headers == ["bytes=1-8"]
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(audio_storage_module.urllib.error.URLError("private upstream detail")),
+    )
+    with pytest.raises(HTTPException) as upstream_failure:
+        audio_storage_module.read_supabase_audio_for_playback(session)
+    assert upstream_failure.value.status_code == 502
+    assert "private upstream detail" not in upstream_failure.value.detail
 
 
 def test_stale_placeholder_audio_is_not_advertised_or_served(monkeypatch, tmp_path):

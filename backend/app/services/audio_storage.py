@@ -5,12 +5,13 @@ import math
 import os
 import secrets
 import struct
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import BinaryIO, Optional, Tuple
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_
@@ -396,18 +397,21 @@ class _AudioFileReader:
     container. Every read is header-sized; payloads are skipped with seek.
     """
 
-    def __init__(self, path: Path):
-        self.path = path
-        self.size = path.stat().st_size
+    def __init__(self, path: Path | BinaryIO, size: Optional[int] = None):
+        self.path = path if isinstance(path, Path) else None
+        self._source = None if isinstance(path, Path) else path
+        self.size = path.stat().st_size if self.path is not None else int(size or 0)
         self._file = None
         self.elements_seen = 0
 
     def __enter__(self):
-        self._file = self.path.open("rb")
+        self._file = self.path.open("rb") if self.path is not None else self._source
+        if self._file is not None:
+            self._file.seek(0)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self._file is not None:
+        if self._file is not None and self.path is not None:
             self._file.close()
 
     def read_exact(self, offset: int, size: int) -> Optional[bytes]:
@@ -673,6 +677,24 @@ def is_local_audio_available_for_playback(session: PracticeSession, path: Path) 
         return False
 
 
+def _is_spooled_audio_available_for_playback(session: PracticeSession, source: BinaryIO, size: int) -> bool:
+    if not is_audio_available_for_playback(session) or size != int(session.audio_size_bytes):
+        return False
+    try:
+        with _AudioFileReader(source, size) as reader:
+            validators = {
+                "audio/wav": _is_valid_wav_file,
+                "audio/webm": _is_valid_webm_file,
+                "audio/mp4": _is_valid_mp4_file,
+                "audio/ogg": _is_valid_ogg_file,
+                "audio/mpeg": _is_valid_mp3_file,
+            }
+            validator = validators.get(session.audio_mime_type)
+            return bool(validator and validator(reader))
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def read_audio_bytes(data: bytes, mime_type: str) -> Tuple[bytes, str]:
     mime_type = (mime_type or "application/octet-stream").split(";", 1)[0].strip().lower()
     audio_extension(mime_type)
@@ -799,6 +821,91 @@ def _read_supabase_object(object_key: str) -> bytes:
             return response.read()
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Supabase audio download failed.") from exc
+
+
+def _read_supabase_object_bounded(
+    object_key: str,
+    *,
+    expected_size: int,
+    byte_range: Optional[Tuple[int, int]] = None,
+) -> Optional[tuple[BinaryIO, int]]:
+    """Spool only the validated playback window, never an unbounded object."""
+    if expected_size <= 0 or expected_size > audio_upload_limit_bytes():
+        return None
+    bucket = _supabase_bucket()
+    encoded_key = urllib.parse.quote(object_key, safe="/")
+    headers = _supabase_headers()
+    expected_response_size = expected_size
+    if byte_range is not None:
+        start, end = byte_range
+        if start < 0 or end < start or end >= expected_size:
+            return None
+        expected_response_size = end - start + 1
+        headers["Range"] = "bytes=%d-%d" % (start, end)
+    request = urllib.request.Request(
+        _supabase_url("/storage/v1/object/%s/%s" % (bucket, encoded_key)),
+        headers=headers,
+    )
+    source = tempfile.SpooledTemporaryFile(max_size=min(1024 * 1024, expected_response_size), mode="w+b")
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310
+            if byte_range is not None:
+                start, end = byte_range
+                expected_content_range = "bytes %d-%d/%d" % (start, end, expected_size)
+                if response.headers.get("Content-Range") != expected_content_range:
+                    source.close()
+                    return None
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None and content_length.isdigit() and int(content_length) != expected_response_size:
+                source.close()
+                return None
+            remaining = expected_response_size + 1
+            while remaining:
+                chunk = response.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                source.write(chunk)
+                remaining -= len(chunk)
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+        source.close()
+        raise HTTPException(status_code=502, detail="Audio storage playback failed.") from exc
+    actual_size = source.tell()
+    if actual_size != expected_response_size:
+        source.close()
+        return None
+    source.seek(0)
+    return source, actual_size
+
+
+def read_supabase_audio_for_playback(
+    session: PracticeSession,
+    byte_range: Optional[Tuple[int, int]] = None,
+) -> Optional[tuple[BinaryIO, int]]:
+    """Return a bounded, validated Supabase playback response body.
+
+    Full-object reads validate the media structure. A valid single-byte range
+    is limited to its requested window; upload-time validation and immutable
+    metadata protect that streaming path without buffering the full object.
+    """
+    if session.audio_storage_provider != "supabase" or not is_audio_available_for_playback(session):
+        return None
+    try:
+        expected_size = int(session.audio_size_bytes)
+    except (TypeError, ValueError):
+        return None
+    result = _read_supabase_object_bounded(
+        session.audio_object_key,
+        expected_size=expected_size,
+        byte_range=byte_range,
+    )
+    if result is None:
+        return None
+    source, actual_size = result
+    if byte_range is not None or _is_spooled_audio_available_for_playback(session, source, actual_size):
+        source.seek(0)
+        return source, actual_size
+    source.close()
+    return None
 
 
 def _delete_supabase_object(object_key: str) -> None:
