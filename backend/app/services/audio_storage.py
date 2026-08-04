@@ -728,7 +728,7 @@ def _supabase_headers(mime_type: Optional[str] = None) -> dict:
     key = os.getenv("SUPABASE_SECRET_KEY")
     if not key:
         raise HTTPException(status_code=503, detail="Audio storage is unavailable.")
-    headers = {"apikey": key, "Authorization": "Bearer %s" % key}
+    headers = {"apikey": key}
     if mime_type:
         headers["Content-Type"] = mime_type
     return headers
