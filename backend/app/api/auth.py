@@ -267,7 +267,7 @@ def delete_supabase_identity(supabase_user_id: Optional[str]) -> bool:
     request = urllib.request.Request(
         _supabase_endpoint("/auth/v1/admin/users/%s" % encoded_user_id),
         method="DELETE",
-        headers={"apikey": service_key, "Authorization": "Bearer %s" % service_key},
+        headers={"apikey": service_key},
     )
     try:
         with urllib.request.urlopen(request, timeout=10):  # nosec B310
