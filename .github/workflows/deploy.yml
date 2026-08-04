@@ -59,9 +59,9 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_AUTH_GOOGLE_ENABLED: "true"
-          # Keep Apple visible-but-disabled until the Apple Developer and
-          # Supabase provider setup is complete. Flip this repository variable
-          # to "true" only after the live authorize flow is verified.
+          # Keep Apple enabled after the owner-confirmed Apple Developer and
+          # Supabase provider setup. Verify the live web authorize/callback
+          # flow against the exact deployed revision after each change.
           VITE_AUTH_APPLE_ENABLED: ${{ vars.VITE_AUTH_APPLE_ENABLED }}
         run: |
           set -euo pipefail
