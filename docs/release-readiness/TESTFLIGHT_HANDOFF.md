@@ -1,44 +1,71 @@
 # TestFlight Handoff
 
-Updated: 2026-07-24 UTC.
+Updated: 2026-08-05 UTC.
 
-## Current State
+## Current native state
 
-- Native project exists under `swift/BrassTuneApp`.
-- Swift package parity tests pass locally.
-- Earlier simulator build/unit/UI evidence is documented, but this run did not create a signed archive, export an IPA, or upload to TestFlight.
-- `scripts/ios/build-testflight.sh` now fails closed until a valid Apple Team ID, registered bundle ID, production Supabase HTTPS URL, and public publishable key are supplied; it invokes `CODE_SIGNING_ALLOWED=YES` for archives.
-- The Apple entitlement and both native third-party OAuth controls are deferred. Guest practice plus first-party email/password remain available.
-- Privacy/legal links are native HTTPS links to `https://brasstune.vercel.app/privacy`, `/terms`, and `/support`; the support page carries the support contact.
-- Native practice/auth/score/analytics/ensemble depth is not equivalent to the web app.
+- Production identity is configured: team `8S79RLTSWV`, bundle
+  `com.aryasalem.BrassTune`, Sign in with Apple, Apple Distribution identity,
+  and explicit App Store profile.
+- Current source remains version `1.0.0 (2)`. Build `2` already exists in
+  TestFlight and has five preserved physical crash reports, so it must not be
+  selected as the submission candidate.
+- Fresh current-source gates passed: Swift Core `12/12`, native units `240/240`,
+  selected non-physical UI `23/23`, focused legal UI `1/1`, Release simulator
+  build, localization, release-auth preflight, privacy-manifest validation, and
+  public legal/support URL checks.
+- Fresh current-source physical targeted UI/audio passed `7/7`, zero
+  failures/skips in 663.931 test seconds on the wired iPhone 15 Pro Max. The
+  full crash-family case completed 20 Tuner, 20 microphone Scale, 20 Metronome,
+  20 reference-tone cycles, background recovery, and 50 rapid tab switches;
+  its postflight inventory added no BrassTune report.
+- A no-install, no-archive generic iOS Release build passed store validation
+  with zero errors/warnings. It is Apple Distribution-signed with
+  `get-task-allow=false`, `beta-reports-active=true`, Sign in with Apple
+  `Default`, and matching app/dSYM UUID
+  `6F560646-9C34-38C0-B097-B05E8B70C0EC`.
+- Google and Apple native provider completion, callback, cold restore, sign-out,
+  and signed-out relaunch previously passed on the isolated physical `.dev`
+  bundle. Those results do not replace final-candidate TestFlight validation.
+- The wired iPhone 15 Pro Max remains connected on iOS 26.4.1 with Developer
+  Mode enabled. Production and `.dev` bundles both remain `1.0.0 (2)`. The
+  production TestFlight app remained at its original install path and untouched;
+  only the isolated `.dev` app was rebuilt for testing and then restored to a
+  normal current-source Debug `.dev` build.
 
-## Required Before TestFlight
+Evidence:
 
-1. Final bundle ID and Apple Team ID.
-2. Signing certificates/profiles.
-3. App Store Connect app record.
-4. Marketing version/build number.
-5. Final privacy manifest and required-reason API audit.
-6. Decide and verify the production third-party auth posture. Re-enable both Apple entitlement/control and native Google presentation only after Apple provider/capability setup and live dual-provider testing.
-7. Native API/auth/audio scope decision: production paths or explicit beta/demo scope.
-8. Signed archive/export validation.
-9. Upload, processing, internal group assignment, and install evidence.
-10. Reconcile App Store Connect privacy answers with the final signed build: linked email, user ID, and account-linked user content for app functionality; no raw microphone audio collection. Reconfirm the exempt-encryption declaration if cryptography changes.
+`<user-home>/Library/Application Support/BrassTune/ReleaseEvidence/NativeIOSContinuation-2026-08-05/AppStorePreflight`
 
-## Suggested Internal Test Scope
+## Exact next-candidate sequence
 
-- Launch and onboarding.
-- Practice tuner demo/mic behavior.
-- Settings, legal, export/delete entry points.
-- Account flow only after provider setup.
-- Score scanner only after native VisionKit/Photos/file importer implementation.
-- Accessibility smoke with Dynamic Type and VoiceOver.
-- Physical-device microphone protocol from `PHYSICAL_DEVICE_PROTOCOL.md`.
+1. Reconcile the dirty native worktree with upstream and bind the intended
+   candidate to an exact reviewed commit.
+2. Assign a unique build number greater than `2`. The earlier no-build-3/no-upload
+   restriction must be explicitly superseded before this step.
+3. Create and validate the production archive; preserve the archive, export
+   diagnostics, and matching dSYM.
+4. Upload only that exact candidate, wait for TestFlight processing, assign the
+   internal group, and install it on the physical device without treating the
+   existing build 2 as a substitute.
+5. Repeat the original metronome, live input-tap, and duplicate-tap crash
+   reproductions, their repeated-cycle groups, and cross-feature stress against
+   the processed build. Preserve device logs and any failure artifacts.
+6. Complete the remaining metadata and owner/legal attestations from
+   [`APP_STORE_SUBMISSION_PACKET_2026-08-05.md`](APP_STORE_SUBMISSION_PACKET_2026-08-05.md).
 
-## Do Not Claim
+## Current decision
 
-- App Store readiness.
-- Physical microphone quality.
-- Production native parity.
-- Score scanner parity.
-- Account-provider readiness.
+**Blocked.** This handoff is locally archive-ready from a signing/configuration
+standpoint, but no unique exact candidate, archive, upload, processed install,
+or final physical closure exists. No App Store Connect field was changed, no
+build was uploaded, and no release package directory was created in this pass.
+
+## Do not claim
+
+- App Store submission readiness from simulator or build-only signing evidence.
+- Build 2 as a repaired candidate.
+- Bluetooth, wired input, or audible production AirPlay coverage when the
+  corresponding hardware/evidence is unavailable.
+- Calibrated tuner latency/accuracy or accepted audible metronome jitter from
+  the existing consumer-device observations.

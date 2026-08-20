@@ -304,20 +304,56 @@ test('server-side ensemble authorization rejects forbidden writes', async ({ req
 });
 
 test('a manager cannot force-activate an invited student (consent gate)', async ({ request }) => {
-  const created = await request.post(`${apiBaseURL}/api/ensemble/groups`, {
-    headers: { Authorization: 'Bearer dev-user-1' },
-    data: { name: 'E2E Consent Class' },
-  });
-  expect(created.status()).toBe(200);
-  const group = await created.json();
-  const invite = await request.post(`${apiBaseURL}/api/ensemble/groups/${group.id}/members/by-username`, {
-    headers: { Authorization: 'Bearer dev-user-1' },
-    data: { username: 'maya' },
-  });
-  expect(invite.status()).toBe(200);
-  const member = await invite.json();
+  const managerHeaders = { Authorization: 'Bearer dev-user-1' };
+  const fixtureName = 'E2E Consent Class';
+
+  // A long-lived local backend can retain the manager's quota from prior E2E
+  // runs. A fixture is reusable only when the manager can directly observe
+  // Maya's pending invitation; never infer consent state from its name alone.
+  const findInvitedFixture = async () => {
+    const groupsResponse = await request.get(`${apiBaseURL}/api/ensemble/groups`, { headers: managerHeaders });
+    expect(groupsResponse.status()).toBe(200);
+    const groups = await groupsResponse.json();
+    for (const group of groups.filter((candidate: { name: string }) => candidate.name === fixtureName)) {
+      const membersResponse = await request.get(`${apiBaseURL}/api/ensemble/groups/${group.id}/members`, {
+        headers: managerHeaders,
+      });
+      expect(membersResponse.status()).toBe(200);
+      const member = (await membersResponse.json()).find(
+        (candidate: { username?: string; status?: string }) => candidate.username === 'maya' && candidate.status === 'invited',
+      );
+      if (member) return { group, member };
+    }
+    return undefined;
+  };
+
+  let fixture = await findInvitedFixture();
+  if (!fixture) {
+    const created = await request.post(`${apiBaseURL}/api/ensemble/groups`, {
+      headers: managerHeaders,
+      data: { name: fixtureName },
+    });
+    if (created.status() === 409) {
+      const { detail } = await created.json();
+      expect(detail).toBe('You have reached the class ownership limit.');
+      fixture = await findInvitedFixture();
+      expect(fixture, 'ownership-limited test setup requires an invited E2E Consent Class fixture').toBeDefined();
+    } else {
+      expect(created.status()).toBe(200);
+      const group = await created.json();
+      const invite = await request.post(`${apiBaseURL}/api/ensemble/groups/${group.id}/members/by-username`, {
+        headers: managerHeaders,
+        data: { username: 'maya' },
+      });
+      expect(invite.status()).toBe(200);
+      fixture = { group, member: await invite.json() };
+    }
+  }
+
+  expect(fixture).toBeDefined();
+  const { group, member } = fixture!;
   const forced = await request.patch(`${apiBaseURL}/api/ensemble/groups/${group.id}/members/${member.id}`, {
-    headers: { Authorization: 'Bearer dev-user-1' },
+    headers: managerHeaders,
     data: { status: 'active' },
   });
   expect(forced.status()).toBe(409);

@@ -1,9 +1,13 @@
-# BrassTune Analytics
+# BrassTune
 
-BrassTune Analytics is a local MVP for brass musicians who want to understand recurring intonation patterns, not only whether a single note is in tune right now.
+BrassTune is a brass-practice app for live tuning, guided practice, local score work, session review, and recurring intonation analysis. The primary native client is the SwiftUI app under `swift/BrassTuneApp`; the repository also contains the React web client and FastAPI service used by the hosted companion experience.
 
 The project includes:
 
+- A native SwiftUI iPhone/iPad app with guest-first practice, local recordings,
+  score import, tuner, scales, metronome, drone/interval tools, localization,
+  accessibility support, and optional Supabase-backed accounts
+- A shared Swift package for pitch math and instrument transposition
 - React + TypeScript + Vite frontend
 - Python + FastAPI backend
 - SQLite persistence with SQLAlchemy
@@ -51,6 +55,41 @@ docs/
   pitch-detection-notes.md
 ```
 
+## Native iOS App
+
+Requirements:
+
+- macOS with a current Xcode release and an installed iOS Simulator runtime
+- Swift 6 toolchain
+- An Apple development team only when installing on physical hardware; simulator
+  builds do not require a signing identity
+
+Inspect the available schemes and run the shared package tests from the project
+root:
+
+```sh
+xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj
+swift test --package-path swift/BrassTuneCore
+```
+
+Open the app project:
+
+```sh
+open swift/BrassTuneApp/BrassTuneApp.xcodeproj
+```
+
+The app uses the local `swift/BrassTuneCore` package. Guest practice works
+without an account. Production account features use a Supabase URL and a
+public client publishable key embedded in the app build; privileged Supabase
+secret/service-role keys must remain server-side and must never be added to the
+Xcode project or source control. Contributors can use local signing overrides
+without committing personal provisioning material.
+
+Native release evidence is intentionally separated into simulator, unsigned
+build, signed build, physical-device, TestFlight, and App Store gates under
+`docs/release-readiness/`. A passing simulator build is not evidence of a signed
+archive, physical microphone quality, or App Store readiness.
+
 ## Windows Setup
 
 These commands assume Windows PowerShell from the project root.
@@ -59,7 +98,7 @@ These commands assume Windows PowerShell from the project root.
 cd C:\path\to\BrassTune
 ```
 
-Install Python 3.11+ and Node.js 20+ first. Then open two PowerShell windows.
+Install Python 3.11+ and Node.js 24.x first. Then open two PowerShell windows.
 
 If PowerShell blocks virtualenv activation, run this once in that PowerShell window:
 
@@ -163,6 +202,19 @@ Backend Supabase env vars:
 - `SUPABASE_PUBLISHABLE_KEY`
 
 See `docs/supabase-integration.md` for Auth, Storage, database, and security notes.
+
+## Public Repository Safety
+
+- Real `.env` files, local databases, recordings, build output, Apple signing
+  material, Xcode user data, and deployment credentials are ignored and must
+  never be force-added.
+- Supabase publishable keys are client identifiers and are safe in web/mobile
+  clients only when Row Level Security and authorization policies are correct.
+  Supabase secret and legacy service-role keys are privileged credentials and
+  must stay in server-side secret stores.
+- Report suspected vulnerabilities privately using the process in
+  [`SECURITY.md`](SECURITY.md). Do not open a public issue containing a token,
+  personal data, or exploit details.
 
 ## Audio Calibration Lab
 

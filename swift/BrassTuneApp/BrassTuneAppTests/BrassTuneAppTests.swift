@@ -41,8 +41,120 @@ private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private final class MetronomeCompletionBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completions: [@Sendable (Result<Void, Error>) -> Void] = []
+
+    func append(_ completion: @escaping @Sendable (Result<Void, Error>) -> Void) {
+        lock.lock()
+        completions.append(completion)
+        lock.unlock()
+    }
+
+    var first: (@Sendable (Result<Void, Error>) -> Void)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return completions.first
+    }
+}
+
+private final class MetronomeGraphProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedEvents: [String] = []
+    private var storedTargets: [UInt64] = []
+    private var storedCompletions: [@Sendable (Result<Void, Error>) -> Void] = []
+
+    lazy var hooks = NativeMetronomeGraphHooks(
+        prepare: { [weak self] in self?.record("prepare") },
+        schedule: { [weak self] target, completion in
+            guard let self else { return }
+            self.lock.lock()
+            self.storedEvents.append("schedule")
+            self.storedTargets.append(target)
+            self.storedCompletions.append(completion)
+            self.lock.unlock()
+        },
+        play: { [weak self] in self?.record("play") },
+        stop: { [weak self] in self?.record("stop") },
+        reset: { [weak self] in self?.record("reset") }
+    )
+
+    var events: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedEvents
+    }
+
+    var targets: [UInt64] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedTargets
+    }
+
+    var completionCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCompletions.count
+    }
+
+    func completion(at index: Int) -> (@Sendable (Result<Void, Error>) -> Void)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedCompletions.indices.contains(index) else { return nil }
+        return storedCompletions[index]
+    }
+
+    private func record(_ event: String) {
+        lock.lock()
+        storedEvents.append(event)
+        lock.unlock()
+    }
+}
+
+private final class AudioControlPlaneProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedEvents: [NativeAudioControlPlaneHooks.Event] = []
+    private var storedMainThreadFlags: [Bool] = []
+    var failingEvent: NativeAudioControlPlaneHooks.Event?
+    var delayedEvent: NativeAudioControlPlaneHooks.Event?
+    var delaySeconds: TimeInterval = 0
+
+    lazy var hooks = NativeAudioControlPlaneHooks { [weak self] event in
+        guard let self else { return }
+        self.lock.lock()
+        self.storedEvents.append(event)
+        self.storedMainThreadFlags.append(Thread.isMainThread)
+        let shouldFail = self.failingEvent == event
+        let shouldDelay = self.delayedEvent == event
+        let delay = self.delaySeconds
+        self.lock.unlock()
+        if shouldDelay, delay > 0 { Thread.sleep(forTimeInterval: delay) }
+        if shouldFail { throw NativeAudioEngineError.outputUnavailable }
+    }
+
+    var events: [NativeAudioControlPlaneHooks.Event] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedEvents
+    }
+
+    var allPhysicalHooksOffMain: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !storedMainThreadFlags.isEmpty && storedMainThreadFlags.allSatisfy { !$0 }
+    }
+
+    func count(_ event: NativeAudioControlPlaneHooks.Event) -> Int {
+        events.filter { $0 == event }.count
+    }
+}
+
 private final class InMemoryAuthSessionStore: @unchecked Sendable {
     var payload: String?
+}
+
+private final class AuthPersistenceWriteCounter: @unchecked Sendable {
+    var payloads: [String] = []
 }
 
 private final class PersistenceThreadObservation: @unchecked Sendable {
@@ -65,6 +177,30 @@ private final class PersistenceThreadObservation: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return values.count
+    }
+}
+
+private final class FailOncePersistenceWriter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var shouldFail = true
+    private var storedAttemptCount = 0
+
+    func write(_ data: Data, to url: URL) throws {
+        lock.lock()
+        storedAttemptCount += 1
+        let failsThisAttempt = shouldFail
+        shouldFail = false
+        lock.unlock()
+        if failsThisAttempt {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try data.write(to: url, options: [.atomic])
+    }
+
+    var attemptCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedAttemptCount
     }
 }
 
@@ -277,6 +413,7 @@ final class BrassTuneAppTests: XCTestCase {
         AppSceneAudioLifecycle.handleTransition(
             from: .active,
             to: .inactive,
+            preservePendingTunerStartWhileInactive: { false },
             cancelTunerStart: { events.append("cancel tuner start") },
             isTunerRecording: { false },
             stopTunerRecording: { events.append("stop tuner recording") },
@@ -294,6 +431,7 @@ final class BrassTuneAppTests: XCTestCase {
         AppSceneAudioLifecycle.handleTransition(
             from: .active,
             to: .background,
+            preservePendingTunerStartWhileInactive: { false },
             cancelTunerStart: { events.append("cancel tuner start") },
             isTunerRecording: { tunerIsRecording },
             stopTunerRecording: {
@@ -314,6 +452,7 @@ final class BrassTuneAppTests: XCTestCase {
         AppSceneAudioLifecycle.handleTransition(
             from: .inactive,
             to: .background,
+            preservePendingTunerStartWhileInactive: { false },
             cancelTunerStart: { cleanupCount += 1 },
             isTunerRecording: { true },
             stopTunerRecording: { cleanupCount += 1 },
@@ -321,6 +460,40 @@ final class BrassTuneAppTests: XCTestCase {
         )
 
         XCTAssertEqual(cleanupCount, 0)
+    }
+
+    @MainActor
+    func testSystemPermissionSheetInactiveTransitionPreservesPendingTunerStart() {
+        var events: [String] = []
+
+        AppSceneAudioLifecycle.handleTransition(
+            from: .active,
+            to: .inactive,
+            preservePendingTunerStartWhileInactive: { true },
+            cancelTunerStart: { events.append("cancel tuner start") },
+            isTunerRecording: { false },
+            stopTunerRecording: { events.append("stop tuner recording") },
+            releasePracticeAudio: { events.append("release practice audio") }
+        )
+
+        XCTAssertEqual(events, ["release practice audio"])
+    }
+
+    @MainActor
+    func testBackgroundTransitionStillCancelsPendingPermissionRequest() {
+        var events: [String] = []
+
+        AppSceneAudioLifecycle.handleTransition(
+            from: .active,
+            to: .background,
+            preservePendingTunerStartWhileInactive: { true },
+            cancelTunerStart: { events.append("cancel tuner start") },
+            isTunerRecording: { false },
+            stopTunerRecording: { events.append("stop tuner recording") },
+            releasePracticeAudio: { events.append("release practice audio") }
+        )
+
+        XCTAssertEqual(events, ["cancel tuner start", "release practice audio"])
     }
 
     @MainActor
@@ -430,6 +603,24 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertFalse(model.practiceFeatures.recents.contains { $0.referenceID == saved.exercise.id })
     }
 
+    func testPracticeHomeShortcutsHideDisabledPacksAndDeduplicateFavoritesAndRecents() {
+        let shared = PracticeShortcut(
+            kind: .playAlongExercise,
+            referenceID: "shared-exercise",
+            title: "Shared exercise"
+        )
+        let pack = PracticeShortcut(
+            kind: .practicePack,
+            referenceID: "disabled-pack",
+            title: "Disabled pack"
+        )
+
+        let visible = uniqueReleaseVisibleShortcuts([shared, pack, shared])
+
+        XCTAssertEqual(visible, [shared])
+        XCTAssertFalse(NativeReleaseFeatureFlags.offlinePacks)
+    }
+
     func testWeakTransitionsNormalizeEnharmonicsOctavesAndRankDestinationCents() {
         func attempt(_ from: String, _ to: String, _ cents: Double) -> PlayAlongAttemptSummary {
             let exercise = PlayAlongExercise(id: UUID().uuidString, title: "Test", detail: "", difficulty: "", category: .practicePattern, writtenNotes: [from, to])
@@ -522,20 +713,52 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testLocalExportIncludesPracticeMetricsAndImportedScore() throws {
+    func testLocalExportUsesVersionedDeterministicJSONAndIncludesImportedScore() throws {
         let model = makeModel()
         model.sessions = [makeSession(name: "Exportable recording", cents: [-4, 0, 7])]
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Warm-up score")
 
-        let export = model.exportDataText()
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let export = model.exportDataText(exportedAt: date)
+        let repeated = model.exportDataText(exportedAt: date)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let payload = try decoder.decode(NativePracticeHistoryExport.self, from: try XCTUnwrap(export.data(using: .utf8)))
 
-        XCTAssertTrue(export.contains("BrassTune local data export"))
-        XCTAssertTrue(export.contains("Sessions: 1"))
-        XCTAssertTrue(export.contains("Exportable recording"))
-        XCTAssertTrue(export.contains("Average absolute cents"))
-        XCTAssertTrue(export.contains("Cents preview"))
-        XCTAssertTrue(export.contains("Scores: 1"))
-        XCTAssertTrue(export.contains("Warm-up score"))
+        XCTAssertEqual(export, repeated)
+        XCTAssertEqual(payload.schemaVersion, 1)
+        XCTAssertEqual(payload.exportedAt, date)
+        XCTAssertEqual(payload.sessions.map(\.name), ["Exportable recording"])
+        XCTAssertEqual(payload.scores.map(\.title), ["Warm-up score"])
+    }
+
+    @MainActor
+    func testClearPracticeHistoryPreservesImportedScoreMetadata() {
+        let model = makeModel()
+        let score = makeSampleScore()
+        model.sessions = [makeSession(name: "History", cents: Array(repeating: 0, count: 12))]
+        model.scores = [score]
+        model.activeScoreID = score.id
+
+        model.clearLocalPracticeData()
+
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertEqual(model.scores, [score])
+        XCTAssertEqual(model.activeScoreID, score.id)
+    }
+
+    func testPracticeSessionMigratesActivityIdentityFromLegacyPayload() throws {
+        let id = UUID()
+        let legacy = """
+        {"id":"\(id.uuidString)","name":"Legacy","instrumentId":"trumpet","startedAt":"2024-01-01T00:00:00Z","frames":[],"source":"live"}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let session = try decoder.decode(PracticeSession.self, from: Data(legacy.utf8))
+
+        XCTAssertEqual(session.activityInstanceID, id)
+        XCTAssertEqual(session.activity, .tuning)
+        XCTAssertEqual(session.completion, .completed)
     }
 
     @MainActor
@@ -558,11 +781,12 @@ final class BrassTuneAppTests: XCTestCase {
     @MainActor
     func testAccountFeaturesAreDisabledWithoutSupabaseConfig() {
         let model = makeModel()
+        model.config = .local
 
         XCTAssertFalse(model.accountFeaturesEnabled)
         XCTAssertEqual(
             model.accountUnavailableMessage,
-            "Practice as a guest today. Online backup and Classes will appear when account access is available."
+            "Practice as a guest today. Account sign-in will be available when secure account access is ready."
         )
     }
 
@@ -915,9 +1139,33 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(KeychainStore.sessionAccessibility, kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
     }
 
+    func testKeychainErrorMappingKeepsOperationSpecificUserRecovery() {
+        XCTAssertEqual(
+            KeychainStore.userVisibleError(for: KeychainStoreError(operation: .read, status: errSecParam)),
+            .secureStorageReadFailed
+        )
+        XCTAssertEqual(
+            KeychainStore.userVisibleError(for: KeychainStoreError(operation: .save, status: errSecMissingEntitlement)),
+            .secureStorageUnavailable
+        )
+        XCTAssertEqual(
+            KeychainStore.userVisibleError(for: KeychainStoreError(operation: .read, status: nil, isCorrupt: true)),
+            .secureStorageCorrupt
+        )
+        XCTAssertEqual(
+            KeychainStore.userVisibleError(for: KeychainStoreError(operation: .save, status: errSecParam)),
+            .secureStorageSaveFailed
+        )
+        XCTAssertEqual(
+            KeychainStore.userVisibleError(for: KeychainStoreError(operation: .delete, status: errSecParam)),
+            .secureStorageDeletionFailed
+        )
+    }
+
     @MainActor
     func testGoogleOAuthTransactionUsesPKCEStateAndExactNativeCallback() throws {
         let verifier = String(repeating: "v", count: 64)
+        let expectedScheme = try XCTUnwrap(AuthService.oauthCallbackScheme)
         let transaction = try AuthService.googleOAuthTransaction(
             config: makeAuthConfig(),
             state: "state-123",
@@ -940,37 +1188,354 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertNotEqual(values["code_challenge"], verifier)
         XCTAssertEqual(
             values["redirect_to"],
-            "com.brasstune.auth://oauth/google?state=state-123"
+            "\(expectedScheme)://oauth/google?state=state-123"
         )
         XCTAssertNil(values["apikey"], "The publishable key belongs in API headers, not browser history.")
-        XCTAssertEqual(transaction.callbackURL.scheme, AuthService.oauthCallbackScheme)
+        XCTAssertEqual(transaction.callbackURL.scheme, expectedScheme)
+        XCTAssertEqual(
+            expectedScheme,
+            AuthService.resolvedOAuthCallbackScheme(
+                rawValue: expectedScheme,
+                bundleIdentifier: Bundle.main.bundleIdentifier
+            )
+        )
+    }
+
+    @MainActor
+    func testOAuthCallbackSchemeResolverBindsExactBundleIdentityAndFailsClosed() throws {
+        XCTAssertEqual(
+            AuthService.resolvedOAuthCallbackScheme(
+                rawValue: AuthService.productionOAuthCallbackScheme,
+                bundleIdentifier: AuthService.productionBundleIdentifier
+            ),
+            AuthService.productionOAuthCallbackScheme
+        )
+        XCTAssertEqual(
+            AuthService.resolvedOAuthCallbackScheme(
+                rawValue: "  COM.BRASSTUNE.AUTH.DEV  ",
+                bundleIdentifier: "com.aryasalem.BrassTune.dev"
+            ),
+            AuthService.developmentOAuthCallbackScheme
+        )
+        for fixtureIdentifier in [
+            "com.brasstune.BrassTuneAppTests.dev",
+            "com.brasstune.BrassTuneAppUITests.dev",
+        ] {
+            XCTAssertEqual(
+                AuthService.resolvedOAuthCallbackScheme(
+                    rawValue: AuthService.developmentOAuthCallbackScheme,
+                    bundleIdentifier: fixtureIdentifier
+                ),
+                AuthService.developmentOAuthCallbackScheme
+            )
+        }
+
+        for (rawValue, bundleIdentifier) in [
+            (AuthService.developmentOAuthCallbackScheme, AuthService.productionBundleIdentifier),
+            (AuthService.productionOAuthCallbackScheme, "com.aryasalem.BrassTune.dev"),
+            (nil, AuthService.productionBundleIdentifier),
+            ("$(BRASSTUNE_AUTH_CALLBACK_SCHEME)", AuthService.productionBundleIdentifier),
+            ("another.app.callback", AuthService.productionBundleIdentifier),
+            (AuthService.productionOAuthCallbackScheme, "another.app"),
+        ] as [(String?, String?)] {
+            XCTAssertNil(
+                AuthService.resolvedOAuthCallbackScheme(
+                    rawValue: rawValue,
+                    bundleIdentifier: bundleIdentifier
+                )
+            )
+        }
+
+        let currentScheme = try XCTUnwrap(AuthService.oauthCallbackScheme)
+        let mismatchedScheme = currentScheme == AuthService.productionOAuthCallbackScheme
+            ? AuthService.developmentOAuthCallbackScheme
+            : AuthService.productionOAuthCallbackScheme
+
+        let mismatchedCallback = try XCTUnwrap(
+            URL(string: "\(mismatchedScheme)://oauth/google?state=expected-state&code=code")
+        )
+        XCTAssertThrowsError(
+            try AuthService.validatedGoogleOAuthCode(
+                mismatchedCallback,
+                expectedState: "expected-state",
+                callbackScheme: currentScheme
+            )
+        ) { error in
+            XCTAssertEqual(error as? UserVisibleError, .oauthCallbackInvalid)
+        }
+        XCTAssertThrowsError(
+            try AuthService.googleOAuthTransaction(
+                config: makeAuthConfig(),
+                state: "untrusted-state",
+                codeVerifier: String(repeating: "u", count: 64),
+                callbackScheme: mismatchedScheme
+            )
+        ) { error in
+            XCTAssertEqual(error as? UserVisibleError, .oauthCallbackInvalid)
+        }
+    }
+
+    @MainActor
+    func testUITestAuthPersistenceBypassIsDevelopmentOnly() {
+        let arguments = ["UITEST_AUTH_NO_PERSIST"]
+        for bundleIdentifier in AuthService.developmentBundleIdentifiers {
+            XCTAssertTrue(
+                AuthService.shouldDisableAuthPersistence(
+                    arguments: arguments,
+                    bundleIdentifier: bundleIdentifier
+                )
+            )
+            XCTAssertTrue(
+                AuthService.shouldReturnEmptyAuthState(
+                    arguments: arguments,
+                    bundleIdentifier: bundleIdentifier
+                ),
+                "No-persist probes must never read or refresh a stored session."
+            )
+        }
+        for bundleIdentifier in [
+            AuthService.productionBundleIdentifier,
+            "another.app",
+        ] {
+            XCTAssertFalse(
+                AuthService.shouldDisableAuthPersistence(
+                    arguments: arguments,
+                    bundleIdentifier: bundleIdentifier
+                )
+            )
+            XCTAssertFalse(
+                AuthService.shouldReturnEmptyAuthState(
+                    arguments: arguments,
+                    bundleIdentifier: bundleIdentifier
+                )
+            )
+        }
+        XCTAssertFalse(
+            AuthService.shouldDisableAuthPersistence(
+                arguments: [],
+                bundleIdentifier: "com.aryasalem.BrassTune.dev"
+            )
+        )
+        XCTAssertFalse(
+            AuthService.shouldDisableAuthPersistence(
+                arguments: arguments,
+                bundleIdentifier: nil
+            )
+        )
+        XCTAssertTrue(
+            AuthService.shouldReturnEmptyAuthState(
+                arguments: ["UITEST_AUTH_EMPTY"],
+                bundleIdentifier: "com.aryasalem.BrassTune.dev"
+            )
+        )
+        XCTAssertFalse(
+            AuthService.shouldReturnEmptyAuthState(
+                arguments: ["UITEST_AUTH_EMPTY"],
+                bundleIdentifier: AuthService.productionBundleIdentifier
+            )
+        )
     }
 
     @MainActor
     func testGoogleOAuthCallbackRejectsStateMismatchTokensAndUnexpectedFields() throws {
+        let callbackScheme = try XCTUnwrap(AuthService.oauthCallbackScheme)
         let valid = try XCTUnwrap(
-            URL(string: "com.brasstune.auth://oauth/google?state=expected&code=single-use-code")
+            URL(string: "\(callbackScheme)://oauth/google?state=expected&code=single-use-code")
         )
         XCTAssertEqual(
-            try AuthService.validatedGoogleOAuthCode(valid, expectedState: "expected"),
+            try AuthService.validatedGoogleOAuthCode(
+                valid,
+                expectedState: "expected",
+                callbackScheme: callbackScheme
+            ),
             "single-use-code"
         )
 
         for invalid in [
-            "com.brasstune.auth://oauth/google?state=wrong&code=single-use-code",
-            "com.brasstune.auth://oauth/google?state=expected&access_token=must-not-be-accepted",
-            "com.brasstune.auth://oauth/google?state=expected&code=ok&extra=unexpected",
-            "com.brasstune.auth://oauth/google?state=expected&code=ok#access_token=secret",
+            "\(callbackScheme)://oauth/google?state=wrong&code=single-use-code",
+            "\(callbackScheme)://oauth/google?state=expected&access_token=must-not-be-accepted",
+            "\(callbackScheme)://oauth/google?state=expected&code=ok&extra=unexpected",
+            "\(callbackScheme)://oauth/google?state=expected&code=ok#access_token=secret",
             "other.app://oauth/google?state=expected&code=ok",
         ] {
             let url = try XCTUnwrap(URL(string: invalid))
             XCTAssertThrowsError(
-                try AuthService.validatedGoogleOAuthCode(url, expectedState: "expected"),
+                try AuthService.validatedGoogleOAuthCode(
+                    url,
+                    expectedState: "expected",
+                    callbackScheme: callbackScheme
+                ),
                 invalid
             ) { error in
                 XCTAssertEqual(error as? UserVisibleError, .oauthCallbackInvalid)
             }
         }
+    }
+
+    @MainActor
+    func testAppleServiceSendsExactNonceAndIdentityTokenAndPersistsSession() async throws {
+        let credentialStore = InMemoryAuthSessionStore()
+        let networkSession = makeStubSession()
+        let authService = AuthService(
+            session: networkSession,
+            readSessionPayload: { credentialStore.payload },
+            saveSessionPayload: { credentialStore.payload = $0 },
+            deleteSessionPayload: { credentialStore.payload = nil }
+        )
+        nonisolated(unsafe) var capturedRequest: URLRequest?
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            capturedRequest = request
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"apple-access","refresh_token":"apple-refresh","expires_in":3600,"user":{"id":"apple-user","email":"apple@example.com"}}"#.utf8)
+            )
+        }
+
+        let result = try await authService.signInWithApple(
+            identityToken: Data("signed-apple-identity-token".utf8),
+            rawNonce: "exact-raw-nonce",
+            config: makeAuthConfig()
+        )
+
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/auth/v1/token")
+        XCTAssertEqual(
+            URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "grant_type" })?.value,
+            "id_token"
+        )
+        let body = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(requestBodyData(request))) as? [String: String]
+        )
+        XCTAssertEqual(
+            body,
+            [
+                "provider": "apple",
+                "id_token": "signed-apple-identity-token",
+                "nonce": "exact-raw-nonce",
+            ]
+        )
+        XCTAssertEqual(result.session.userID, "apple-user")
+        XCTAssertEqual(result.session.accessToken, "apple-access")
+        XCTAssertEqual(try authService.restoreSessionOrThrow(), result.session)
+        XCTAssertNotNil(credentialStore.payload)
+    }
+
+    @MainActor
+    func testGoogleServiceUsesBrowserPKCEVerifierForTokenExchangeAndPersistsSession() async throws {
+        let credentialStore = InMemoryAuthSessionStore()
+        let networkSession = makeStubSession()
+        nonisolated(unsafe) var capturedAuthorizationURL: URL?
+        nonisolated(unsafe) var capturedCallbackScheme: String?
+        nonisolated(unsafe) var capturedTokenRequest: URLRequest?
+        let authService = AuthService(
+            session: networkSession,
+            readSessionPayload: { credentialStore.payload },
+            saveSessionPayload: { credentialStore.payload = $0 },
+            deleteSessionPayload: { credentialStore.payload = nil },
+            webAuthentication: { authorizationURL, callbackScheme in
+                capturedAuthorizationURL = authorizationURL
+                capturedCallbackScheme = callbackScheme
+                let authorizationQuery = URLComponents(
+                    url: authorizationURL,
+                    resolvingAgainstBaseURL: false
+                )?.queryItems ?? []
+                let redirect = try XCTUnwrap(
+                    authorizationQuery.first(where: { $0.name == "redirect_to" })?.value
+                )
+                var callback = try XCTUnwrap(URLComponents(string: redirect))
+                let state = try XCTUnwrap(
+                    callback.queryItems?.first(where: { $0.name == "state" })?.value
+                )
+                callback.queryItems = [
+                    URLQueryItem(name: "state", value: state),
+                    URLQueryItem(name: "code", value: "single-use-google-code"),
+                ]
+                return try XCTUnwrap(callback.url)
+            }
+        )
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            capturedTokenRequest = request
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"google-access","refresh_token":"google-refresh","expires_in":3600,"user":{"id":"google-user","email":"google@example.com"}}"#.utf8)
+            )
+        }
+
+        let session = try await authService.signInWithGoogle(config: makeAuthConfig())
+
+        let authorizationURL = try XCTUnwrap(capturedAuthorizationURL)
+        XCTAssertEqual(authorizationURL.path, "/auth/v1/authorize")
+        XCTAssertEqual(capturedCallbackScheme, AuthService.oauthCallbackScheme)
+        let authorizationQuery = URLComponents(
+            url: authorizationURL,
+            resolvingAgainstBaseURL: false
+        )?.queryItems ?? []
+        XCTAssertEqual(authorizationQuery.first(where: { $0.name == "provider" })?.value, "google")
+        XCTAssertEqual(authorizationQuery.first(where: { $0.name == "code_challenge_method" })?.value, "s256")
+
+        let tokenRequest = try XCTUnwrap(capturedTokenRequest)
+        XCTAssertEqual(tokenRequest.url?.path, "/auth/v1/token")
+        XCTAssertEqual(
+            URLComponents(url: try XCTUnwrap(tokenRequest.url), resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "grant_type" })?.value,
+            "pkce"
+        )
+        let tokenBody = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(requestBodyData(tokenRequest))) as? [String: String]
+        )
+        XCTAssertEqual(tokenBody["auth_code"], "single-use-google-code")
+        let verifier = try XCTUnwrap(tokenBody["code_verifier"])
+        XCTAssertTrue((43...128).contains(verifier.count))
+        let verifierDigest = Data(SHA256.hash(data: Data(verifier.utf8)))
+        let expectedChallenge = verifierDigest.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        XCTAssertEqual(
+            authorizationQuery.first(where: { $0.name == "code_challenge" })?.value,
+            expectedChallenge
+        )
+        XCTAssertEqual(session.userID, "google-user")
+        XCTAssertEqual(session.accessToken, "google-access")
+        XCTAssertEqual(try authService.restoreSessionOrThrow(), session)
+        XCTAssertNotNil(credentialStore.payload)
+    }
+
+    @MainActor
+    func testGoogleServiceStateMismatchMakesZeroTokenRequestsAndWritesNoCredential() async throws {
+        let credentialStore = InMemoryAuthSessionStore()
+        nonisolated(unsafe) var tokenRequestCount = 0
+        let authService = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { credentialStore.payload },
+            saveSessionPayload: { credentialStore.payload = $0 },
+            deleteSessionPayload: { credentialStore.payload = nil },
+            webAuthentication: { _, callbackScheme in
+                try XCTUnwrap(URL(string: "\(callbackScheme)://oauth/google?state=mismatched-state&code=must-not-exchange"))
+            }
+        )
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            tokenRequestCount += 1
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!,
+                data: Data()
+            )
+        }
+
+        do {
+            _ = try await authService.signInWithGoogle(config: makeAuthConfig())
+            XCTFail("Expected mismatched OAuth state to fail closed")
+        } catch let error as UserVisibleError {
+            XCTAssertEqual(error, .oauthCallbackInvalid)
+        }
+        XCTAssertEqual(tokenRequestCount, 0)
+        XCTAssertNil(credentialStore.payload)
+        XCTAssertNil(try authService.restoreSessionOrThrow())
     }
 
     @MainActor
@@ -1012,7 +1577,7 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testNativeShippingGateIgnoresRemoteOAuthProviderSettings() async throws {
+    func testRemoteOAuthProviderCapabilityEnablesOnlyConfiguredProvider() async throws {
         let networkSession = makeStubSession()
         nonisolated(unsafe) var providerRequestCount = 0
         let authService = AuthService(
@@ -1043,12 +1608,9 @@ final class BrassTuneAppTests: XCTestCase {
 
         await model.loadAuthProviderConfiguration()
         XCTAssertFalse(model.appleSignInAvailable)
-        XCTAssertFalse(model.googleSignInAvailable)
-        XCTAssertEqual(model.authProviderConfiguration, AuthProviderConfiguration(apple: false, google: false))
-        XCTAssertEqual(providerRequestCount, 0)
-        await model.completeGoogleSignIn()
-        XCTAssertEqual(model.authState, .signedOut)
-        XCTAssertEqual(model.lastError, .oauthProviderUnavailable)
+        XCTAssertTrue(model.googleSignInAvailable)
+        XCTAssertEqual(model.authProviderConfiguration, AuthProviderConfiguration(apple: false, google: true))
+        XCTAssertEqual(providerRequestCount, 1)
     }
 
     @MainActor
@@ -1070,7 +1632,10 @@ final class BrassTuneAppTests: XCTestCase {
         await model.loadAuthProviderConfiguration()
         XCTAssertFalse(model.appleSignInAvailable)
         XCTAssertFalse(model.googleSignInAvailable)
-        XCTAssertNil(model.authProviderRecoveryMessage)
+        XCTAssertEqual(
+            model.authProviderRecoveryMessage,
+            "BrassTune couldn't check Apple and Google sign-in. Retry or use email and password."
+        )
 
         model.reportAuthFailure(.appleSignInCancelled)
         XCTAssertEqual(model.authState, .signedOut)
@@ -1094,7 +1659,9 @@ final class BrassTuneAppTests: XCTestCase {
         let schemes = urlTypes.flatMap { type in
             type["CFBundleURLSchemes"] as? [String] ?? []
         }
-        XCTAssertEqual(schemes, [AuthService.oauthCallbackScheme])
+        XCTAssertEqual(plist[AuthService.oauthCallbackSchemeInfoKey] as? String, "$(BRASSTUNE_AUTH_CALLBACK_SCHEME)")
+        XCTAssertEqual(urlTypes.first?["CFBundleURLName"] as? String, "$(BRASSTUNE_AUTH_CALLBACK_SCHEME)")
+        XCTAssertEqual(schemes, ["$(BRASSTUNE_AUTH_CALLBACK_SCHEME)"])
         XCTAssertEqual(plist["UIAppFonts"] as? [String], ["GoogleSans-Medium.ttf"])
         XCTAssertNil(String(data: data, encoding: .utf8)?.range(of: "secret", options: .caseInsensitive))
 
@@ -1116,6 +1683,29 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testBuiltAppAndTestHostRegisterOnlyResolvedOAuthCallbackScheme() throws {
+        let builtPlist = try XCTUnwrap(Bundle.main.infoDictionary)
+        let configuredScheme = try XCTUnwrap(
+            builtPlist[AuthService.oauthCallbackSchemeInfoKey] as? String
+        )
+        let expectedScheme = try XCTUnwrap(
+            AuthService.resolvedOAuthCallbackScheme(
+                rawValue: configuredScheme,
+                bundleIdentifier: Bundle.main.bundleIdentifier
+            )
+        )
+        XCTAssertEqual(builtPlist[AuthService.oauthCallbackSchemeInfoKey] as? String, expectedScheme)
+        let urlTypes = try XCTUnwrap(builtPlist["CFBundleURLTypes"] as? [[String: Any]])
+        XCTAssertEqual(urlTypes.count, 1)
+        XCTAssertEqual(urlTypes.first?["CFBundleURLName"] as? String, expectedScheme)
+        XCTAssertEqual(
+            urlTypes.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] },
+            [expectedScheme]
+        )
+        XCTAssertEqual(AuthService.oauthCallbackScheme, expectedScheme)
+    }
+
+    @MainActor
     func testUnreadableAuthPayloadIsDistinguishedFromMissingAndPreservedForRecovery() {
         let store = InMemoryAuthSessionStore()
         store.payload = #"{"accessToken":"legacy-token","refreshToken":"legacy-refresh","email":"legacy@example.com"}"#
@@ -1127,9 +1717,371 @@ final class BrassTuneAppTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try service.restoreSessionOrThrow()) { error in
-            XCTAssertEqual(error as? UserVisibleError, .secureStorageUnavailable)
+            XCTAssertEqual(error as? UserVisibleError, .secureStorageCorrupt)
         }
         XCTAssertNotNil(store.payload, "An unreadable Keychain item must not be erased as though it were absent.")
+    }
+
+    @MainActor
+    func testKeychainSaveUpdatesExistingAddsMissingAndPreservesExistingCredentialOnFailure() throws {
+        var stored = "old"
+        var addCalls = 0
+        try KeychainStore.save(
+            "new",
+            service: "test",
+            account: "account",
+            update: { _, attributes in
+                let values = attributes as NSDictionary
+                stored = String(data: values[kSecValueData] as! Data, encoding: .utf8)!
+                return errSecSuccess
+            },
+            add: { _ in addCalls += 1; return errSecSuccess }
+        )
+        XCTAssertEqual(stored, "new")
+        XCTAssertEqual(addCalls, 0)
+
+        stored = ""
+        try KeychainStore.save(
+            "added",
+            service: "test",
+            account: "account",
+            update: { _, _ in errSecItemNotFound },
+            add: { query in
+                let values = query as NSDictionary
+                stored = String(data: values[kSecValueData] as! Data, encoding: .utf8)!
+                return errSecSuccess
+            }
+        )
+        XCTAssertEqual(stored, "added")
+
+        stored = "survives"
+        XCTAssertThrowsError(
+            try KeychainStore.save(
+                "replacement",
+                service: "test",
+                account: "account",
+                update: { _, _ in errSecNotAvailable },
+                add: { _ in XCTFail("Add must not run when update failed"); return errSecSuccess }
+            )
+        ) { error in
+            XCTAssertEqual(error as? KeychainStoreError, KeychainStoreError(operation: .save, status: errSecNotAvailable))
+        }
+        XCTAssertEqual(stored, "survives")
+    }
+
+    @MainActor
+    func testGuestSignInRequiresExplicitMergeOrSeparateDecisionAndDeduplicatesSessions() async throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-guest-upgrade-\(UUID().uuidString).json")
+        let credentials = InMemoryAuthSessionStore()
+        let auth = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { credentials.payload },
+            saveSessionPayload: { credentials.payload = $0 },
+            deleteSessionPayload: { credentials.payload = nil }
+        )
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: auth)
+        model.config = makeAuthConfig()
+        let duplicate = makeSession(name: "Existing account", cents: [1])
+        let guestOnly = makeSession(name: "Guest only", cents: [2])
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"guest-upgrade","email":"player@example.com"}}"#.utf8))
+        }
+
+        await model.signIn(email: "player@example.com", password: "password")
+        model.sessions = [duplicate]
+        await model.signOut()
+        model.enterGuestDemo(presentTutorial: false)
+        model.sessions = [duplicate, guestOnly]
+        let guestExercise: SavedPlayAlongExercise
+        switch model.saveCustomExercise(title: "Guest pattern", notes: ["C", "D", "E"]) {
+        case .success(let exercise): guestExercise = exercise
+        case .failure(let error):
+            XCTFail("Expected valid guest exercise: \(error)")
+            return
+        }
+        model.updateWeeklyGoal(minutes: 145, sessions: 6)
+        model.updateDroneSettings(
+            DroneSettings(writtenMIDINote: 55, interval: .perfectFifth, volume: 0.18),
+            restartIfPlaying: false
+        )
+
+        await model.signIn(email: "player@example.com", password: "password")
+        XCTAssertEqual(model.authState, .guest)
+        XCTAssertEqual(model.guestAccountUpgradePrompt?.canMerge, true)
+        XCTAssertNil(credentials.payload, "A pending guest-upgrade choice must not create a restorable account session.")
+        model.flushPendingPersistence()
+
+        let relaunchedBeforeChoice = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            authService: auth
+        )
+        relaunchedBeforeChoice.config = makeAuthConfig()
+        await relaunchedBeforeChoice.restoreSession()
+        XCTAssertEqual(relaunchedBeforeChoice.authState, .guest)
+        XCTAssertEqual(
+            relaunchedBeforeChoice.sessions.map(\.id),
+            [duplicate.id, guestOnly.id],
+            "Relaunch before a choice must restore the guest namespace, not the pending account."
+        )
+        model.resolveGuestAccountUpgrade(.merge)
+
+        XCTAssertEqual(model.authState, .signedIn(email: "player@example.com"))
+        XCTAssertEqual(Set(model.sessions.map(\.id)), Set([duplicate.id, guestOnly.id]))
+        XCTAssertEqual(model.sessions.count, 2)
+        XCTAssertTrue(
+            model.playAlongExercises.contains(where: { $0.id == guestExercise.exercise.id }),
+            "Merge must preserve guest custom exercises as well as sessions."
+        )
+        XCTAssertEqual(model.practiceFeatures.weeklyGoal, WeeklyPracticeGoal(targetMinutes: 145, targetSessions: 6))
+        XCTAssertEqual(
+            model.practiceFeatures.droneSettings,
+            DroneSettings(writtenMIDINote: 55, interval: .perfectFifth, volume: 0.18)
+        )
+
+        let relaunchedAfterMerge = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            authService: auth
+        )
+        relaunchedAfterMerge.config = makeAuthConfig()
+        await relaunchedAfterMerge.restoreSession()
+        XCTAssertEqual(relaunchedAfterMerge.authState, .signedIn(email: "player@example.com"))
+        XCTAssertEqual(Set(relaunchedAfterMerge.sessions.map(\.id)), Set([duplicate.id, guestOnly.id]))
+        XCTAssertTrue(relaunchedAfterMerge.playAlongExercises.contains(where: { $0.id == guestExercise.exercise.id }))
+    }
+
+    @MainActor
+    func testGuestUpgradeKeepSeparateAndCancelPreserveGuestData() async throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-guest-choices-\(UUID().uuidString).json")
+        let credentials = InMemoryAuthSessionStore()
+        let auth = AuthService(session: makeStubSession(), readSessionPayload: { credentials.payload }, saveSessionPayload: { credentials.payload = $0 }, deleteSessionPayload: { credentials.payload = nil })
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: auth)
+        model.config = makeAuthConfig()
+        let guest = makeSession(name: "Guest survives", cents: [0])
+        model.enterGuestDemo(presentTutorial: false)
+        model.sessions = [guest]
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"guest-choice","email":"player@example.com"}}"#.utf8))
+        }
+
+        await model.signIn(email: "player@example.com", password: "password")
+        model.resolveGuestAccountUpgrade(.cancel)
+        XCTAssertEqual(model.authState, .guest)
+        XCTAssertEqual(model.sessions.map(\.id), [guest.id])
+        XCTAssertNil(credentials.payload)
+
+        await model.signIn(email: "player@example.com", password: "password")
+        model.resolveGuestAccountUpgrade(.keepSeparate)
+        XCTAssertEqual(model.authState, .signedIn(email: "player@example.com"))
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertNotNil(credentials.payload, "Keep separate is an explicit choice to persist the account session.")
+        model.enterGuestDemo(presentTutorial: false)
+        XCTAssertEqual(model.sessions.map(\.id), [guest.id])
+    }
+
+    @MainActor
+    func testGuestUpgradeCorruptAccountNamespacePreservesGuestAndDefersCredentials() async throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-guest-upgrade-corrupt-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-guest-upgrade-corrupt-scores-\(UUID().uuidString)", isDirectory: true)
+        let targetStateURL = NativeStorageNamespace.account(userID: "corrupt-target")
+            .stateFile(basedAt: stateURL)
+        let credentials = InMemoryAuthSessionStore()
+        let auth = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { credentials.payload },
+            saveSessionPayload: { credentials.payload = $0 },
+            deleteSessionPayload: { credentials.payload = nil }
+        )
+        defer {
+            StubURLProtocol.handler = nil
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: targetStateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        try FileManager.default.createDirectory(
+            at: targetStateURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("not a BrassTune snapshot".utf8).write(to: targetStateURL)
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+                )!,
+                data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"corrupt-target","email":"player@example.com"}}"#.utf8)
+            )
+        }
+
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            authService: auth
+        )
+        model.config = makeAuthConfig()
+        model.enterGuestDemo(presentTutorial: false)
+        let guestSession = makeSession(name: "Guest survives failed upgrade", cents: [0])
+        model.sessions = [guestSession]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Guest score")
+        model.flushPendingPersistence()
+
+        await model.signIn(email: "player@example.com", password: "password")
+        XCTAssertNotNil(model.guestAccountUpgradePrompt)
+        XCTAssertNil(credentials.payload)
+
+        model.resolveGuestAccountUpgrade(.keepSeparate)
+
+        XCTAssertEqual(model.authState, .guest)
+        XCTAssertEqual(model.persistenceAccessState, .guest)
+        XCTAssertEqual(model.sessions.map(\.id), [guestSession.id])
+        XCTAssertEqual(model.scores.map(\.title), ["Guest score"])
+        XCTAssertNotNil(model.guestAccountUpgradePrompt, "The user must be able to cancel or retry after a target failure.")
+        XCTAssertNotNil(model.lastError)
+        XCTAssertNil(credentials.payload, "Failed target preparation must not write a restorable account credential.")
+
+        let relaunched = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            scoreStorageDirectory: scoreDirectory,
+            authService: auth
+        )
+        relaunched.config = makeAuthConfig()
+        await relaunched.restoreSession()
+        XCTAssertEqual(relaunched.authState, .guest)
+        XCTAssertEqual(relaunched.sessions.map(\.id), [guestSession.id])
+        XCTAssertEqual(relaunched.scores.map(\.title), ["Guest score"])
+    }
+
+    @MainActor
+    func testGuestUpgradeCredentialPersistenceFailureRestoresGuestBeforeCommit() async throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-guest-upgrade-keychain-\(UUID().uuidString).json")
+        var storedCredential: String?
+        let auth = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { storedCredential },
+            saveSessionPayload: { _ in throw UserVisibleError.secureStorageSaveFailed },
+            deleteSessionPayload: { storedCredential = nil }
+        )
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+                )!,
+                data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"keychain-target","email":"player@example.com"}}"#.utf8)
+            )
+        }
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: auth)
+        model.config = makeAuthConfig()
+        model.enterGuestDemo(presentTutorial: false)
+        let guestSession = makeSession(name: "Guest survives credential failure", cents: [0])
+        model.sessions = [guestSession]
+
+        await model.signIn(email: "player@example.com", password: "password")
+        XCTAssertNotNil(model.guestAccountUpgradePrompt)
+        XCTAssertNil(storedCredential)
+
+        model.resolveGuestAccountUpgrade(.keepSeparate)
+
+        XCTAssertEqual(model.authState, .guest)
+        XCTAssertEqual(model.persistenceAccessState, .guest)
+        XCTAssertEqual(model.sessions.map(\.id), [guestSession.id])
+        XCTAssertNotNil(model.guestAccountUpgradePrompt)
+        XCTAssertEqual(model.lastError, .secureStorageSaveFailed)
+        XCTAssertNil(storedCredential)
+    }
+
+    @MainActor
+    func testGuestMergeSnapshotWriteFailurePreservesGuestAndDoesNotPersistCredential() async throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-guest-merge-write-\(UUID().uuidString).json")
+        let targetStateURL = NativeStorageNamespace.account(userID: "merge-write-target")
+            .stateFile(basedAt: stateURL)
+        let credentials = InMemoryAuthSessionStore()
+        let store = NativePersistenceStore.ephemeral(
+            fileURL: stateURL,
+            writeData: { data, url in
+                guard url.standardizedFileURL != targetStateURL.standardizedFileURL else {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                try data.write(to: url, options: [.atomic])
+            }
+        )
+        let auth = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { credentials.payload },
+            saveSessionPayload: { credentials.payload = $0 },
+            deleteSessionPayload: { credentials.payload = nil }
+        )
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+                )!,
+                data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"merge-write-target","email":"player@example.com"}}"#.utf8)
+            )
+        }
+        let model = AppModel(persistenceStore: store, authService: auth)
+        model.config = makeAuthConfig()
+        model.enterGuestDemo(presentTutorial: false)
+        let guestSession = makeSession(name: "Guest survives merged write failure", cents: [0])
+        model.sessions = [guestSession]
+        model.flushPendingPersistence()
+
+        await model.signIn(email: "player@example.com", password: "password")
+        XCTAssertEqual(model.guestAccountUpgradePrompt?.canMerge, true)
+        XCTAssertNil(credentials.payload)
+
+        model.resolveGuestAccountUpgrade(.merge)
+
+        XCTAssertEqual(model.authState, .guest)
+        XCTAssertEqual(model.persistenceAccessState, .guest)
+        XCTAssertEqual(model.sessions.map(\.id), [guestSession.id])
+        XCTAssertNotNil(model.guestAccountUpgradePrompt)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertNil(credentials.payload)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: targetStateURL.path))
+
+        let relaunched = AppModel(persistenceStore: store, authService: auth)
+        relaunched.config = makeAuthConfig()
+        await relaunched.restoreSession()
+        XCTAssertEqual(relaunched.authState, .guest)
+        XCTAssertEqual(relaunched.sessions.map(\.id), [guestSession.id])
+    }
+
+    @MainActor
+    func testExpiredCredentialDeletionFailureLeavesRemovalMarkerForRelaunchRecovery() async throws {
+        let credentials = InMemoryAuthSessionStore()
+        credentials.payload = #"{"userID":"expired-user","accessToken":"old","refreshToken":"refresh","email":"expired@example.com","expiresAt":0}"#
+        var pendingDigests: [String] = []
+        let pendingStore = PendingDigestStore(load: { pendingDigests }, save: { pendingDigests = $0 })
+        let auth = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { credentials.payload },
+            saveSessionPayload: { credentials.payload = $0 },
+            deleteSessionPayload: { throw UserVisibleError.secureStorageDeletionFailed }
+        )
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-expired-\(UUID().uuidString).json")
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), pendingCredentialRemovalStore: pendingStore, authService: auth)
+        model.config = makeAuthConfig()
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            .init(response: HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!, data: Data())
+        }
+
+        await model.restoreSession()
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertEqual(model.lastError, .secureStorageDeletionFailed)
+        XCTAssertFalse(pendingDigests.isEmpty)
+
+        let relaunched = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), pendingCredentialRemovalStore: pendingStore, authService: auth)
+        relaunched.config = makeAuthConfig()
+        await relaunched.restoreSession()
+        XCTAssertEqual(relaunched.authState, .signedOut)
+        XCTAssertEqual(relaunched.lastError, .secureStorageDeletionFailed)
     }
 
     @MainActor
@@ -1315,7 +2267,7 @@ final class BrassTuneAppTests: XCTestCase {
         StubURLProtocol.handler = { request in
             .init(
                 response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                data: Data(#"{"user":{"email":"new@example.com"}}"#.utf8)
+                data: Data(#"{"id":"confirmation-id","email":"new@example.com","created_at":"2026-08-15T12:00:00Z"}"#.utf8)
             )
         }
 
@@ -1332,21 +2284,158 @@ final class BrassTuneAppTests: XCTestCase {
         StubURLProtocol.handler = nil
     }
 
-    func testPhotoLibraryUsageDescriptionIsTranslatedAcrossAllSupportedLocales() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("BrassTuneApp/Resources/InfoPlist.xcstrings")
-        let data = try Data(contentsOf: sourceURL)
-        let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let strings = try XCTUnwrap(catalog["strings"] as? [String: Any])
-        let entry = try XCTUnwrap(strings["NSPhotoLibraryUsageDescription"] as? [String: Any])
-        let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any])
-
-        XCTAssertEqual(
-            Set(localizations.keys),
-            Set(["ar", "de", "en", "es", "fr", "ja", "ko", "pt-BR", "ru", "vi", "zh-Hans", "zh-Hant"])
+    func testSupabaseAuthResponseDecodesNestedSessionUser() throws {
+        let response = try JSONDecoder().decode(
+            SupabaseAuthResponse.self,
+            from: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"nested-id","email":"nested@example.com","created_at":"2026-08-15T12:00:00Z"}}"#.utf8)
         )
+
+        XCTAssertEqual(response.accessToken, "access")
+        XCTAssertEqual(response.refreshToken, "refresh")
+        XCTAssertEqual(response.expiresIn, 3600)
+        XCTAssertEqual(response.user?.id, "nested-id")
+        XCTAssertEqual(response.user?.email, "nested@example.com")
+    }
+
+    func testSupabaseAuthResponseIgnoresTopLevelUserOutsideSignup() throws {
+        let response = try JSONDecoder().decode(
+            SupabaseAuthResponse.self,
+            from: Data(#"{"id":"top-level-id","email":"confirm@example.com","created_at":"2026-08-15T12:00:00Z","last_sign_in_at":"2026-08-15T12:00:00Z"}"#.utf8)
+        )
+
+        XCTAssertNil(response.accessToken)
+        XCTAssertNil(response.refreshToken)
+        XCTAssertNil(response.expiresIn)
+        XCTAssertNil(response.user)
+    }
+
+    func testSupabaseAuthResponseEmptyAndMalformedPayloadsFailClosed() throws {
+        let empty = try JSONDecoder().decode(SupabaseAuthResponse.self, from: Data("{}".utf8))
+        XCTAssertNil(empty.user)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                SupabaseAuthResponse.self,
+                from: Data(#"{"access_token":7}"#.utf8)
+            )
+        )
+    }
+
+    @MainActor
+    func testNestedSignupConfirmationResponseRemainsRecoverable() async throws {
+        let session = makeStubSession()
+        let authService = makeIsolatedAuthService(session: session)
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"user":{"id":"nested-confirmation-id","email":"nested@example.com"}}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await authService.signUp(
+                email: "nested@example.com",
+                password: "long-enough-password",
+                config: makeAuthConfig(),
+                persist: false
+            )
+            XCTFail("A signup response without a session must require email confirmation.")
+        } catch let error as UserVisibleError {
+            XCTAssertEqual(error, .emailConfirmationRequired)
+        }
+    }
+
+    @MainActor
+    func testFailedSignupAndGenericTopLevelTokenResponsesNeverPersistCredentials() async throws {
+        let cases: [(name: String, payload: String, signsUp: Bool, expectedError: UserVisibleError)] = [
+            ("top-level confirmation", #"{"id":"confirmation-id","email":"new@example.com"}"#, true, .emailConfirmationRequired),
+            ("nested confirmation", #"{"user":{"id":"nested-confirmation-id"}}"#, true, .emailConfirmationRequired),
+            ("password token with top-level user", #"{"access_token":"password-token","id":"top-level-id","email":"token@example.com"}"#, false, .authenticationFailed),
+            ("hybrid signup", #"{"access_token":"hybrid-token","id":"hybrid-id","email":"hybrid@example.com"}"#, true, .malformedResponse),
+            ("empty signup", "{}", true, .authenticationFailed),
+            ("malformed signup", #"{"access_token":7}"#, true, .malformedResponse),
+            ("token without nested user", #"{"access_token":"orphan-token"}"#, true, .authenticationFailed),
+        ]
+        defer { StubURLProtocol.handler = nil }
+
+        for fixture in cases {
+            let counter = AuthPersistenceWriteCounter()
+            let authService = AuthService(
+                session: makeStubSession(),
+                service: "com.brasstune.tests.\(UUID().uuidString)",
+                account: "current-session",
+                readSessionPayload: { nil },
+                saveSessionPayload: { counter.payloads.append($0) },
+                deleteSessionPayload: {}
+            )
+            StubURLProtocol.handler = { request in
+                .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: Data(fixture.payload.utf8)
+                )
+            }
+
+            do {
+                if fixture.signsUp {
+                    _ = try await authService.signUp(
+                        email: "new@example.com",
+                        password: "long-enough-password",
+                        config: makeAuthConfig()
+                    )
+                } else {
+                    _ = try await authService.signIn(
+                        email: "token@example.com",
+                        password: "long-enough-password",
+                        config: makeAuthConfig()
+                    )
+                }
+                XCTFail("\(fixture.name) must fail closed.")
+            } catch let error as UserVisibleError {
+                XCTAssertEqual(error, fixture.expectedError, fixture.name)
+            }
+            XCTAssertEqual(counter.payloads.count, 0, fixture.name)
+        }
+    }
+
+    @MainActor
+    func testAutoConfirmedNestedSignupPersistsSessionExactlyOnce() async throws {
+        let counter = AuthPersistenceWriteCounter()
+        let authService = AuthService(
+            session: makeStubSession(),
+            service: "com.brasstune.tests.\(UUID().uuidString)",
+            account: "current-session",
+            readSessionPayload: { nil },
+            saveSessionPayload: { counter.payloads.append($0) },
+            deleteSessionPayload: {}
+        )
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"confirmed-token","refresh_token":"confirmed-refresh","expires_in":3600,"user":{"id":"confirmed-id","email":"confirmed@example.com"}}"#.utf8)
+            )
+        }
+
+        let session = try await authService.signUp(
+            email: "confirmed@example.com",
+            password: "long-enough-password",
+            config: makeAuthConfig()
+        )
+
+        XCTAssertEqual(session.userID, "confirmed-id")
+        XCTAssertEqual(counter.payloads.count, 1)
+    }
+
+    func testPhotosPickerDoesNotRequestFullLibraryPermission() throws {
+        let infoURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("BrassTuneApp/Info.plist")
+        let data = try Data(contentsOf: infoURL)
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        XCTAssertNil(plist["NSPhotoLibraryUsageDescription"])
     }
 
     @MainActor
@@ -1479,6 +2568,7 @@ final class BrassTuneAppTests: XCTestCase {
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Guest score")
 
         await model.signIn(email: "a@example.com", password: "password")
+        model.resolveGuestAccountUpgrade(.keepSeparate)
         XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertTrue(model.scores.isEmpty, "Account A must not inherit guest scores.")
         let accountASession = makeSession(name: "Account A only", cents: [1])
@@ -1494,6 +2584,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(model.scores.map(\.title), ["Guest score"])
 
         await model.signIn(email: "b@example.com", password: "password")
+        model.resolveGuestAccountUpgrade(.keepSeparate)
         XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertTrue(model.scores.isEmpty, "Account B must not inherit account A or guest scores.")
         model.sessions = [makeSession(name: "Account B only", cents: [2])]
@@ -1542,6 +2633,7 @@ final class BrassTuneAppTests: XCTestCase {
         await afterDeletionRelaunch.restoreSession()
         XCTAssertEqual(afterDeletionRelaunch.sessions.map(\.id), [guestSession.id])
         await afterDeletionRelaunch.signIn(email: "a@example.com", password: "password")
+        afterDeletionRelaunch.resolveGuestAccountUpgrade(.keepSeparate)
         XCTAssertTrue(afterDeletionRelaunch.sessions.isEmpty, "A deleted account namespace must stay deleted after relaunch.")
         XCTAssertTrue(afterDeletionRelaunch.scores.isEmpty)
     }
@@ -1779,7 +2871,7 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testNativeAppleSignInIsGatedForThisShippingConfiguration() async {
+    func testAppleSignInFailsClosedUntilRemoteCapabilityIsLoaded() async {
         let model = AppModel(
             persistenceStore: .ephemeral(
                 fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
@@ -1789,7 +2881,6 @@ final class BrassTuneAppTests: XCTestCase {
 
         await model.completeAppleSignIn(identityToken: Data("apple-id-token".utf8), rawNonce: "nonce")
 
-        XCTAssertFalse(AppModel.nativeThirdPartySignInEnabled)
         XCTAssertEqual(model.authState, .signedOut)
         XCTAssertEqual(model.lastError, .oauthProviderUnavailable)
         XCTAssertTrue(model.authNoticeIsError)
@@ -1894,6 +2985,32 @@ final class BrassTuneAppTests: XCTestCase {
         restored.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(restored.scores.first?.id, score.id, "Failed file removal must roll the persisted deletion back.")
         XCTAssertEqual(restored.sessions.first?.attachedScoreID, score.id)
+    }
+
+    @MainActor
+    func testScoreRenameTrimsPersistsAndRejectsInvalidTitles() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
+        let model = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Original title")
+        let scoreID = try XCTUnwrap(model.scores.first?.id)
+
+        XCTAssertTrue(model.renameScore(id: scoreID, title: "  Concert étude  "))
+        XCTAssertEqual(model.scores.first?.title, "Concert étude")
+        XCTAssertFalse(model.renameScore(id: scoreID, title: "   \n"))
+        XCTAssertFalse(model.renameScore(id: scoreID, title: String(repeating: "A", count: 121)))
+        XCTAssertEqual(model.scores.first?.title, "Concert étude")
+        model.flushPendingPersistence()
+
+        let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
+        restored.enterGuestDemo(presentTutorial: false)
+        XCTAssertEqual(restored.scores.first?.title, "Concert étude")
     }
 
     @MainActor
@@ -2023,10 +3140,12 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testClearingLocalPracticeDataRemovesImportedScoreFiles() throws {
+    func testClearingPracticeHistoryPreservesImportedScoreFiles() throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
         let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
+        model.sessions = [makeSession(name: "History to clear", cents: [-2, 0, 3])]
 
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Local score")
         let fileName = try XCTUnwrap(model.scores.first?.localFileName)
@@ -2035,9 +3154,82 @@ final class BrassTuneAppTests: XCTestCase {
 
         model.clearLocalPracticeData()
 
-        XCTAssertTrue(model.scores.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: storedURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: scoreDirectory.path))
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertEqual(model.scores.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scoreDirectory.path))
+    }
+
+    @MainActor
+    func testLocalStateAndImportedScoresReceiveDataProtectionAndBackupExclusion() throws {
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-privacy-\(UUID().uuidString).json")
+        let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-privacy-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: stateURL)
+            try? FileManager.default.removeItem(at: scoreDirectory)
+        }
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+        model.enterGuestDemo(presentTutorial: false)
+        model.sessions = [makeSession(name: "Private state", cents: [0, 1, -1])]
+        try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Private score")
+        model.flushPendingPersistence()
+
+        let scoreURL = try XCTUnwrap(model.scores.first.flatMap { model.storedScoreFileURL(for: $0) })
+        for url in [stateURL, scoreDirectory, scoreURL] {
+            XCTAssertEqual(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+            // The simulator does not report a protection attribute back from
+            // attributesOfItem, but it does execute the same iOS API. This
+            // keeps the test behavioral without treating simulator metadata as
+            // physical-device proof.
+            XCTAssertNoThrow(try NativeLocalStorageProtection.apply(to: url))
+        }
+
+        // Existing installs are migrated when their namespace is activated.
+        for url in [stateURL, scoreDirectory, scoreURL] {
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = false
+            var mutableURL = url
+            try mutableURL.setResourceValues(values)
+        }
+        let relaunched = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), scoreStorageDirectory: scoreDirectory)
+        relaunched.enterGuestDemo(presentTutorial: false)
+        for url in [stateURL, scoreDirectory, scoreURL] {
+            XCTAssertEqual(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+        }
+    }
+
+    func testStoredScoreFileRejectsTraversalAndAbsolutePersistedNames() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-safe-name-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = NativeScoreImportService(storageDirectory: directory)
+
+        for unsafeName in ["../outside.png", "/tmp/outside.png", "nested/score.png", "..", "C:\\outside.png"] {
+            XCTAssertNil(service.storedFileURL(named: unsafeName))
+            XCTAssertThrowsError(try service.deleteStoredFile(named: unsafeName)) { error in
+                XCTAssertEqual(error as? NativeScoreImportService.ImportError, .unsafeStoredFile)
+            }
+        }
+    }
+
+    func testStoredScoreFileRejectsSymlinkEscapeWithoutDeletingTarget() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-symlink-\(UUID().uuidString)", isDirectory: true)
+        let outsideURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-outside-\(UUID().uuidString).png")
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: outsideURL)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("outside score".utf8).write(to: outsideURL)
+        let linkURL = directory.appendingPathComponent("linked-score.png")
+        try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: outsideURL)
+        let service = NativeScoreImportService(storageDirectory: directory)
+
+        XCTAssertNil(service.storedFileURL(named: "linked-score.png"))
+        XCTAssertThrowsError(try service.deleteStoredFile(named: "linked-score.png")) { error in
+            XCTAssertEqual(error as? NativeScoreImportService.ImportError, .unsafeStoredFile)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: linkURL.path))
     }
 
     @MainActor
@@ -2051,6 +3243,35 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertTrue(model.scores.isEmpty)
         let storedFiles = (try? FileManager.default.contentsOfDirectory(at: scoreDirectory, includingPropertiesForKeys: nil)) ?? []
         XCTAssertTrue(storedFiles.isEmpty)
+    }
+
+    func testScoreImportCancellationIsNotPresentedAsAnError() {
+        XCTAssertNil(scoreImportFailureMessage(for: CocoaError(.userCancelled)))
+        XCTAssertNil(scoreImportFailureMessage(for: CancellationError()))
+        XCTAssertNotNil(scoreImportFailureMessage(for: CocoaError(.fileReadCorruptFile)))
+    }
+
+    func testPhotoImportStoresTheDetectedImageTypeInsteadOfForcingPNG() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTuneScores-types-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = NativeScoreImportService(storageDirectory: directory)
+
+        let png = try service.importImageData(
+            makeTinyPNGData(),
+            preferredName: "PNG score",
+            sourceKind: .photos
+        )
+        XCTAssertEqual(URL(fileURLWithPath: try XCTUnwrap(png.localFileName)).pathExtension, "png")
+
+        let image = try XCTUnwrap(UIImage(data: makeTinyPNGData()))
+        let jpegData = try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+        let jpeg = try service.importImageData(
+            jpegData,
+            preferredName: "JPEG score",
+            sourceKind: .photos
+        )
+        XCTAssertEqual(URL(fileURLWithPath: try XCTUnwrap(jpeg.localFileName)).pathExtension, "jpg")
     }
 
     @MainActor
@@ -2108,7 +3329,7 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testClearLocalPracticeDataFailureKeepsModelAndFile() throws {
+    func testClearingPracticeHistoryDoesNotDeleteScoresWhenScoreRemoverFails() throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
         defer {
@@ -2131,24 +3352,19 @@ final class BrassTuneAppTests: XCTestCase {
         model.clearLocalPracticeData()
 
         XCTAssertEqual(model.scores.count, 1)
-        XCTAssertEqual(model.sessions.count, 1)
+        XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
-        XCTAssertEqual(
-            model.lastError,
-            .apiRequestFailed(
-                statusCode: 500,
-                message: "BrassTune couldn't remove your imported score files, so your local practice data was kept. Try again."
-            )
-        )
+        XCTAssertNil(model.lastError)
+        model.flushPendingPersistence()
 
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
         restored.enterGuestDemo(presentTutorial: false)
-        XCTAssertEqual(restored.scores.count, 1, "A score-cleanup failure must restore the snapshot cleared earlier in the transaction.")
-        XCTAssertEqual(restored.sessions.count, 1)
+        XCTAssertEqual(restored.scores.count, 1)
+        XCTAssertTrue(restored.sessions.isEmpty)
     }
 
     @MainActor
-    func testPersistenceClearFailureKeepsModelFilesAndRestorableSnapshot() throws {
+    func testClearingPracticeHistoryDoesNotRequirePersistenceStoreClear() throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
         defer {
@@ -2173,21 +3389,16 @@ final class BrassTuneAppTests: XCTestCase {
         model.clearLocalPracticeData()
 
         XCTAssertEqual(model.scores.first?.id, score.id)
-        XCTAssertEqual(model.sessions.count, 1)
+        XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: storedURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: stateURL.path))
-        XCTAssertEqual(
-            model.lastError,
-            .apiRequestFailed(
-                statusCode: 500,
-                message: "BrassTune couldn't clear its saved local data, so your practice data was kept. Try again."
-            )
-        )
+        XCTAssertNil(model.lastError)
+        model.flushPendingPersistence()
 
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
         restored.enterGuestDemo(presentTutorial: false)
-        XCTAssertEqual(restored.scores.first?.id, score.id, "Failed clear must not claim success before stale state can reappear on launch.")
-        XCTAssertEqual(restored.sessions.count, 1)
+        XCTAssertEqual(restored.scores.first?.id, score.id)
+        XCTAssertTrue(restored.sessions.isEmpty)
     }
 
     @MainActor
@@ -2246,7 +3457,7 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testLegacySilentMetronomeDefaultsMigrateToAudibleDefaults() {
+    func testLegacySilentMetronomeDefaultsMigrateToAudibleDefaultsAndWriteBack() throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
         var legacyMetronome = MetronomeSettings()
@@ -2271,10 +3482,111 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertFalse(restored.metronome.muted)
         XCTAssertFalse(restored.metronome.visualOnly)
         XCTAssertEqual(restored.metronome.volume, 0.6, accuracy: 0.001)
+
+        // The repaired snapshot must reach disk after the namespace becomes
+        // writable, not be lost behind the restoring-identity write gate.
+        restored.flushPendingPersistence()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let migratedOnDisk = try decoder.decode(
+            NativeLocalSnapshot.self,
+            from: Data(contentsOf: stateURL)
+        )
+        XCTAssertEqual(migratedOnDisk.metronomeDefaultsVersion, 2)
+        XCTAssertEqual(migratedOnDisk.snapshotVersion, 5)
+        XCTAssertFalse(migratedOnDisk.metronome.muted)
+        XCTAssertFalse(migratedOnDisk.metronome.visualOnly)
+        XCTAssertEqual(migratedOnDisk.metronome.volume, 0.6, accuracy: 0.001)
+
+        let secondRelaunch = AppModel(persistenceStore: store)
+        secondRelaunch.enterGuestDemo(presentTutorial: false)
+        XCTAssertFalse(secondRelaunch.metronome.muted)
+        XCTAssertFalse(secondRelaunch.metronome.visualOnly)
+        XCTAssertEqual(secondRelaunch.metronome.volume, 0.6, accuracy: 0.001)
     }
 
     @MainActor
-    func testShippingRestoreQuarantinesLegacyFixtureSessionsAndScores() {
+    func testFailedRestoredSnapshotMigrationRearmsUntilNextPersistenceTrigger() async throws {
+        let guestStateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-migration-retry-\(UUID().uuidString).json")
+        let userID = "migration-retry-user"
+        let accountStateURL = NativeStorageNamespace.account(userID: userID)
+            .stateFile(basedAt: guestStateURL)
+        defer {
+            try? FileManager.default.removeItem(at: guestStateURL)
+            try? FileManager.default.removeItem(at: accountStateURL)
+        }
+        var legacyMetronome = MetronomeSettings()
+        legacyMetronome.muted = true
+        legacyMetronome.visualOnly = true
+        legacyMetronome.volume = 0
+        NativePersistenceStore.ephemeral(fileURL: accountStateURL).save(
+            NativeLocalSnapshot(
+                selectedInstrumentId: "trumpet",
+                referencePitchHz: 440,
+                sessions: [],
+                scores: [],
+                activeScoreID: nil,
+                metronome: legacyMetronome,
+                metronomeDefaultsVersion: 1,
+                gatewayCompleted: true
+            )
+        )
+        let storedSession = AuthSession(
+            userID: userID,
+            accessToken: "unexpired-access",
+            refreshToken: "refresh",
+            email: "migration@example.com",
+            expiresAt: Date().addingTimeInterval(3_600)
+        )
+        let encodedSession = String(data: try JSONEncoder().encode(storedSession), encoding: .utf8)
+        let writer = FailOncePersistenceWriter()
+        let retryingStore = NativePersistenceStore.ephemeral(
+            fileURL: guestStateURL,
+            writeData: writer.write
+        )
+        let authService = AuthService(
+            session: makeStubSession(),
+            readSessionPayload: { encodedSession },
+            saveSessionPayload: { _ in },
+            deleteSessionPayload: { }
+        )
+        let restored = AppModel(persistenceStore: retryingStore, authService: authService)
+        restored.config = makeAuthConfig()
+        await restored.restoreSession()
+        restored.flushPendingPersistence()
+        for _ in 0..<50 where writer.attemptCount < 1 {
+            await Task.yield()
+        }
+        XCTAssertEqual(writer.attemptCount, 1)
+
+        // A failed asynchronous migration write stays armed without creating
+        // an unbounded automatic retry loop.
+        for _ in 0..<20 { await Task.yield() }
+        restored.flushPendingPersistence()
+        XCTAssertEqual(writer.attemptCount, 1)
+
+        // The next real state change consumes the re-armed token and writes the
+        // already-repaired snapshot exactly once.
+        restored.referencePitchHz = 442
+        restored.flushPendingPersistence()
+        for _ in 0..<50 where writer.attemptCount < 2 {
+            await Task.yield()
+        }
+        XCTAssertEqual(writer.attemptCount, 2)
+
+        let secondRelaunch = AppModel(persistenceStore: retryingStore, authService: authService)
+        secondRelaunch.config = makeAuthConfig()
+        await secondRelaunch.restoreSession()
+        XCTAssertEqual(secondRelaunch.authState, .signedIn(email: "migration@example.com"))
+        XCTAssertEqual(secondRelaunch.referencePitchHz, 442)
+        XCTAssertFalse(secondRelaunch.metronome.muted)
+        XCTAssertFalse(secondRelaunch.metronome.visualOnly)
+        XCTAssertEqual(secondRelaunch.metronome.volume, 0.6, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testShippingRestoreQuarantinesLegacyFixtureSessionsAndScoresAndWritesBack() throws {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
         let sampleSession = makeSession(name: "Old test recording", cents: [0], source: .sample)
@@ -2297,6 +3609,24 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertTrue(restored.sessions.isEmpty)
         XCTAssertTrue(restored.scores.isEmpty)
         XCTAssertNil(restored.activeScoreID)
+
+        restored.flushPendingPersistence()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let quarantinedOnDisk = try decoder.decode(
+            NativeLocalSnapshot.self,
+            from: Data(contentsOf: stateURL)
+        )
+        XCTAssertTrue(quarantinedOnDisk.sessions.isEmpty)
+        XCTAssertTrue(quarantinedOnDisk.scores.isEmpty)
+        XCTAssertNil(quarantinedOnDisk.activeScoreID)
+        XCTAssertEqual(quarantinedOnDisk.snapshotVersion, 5)
+
+        let secondRelaunch = AppModel(persistenceStore: store)
+        secondRelaunch.enterGuestDemo(presentTutorial: false)
+        XCTAssertTrue(secondRelaunch.sessions.isEmpty)
+        XCTAssertTrue(secondRelaunch.scores.isEmpty)
+        XCTAssertNil(secondRelaunch.activeScoreID)
     }
 
     // MARK: - Play-Along web parity
@@ -2511,22 +3841,40 @@ final class BrassTuneAppTests: XCTestCase {
                 item["concert_midi"] as? Int
             )
             let range = InstrumentAcousticRange.forInstrument(instrumentID)
-            XCTAssertEqual(range.minimumHz, try XCTUnwrap(item["expected_min_frequency_hz"] as? Double))
-            XCTAssertEqual(range.maximumHz, try XCTUnwrap(item["expected_max_frequency_hz"] as? Double))
+            XCTAssertEqual(range.minimumHz, try XCTUnwrap(item["expected_detector_min_frequency_hz"] as? Double))
+            XCTAssertEqual(range.maximumHz, try XCTUnwrap(item["expected_detector_max_frequency_hz"] as? Double))
+            let profile = try XCTUnwrap(InstrumentProfiles.profile(for: instrumentID))
+            XCTAssertEqual(
+                BrassTuneCore.midiToFrequency(Double(profile.practicalSoundingRange.minimum)),
+                try XCTUnwrap(item["expected_practical_min_frequency_hz"] as? Double),
+                accuracy: 0.000_000_1
+            )
+            XCTAssertEqual(
+                BrassTuneCore.midiToFrequency(Double(profile.practicalSoundingRange.maximum)),
+                try XCTUnwrap(item["expected_practical_max_frequency_hz"] as? Double),
+                accuracy: 0.000_000_1
+            )
         }
     }
 
-    func testAllSelectedInstrumentRangesGatePitchBeforeNoteAndRecordingState() {
-        let expected: [String: InstrumentAcousticRange] = [
+    func testAllSelectedInstrumentDetectorWindowsGatePitchAtExactBoundaries() {
+        let expectedRanges: [String: InstrumentAcousticRange] = [
             "trumpet": .init(minimumHz: 130, maximumHz: 1_500),
+            "cornet": .init(minimumHz: 130, maximumHz: 1_500),
+            "flugelhorn": .init(minimumHz: 130, maximumHz: 1_500),
+            "c-trumpet": .init(minimumHz: 130, maximumHz: 1_500),
             "horn": .init(minimumHz: 80, maximumHz: 1_200),
             "trombone": .init(minimumHz: 50, maximumHz: 700),
             "euphonium": .init(minimumHz: 55, maximumHz: 800),
+            "baritone-concert": .init(minimumHz: 55, maximumHz: 800),
+            "baritone": .init(minimumHz: 55, maximumHz: 800),
+            "euphonium-treble": .init(minimumHz: 55, maximumHz: 800),
             "tuba": .init(minimumHz: 30, maximumHz: 500),
         ]
-        for (instrument, range) in expected {
-            XCTAssertEqual(InstrumentAcousticRange.forInstrument(instrument), range)
-            XCTAssertEqual(NativePitchDetector.acousticRange(for: instrument), range)
+        XCTAssertEqual(Set(InstrumentProfiles.all.map(\.id)), Set(expectedRanges.keys))
+        for (instrument, range) in expectedRanges {
+            XCTAssertEqual(InstrumentAcousticRange.forInstrument(instrument), range, instrument)
+            XCTAssertEqual(NativePitchDetector.acousticRange(for: instrument), range, instrument)
             for rejectedFrequency in [range.minimumHz.nextDown, range.maximumHz.nextUp] {
                 let frame = PitchFrame.detected(
                     timestampMs: 0,
@@ -2555,6 +3903,68 @@ final class BrassTuneAppTests: XCTestCase {
                 XCTAssertTrue(frame.isValidForRecording)
             }
         }
+    }
+
+    func testPracticalRangeBoundariesRemainAcceptedAcrossReferencePitchExtremes() {
+        for profile in InstrumentProfiles.all {
+            for referencePitchHz in [430.0, 440.0, 450.0] {
+                for (midi, cents) in [
+                    (profile.practicalSoundingRange.minimum, -10.0),
+                    (profile.practicalSoundingRange.maximum, 10.0),
+                ] {
+                    let frequency = BrassTuneCore.midiToFrequency(
+                        Double(midi),
+                        referencePitchHz: referencePitchHz
+                    ) * pow(2, cents / 1_200)
+                    let frame = PitchFrame.detected(
+                        timestampMs: 0,
+                        frequencyHz: frequency,
+                        confidence: 0.99,
+                        rms: 0.1,
+                        instrumentId: profile.id,
+                        referencePitchHz: referencePitchHz
+                    )
+                    XCTAssertNotNil(frame.writtenNoteName, "\(profile.id), A4=\(referencePitchHz), \(cents) cents")
+                    XCTAssertNotNil(frame.writtenOctave)
+                    XCTAssertEqual(frame.centsDeviation ?? .nan, cents, accuracy: 0.000_001)
+                    XCTAssertTrue(frame.isValidForRecording)
+                }
+            }
+        }
+    }
+
+    func testBroadDetectorAcceptsOutsidePracticalRangeForMajorNinthTrebleLowBrass() throws {
+        let profile = try XCTUnwrap(InstrumentProfiles.profile(for: "euphonium-treble"))
+        XCTAssertEqual(profile.transpositionSemitones, 14)
+        let outsidePracticalConcertMIDI = profile.practicalSoundingRange.minimum - 1
+        let frequency = BrassTuneCore.midiToFrequency(Double(outsidePracticalConcertMIDI))
+        XCTAssertTrue(InstrumentAcousticRange.forInstrument(profile.id).contains(frequency))
+
+        let frame = PitchFrame.detected(
+            timestampMs: 0,
+            frequencyHz: frequency,
+            confidence: 0.99,
+            rms: 0.1,
+            instrumentId: profile.id,
+            referencePitchHz: 440
+        )
+        let expectedWrittenMIDI = BrassTuneCore.transposeConcertToWritten(
+            outsidePracticalConcertMIDI,
+            semitones: profile.transpositionSemitones
+        )
+        XCTAssertEqual(expectedWrittenMIDI, outsidePracticalConcertMIDI + 14)
+        XCTAssertEqual(frame.writtenOctave, (expectedWrittenMIDI / 12) - 1)
+        XCTAssertEqual(frame.centsDeviation ?? .nan, 0, accuracy: 0.000_001)
+        XCTAssertTrue(frame.isValidForRecording)
+    }
+
+    func testUnknownInstrumentDetectorRangeFailsClosed() {
+        let unknown = PitchFrame.detected(timestampMs: 0, frequencyHz: 440, confidence: 0.99, rms: 0.1, instrumentId: "unknown", referencePitchHz: 440)
+        XCTAssertEqual(InstrumentAcousticRange.forInstrument("unknown").minimumHz, .infinity)
+        XCTAssertNil(unknown.writtenNoteName)
+        XCTAssertNil(unknown.centsDeviation)
+        XCTAssertFalse(unknown.isValidForRecording)
+        XCTAssertEqual(instrumentDisplayName("unknown"), "Unsupported instrument")
     }
 
     func testSharedNoteSegmentationFixtureMatchesNativeEvents() throws {
@@ -2815,36 +4225,185 @@ final class BrassTuneAppTests: XCTestCase {
         }
     }
 
-    func testPlayAlongExerciseCatalogIncludesAllGroupedScalesAndPracticePatterns() {
-        let major = PlayAlongExercise.library.filter { $0.category == .major }
-        let minor = PlayAlongExercise.library.filter { $0.category == .naturalMinor }
-        let patterns = PlayAlongExercise.library.filter { $0.category == .practicePattern }
+    func testPlayAlongExerciseCatalogIncludesAllCoreGeneratedScaleFamilies() throws {
+        let scaleCategories: [PlayAlongExerciseCategory] = [.major, .naturalMinor, .harmonicMinor, .melodicMinor, .chromatic]
         XCTAssertEqual(PlayAlongExercise.defaultExercise.id, "cmaj")
-        XCTAssertEqual(major.count, 12)
-        XCTAssertEqual(minor.count, 12)
-        XCTAssertEqual(patterns.count, 3)
-        XCTAssertEqual(PlayAlongExercise.library.count, 27)
+        XCTAssertEqual(PlayAlongExercise.library.filter { $0.category == .practicePattern }.count, 2)
+        XCTAssertEqual(PlayAlongExercise.library.count, 62)
         XCTAssertEqual(Set(PlayAlongExercise.library.map(\.id)).count, PlayAlongExercise.library.count)
-        XCTAssertTrue(["cmaj", "fmaj", "gmaj", "arpeggio", "chromatic", "longtones"].allSatisfy { id in
+        XCTAssertTrue(["cmaj", "cmin", "csmin", "chromatic", "arpeggio", "longtones"].allSatisfy { id in
             PlayAlongExercise.library.contains { $0.id == id }
         })
-        XCTAssertFalse(PlayAlongExercise.library.contains { $0.writtenNotes.isEmpty })
+        for category in scaleCategories {
+            let exercises = PlayAlongExercise.library.filter { $0.category == category }
+            XCTAssertEqual(exercises.count, 12, "\(category)")
+            XCTAssertEqual(Set(exercises.compactMap { testPitchClass($0.writtenNotes.first ?? "") }).count, 12, "\(category)")
+            XCTAssertFalse(exercises.contains { $0.writtenNotes.isEmpty }, "\(category)")
+        }
     }
 
-    func testPlayAlongScaleIntervalsMatchMajorAndNaturalMinorPatterns() throws {
-        let expected: [PlayAlongExerciseCategory: [Int]] = [
-            .major: [0, 2, 4, 5, 7, 9, 11, 0],
-            .naturalMinor: [0, 2, 3, 5, 7, 8, 10, 0],
+    func testPlayAlongScaleSpellingsAndPitchClassesMatchCore() throws {
+        let coreTypes: [PlayAlongExerciseCategory: ScaleType] = [
+            .major: .major,
+            .naturalMinor: .naturalMinor,
+            .harmonicMinor: .harmonicMinor,
+            .melodicMinor: .melodicMinor,
+            .chromatic: .chromatic,
         ]
-        for exercise in PlayAlongExercise.library where exercise.category != .practicePattern {
-            let tonic = try XCTUnwrap(testPitchClass(exercise.writtenNotes[0]), exercise.title)
-            let intervals = try exercise.writtenNotes.map { note in
-                let pitchClass = try XCTUnwrap(testPitchClass(note), "Unsupported note spelling \(note) in \(exercise.title)")
-                return (pitchClass - tonic + 12) % 12
+        for (category, type) in coreTypes {
+            let exercises = PlayAlongExercise.library.filter { $0.category == category }
+            for (exercise, root) in zip(exercises, ScaleRoot.allCases) {
+                let generated = try XCTUnwrap(ScaleGenerator.generate(root: root, type: type, octaves: .one, direction: .ascending))
+                XCTAssertEqual(exercise.writtenNotes, generated.notes.map(\.writtenName), exercise.id)
+                XCTAssertEqual(testPitchClass(exercise.writtenNotes.first ?? ""), root.pitchClass, exercise.id)
+                XCTAssertEqual(exercise.writtenNotes.first, exercise.writtenNotes.last, exercise.id)
             }
-            XCTAssertEqual(intervals, expected[exercise.category], exercise.title)
-            XCTAssertEqual(exercise.writtenNotes.first, exercise.writtenNotes.last, exercise.title)
         }
+    }
+
+    @MainActor
+    func testTransientCoreScaleStartsWithoutPersistingACustomExercise() async throws {
+        let model = makeModel(playAlongFixturesEnabled: true)
+        let exercise = try XCTUnwrap(
+            PlayAlongExercise.scaleExercise(
+                root: .f,
+                type: .melodicMinor,
+                direction: .both,
+                octaves: .two,
+                id: "generated:f:melodic-minor:two:both"
+            )
+        )
+        let customBefore = model.practiceFeatures.customExercises
+
+        await model.startPlayAlong(exercise: exercise)
+
+        XCTAssertEqual(model.playAlongSession?.exercise, exercise)
+        XCTAssertEqual(model.playAlongSession?.exercise.writtenNotes.count, 29)
+        XCTAssertEqual(model.practiceFeatures.customExercises, customBefore)
+        XCTAssertFalse(model.playAlongExercises.contains { $0.id == exercise.id })
+        model.stopPlayAlong()
+    }
+
+    func testThreeOctaveScaleAvailabilityFailsClosedForUnknownOrNarrowProfiles() {
+        XCTAssertFalse(PlayAlongExercise.isScaleAvailable(
+            root: .c, type: .major, octaves: .three, direction: .ascending, instrumentID: "unknown"
+        ))
+        XCTAssertFalse(PlayAlongExercise.isScaleAvailable(
+            root: .c, type: .major, octaves: .three, direction: .ascending, instrumentID: "trumpet"
+        ))
+        XCTAssertTrue(PlayAlongExercise.isScaleAvailable(
+            root: .d, type: .major, octaves: .three, direction: .ascending, instrumentID: "tuba"
+        ))
+        XCTAssertNil(PlayAlongExercise.scaleExercise(
+            root: .c, type: .major, octaves: .three, id: "unsafe-unknown-profile"
+        ))
+    }
+
+    @MainActor
+    func testVisualScaleCompletionPersistsPracticeTimeWithoutPitchOrRecordingClaims() throws {
+        let model = makeModel()
+        let activityID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let configuration = VisualScalePracticeConfiguration(
+            exerciseID: "scale:tuba:B:major:1:ascending",
+            instrumentID: "tuba",
+            root: .b,
+            type: .major,
+            octaves: .one,
+            direction: .ascending,
+            tempoBPM: 84,
+            loopCount: 1
+        )
+        model.selectedInstrumentId = "tuba"
+        let completion = VisualScalePracticeCompletion(
+            activityInstanceID: activityID,
+            configuration: configuration,
+            startedAt: startedAt,
+            completedAt: startedAt.addingTimeInterval(18)
+        )
+
+        XCTAssertTrue(model.saveVisualScaleCompletion(completion))
+        let session = try XCTUnwrap(model.sessions.first)
+        XCTAssertEqual(session.id, activityID)
+        XCTAssertEqual(session.activityInstanceID, activityID)
+        XCTAssertEqual(session.source, .manual)
+        XCTAssertEqual(session.activity, .visualScalePractice)
+        XCTAssertEqual(session.completion, .completed)
+        XCTAssertEqual(session.visualScaleConfiguration, configuration)
+        XCTAssertEqual(session.durationSeconds, 18, accuracy: 0.001)
+        XCTAssertTrue(session.frames.isEmpty)
+        XCTAssertNil(session.retainedRecordingURL)
+        XCTAssertEqual(session.validFrameCount, 0)
+        XCTAssertFalse(session.activity.contributesPitchMetrics)
+        XCTAssertTrue(session.contributesPracticeTime)
+        XCTAssertFalse(model.saveVisualScaleCompletion(completion), "Activity identity must prevent double logging.")
+
+        let roundTrip = try JSONDecoder().decode(
+            PracticeSession.self,
+            from: JSONEncoder().encode(session)
+        )
+        XCTAssertEqual(roundTrip, session)
+    }
+
+    @MainActor
+    func testScoreGuidedPracticePersistsOneManualAttachedCompletionWithoutAudioClaims() throws {
+        let model = makeModel()
+        var score = makeSampleScore()
+        score.annotation.focusMeasures = "Measures 9–16"
+        score.annotation.problemPassage = "Middle entrance"
+        score.annotation.notes = "Keep the air moving through every note."
+        model.scores = [score]
+        model.selectedInstrumentId = "trumpet"
+        model.setTempo(96)
+        let startedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let run = try XCTUnwrap(model.startScoreGuidedPractice(scoreID: score.id, startedAt: startedAt))
+        XCTAssertEqual(run.configuration.tempoBPM, score.annotation.tempoTarget)
+        XCTAssertEqual(run.configuration.focusMeasures, score.annotation.focusMeasures)
+        XCTAssertEqual(run.configuration.pageNumber, score.selectedPage?.pageNumber)
+        XCTAssertEqual(run.configuration.practiceNotes, score.annotation.notes)
+        XCTAssertEqual(model.activeScoreID, score.id)
+        XCTAssertEqual(model.metronome.bpm, 96, "Score tempo is run-local and must not overwrite the global metronome.")
+
+        var discardedTimer = ScoreGuidedPracticeTimerState()
+        discardedTimer.start(at: startedAt)
+        discardedTimer.pause(at: startedAt.addingTimeInterval(3))
+        XCTAssertTrue(model.sessions.isEmpty, "Discarding a guided timer must not persist a completion.")
+        XCTAssertEqual(model.metronome.bpm, 96, "Cancelling a guided run must preserve global metronome tempo.")
+
+        let completion = ScoreGuidedPracticeCompletion(
+            activityInstanceID: run.activityInstanceID,
+            configuration: run.configuration,
+            startedAt: run.startedAt,
+            completedAt: startedAt.addingTimeInterval(12)
+        )
+        XCTAssertTrue(model.saveScoreGuidedPracticeCompletion(completion))
+        XCTAssertFalse(model.saveScoreGuidedPracticeCompletion(completion))
+        let session = try XCTUnwrap(model.sessions.first)
+        XCTAssertEqual(session.attachedScoreID, score.id)
+        XCTAssertEqual(session.scoreGuidedPracticeConfiguration, run.configuration)
+        XCTAssertEqual(session.activity, .practicePlan)
+        XCTAssertEqual(session.source, .manual)
+        XCTAssertTrue(session.frames.isEmpty)
+        XCTAssertNil(session.retainedRecordingURL)
+        XCTAssertTrue(session.contributesPracticeTime)
+        XCTAssertTrue(session.practiceNotes.contains("page \(run.configuration.pageNumber)"))
+        XCTAssertTrue(session.practiceNotes.contains(run.configuration.practiceNotes))
+        XCTAssertEqual(model.metronome.bpm, 96)
+    }
+
+    func testScoreGuidedPracticeTimerAccumulatesOnlyActiveFractionalSegments() {
+        let origin = Date(timeIntervalSince1970: 1_800_000_000)
+        var timer = ScoreGuidedPracticeTimerState()
+        timer.start(at: origin)
+        timer.pause(at: origin.addingTimeInterval(1.25))
+        timer.pause(at: origin.addingTimeInterval(9)) // A paused timer must not double count.
+        timer.resume(at: origin.addingTimeInterval(12))
+        XCTAssertEqual(timer.activeDuration(at: origin.addingTimeInterval(12.4)), 1.65, accuracy: 0.000_001)
+        timer.pause(at: origin.addingTimeInterval(13.75)) // background-style pause
+        timer.resume(at: origin.addingTimeInterval(30))
+        XCTAssertEqual(timer.finish(at: origin.addingTimeInterval(30.5)), 3.5, accuracy: 0.000_001)
+        XCTAssertFalse(timer.isRunning)
+        XCTAssertEqual(timer.finish(at: origin.addingTimeInterval(40)), 3.5, accuracy: 0.000_001)
     }
 
     func testEnsembleSummaryUsesExplicitViewerCapabilitiesWithoutJoinCodeInference() throws {
@@ -3125,6 +4684,7 @@ final class BrassTuneAppTests: XCTestCase {
         model.sessions = [guestSession]
 
         await model.signIn(email: "class@example.com", password: "password")
+        model.resolveGuestAccountUpgrade(.keepSeparate)
         model.sessions = [makeSession(name: "Private account session", cents: [2])]
         try model.importPhotoScore(data: makeTinyPNGData(), preferredName: "Private account score")
 
@@ -3334,6 +4894,24 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(milestones.map(\.earned), [true, true, true, true])
     }
 
+    func testProgressWeeklySessionsExcludesOlderPractice() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 1_770_206_400) // 2026-02-04 12:00:00 UTC
+        var currentWeek = makeSession(name: "This week", cents: [0])
+        currentWeek.startedAt = now.addingTimeInterval(-86_400)
+        var previousWeek = makeSession(name: "Previous week", cents: [0])
+        previousWeek.startedAt = now.addingTimeInterval(-8 * 86_400)
+
+        let sessions = progressWeeklySessions(
+            [previousWeek, currentWeek],
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(sessions.map(\.id), [currentWeek.id])
+    }
+
     func testTunerVoiceOverStateCombinesNoteAndQuantizedCentsWithoutFrameFlooding() {
         let previous = NativeLocalization.language
         defer { NativeLocalization.language = previous }
@@ -3510,6 +5088,28 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(grader.noteGrades.first?.rating, .excellent)
     }
 
+    func testGeneratedScaleGraderRejectsCorrectPitchClassInWrongOctave() {
+        var grader = PlayAlongGrader(
+            writtenNotes: ["Bb"],
+            writtenMIDIs: [58],
+            holdDurationMs: 300,
+            minimumSamples: 3,
+            attackTrimMs: 0
+        )
+
+        for timestamp in stride(from: 0, through: 300, by: 100) {
+            grader.feed(makePlayAlongFrame(note: "A#", cents: 2, timestampMs: timestamp, writtenOctave: 6))
+        }
+        XCTAssertFalse(grader.isComplete)
+        XCTAssertTrue(grader.noteGrades.isEmpty)
+
+        for timestamp in stride(from: 1_000, through: 1_300, by: 100) {
+            grader.feed(makePlayAlongFrame(note: "A#", cents: 2, timestampMs: timestamp, writtenOctave: 3))
+        }
+        XCTAssertTrue(grader.isComplete)
+        XCTAssertEqual(grader.noteGrades.first?.writtenNoteName, "Bb")
+    }
+
     func testDetectedFramesApplyWrittenPitchTranspositionForTrumpetAndHorn() {
         let trumpet = PitchFrame.detected(
             timestampMs: 0,
@@ -3536,14 +5136,41 @@ final class BrassTuneAppTests: XCTestCase {
 
     // MARK: - Pitch detector and BrassTuneCore integration
 
-    func testFixtureFramesReflectInstrumentTransposition() {
-        let trumpet = PitchFrame.fixture(index: 0, instrumentId: "trumpet")
-        let horn = PitchFrame.fixture(index: 0, instrumentId: "horn")
+    func testFixtureFramesReflectInstrumentTransposition() throws {
+        for profile in [InstrumentProfiles.profile(for: "trumpet"), InstrumentProfiles.profile(for: "horn")].compactMap({ $0 }) {
+            let fixture = PitchFrame.fixture(index: 0, instrumentId: profile.id)
+            let concertMIDI = Int(BrassTuneCore.frequencyToMidi(try XCTUnwrap(fixture.frequencyHz)).rounded())
+            let writtenMIDI = BrassTuneCore.transposeConcertToWritten(concertMIDI, semitones: profile.transpositionSemitones)
+            XCTAssertEqual(testPitchClass(fixture.writtenNoteName ?? ""), writtenMIDI % 12)
+            XCTAssertEqual(fixture.writtenOctave, (writtenMIDI / 12) - 1)
+        }
+    }
 
-        XCTAssertEqual(trumpet.writtenNoteName, "D")
-        XCTAssertEqual(trumpet.writtenOctave, 5)
-        XCTAssertEqual(horn.writtenNoteName, "D")
-        XCTAssertEqual(horn.writtenOctave, 4)
+    func testCoreProfilesDrivePitchFramesAndDroneMathIncludingLegacyIDs() throws {
+        let expected: [(id: String, notation: String, semitones: Int)] = [
+            ("trumpet", "B♭", 2), ("horn", "F", 7), ("trombone", "C", 0),
+            ("french-horn", "F", 7), ("c_trumpet", "C", 0), ("euphonium-tc", "B♭", 14),
+        ]
+        for item in expected {
+            let profile = try XCTUnwrap(InstrumentProfiles.profile(for: item.id))
+            XCTAssertEqual(profile.displayNotation, item.notation)
+            XCTAssertEqual(profile.transpositionSemitones, item.semitones)
+            XCTAssertEqual(PracticePitchMath.concertMIDI(forWrittenMIDI: 60, instrumentID: item.id), 60 - item.semitones)
+            let frame = PitchFrame.detected(
+                timestampMs: 0,
+                frequencyHz: BrassTuneCore.midiToFrequency(60 - Double(item.semitones)),
+                confidence: 0.99,
+                rms: 0.1,
+                instrumentId: item.id,
+                referencePitchHz: 440
+            )
+            XCTAssertEqual(frame.writtenNoteName, "C", item.id)
+            XCTAssertEqual(frame.writtenOctave, 4, item.id)
+        }
+        XCTAssertEqual(instrumentDisplayName("trumpet"), "Trumpet in B♭")
+        let drone = try XCTUnwrap(PracticePitchMath.frequency(writtenMIDI: 60, instrumentID: "horn", referencePitchHz: 440))
+        XCTAssertEqual(drone, BrassTuneCore.midiToFrequency(53), accuracy: 0.000_001)
+        XCTAssertNil(PracticePitchMath.frequency(writtenMIDI: 60, instrumentID: "unrecognized", referencePitchHz: 440))
     }
 
     func testCoreTuningStatusIsAvailableToApp() {
@@ -3616,60 +5243,1223 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testAudioSessionCoordinatorDeactivatesOnlyAfterFinalOwner() throws {
+    func testAudioControlPlaneRunsPhysicalToneHooksOffMainAndPreservesFIFOAcrossRestart() async throws {
+        let probe = AudioControlPlaneProbe()
+        probe.delayedEvent = .toneStop
+        probe.delaySeconds = 0.05
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            microphonePermissionRequester: { true }
+        )
+
+        try engine.startTone(frequencyHz: 440, volume: 0.3)
+        await coordinator.flush()
+        engine.stopTone(deactivation: .immediate)
+        try engine.startTone(frequencyHz: 442, volume: 0.3)
+        await coordinator.flush()
+        for _ in 0..<10 { await Task.yield() }
+
+        let events = probe.events
+        let toneStarts = events.indices.filter { events[$0] == .toneStart }
+        let tonePlays = events.indices.filter { events[$0] == .tonePlay }
+        let toneStops = events.indices.filter { events[$0] == .toneStop }
+        XCTAssertEqual(toneStarts.count, 2)
+        XCTAssertEqual(tonePlays.count, 2)
+        XCTAssertEqual(toneStops.count, 1)
+        XCTAssertLessThan(try XCTUnwrap(toneStarts.first), try XCTUnwrap(tonePlays.first))
+        XCTAssertLessThan(try XCTUnwrap(tonePlays.first), try XCTUnwrap(toneStops.first))
+        XCTAssertLessThan(try XCTUnwrap(toneStarts.first), try XCTUnwrap(toneStops.first))
+        XCTAssertLessThan(try XCTUnwrap(toneStops.first), try XCTUnwrap(toneStarts.last))
+        XCTAssertTrue(probe.allPhysicalHooksOffMain)
+        XCTAssertTrue(engine.tonePlaying, "A stale completion from the first start must not stop the restarted tone.")
+        XCTAssertEqual(coordinator.activeOwners, [.tone])
+
+        engine.stopTone(deactivation: .immediate)
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testConcurrentSameOwnerAcquiresAwaitOnePhysicalActivation() async throws {
+        let probe = AudioControlPlaneProbe()
+        probe.delayedEvent = .activate
+        probe.delaySeconds = 0.05
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+
+        let first = try coordinator.acquireTask(
+            .recordingPlayback,
+            configuration: .recordingPlayback
+        )
+        let second = try coordinator.acquireTask(
+            .recordingPlayback,
+            configuration: .recordingPlayback
+        )
+        let firstResult = try await first.value
+        let secondResult = try await second.value
+
+        XCTAssertTrue(firstResult)
+        XCTAssertTrue(secondResult, "A duplicate logical owner must await the in-flight physical readiness result.")
+        XCTAssertEqual(probe.count(.configure(.recordingPlayback)), 1)
+        XCTAssertEqual(probe.count(.activate), 1)
+        XCTAssertEqual(coordinator.activeOwners, [.recordingPlayback])
+
+        coordinator.release(.recordingPlayback, deactivation: .immediate)
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testConcurrentSameOwnerAcquiresShareFailureAndRollbackOwner() async throws {
+        let probe = AudioControlPlaneProbe()
+        probe.delayedEvent = .activate
+        probe.delaySeconds = 0.05
+        probe.failingEvent = .activate
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+
+        let first = try coordinator.acquireTask(.metronome, configuration: .metronome)
+        let second = try coordinator.acquireTask(.metronome, configuration: .metronome)
+        for task in [first, second] {
+            do {
+                _ = try await task.value
+                XCTFail("Every waiter must observe the shared physical activation failure.")
+            } catch {
+                XCTAssertEqual(error as? NativeAudioEngineError, .outputUnavailable)
+            }
+        }
+
+        XCTAssertEqual(probe.count(.configure(.metronome)), 1)
+        XCTAssertEqual(probe.count(.activate), 1)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        let physicalOwners = await coordinator.physicalActiveOwners()
+        XCTAssertTrue(physicalOwners.isEmpty)
+    }
+
+    @MainActor
+    func testProductionMetronomeGraphSchedulesThenPlaysWithoutWaitingForConsumption() async throws {
+        let graphProbe = MetronomeGraphProbe()
+        let sessionProbe = AudioControlPlaneProbe()
+        let completionHandled = expectation(description: "stale production graph completion handled")
+        var submittedCount = 0
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: sessionProbe.hooks,
+            deactivationDelay: .zero
+        )
+        let output = NativeMetronomeOutput(
+            audioSessionCoordinator: coordinator,
+            onScheduleResult: { _ in completionHandled.fulfill() },
+            onScheduleSubmitted: { submittedCount += 1 },
+            graphHooks: graphProbe.hooks
+        )
+
+        output.playTick(
+            settings: MetronomeSettings(),
+            accent: false,
+            hostTime: 123_456,
+            pulseIndex: 1
+        )
+        for _ in 0..<100 where submittedCount < 1 {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        XCTAssertEqual(submittedCount, 1)
+        XCTAssertEqual(graphProbe.events, ["prepare", "schedule", "play"])
+        XCTAssertEqual(graphProbe.targets, [123_456])
+        XCTAssertEqual(graphProbe.completionCount, 1)
+        XCTAssertEqual(coordinator.activeOwners, [.metronome])
+
+        let staleCompletion = try XCTUnwrap(graphProbe.completion(at: 0))
+        output.stop()
+        output.playTick(
+            settings: MetronomeSettings(),
+            accent: true,
+            hostTime: 223_456,
+            pulseIndex: 2
+        )
+        for _ in 0..<100 where submittedCount < 2 {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        XCTAssertEqual(submittedCount, 2)
+        XCTAssertEqual(graphProbe.events, ["prepare", "schedule", "play", "stop", "prepare", "schedule", "play"])
+        XCTAssertEqual(graphProbe.targets, [123_456, 223_456])
+
+        staleCompletion(.failure(NativeAudioEngineError.outputUnavailable))
+        await fulfillment(of: [completionHandled], timeout: 1)
+        XCTAssertNil(output.lastFailure)
+        XCTAssertEqual(coordinator.activeOwners, [.metronome])
+
+        output.stop()
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testLiveCaptureLogicalStopIsSynchronousAndPhysicalRestartWaitsForFIFOTeardown() async throws {
+        let probe = AudioControlPlaneProbe()
+        probe.delayedEvent = .captureStop
+        probe.delaySeconds = 0.08
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            microphonePermissionRequester: { true }
+        )
+
+        let firstStartSucceeded = try await engine.startLiveRecording(
+            instrumentId: "trumpet",
+            referencePitchHz: 440
+        )
+        XCTAssertTrue(firstStartSucceeded)
+        let clock = ContinuousClock()
+        let stopStarted = clock.now
+        let firstStop = engine.stopLiveRecording()
+        let logicalStopDuration = stopStarted.duration(to: clock.now)
+        XCTAssertLessThan(logicalStopDuration, .milliseconds(40))
+        XCTAssertFalse(engine.recording)
+        XCTAssertFalse(coordinator.isActive(.capture))
+
+        let restarted = Task { @MainActor in
+            try await engine.startLiveRecording(instrumentId: "trumpet", referencePitchHz: 440)
+        }
+        _ = await firstStop.value
+        let restartSucceeded = try await restarted.value
+        XCTAssertTrue(restartSucceeded)
+        await coordinator.flush()
+
+        let events = probe.events
+        let installs = events.indices.filter { events[$0] == .captureInstallTap }
+        let removals = events.indices.filter { events[$0] == .captureRemoveTap }
+        XCTAssertEqual(installs.count, 2)
+        XCTAssertEqual(removals.count, 1)
+        XCTAssertLessThan(try XCTUnwrap(removals.first), try XCTUnwrap(installs.last))
+        XCTAssertTrue(engine.recording)
+        XCTAssertEqual(coordinator.activeOwners, [.capture])
+
+        _ = await engine.stopLiveRecording().value
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testConcurrentLiveStartsInstallOnlyOneInputTap() async throws {
+        let probe = AudioControlPlaneProbe()
+        probe.delayedEvent = .captureStart
+        probe.delaySeconds = 0.08
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            microphonePermissionRequester: { true }
+        )
+
+        let firstStart = Task { @MainActor in
+            try await engine.startLiveRecording(instrumentId: "trumpet", referencePitchHz: 440)
+        }
+        for _ in 0..<100 where probe.count(.captureInstallTap) == 0 {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        XCTAssertEqual(probe.count(.captureInstallTap), 1)
+
+        let duplicateStart = try await engine.startLiveRecording(
+            instrumentId: "trumpet",
+            referencePitchHz: 440
+        )
+        XCTAssertFalse(duplicateStart, "A concurrent start must not reserve or install a second input tap.")
+        let firstStartSucceeded = try await firstStart.value
+        XCTAssertTrue(firstStartSucceeded)
+        XCTAssertEqual(probe.count(.captureInstallTap), 1)
+
+        _ = await engine.stopLiveRecording().value
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testFailedCaptureStartRollsBackTapSessionAndLogicalOwner() async throws {
+        let probe = AudioControlPlaneProbe()
+        probe.failingEvent = .captureStart
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            microphonePermissionRequester: { true }
+        )
+
+        do {
+            _ = try await engine.startLiveRecording(instrumentId: "trumpet", referencePitchHz: 440)
+            XCTFail("The injected physical start failure must propagate.")
+        } catch {
+            XCTAssertEqual(error as? NativeAudioEngineError, .outputUnavailable)
+        }
+        await coordinator.flush()
+
+        XCTAssertFalse(engine.recording)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        let physicalOwners = await coordinator.physicalActiveOwners()
+        XCTAssertTrue(physicalOwners.isEmpty)
+        XCTAssertEqual(probe.count(.captureInstallTap), 1)
+        XCTAssertEqual(probe.count(.captureRemoveTap), 1)
+        XCTAssertEqual(probe.count(.captureStop), 1)
+        XCTAssertEqual(probe.count(.deactivate), 1)
+    }
+
+    @MainActor
+    func testMediaResetRebuildsControlPlaneBeforeFreshToneStart() async throws {
+        let probe = AudioControlPlaneProbe()
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            microphonePermissionRequester: { true }
+        )
+
+        try engine.startTone(frequencyHz: 440, volume: 0.3)
+        await coordinator.flush()
+        let beforeReset = await coordinator.graphGeneration()
+        engine.handleMediaServicesReset()
+        await coordinator.flush()
+        let afterReset = await coordinator.graphGeneration()
+        XCTAssertGreaterThan(afterReset, beforeReset)
+        XCTAssertEqual(probe.count(.rebuildGraphs), 1)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+
+        try engine.startTone(frequencyHz: 442, volume: 0.3)
+        await coordinator.flush()
+        XCTAssertEqual(probe.count(.toneStart), 2)
+        XCTAssertEqual(probe.count(.configure(.tone)), 2)
+        XCTAssertEqual(probe.count(.activate), 2)
+        XCTAssertEqual(coordinator.activeOwners, [.tone])
+
+        engine.stopTone(deactivation: .immediate)
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testAudioSessionCoordinatorDeactivatesOnlyAfterFinalOwner() async throws {
         var activationCount = 0
         var deactivationCount = 0
         let coordinator = NativeAudioSessionCoordinator(
             activateSession: { activationCount += 1 },
-            deactivateSession: { deactivationCount += 1 }
+            deactivateSession: { deactivationCount += 1 },
+            deactivationDelay: .zero
         )
 
-        try coordinator.acquire(.capture) { }
-        try coordinator.acquire(.metronome) { }
+        try await coordinator.acquire(.capture)
+        try await coordinator.acquire(.metronome)
         XCTAssertEqual(activationCount, 1)
         coordinator.release(.capture)
         XCTAssertEqual(deactivationCount, 0)
         coordinator.release(.metronome)
+        await coordinator.flush()
         XCTAssertEqual(deactivationCount, 1)
         XCTAssertTrue(coordinator.activeOwners.isEmpty)
 
-        XCTAssertThrowsError(
-            try coordinator.acquire(.capture, configure: { }, setup: {
-                throw NativeAudioEngineError.inputUnavailable
-            })
-        )
-        XCTAssertTrue(coordinator.activeOwners.isEmpty, "Failed capture setup must not strand audio-session ownership.")
-        XCTAssertEqual(deactivationCount, 2)
-
         let metronomeOutput = NativeMetronomeOutput(audioSessionCoordinator: coordinator)
-        try coordinator.acquire(.capture) { }
+        try await coordinator.acquire(.capture)
         metronomeOutput.playTick(settings: MetronomeSettings(), accent: false)
         XCTAssertEqual(coordinator.activeOwners, [.capture], "A metronome timer must not acquire or reconfigure the session while capture owns measurement mode.")
         coordinator.release(.capture)
-        XCTAssertEqual(deactivationCount, 3)
+        await coordinator.flush()
+        XCTAssertEqual(deactivationCount, 2)
 
         let engine = NativeAudioEngine(audioSessionCoordinator: coordinator)
-        try coordinator.acquire(.capture) { }
+        try await coordinator.acquire(.capture)
         engine.stopAndResetAudioEngine()
-        XCTAssertEqual(deactivationCount, 4, "Stopping capture must release and deactivate its final session owner.")
+        await coordinator.flush()
+        XCTAssertEqual(deactivationCount, 3, "Stopping capture must release and deactivate its final session owner.")
 
-        try coordinator.acquire(.metronome) { }
+        try await coordinator.acquire(.metronome)
         metronomeOutput.stop()
-        XCTAssertEqual(deactivationCount, 5, "Stopping the metronome must release and deactivate its final session owner.")
+        await coordinator.flush()
+        XCTAssertEqual(deactivationCount, 4, "Stopping the metronome must release and deactivate its final session owner.")
 
-        try coordinator.acquire(.metronome) { }
+        try await coordinator.acquire(.metronome)
         var mutedSettings = MetronomeSettings()
         mutedSettings.muted = true
         metronomeOutput.playTick(settings: mutedSettings, accent: false)
+        await coordinator.flush()
         XCTAssertTrue(coordinator.activeOwners.isEmpty, "Switching to muted output must release metronome ownership immediately.")
-        XCTAssertEqual(deactivationCount, 6)
+        XCTAssertEqual(deactivationCount, 5)
 
-        try coordinator.acquire(.metronome) { }
+        try await coordinator.acquire(.metronome)
         var visualSettings = MetronomeSettings()
         visualSettings.visualOnly = true
         metronomeOutput.playTick(settings: visualSettings, accent: false)
+        await coordinator.flush()
         XCTAssertTrue(coordinator.activeOwners.isEmpty, "Switching to visual-only output must release metronome ownership immediately.")
-        XCTAssertEqual(deactivationCount, 7)
+        XCTAssertEqual(deactivationCount, 6)
+    }
+
+    @MainActor
+    func testAudioSessionCoordinatorDefersAndCancelsDeactivationAcrossRapidHandoffs() async throws {
+        var activationCount = 0
+        var deactivationCount = 0
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { activationCount += 1 },
+            deactivateSession: { deactivationCount += 1 },
+            deactivationDelay: .milliseconds(40)
+        )
+
+        try await coordinator.acquire(.capture)
+        coordinator.release(.capture)
+        XCTAssertEqual(deactivationCount, 0)
+
+        try await coordinator.acquire(.tone)
+        XCTAssertEqual(activationCount, 1, "A rapid handoff must reuse the still-active shared session.")
+        coordinator.release(.tone)
+        XCTAssertEqual(deactivationCount, 0)
+
+        try await Task.sleep(for: .milliseconds(80))
+        await coordinator.flush()
+        XCTAssertEqual(deactivationCount, 1, "Only the final quiescent release should deactivate the session.")
+
+        try await coordinator.acquire(.capture)
+        coordinator.release(.capture, deactivation: .immediate)
+        await coordinator.flush()
+        XCTAssertEqual(activationCount, 2)
+        XCTAssertEqual(deactivationCount, 2, "Lifecycle-loss paths must retain immediate deactivation.")
+    }
+
+    @MainActor
+    func testAudioSessionCoordinatorCachesOnlyActiveDeferredOwnerConfiguration() async throws {
+        let probe = AudioControlPlaneProbe()
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .seconds(5)
+        )
+
+        try await coordinator.acquire(.tone, configuration: .tone)
+        coordinator.release(.tone)
+        try await coordinator.acquire(.tone, configuration: .tone)
+        XCTAssertEqual(probe.count(.configure(.tone)), 1, "A same-owner handoff during deferred deactivation should reuse AVAudioSession configuration.")
+        XCTAssertEqual(probe.count(.activate), 1)
+
+        coordinator.release(.tone, deactivation: .immediate)
+        await coordinator.flush()
+        try await coordinator.acquire(.tone, configuration: .tone)
+        XCTAssertEqual(probe.count(.configure(.tone)), 2, "A real deactivation must require a fresh session configuration.")
+
+        coordinator.invalidateSessionConfiguration()
+        coordinator.release(.tone)
+        try await coordinator.acquire(.tone, configuration: .tone)
+        XCTAssertEqual(probe.count(.configure(.tone)), 3, "Lifecycle invalidation must never reuse a stale session configuration.")
+    }
+
+    @MainActor
+    func testAudioSessionSetupRunsOnlyForNewOwnerAcquisition() async throws {
+        let probe = AudioControlPlaneProbe()
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+
+        let firstAcquire = try await coordinator.acquire(.tone, configuration: .tone)
+        let repeatedAcquire = try await coordinator.acquire(.tone, configuration: .tone)
+        XCTAssertTrue(firstAcquire)
+        XCTAssertFalse(repeatedAcquire)
+        XCTAssertEqual(probe.count(.configure(.tone)), 1)
+        coordinator.release(.tone, deactivation: .immediate)
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testLifecycleTeardownForcesImmediateReleaseDespiteLongHandoffDelay() async throws {
+        let probe = AudioControlPlaneProbe()
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .seconds(30)
+        )
+
+        try await coordinator.acquire(.tone)
+        coordinator.release(.tone)
+        coordinator.deactivateImmediatelyIfIdle()
+        await coordinator.flush()
+        XCTAssertEqual(probe.count(.deactivate), 1)
+    }
+
+    @MainActor
+    func testMediaServicesResetForcesFreshConfigurationAndActivationAfterFailedDeactivation() async throws {
+        let probe = AudioControlPlaneProbe()
+        probe.failingEvent = .deactivate
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+
+        try await coordinator.acquire(.tone, configuration: .tone)
+        coordinator.release(.tone, deactivation: .immediate)
+        await coordinator.flush()
+        XCTAssertEqual(probe.count(.deactivate), 1)
+
+        coordinator.invalidateAfterMediaServicesReset()
+        try await coordinator.acquire(.tone, configuration: .tone)
+        XCTAssertEqual(probe.count(.configure(.tone)), 2)
+        XCTAssertEqual(probe.count(.activate), 2)
+    }
+
+    @MainActor
+    func testRecordingPlaybackConfigurationParticipatesInDeferredReuse() async throws {
+        let probe = AudioControlPlaneProbe()
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .seconds(5)
+        )
+
+        try await coordinator.acquire(.recordingPlayback, configuration: .recordingPlayback)
+        coordinator.release(.recordingPlayback)
+        try await coordinator.acquire(.recordingPlayback, configuration: .recordingPlayback)
+        XCTAssertEqual(probe.count(.configure(.recordingPlayback)), 1)
+    }
+
+    @MainActor
+    func testStaleMetronomeFailureCannotReleaseRestartedRun() async throws {
+        let completionBox = MetronomeCompletionBox()
+        let staleHandlerRan = expectation(description: "stale metronome result handled")
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { },
+            deactivateSession: { },
+            deactivationDelay: .zero
+        )
+        let output = NativeMetronomeOutput(
+            audioSessionCoordinator: coordinator,
+            scheduleOverride: { _, _, _, completion in
+                completionBox.append(completion)
+            },
+            onScheduleResult: { _ in
+                staleHandlerRan.fulfill()
+            }
+        )
+        let settings = MetronomeSettings()
+
+        output.playTick(settings: settings, accent: false)
+        for _ in 0..<50 where completionBox.first == nil { await Task.yield() }
+        let staleCompletion = try XCTUnwrap(completionBox.first)
+        output.stop()
+        output.playTick(settings: settings, accent: true)
+        XCTAssertEqual(coordinator.activeOwners, [.metronome])
+
+        staleCompletion(.failure(NativeAudioEngineError.outputUnavailable))
+        await fulfillment(of: [staleHandlerRan], timeout: 1)
+
+        XCTAssertEqual(coordinator.activeOwners, [.metronome])
+        XCTAssertNil(output.lastFailure)
+    }
+
+    @MainActor
+    func testMetronomeMediaResetForcesFreshActivationAfterFailedDeactivation() async throws {
+        enum ExpectedFailure: Error { case deactivation }
+        var activationCount = 0
+        var deactivationCount = 0
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { activationCount += 1 },
+            deactivateSession: {
+                deactivationCount += 1
+                throw ExpectedFailure.deactivation
+            },
+            deactivationDelay: .zero
+        )
+        let output = NativeMetronomeOutput(
+            audioSessionCoordinator: coordinator,
+            scheduleOverride: { _, _, _, completion in completion(.success(())) }
+        )
+
+        output.playTick(settings: MetronomeSettings(), accent: false)
+        for _ in 0..<50 where !coordinator.isActive(.metronome) { await Task.yield() }
+        coordinator.release(.metronome, deactivation: .immediate)
+        await coordinator.flush()
+        XCTAssertEqual(deactivationCount, 1, "The pre-reset immediate release must exercise a failing AVAudioSession deactivation.")
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+
+        output.playTick(settings: MetronomeSettings(), accent: true)
+        for _ in 0..<50 where !coordinator.isActive(.metronome) { await Task.yield() }
+        await coordinator.flush()
+        XCTAssertEqual(activationCount, 1, "A failed deactivation leaves the coordinator's active marker intact before reset.")
+        XCTAssertEqual(coordinator.activeOwners, [.metronome])
+
+        output.handleMediaServicesReset()
+        await coordinator.flush()
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertEqual(deactivationCount, 1, "Reset must clear the stale marker before releasing ownership, not retry the invalid session.")
+
+        output.playTick(settings: MetronomeSettings(), accent: true)
+        for _ in 0..<50 where !coordinator.isActive(.metronome) { await Task.yield() }
+        await coordinator.flush()
+        XCTAssertEqual(activationCount, 2, "The post-reset metronome run must activate a fresh session.")
+    }
+
+    @MainActor
+    func testRecordingPlaybackMediaResetStopsOwnershipAndForcesFreshConfiguration() async {
+        let probe = AudioControlPlaneProbe()
+        var playing = false
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .seconds(5)
+        )
+        let driver = NativeRecordingPlaybackDriver(
+            duration: { 4 },
+            currentTime: { 0 },
+            setCurrentTime: { _ in },
+            isPlaying: { playing },
+            prepareToPlay: { true },
+            play: { playing = true; return true },
+            pause: { playing = false },
+            stop: { playing = false }
+        )
+        let player = NativeRecordingPlayer(
+            audioSessionCoordinator: coordinator,
+            makeDriver: { _ in driver }
+        )
+        let url = URL(fileURLWithPath: "/app-owned/reset-test.caf")
+
+        player.play(url: url)
+        for _ in 0..<20 where player.state != .playing { await Task.yield() }
+        XCTAssertEqual(coordinator.activeOwners, [.recordingPlayback])
+        player.handleMediaServicesReset()
+        XCTAssertEqual(player.state, .stopped)
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertTrue(player.notice?.localizedCaseInsensitiveContains("services restarted") == true)
+
+        player.play(url: url)
+        for _ in 0..<20 where player.state != .playing { await Task.yield() }
+        XCTAssertEqual(probe.count(.activate), 2)
+        XCTAssertEqual(probe.count(.configure(.recordingPlayback)), 2)
+        XCTAssertEqual(coordinator.activeOwners, [.recordingPlayback])
+    }
+
+    @MainActor
+    func testRecordingPlaybackMediaResetUnloadsInvalidDriverForSameURLReplay() async {
+        let probe = AudioControlPlaneProbe()
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+        var makeDriverCount = 0
+        var firstDriverIsInvalid = false
+        var playedDriverIDs: [Int] = []
+        let player = NativeRecordingPlayer(
+            audioSessionCoordinator: coordinator,
+            makeDriver: { _ in
+                makeDriverCount += 1
+                let driverID = makeDriverCount
+                var isPlaying = false
+                return NativeRecordingPlaybackDriver(
+                    duration: { 3 },
+                    currentTime: { 0 },
+                    setCurrentTime: { _ in },
+                    isPlaying: { isPlaying },
+                    prepareToPlay: { !(driverID == 1 && firstDriverIsInvalid) },
+                    play: {
+                        guard !(driverID == 1 && firstDriverIsInvalid) else { return false }
+                        playedDriverIDs.append(driverID)
+                        isPlaying = true
+                        return true
+                    },
+                    pause: { isPlaying = false },
+                    stop: { isPlaying = false }
+                )
+            }
+        )
+        let url = URL(fileURLWithPath: "/app-owned/media-reset-reload.caf")
+
+        player.play(url: url)
+        for _ in 0..<50 where player.state != .playing { await Task.yield() }
+        XCTAssertEqual(makeDriverCount, 1)
+        XCTAssertEqual(playedDriverIDs, [1])
+
+        firstDriverIsInvalid = true
+        player.handleMediaServicesReset()
+        await coordinator.flush()
+        XCTAssertNil(player.loadedURL)
+        XCTAssertEqual(player.duration, 0)
+
+        player.play(url: url)
+        for _ in 0..<50 where player.state != .playing { await Task.yield() }
+        XCTAssertEqual(makeDriverCount, 2)
+        XCTAssertEqual(playedDriverIDs, [1, 2])
+        XCTAssertEqual(player.state, .playing)
+
+        player.stopAndUnload()
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testRapidRecordingReplayDoesNotLetStaleWaiterReleaseSharedReadiness() async throws {
+        let probe = AudioControlPlaneProbe()
+        probe.delayedEvent = .activate
+        probe.delaySeconds = 0.05
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+        var playCount = 0
+        var isPlaying = false
+        let driver = NativeRecordingPlaybackDriver(
+            duration: { 3 },
+            currentTime: { 0 },
+            setCurrentTime: { _ in },
+            isPlaying: { isPlaying },
+            prepareToPlay: { true },
+            play: {
+                playCount += 1
+                isPlaying = true
+                return true
+            },
+            pause: { isPlaying = false },
+            stop: { isPlaying = false }
+        )
+        let player = NativeRecordingPlayer(
+            audioSessionCoordinator: coordinator,
+            makeDriver: { _ in driver }
+        )
+        let url = URL(fileURLWithPath: "/app-owned/rapid-replay.caf")
+
+        player.play(url: url)
+        player.play(url: url)
+        for _ in 0..<100 where player.state != .playing {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        await coordinator.flush()
+
+        XCTAssertEqual(probe.count(.activate), 1)
+        XCTAssertEqual(playCount, 1)
+        XCTAssertEqual(player.state, .playing)
+        XCTAssertEqual(coordinator.activeOwners, [.recordingPlayback])
+        let physicalOwners = await coordinator.physicalActiveOwners()
+        XCTAssertEqual(physicalOwners, [.recordingPlayback])
+
+        player.stopAndUnload()
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testToneBufferCacheReusesNormalizedBuffersWithinBoundedCapacity() throws {
+        let cache = NativeToneBufferCache(capacity: 2)
+        let first = try cache.buffer(for: [440])
+        let repeated = try cache.buffer(for: [440])
+        XCTAssertTrue(first === repeated)
+        XCTAssertEqual(first.frameLength, 44_100)
+        XCTAssertEqual(first.format.sampleRate, 44_100)
+        XCTAssertEqual(try XCTUnwrap(first.floatChannelData?[0])[0], 0, accuracy: 0.000_001)
+
+        let chord = try cache.buffer(for: [440, 550])
+        let samples = chord.floatChannelData?[0]
+        XCTAssertNotNil(samples)
+        let peak = (0..<Int(chord.frameLength)).reduce(Float.zero) { current, index in
+            max(current, abs(samples![index]))
+        }
+        XCTAssertLessThanOrEqual(peak, 1.000_001, "Normalized chord buffers must not encode user volume or clip.")
+
+        _ = try cache.buffer(for: [660])
+        XCTAssertEqual(cache.count, 2, "The cache must evict rather than retaining arbitrary tone combinations.")
+    }
+
+    @MainActor
+    func testMetronomeStopWithoutSessionOwnerIsNoOp() {
+        var deactivationCount = 0
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { },
+            deactivateSession: { deactivationCount += 1 },
+            deactivationDelay: .zero
+        )
+        let output = NativeMetronomeOutput(audioSessionCoordinator: coordinator)
+
+        output.stop()
+
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertEqual(deactivationCount, 0)
+    }
+
+    @MainActor
+    func testToneRouteLossAndInterruptionDeactivateWithoutWaitingForIdleDelay() async throws {
+        var activationCount = 0
+        var deactivationCount = 0
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { activationCount += 1 },
+            deactivateSession: { deactivationCount += 1 },
+            deactivationDelay: .seconds(5)
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            simulateTonePlayback: true
+        )
+
+        try engine.startTone(frequencyHz: 440, volume: 0.5)
+        try await coordinator.acquire(.tone)
+        engine.handleRouteChange(rawReason: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue)
+        await coordinator.flush()
+        XCTAssertEqual(deactivationCount, 1, "Route loss must not leave a deferred audio-session deactivation pending.")
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+
+        try engine.startTone(frequencyHz: 440, volume: 0.5)
+        try await coordinator.acquire(.tone)
+        engine.handleInterruption(rawType: AVAudioSession.InterruptionType.began.rawValue)
+        await coordinator.flush()
+        XCTAssertEqual(activationCount, 2)
+        XCTAssertEqual(deactivationCount, 2, "An interruption must deactivate immediately even when normal handoffs are delayed.")
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+    }
+
+    @MainActor
+    func testAudioSessionCoordinatorRejectsIncompatibleOwnersAndMakesRepeatedHandoffsIdempotent() async throws {
+        var activationCount = 0
+        var deactivationCount = 0
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { activationCount += 1 },
+            deactivateSession: { deactivationCount += 1 },
+            deactivationDelay: .zero
+        )
+
+        let firstCaptureAcquire = try await coordinator.acquire(.capture)
+        let repeatedCaptureAcquire = try await coordinator.acquire(.capture)
+        XCTAssertTrue(firstCaptureAcquire)
+        XCTAssertFalse(repeatedCaptureAcquire)
+        XCTAssertEqual(activationCount, 1)
+        do {
+            _ = try await coordinator.acquire(.tone)
+            XCTFail("Capture and tone must conflict.")
+        } catch {
+            XCTAssertEqual(error as? NativeAudioEngineError, .audioSessionOwnerConflict)
+        }
+        XCTAssertEqual(coordinator.activeOwners, [.capture])
+        coordinator.release(.tone)
+        coordinator.release(.capture)
+        coordinator.release(.capture)
+        await coordinator.flush()
+        XCTAssertEqual(deactivationCount, 1)
+
+        try await coordinator.acquire(.recordingPlayback)
+        do { _ = try await coordinator.acquire(.capture); XCTFail("Playback and capture must conflict.") }
+        catch { XCTAssertEqual(error as? NativeAudioEngineError, .audioSessionOwnerConflict) }
+        do { _ = try await coordinator.acquire(.metronome); XCTFail("Playback and metronome must conflict.") }
+        catch { XCTAssertEqual(error as? NativeAudioEngineError, .audioSessionOwnerConflict) }
+        coordinator.release(.recordingPlayback)
+        await coordinator.flush()
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertEqual(activationCount, 2)
+        XCTAssertEqual(deactivationCount, 2)
+    }
+
+    func testAudioReferencePitchAndStableTunerStateRejectInvalidInputs() throws {
+        XCTAssertEqual(NativeReferencePitch.sanitized(.nan), 440)
+        XCTAssertEqual(NativeReferencePitch.sanitized(.infinity), 440)
+        XCTAssertEqual(NativeReferencePitch.sanitized(429.9), 440)
+        XCTAssertEqual(NativeReferencePitch.sanitized(450.1), 440)
+        XCTAssertEqual(NativeReferencePitch.sanitized(442), 442)
+
+        let stable = PitchFrame(
+            timestampMs: 1, frequencyHz: 440, confidence: 0.98, rms: 0.08,
+            centsDeviation: 0, tuningStatus: .inTune, writtenNoteName: "A",
+            writtenOctave: 4, isValidForRecording: true
+        )
+        let lowConfidence = PitchFrame(
+            timestampMs: 2, frequencyHz: 440, confidence: 0.4, rms: 0.08,
+            centsDeviation: 0, tuningStatus: .unstable, writtenNoteName: "A",
+            writtenOctave: 4, isValidForRecording: false
+        )
+        let outOfRange = PitchFrame(
+            timestampMs: 3, frequencyHz: 440, confidence: 0.99, rms: 0.08,
+            centsDeviation: nil, tuningStatus: .noLock, writtenNoteName: nil,
+            writtenOctave: nil, isValidForRecording: false
+        )
+        XCTAssertTrue(NativeAudioEngine.isStableTunerFrame(stable))
+        XCTAssertFalse(NativeAudioEngine.isStableTunerFrame(lowConfidence))
+        XCTAssertFalse(NativeAudioEngine.isStableTunerFrame(outOfRange))
+    }
+
+    @MainActor
+    func testAppModelSanitizesRestoredOrUserEnteredReferencePitch() {
+        let model = makeModel()
+        model.referencePitchHz = .nan
+        XCTAssertEqual(model.referencePitchHz, 440)
+        model.referencePitchHz = 451
+        XCTAssertEqual(model.referencePitchHz, 440)
+        model.referencePitchHz = 443
+        XCTAssertEqual(model.referencePitchHz, 443)
+    }
+
+    func testMetronomeClickBuffersFollowNegotiatedFormatAndUseHostClockSeam() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2))
+        let buffers = try NativeMetronomeClickBuffers(outputFormat: format)
+        XCTAssertEqual(buffers.regular.format.sampleRate, 48_000, accuracy: 0.001)
+        XCTAssertEqual(buffers.regular.format.channelCount, 2)
+        XCTAssertEqual(buffers.accent.format.channelCount, 2)
+        XCTAssertGreaterThan(buffers.regular.frameLength, 0)
+        XCTAssertTrue(buffers.matches(format))
+
+        let scheduled = NativeMetronomeScheduling.hostTime(now: 123_456)
+        XCTAssertEqual(scheduled.hostTime, 123_456)
+
+        let timeline = NativeMetronomeTimeline(anchorHostTime: 10_000, intervalSeconds: 0.125)
+        XCTAssertEqual(
+            timeline.hostTime(forPulseIndex: 10_000),
+            10_000 &+ (AVAudioTime.hostTime(forSeconds: 0.125) &* 10_000),
+            "Every pulse must stay anchored instead of accumulating rounded deadlines."
+        )
+        let targets = (1...360).map { timeline.hostTime(forPulseIndex: UInt64($0)) }
+        XCTAssertEqual(targets.count, Set(targets).count)
+        XCTAssertTrue(
+            zip(targets, targets.dropFirst()).allSatisfy {
+                $1 &- $0 == timeline.intervalHostTicks
+            },
+            "A six-minute-equivalent 360-pulse run must preserve one exact anchored host-time interval."
+        )
+        XCTAssertEqual(
+            targets.last,
+            timeline.anchorHostTime &+ (timeline.intervalHostTicks &* 360)
+        )
+    }
+
+    func testStandaloneMetronomeSessionPolicyIsPlaybackOriented() throws {
+        var captured: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
+        NativeMetronomeSessionPolicy.configure { category, mode, options in
+            captured = (category, mode, options)
+        }
+        XCTAssertEqual(captured?.0, .playback)
+        XCTAssertEqual(captured?.1, .default)
+        XCTAssertEqual(captured?.2, [.mixWithOthers])
+    }
+
+    @MainActor
+    func testMetronomeHapticsRemainAvailableForVisualOnlyAndMutedTicks() {
+        let coordinator = NativeAudioSessionCoordinator(activateSession: {}, deactivateSession: {})
+        var accents: [Bool] = []
+        let output = NativeMetronomeOutput(
+            audioSessionCoordinator: coordinator,
+            playHaptic: { accents.append($0) }
+        )
+        var visualOnly = MetronomeSettings()
+        visualOnly.visualOnly = true
+        visualOnly.hapticsEnabled = true
+        output.playTick(settings: visualOnly, accent: true)
+        var muted = MetronomeSettings()
+        muted.muted = true
+        muted.hapticsEnabled = true
+        output.playTick(settings: muted, accent: false)
+        XCTAssertEqual(accents, [true, false])
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+    }
+
+    @MainActor
+    func testMetronomeHandoffStopsReferenceToneBeforeStarting() throws {
+        var stopped = false
+        AppAudioOwnershipHandoff.prepareForMetronomePlayback { stopped = true }
+        XCTAssertTrue(stopped)
+
+        let coordinator = NativeAudioSessionCoordinator(activateSession: {}, deactivateSession: {})
+        let engine = NativeAudioEngine(audioSessionCoordinator: coordinator, simulateTonePlayback: true)
+        let model = makeModel(audioEngine: engine, audioSessionCoordinator: coordinator)
+        try engine.startTone(frequencyHz: 440, volume: 0.3)
+        XCTAssertTrue(engine.tonePlaying)
+        model.startMetronome()
+        XCTAssertFalse(engine.tonePlaying)
+    }
+
+    @MainActor
+    func testMetronomeAcquireAndScheduleFailuresNotifyLifecycleHandler() async {
+        let coordinator = NativeAudioSessionCoordinator(activateSession: {}, deactivateSession: {})
+        _ = try? await coordinator.acquire(.tone, configuration: .tone)
+        var events: [NativeMetronomeOutput.LifecycleEvent] = []
+        let output = NativeMetronomeOutput(audioSessionCoordinator: coordinator)
+        output.setLifecycleHandler { events.append($0) }
+        output.playTick(settings: MetronomeSettings(), accent: false)
+        XCTAssertEqual(events, [.outputFailure])
+
+        let scheduleCoordinator = NativeAudioSessionCoordinator(activateSession: {}, deactivateSession: {})
+        let scheduleOutput = NativeMetronomeOutput(
+            audioSessionCoordinator: scheduleCoordinator,
+            scheduleOverride: { _, _, _, completion in completion(.failure(NativeAudioEngineError.outputUnavailable)) }
+        )
+        scheduleOutput.setLifecycleHandler { events.append($0) }
+        scheduleOutput.playTick(settings: MetronomeSettings(), accent: false)
+        for _ in 0..<50 where events.count < 2 { await Task.yield() }
+        XCTAssertEqual(events, [.outputFailure, .outputFailure])
+        XCTAssertTrue(scheduleCoordinator.activeOwners.isEmpty)
+    }
+
+    @MainActor
+    func testMetronomeActivationFailureStopsAppModelAndPresentsRecoverableNotice() async {
+        let probe = AudioControlPlaneProbe()
+        probe.failingEvent = .activate
+        let coordinator = NativeAudioSessionCoordinator(hooks: probe.hooks, deactivationDelay: .zero)
+        let model = makeModel(audioSessionCoordinator: coordinator)
+        model.startMetronome()
+        for _ in 0..<100 where model.metronomeRunning { await Task.yield() }
+        XCTAssertFalse(model.metronomeRunning)
+        XCTAssertEqual(
+            model.lastError?.localizedDescription,
+            NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
+        )
+    }
+
+    @MainActor
+    func testMetronomeColdStartWaitsForReadinessAndAnchorsFirstClickInTheFuture() async throws {
+        var targets: [UInt64] = []
+        let submitted = expectation(description: "initial metronome click submitted")
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: {},
+            deactivateSession: {},
+            deactivationDelay: .zero
+        )
+        let output = NativeMetronomeOutput(
+            audioSessionCoordinator: coordinator,
+            scheduleOverride: { _, _, hostTime, completion in
+                targets.append(hostTime)
+                completion(.success(()))
+            },
+            onScheduleSubmitted: { submitted.fulfill() }
+        )
+        let requestedHostTime = mach_absolute_time()
+        output.playTick(
+            settings: MetronomeSettings(),
+            accent: true,
+            hostTime: requestedHostTime,
+            onInitialPulseScheduled: { anchorHostTime in
+                XCTAssertEqual(anchorHostTime, targets.first)
+            }
+        )
+
+        await fulfillment(of: [submitted], timeout: 1)
+        let target = try XCTUnwrap(targets.first)
+        XCTAssertGreaterThanOrEqual(
+            target,
+            requestedHostTime &+ AVAudioTime.hostTime(
+                forSeconds: NativeMetronomeOutput.initialSchedulingMarginSeconds
+            )
+        )
+    }
+
+    @MainActor
+    func testMetronomeRouteAndInterruptionResetGraphReleaseOwnershipAndNotifyAppModel() async throws {
+        let graphProbe = MetronomeGraphProbe()
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: {},
+            deactivateSession: {},
+            deactivationDelay: .zero
+        )
+        var events: [NativeMetronomeOutput.LifecycleEvent] = []
+        let output = NativeMetronomeOutput(
+            audioSessionCoordinator: coordinator,
+            scheduleOverride: { _, _, _, completion in completion(.success(())) },
+            graphHooks: graphProbe.hooks
+        )
+        output.setLifecycleHandler { events.append($0) }
+        output.playTick(settings: MetronomeSettings(), accent: false)
+        for _ in 0..<50 where !coordinator.isActive(.metronome) { await Task.yield() }
+
+        output.handleRouteChange(rawReason: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue)
+        await coordinator.flush()
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertEqual(events, [.routeChanged])
+        XCTAssertTrue(graphProbe.events.contains("reset"))
+
+        output.playTick(settings: MetronomeSettings(), accent: false)
+        for _ in 0..<50 where !coordinator.isActive(.metronome) { await Task.yield() }
+        output.handleInterruption(rawType: AVAudioSession.InterruptionType.began.rawValue)
+        await coordinator.flush()
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertEqual(events, [.routeChanged, .interruption])
+
+        let model = makeModel(audioSessionCoordinator: coordinator)
+        model.startMetronome()
+        for _ in 0..<50 where !model.metronomeRunning { await Task.yield() }
+        NotificationCenter.default.post(
+            name: AVAudioSession.interruptionNotification,
+            object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue]
+        )
+        for _ in 0..<50 where model.metronomeRunning { await Task.yield() }
+        XCTAssertFalse(model.metronomeRunning)
+        XCTAssertEqual(model.lastError?.localizedDescription, NativeLocalization.string("Microphone interrupted"))
+    }
+
+    func testAudioFrameDeliveryHopsToMainActorBeforeInvokingReceiver() async {
+        let delivered = expectation(description: "Frame delivered on MainActor")
+        let frame = PitchFrame(
+            timestampMs: 7,
+            frequencyHz: 440,
+            confidence: 0.99,
+            rms: 0.08,
+            centsDeviation: 0,
+            tuningStatus: .inTune,
+            writtenNoteName: "A",
+            writtenOctave: 4,
+            isValidForRecording: true
+        )
+        let receiver = NativeAudioFrameDelivery.toMainActor { received in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertEqual(received, frame)
+            delivered.fulfill()
+        }
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                receiver(frame)
+                continuation.resume()
+            }
+        }
+        await fulfillment(of: [delivered], timeout: 2)
+    }
+
+    func testLiveCaptureFinishDrainsTailFrameBeforeReturning() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 256))
+        buffer.frameLength = 256
+        let pipeline = try XCTUnwrap(NativeLiveCapturePipeline(
+            format: format,
+            frameCapacity: 256,
+            writer: nil,
+            instrumentId: "trumpet",
+            referencePitchHz: 440,
+            receiveFrame: { _ in }
+        ))
+
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 321)
+        let result = pipeline.finish()
+
+        XCTAssertEqual(result.frames.count, 1)
+        XCTAssertEqual(result.frames.first?.timestampMs, 321)
+    }
+
+    func testLiveCapturePipelineCountsOverflowAndMarksResultIncomplete() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 256))
+        buffer.frameLength = 256
+        let pipeline = try XCTUnwrap(NativeLiveCapturePipeline(
+            format: format,
+            frameCapacity: 256,
+            slotCount: 2,
+            writer: nil,
+            instrumentId: "trumpet",
+            referencePitchHz: 440,
+            automaticallyDrain: false,
+            receiveFrame: { _ in }
+        ))
+
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 100)
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 200)
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 300)
+        let result = pipeline.finish()
+
+        XCTAssertEqual(result.frames.count, 1)
+        XCTAssertEqual(result.droppedInputFrameCount, 2)
+    }
+
+    func testLiveCapturePipelineDiscardPreservesOverflowDiagnostics() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 256))
+        buffer.frameLength = 256
+        let pipeline = try XCTUnwrap(NativeLiveCapturePipeline(
+            format: format,
+            frameCapacity: 256,
+            slotCount: 2,
+            writer: nil,
+            instrumentId: "trumpet",
+            referencePitchHz: 440,
+            automaticallyDrain: false,
+            receiveFrame: { _ in }
+        ))
+
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 100)
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 200)
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 300)
+        let result = pipeline.discard()
+
+        XCTAssertEqual(result.droppedInputFrameCount, 2)
+    }
+
+    @MainActor
+    func testDiscardedLiveCapturePreservesDiagnosticsWithoutRepublishingAcceptedFrames() async throws {
+        let probe = AudioControlPlaneProbe()
+        let coordinator = NativeAudioSessionCoordinator(
+            hooks: probe.hooks,
+            deactivationDelay: .zero
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            microphonePermissionRequester: { true }
+        )
+        let model = makeModel(
+            audioEngine: engine,
+            audioSessionCoordinator: coordinator,
+            playAlongFixturesEnabled: false
+        )
+
+        await model.startPlayAlong()
+        XCTAssertEqual(model.playAlongPhase, .running)
+        let acceptedFrame = PitchFrame.fixture(index: 0)
+        engine.seedAcceptedLiveFrameForTesting(acceptedFrame)
+        XCTAssertEqual(engine.frames, [acceptedFrame])
+        XCTAssertEqual(engine.currentFrame, acceptedFrame)
+        XCTAssertEqual(engine.acceptedLiveFrameCount, 1)
+        let completion = try XCTUnwrap(model.stopPlayAlong())
+        let capture = await completion.value
+
+        XCTAssertEqual(capture.completionReason, .userStopped)
+        XCTAssertEqual(capture.droppedInputFrameCount, 0)
+        XCTAssertTrue(capture.frames.isEmpty)
+        XCTAssertTrue(engine.frames.isEmpty)
+        XCTAssertNil(engine.currentFrame)
+        XCTAssertEqual(engine.acceptedLiveFrameCount, 1)
+        XCTAssertFalse(engine.recording)
+        XCTAssertFalse(coordinator.isActive(.capture))
+        await coordinator.flush()
+    }
+
+    @MainActor
+    func testTonePlaybackDoesNotManufactureMicrophonePermission() async throws {
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { },
+            deactivateSession: { }
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            microphonePermissionRequester: { false },
+            simulateTonePlayback: true
+        )
+        let permissionGranted = await engine.requestMicrophonePermission()
+        XCTAssertFalse(permissionGranted)
+        XCTAssertEqual(engine.audioState, .permissionDenied)
+
+        try engine.startTone(frequencyHz: 440, volume: 0.5)
+        XCTAssertTrue(engine.tonePlaying)
+        XCTAssertEqual(engine.audioState, .permissionDenied)
+        engine.stopTone()
+        XCTAssertEqual(engine.audioState, .permissionDenied)
+    }
+
+    @MainActor
+    func testMediaServicesResetRebuildsGraphsAndReleasesMetronomeOwnership() async throws {
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: { },
+            deactivateSession: { }
+        )
+        let engine = NativeAudioEngine(
+            audioSessionCoordinator: coordinator,
+            simulateTonePlayback: true
+        )
+        XCTAssertEqual(engine.audioGraphGeneration, 0)
+        engine.handleMediaServicesReset()
+        await coordinator.flush()
+        for _ in 0..<10 where engine.audioGraphGeneration == 0 { await Task.yield() }
+        XCTAssertEqual(engine.audioGraphGeneration, 1)
+
+        let output = NativeMetronomeOutput(audioSessionCoordinator: coordinator)
+        try await coordinator.acquire(.metronome)
+        output.handleMediaServicesReset()
+        await coordinator.flush()
+        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertEqual(output.lastFailure, .outputUnavailable)
     }
 
     func testRecordingFileStoreOnlyReturnsAndDeletesOwnedPlayableFiles() throws {
@@ -3704,18 +6494,14 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testListenBackUsesPlaybackCategoryAndReleasesOwnershipForPauseStopRouteAndInterruption() throws {
-        var activationCount = 0
-        var deactivationCount = 0
+    func testListenBackUsesPlaybackCategoryAndReleasesOwnershipForPauseStopRouteAndInterruption() async throws {
+        let probe = AudioControlPlaneProbe()
         let coordinator = NativeAudioSessionCoordinator(
-            activateSession: { activationCount += 1 },
-            deactivateSession: { deactivationCount += 1 }
+            hooks: probe.hooks,
+            deactivationDelay: .zero
         )
         var playing = false
         var currentTime: TimeInterval = 0
-        var configuredCategory: AVAudioSession.Category?
-        var configuredMode: AVAudioSession.Mode?
-        var configuredOptions: AVAudioSession.CategoryOptions?
         let driver = NativeRecordingPlaybackDriver(
             duration: { 12 },
             currentTime: { currentTime },
@@ -3731,35 +6517,29 @@ final class BrassTuneAppTests: XCTestCase {
         )
         let player = NativeRecordingPlayer(
             audioSessionCoordinator: coordinator,
-            makeDriver: { _ in driver },
-            configurePlaybackSession: {
-                NativePlaybackSessionPolicy.configure { category, mode, options in
-                    configuredCategory = category
-                    configuredMode = mode
-                    configuredOptions = options
-                }
-            }
+            makeDriver: { _ in driver }
         )
         let url = URL(fileURLWithPath: "/app-owned/test.caf")
 
         player.play(url: url)
+        for _ in 0..<20 where player.state != .playing { await Task.yield() }
 
-        XCTAssertEqual(configuredCategory, .playback, "Listen-back must ignore Ring/Silent like media playback.")
-        XCTAssertEqual(configuredMode, .default)
-        XCTAssertEqual(configuredOptions, [])
+        XCTAssertEqual(probe.count(.configure(.recordingPlayback)), 1)
         XCTAssertEqual(player.state, .playing)
         XCTAssertEqual(coordinator.activeOwners, [.recordingPlayback])
-        XCTAssertEqual(activationCount, 1)
+        XCTAssertEqual(probe.count(.activate), 1)
 
         player.handleRouteChange(rawReason: AVAudioSession.RouteChangeReason.categoryChange.rawValue)
         XCTAssertEqual(player.state, .playing, "Self-induced category changes are not output loss.")
 
         player.pause()
+        await coordinator.flush()
         XCTAssertEqual(player.state, .paused)
         XCTAssertTrue(coordinator.activeOwners.isEmpty)
-        XCTAssertEqual(deactivationCount, 1)
+        XCTAssertEqual(probe.count(.deactivate), 1)
 
         player.play(url: url)
+        for _ in 0..<20 where player.state != .playing { await Task.yield() }
         XCTAssertEqual(player.state, .playing)
         player.handleInterruption(rawType: AVAudioSession.InterruptionType.began.rawValue)
         XCTAssertEqual(player.state, .paused)
@@ -3767,20 +6547,21 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertTrue(coordinator.activeOwners.isEmpty)
 
         player.play(url: url)
+        for _ in 0..<20 where player.state != .playing { await Task.yield() }
         player.handleRouteChange(rawReason: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue)
         XCTAssertEqual(player.state, .stopped)
         XCTAssertTrue(player.notice?.contains("output changed") == true)
         XCTAssertTrue(coordinator.activeOwners.isEmpty)
-        XCTAssertEqual(activationCount, 3)
-        XCTAssertEqual(deactivationCount, 3)
+        await coordinator.flush()
+        XCTAssertEqual(probe.count(.activate), 3)
+        XCTAssertEqual(probe.count(.deactivate), 3)
     }
 
     @MainActor
-    func testListenBackFailureCopyNamesRecordingForCategoryAndDriverFailures() {
-        let coordinator = NativeAudioSessionCoordinator(
-            activateSession: {},
-            deactivateSession: {}
-        )
+    func testListenBackFailureCopyNamesRecordingForCategoryAndDriverFailures() async {
+        let categoryProbe = AudioControlPlaneProbe()
+        categoryProbe.failingEvent = .configure(.recordingPlayback)
+        let coordinator = NativeAudioSessionCoordinator(hooks: categoryProbe.hooks)
         let url = URL(fileURLWithPath: "/app-owned/test.caf")
         let driver = NativeRecordingPlaybackDriver(
             duration: { 1 },
@@ -3794,11 +6575,13 @@ final class BrassTuneAppTests: XCTestCase {
         )
         let categoryFailurePlayer = NativeRecordingPlayer(
             audioSessionCoordinator: coordinator,
-            makeDriver: { _ in driver },
-            configurePlaybackSession: { throw NSError(domain: "BrassTuneTests", code: 1) }
+            makeDriver: { _ in driver }
         )
 
         categoryFailurePlayer.play(url: url)
+        for _ in 0..<100 where categoryFailurePlayer.notice == nil {
+            try? await Task.sleep(for: .milliseconds(2))
+        }
 
         XCTAssertEqual(
             categoryFailurePlayer.notice,
@@ -3806,18 +6589,22 @@ final class BrassTuneAppTests: XCTestCase {
         )
         XCTAssertFalse(categoryFailurePlayer.notice?.localizedCaseInsensitiveContains("reference tone") == true)
 
+        let driverProbe = AudioControlPlaneProbe()
+        let driverCoordinator = NativeAudioSessionCoordinator(hooks: driverProbe.hooks)
         let driverFailurePlayer = NativeRecordingPlayer(
-            audioSessionCoordinator: coordinator,
-            makeDriver: { _ in driver },
-            configurePlaybackSession: {}
+            audioSessionCoordinator: driverCoordinator,
+            makeDriver: { _ in driver }
         )
         driverFailurePlayer.play(url: url)
+        for _ in 0..<100 where driverFailurePlayer.notice == nil {
+            try? await Task.sleep(for: .milliseconds(2))
+        }
 
         XCTAssertEqual(
             driverFailurePlayer.notice,
             "BrassTune couldn't play this recording. Check your audio output and try again."
         )
-        XCTAssertTrue(coordinator.activeOwners.isEmpty)
+        XCTAssertTrue(driverCoordinator.activeOwners.isEmpty)
     }
 
     @MainActor
@@ -3843,6 +6630,34 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testAudioOperationalStateReflectsMicrophonePermissionResult() async {
+        let deniedEngine = NativeAudioEngine(
+            audioSessionCoordinator: NativeAudioSessionCoordinator(
+                activateSession: {},
+                deactivateSession: {}
+            ),
+            microphonePermissionRequester: { false }
+        )
+        XCTAssertEqual(deniedEngine.audioState, .permissionNotDetermined)
+        let denied = await deniedEngine.requestMicrophonePermission()
+        XCTAssertFalse(denied)
+        XCTAssertEqual(deniedEngine.audioState, .permissionDenied)
+        XCTAssertTrue(deniedEngine.permissionDenied)
+
+        let grantedEngine = NativeAudioEngine(
+            audioSessionCoordinator: NativeAudioSessionCoordinator(
+                activateSession: {},
+                deactivateSession: {}
+            ),
+            microphonePermissionRequester: { true }
+        )
+        let granted = await grantedEngine.requestMicrophonePermission()
+        XCTAssertTrue(granted)
+        XCTAssertEqual(grantedEngine.audioState, .permissionGranted(.idle))
+        XCTAssertFalse(grantedEngine.permissionDenied)
+    }
+
+    @MainActor
     func testInterruptedCaptureRetainsOneSessionSnapshotAndDeletesItsFileWithSession() throws {
         let stateURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
@@ -3865,7 +6680,7 @@ final class BrassTuneAppTests: XCTestCase {
             id: captureID,
             startedAt: Date(timeIntervalSince1970: 1_000),
             endedAt: Date(timeIntervalSince1970: 1_003),
-            frames: [PitchFrame.fixture(index: 0)],
+            frames: (0..<8).map { PitchFrame.fixture(index: $0) },
             recordingURL: recordingURL,
             recordingRetentionFailure: nil,
             completionReason: .interruption
@@ -3892,6 +6707,57 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testUserStoppedNoSignalCaptureReturnsTunerToIdleWithoutMicrophoneError() {
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            )
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        let capture = NativeLiveCapture(
+            id: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_000.2),
+            frames: [],
+            recordingURL: nil,
+            recordingRetentionFailure: nil,
+            completionReason: .userStopped
+        )
+
+        XCTAssertFalse(model.handleUserStoppedLiveCapture(capture))
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertNil(model.lastError)
+        XCTAssertNil(model.audioEngine.audioNotice)
+    }
+
+    @MainActor
+    func testUserStoppedCaptureDoesNotHideDroppedFrameFailure() {
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            )
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        let capture = NativeLiveCapture(
+            id: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_003),
+            frames: (0..<8).map { PitchFrame.fixture(index: $0) },
+            droppedInputFrameCount: 1,
+            recordingURL: nil,
+            recordingRetentionFailure: nil,
+            completionReason: .userStopped
+        )
+
+        XCTAssertFalse(model.handleUserStoppedLiveCapture(capture))
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertTrue(model.audioEngine.audioNotice?.contains("couldn't save") == true)
+    }
+
+    @MainActor
     func testRestoreMigratesMissingRetainedRecordingToUnavailable() throws {
         let stateURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("BrassTune-\(UUID().uuidString).json")
@@ -3914,6 +6780,21 @@ final class BrassTuneAppTests: XCTestCase {
 
         XCTAssertNil(restored.sessions.first?.retainedRecordingURL)
         XCTAssertNil(restored.sessions.first.flatMap(restored.availableRecordingURL(for:)))
+
+        restored.flushPendingPersistence()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let repairedOnDisk = try decoder.decode(
+            NativeLocalSnapshot.self,
+            from: Data(contentsOf: stateURL)
+        )
+        XCTAssertNil(repairedOnDisk.sessions.first?.retainedRecordingURL)
+        XCTAssertEqual(repairedOnDisk.snapshotVersion, 5)
+
+        let secondRelaunch = AppModel(persistenceStore: store, recordingStorageDirectory: recordingDirectory)
+        secondRelaunch.enterGuestDemo(presentTutorial: false)
+        XCTAssertNil(secondRelaunch.sessions.first?.retainedRecordingURL)
+        XCTAssertNil(secondRelaunch.sessions.first.flatMap(secondRelaunch.availableRecordingURL(for:)))
     }
 
     @MainActor
@@ -4018,8 +6899,8 @@ final class BrassTuneAppTests: XCTestCase {
             quota: NativeRecordingRetentionQuota(maximumDuration: 60, maximumBytes: 3_000)
         )
 
-        writer.write(buffer)
-        writer.write(buffer)
+        writer.enqueueCopy(from: buffer)
+        writer.enqueueCopy(from: buffer)
         let result = writer.finish()
 
         XCTAssertEqual(result.retentionFailure, .sizeLimitReached)
@@ -4044,7 +6925,7 @@ final class BrassTuneAppTests: XCTestCase {
             id: UUID(),
             startedAt: Date(timeIntervalSince1970: 1_000),
             endedAt: Date(timeIntervalSince1970: 1_003),
-            frames: [PitchFrame.fixture(index: 0)],
+            frames: (0..<8).map { PitchFrame.fixture(index: $0) },
             recordingURL: nil,
             recordingRetentionFailure: .writeFailed,
             completionReason: .interruption
@@ -4053,6 +6934,31 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertTrue(model.retainUnexpectedLiveCapture(capture))
         XCTAssertEqual(model.sessions.count, 1)
         XCTAssertNil(model.sessions.first?.retainedRecordingURL)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertTrue(model.audioEngine.audioNotice?.contains("couldn't save") == true)
+    }
+
+    @MainActor
+    func testDroppedInputFramesFailClosedWithoutSavingPartialAnalytics() {
+        let model = AppModel(
+            persistenceStore: .ephemeral(
+                fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
+            )
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        let capture = NativeLiveCapture(
+            id: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_003),
+            frames: (0..<8).map { PitchFrame.fixture(index: $0) },
+            droppedInputFrameCount: 2,
+            recordingURL: nil,
+            recordingRetentionFailure: .writeFailed,
+            completionReason: .interruption
+        )
+
+        XCTAssertFalse(model.retainUnexpectedLiveCapture(capture))
+        XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertNotNil(model.lastError)
         XCTAssertTrue(model.audioEngine.audioNotice?.contains("couldn't save") == true)
     }
@@ -4078,7 +6984,7 @@ final class BrassTuneAppTests: XCTestCase {
             id: UUID(),
             startedAt: Date(timeIntervalSince1970: 1_000),
             endedAt: Date(timeIntervalSince1970: 1_010),
-            frames: [PitchFrame.fixture(index: 0), PitchFrame.fixture(index: 1)],
+            frames: (0..<8).map { PitchFrame.fixture(index: $0) },
             recordingURL: recordingURL,
             recordingRetentionFailure: .durationLimitReached,
             completionReason: .interruption
@@ -4112,7 +7018,7 @@ final class BrassTuneAppTests: XCTestCase {
             id: UUID(),
             startedAt: Date(timeIntervalSince1970: 1_000),
             endedAt: Date(timeIntervalSince1970: 1_003),
-            frames: [PitchFrame.fixture(index: 0)],
+            frames: (0..<8).map { PitchFrame.fixture(index: $0) },
             recordingURL: corruptRecordingURL,
             recordingRetentionFailure: .sizeLimitReached,
             completionReason: .interruption
@@ -4213,11 +7119,14 @@ final class BrassTuneAppTests: XCTestCase {
             let target = try XCTUnwrap((item["frequency_hz"] as? NSNumber)?.doubleValue)
             let expectedMIDI = try XCTUnwrap(item["midi"] as? Int)
             let expectedPython = try XCTUnwrap((item["expected_python_signed_cents_error"] as? NSNumber)?.doubleValue)
+            // Detector ranges intentionally reject unknown instruments. Pick
+            // a known profile that contains each synthetic fixture frequency.
+            let fixtureInstrument = expectedMIDI <= 65 ? "tuba" : "c-trumpet"
             let frame = NativePitchDetector.frame(
                 samples: harmonicTone(frequency: target, multiplier: 1),
                 sampleRate: sampleRate,
                 timestampMs: 0,
-                instrumentId: "fixture-wide-range",
+                instrumentId: fixtureInstrument,
                 referencePitchHz: 440
             )
             let detected = try XCTUnwrap(frame.frequencyHz, "Native detector did not lock \(note)")
@@ -4237,7 +7146,7 @@ final class BrassTuneAppTests: XCTestCase {
                     samples: harmonicTone(frequency: target, multiplier: amplitudes[index]),
                     sampleRate: sampleRate,
                     timestampMs: index,
-                    instrumentId: "fixture-wide-range",
+                    instrumentId: fixtureInstrument,
                     referencePitchHz: 440
                 )
                 guard let locked = onsetFrame.frequencyHz else { return false }
@@ -4507,7 +7416,8 @@ final class BrassTuneAppTests: XCTestCase {
     @MainActor
     private func makeModel(
         audioEngine: NativeAudioEngine? = nil,
-        audioSessionCoordinator: NativeAudioSessionCoordinator = .shared
+        audioSessionCoordinator: NativeAudioSessionCoordinator = .shared,
+        playAlongFixturesEnabled: Bool = NativeAudioEngine.testFixturesEnabled
     ) -> AppModel {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let scoreDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTuneScores-\(UUID().uuidString)", isDirectory: true)
@@ -4516,7 +7426,8 @@ final class BrassTuneAppTests: XCTestCase {
             scoreStorageDirectory: scoreDirectory,
             authService: AuthService(session: makeStubSession(), readSessionPayload: { nil }),
             audioSessionCoordinator: audioSessionCoordinator,
-            audioEngine: audioEngine
+            audioEngine: audioEngine,
+            playAlongFixturesEnabled: playAlongFixturesEnabled
         )
         model.enterGuestDemo(presentTutorial: false)
         return model

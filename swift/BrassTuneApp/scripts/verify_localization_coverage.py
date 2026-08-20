@@ -35,6 +35,19 @@ ALLOWED_DYNAMIC_LITERALS = {
     r"\(note)\(octave)",  # Internal A-G/octave note ID.
 }
 
+# The fallback below is a machine-readable JSON contract for a failed export,
+# never rendered in the app. It intentionally stays outside the String Catalog.
+NON_UI_STATIC_LITERAL_EXCEPTIONS = {
+    '{"schema_version":1,"export_error":"encoding_failed"}',
+}
+
+# Here “score” means a generated evaluation, not sheet music. Grade vocabulary is
+# correct in every locale and must not be rejected by the sheet-music heuristic.
+GRADE_SCORE_TERMINOLOGY_KEYS = {
+    "A visual cue advances through the sequence. No microphone capture or score is created.",
+    "Keep score",
+}
+
 CALLS = (
     "Text", "Label", "Button", "ProgressView", "Picker", "Toggle", "Section", "GroupBox",
     "navigationTitle", "accessibilityLabel", "accessibilityHint", "accessibilityValue",
@@ -266,6 +279,7 @@ def source_keys() -> tuple[set[str], dict[str, list[str]]]:
                             dynamic.setdefault(value, []).append(location)
                         else:
                             static.add(value)
+    static.difference_update(NON_UI_STATIC_LITERAL_EXCEPTIONS)
     return static, dynamic
 
 
@@ -355,7 +369,8 @@ def main() -> int:
                 ]
             if "guest" in key_lower:
                 checks += [("pt-BR", ("visitante",))]
-            if "score" in key_lower and key not in {"Your score", "Test score"}:
+            if ("score" in key_lower and key not in {"Your score", "Test score"}
+                    and key not in GRADE_SCORE_TERMINOLOGY_KEYS):
                 checks += [
                     ("es", ("puntuación",)), ("fr", ("score",)), ("pt-BR", ("pontuação", "placar")),
                     ("ru", ("счет", "оценк")), ("vi", ("điểm số", "tỉ số")),

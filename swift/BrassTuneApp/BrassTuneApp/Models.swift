@@ -9,14 +9,28 @@ enum NativeTestFixtures {
 }
 
 func instrumentDisplayName(_ id: String) -> String {
-    switch id {
-    case "trumpet": return NativeLocalization.string("Trumpet in Bb")
-    case "horn": return NativeLocalization.string("Horn in F")
-    case "trombone": return NativeLocalization.string("Trombone")
-    case "euphonium": return NativeLocalization.string("Euphonium")
-    case "tuba": return NativeLocalization.string("Tuba")
-    default: return id.capitalized
+    guard let profile = InstrumentProfiles.profile(for: id) else {
+        return NativeLocalization.string("Unsupported instrument")
     }
+    // Core profiles deliberately keep stable English identifiers for shared
+    // pitch-domain fixtures. Native UI must resolve those identifiers through
+    // the String Catalog instead of exposing the fixture copy to users.
+    let localizationKey: String
+    switch profile.id {
+    case "trumpet": localizationKey = "Trumpet in B♭"
+    case "cornet": localizationKey = "Cornet in B♭"
+    case "flugelhorn": localizationKey = "Flugelhorn in B♭"
+    case "c-trumpet": localizationKey = "Trumpet in C"
+    case "horn": localizationKey = "French Horn in F"
+    case "trombone": localizationKey = "Trombone"
+    case "euphonium": localizationKey = "Euphonium (concert)"
+    case "baritone-concert": localizationKey = "Baritone (concert)"
+    case "baritone": localizationKey = "Baritone in B♭ (treble)"
+    case "euphonium-treble": localizationKey = "Euphonium in B♭ (treble)"
+    case "tuba": localizationKey = "Tuba"
+    default: return NativeLocalization.string("Unsupported instrument")
+    }
+    return NativeLocalization.string(localizationKey)
 }
 
 struct InstrumentAcousticRange: Equatable {
@@ -28,14 +42,15 @@ struct InstrumentAcousticRange: Equatable {
     }
 
     static func forInstrument(_ instrumentId: String) -> InstrumentAcousticRange {
-        switch instrumentId {
-        case "trumpet": return InstrumentAcousticRange(minimumHz: 130, maximumHz: 1_500)
-        case "horn": return InstrumentAcousticRange(minimumHz: 80, maximumHz: 1_200)
-        case "trombone": return InstrumentAcousticRange(minimumHz: 50, maximumHz: 700)
-        case "euphonium": return InstrumentAcousticRange(minimumHz: 55, maximumHz: 800)
-        case "tuba": return InstrumentAcousticRange(minimumHz: 30, maximumHz: 500)
-        default: return InstrumentAcousticRange(minimumHz: 55, maximumHz: 1_300)
+        guard let profile = InstrumentProfiles.profile(for: instrumentId) else {
+            // An empty interval makes unknown persisted IDs fail closed before pitch or recording state is authorized.
+            return InstrumentAcousticRange(minimumHz: .infinity, maximumHz: -.infinity)
         }
+        let detectorRange = profile.detectorFrequencyRange
+        return InstrumentAcousticRange(
+            minimumHz: detectorRange.minimumHz,
+            maximumHz: detectorRange.maximumHz
+        )
     }
 }
 
@@ -166,7 +181,7 @@ struct AppConfig: Equatable {
     )
 }
 
-struct PitchFrame: Codable, Equatable, Identifiable {
+struct PitchFrame: Codable, Equatable, Identifiable, Sendable {
     var id: Int { timestampMs }
     let timestampMs: Int
     let frequencyHz: Double?
@@ -180,8 +195,15 @@ struct PitchFrame: Codable, Equatable, Identifiable {
 
     static func fixture(index: Int, instrumentId: String = "trumpet", referencePitchHz: Double = 440.0) -> PitchFrame {
         let cents = Double([-7, -3, 0, 2, 8][index % 5])
-        let concertMidi = fixtureConcertMidi(for: instrumentId)
-        let writtenMidi = BrassTuneCore.transposeConcertToWritten(concertMidi, semitones: transpositionSemitones(for: instrumentId))
+        guard let profile = InstrumentProfiles.profile(for: instrumentId) else {
+            return PitchFrame(
+                timestampMs: index * 110, frequencyHz: nil, confidence: 0, rms: 0,
+                centsDeviation: nil, tuningStatus: .noLock, writtenNoteName: nil,
+                writtenOctave: nil, isValidForRecording: false
+            )
+        }
+        let concertMidi = fixtureConcertMidi(for: profile)
+        let writtenMidi = BrassTuneCore.transposeConcertToWritten(concertMidi, semitones: profile.transpositionSemitones)
         let frequency = BrassTuneCore.midiToFrequency(Double(concertMidi), referencePitchHz: referencePitchHz) * pow(2.0, cents / 1200.0)
         return PitchFrame(
             timestampMs: index * 110,
@@ -204,8 +226,9 @@ struct PitchFrame: Codable, Equatable, Identifiable {
         instrumentId: String,
         referencePitchHz: Double
     ) -> PitchFrame {
-        let acceptedFrequency = frequencyHz.flatMap {
-            InstrumentAcousticRange.forInstrument(instrumentId).contains($0) ? $0 : nil
+        let profile = InstrumentProfiles.profile(for: instrumentId)
+        let acceptedFrequency = profile.flatMap { profile in
+            frequencyHz.flatMap { InstrumentAcousticRange.forInstrument(profile.id).contains($0) ? $0 : nil }
         }
         let concertMidiFloat = acceptedFrequency.map { BrassTuneCore.frequencyToMidi($0, referencePitchHz: referencePitchHz) }
         let concertMidi = concertMidiFloat.map { Int($0.rounded()) }
@@ -213,8 +236,8 @@ struct PitchFrame: Codable, Equatable, Identifiable {
             guard let concertMidi else { return nil }
             return BrassTuneCore.centsDeviation(frequencyHz: frequency, nearestMidi: concertMidi, referencePitchHz: referencePitchHz)
         }
-        let writtenMidi = concertMidi.map {
-            BrassTuneCore.transposeConcertToWritten($0, semitones: transpositionSemitones(for: instrumentId))
+        let writtenMidi = concertMidi.flatMap { concertMidi in
+            profile.map { BrassTuneCore.transposeConcertToWritten(concertMidi, semitones: $0.transpositionSemitones) }
         }
         let status = BrassTuneCore.tuningStatus(cents: cents, confidence: confidence, rms: rms)
         return PitchFrame(
@@ -230,21 +253,9 @@ struct PitchFrame: Codable, Equatable, Identifiable {
         )
     }
 
-    private static func fixtureConcertMidi(for instrumentId: String) -> Int {
-        switch instrumentId {
-        case "horn": return 55
-        case "trombone", "euphonium": return 58
-        case "tuba": return 46
-        default: return 72
-        }
-    }
-
-    private static func transpositionSemitones(for instrumentId: String) -> Int {
-        switch instrumentId {
-        case "trumpet": return 2
-        case "horn": return 7
-        default: return 0
-        }
+    private static func fixtureConcertMidi(for profile: InstrumentProfile) -> Int {
+        let preferred = profile.practicalSoundingRange.minimum + (profile.practicalSoundingRange.maximum - profile.practicalSoundingRange.minimum) / 2
+        return preferred
     }
 
     private static func noteName(for midi: Int) -> String {
@@ -384,6 +395,7 @@ enum ScoreSourceKind: String, Codable, CaseIterable, Identifiable {
 enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
     case live
     case sample
+    case manual
 
     var id: String { rawValue }
 
@@ -391,6 +403,7 @@ enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .live: return NativeLocalization.string("Live mic")
         case .sample: return NativeLocalization.string("UI test fixture")
+        case .manual: return NativeLocalization.string("Timed visual practice")
         }
     }
 
@@ -398,6 +411,7 @@ enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .live: return NativeLocalization.string("Recording")
         case .sample: return NativeLocalization.string("Test recording")
+        case .manual: return NativeLocalization.string("Visual scale practice")
         }
     }
 
@@ -405,6 +419,7 @@ enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .live: return NativeLocalization.string("live microphone")
         case .sample: return NativeLocalization.string("UI test fixture")
+        case .manual: return NativeLocalization.string("timed visual practice")
         }
     }
 
@@ -413,9 +428,43 @@ enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Describes what was actually practiced. This deliberately stays separate
+/// from `source`: a real microphone is a source, while a warm-up or plan is
+/// an activity that must not be represented as a recording.
+enum PracticeSessionActivity: String, Codable, CaseIterable, Identifiable {
+    case tuning
+    case playAlong
+    case guidedWarmup
+    case scalePractice
+    case visualScalePractice
+    case practicePlan
+
+    var id: String { rawValue }
+
+    var contributesPitchMetrics: Bool {
+        switch self {
+        case .tuning, .playAlong, .scalePractice: return true
+        case .guidedWarmup, .visualScalePractice, .practicePlan: return false
+        }
+    }
+
+    var isRecordingActivity: Bool {
+        contributesPitchMetrics
+    }
+}
+
+enum PracticeSessionCompletion: String, Codable, CaseIterable {
+    case completed
+    case interrupted
+    case discarded
+}
+
 enum PlayAlongExerciseCategory: String, Codable, CaseIterable, Identifiable {
     case major
     case naturalMinor
+    case harmonicMinor
+    case melodicMinor
+    case chromatic
     case practicePattern
 
     var id: String { rawValue }
@@ -424,6 +473,9 @@ enum PlayAlongExerciseCategory: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .major: return NativeLocalization.string("Major scales")
         case .naturalMinor: return NativeLocalization.string("Natural minor scales")
+        case .harmonicMinor: return NativeLocalization.string("Harmonic minor scales")
+        case .melodicMinor: return NativeLocalization.string("Melodic minor scales")
+        case .chromatic: return NativeLocalization.string("Chromatic scales")
         case .practicePattern: return NativeLocalization.string("Other exercises")
         }
     }
@@ -436,6 +488,27 @@ struct PlayAlongExercise: Codable, Equatable, Identifiable {
     let difficulty: String
     let category: PlayAlongExerciseCategory
     let writtenNotes: [String]
+    /// Exact written targets for generated material.  Generic/custom exercises
+    /// intentionally leave this absent and continue to grade pitch class only.
+    let writtenMIDIs: [Int]?
+
+    init(
+        id: String,
+        title: String,
+        detail: String,
+        difficulty: String,
+        category: PlayAlongExerciseCategory,
+        writtenNotes: [String],
+        writtenMIDIs: [Int]? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.difficulty = difficulty
+        self.category = category
+        self.writtenNotes = writtenNotes
+        self.writtenMIDIs = writtenMIDIs?.count == writtenNotes.count ? writtenMIDIs : nil
+    }
 
     var isBuiltIn: Bool {
         Self.library.contains { $0.id == id }
@@ -453,226 +526,287 @@ struct PlayAlongExercise: Codable, Equatable, Identifiable {
         isBuiltIn ? NativeLocalization.string(difficulty) : difficulty
     }
 
-    static let library: [PlayAlongExercise] = [
-        PlayAlongExercise(
-            id: "cmaj",
-            title: "C major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["C", "D", "E", "F", "G", "A", "B", "C"]
-        ),
-        PlayAlongExercise(
-            id: "dbmaj",
-            title: "D♭ major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["Db", "Eb", "F", "Gb", "Ab", "Bb", "C", "Db"]
-        ),
-        PlayAlongExercise(
-            id: "dmaj",
-            title: "D major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["D", "E", "F#", "G", "A", "B", "C#", "D"]
-        ),
-        PlayAlongExercise(
-            id: "ebmaj",
-            title: "E♭ major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["Eb", "F", "G", "Ab", "Bb", "C", "D", "Eb"]
-        ),
-        PlayAlongExercise(
-            id: "emaj",
-            title: "E major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["E", "F#", "G#", "A", "B", "C#", "D#", "E"]
-        ),
-        PlayAlongExercise(
-            id: "fmaj",
-            title: "F major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["F", "G", "A", "Bb", "C", "D", "E", "F"]
-        ),
-        PlayAlongExercise(
-            id: "fsmaj",
-            title: "F♯ major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["F#", "G#", "A#", "B", "C#", "D#", "E#", "F#"]
-        ),
-        PlayAlongExercise(
-            id: "gmaj",
-            title: "G major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["G", "A", "B", "C", "D", "E", "F#", "G"]
-        ),
-        PlayAlongExercise(
-            id: "abmaj",
-            title: "A♭ major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["Ab", "Bb", "C", "Db", "Eb", "F", "G", "Ab"]
-        ),
-        PlayAlongExercise(
-            id: "amaj",
-            title: "A major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["A", "B", "C#", "D", "E", "F#", "G#", "A"]
-        ),
-        PlayAlongExercise(
-            id: "bbmaj",
-            title: "B♭ major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["Bb", "C", "D", "Eb", "F", "G", "A", "Bb"]
-        ),
-        PlayAlongExercise(
-            id: "bmaj",
-            title: "B major scale",
-            detail: "One octave, ascending",
-            difficulty: "Major",
-            category: .major,
-            writtenNotes: ["B", "C#", "D#", "E", "F#", "G#", "A#", "B"]
-        ),
-        PlayAlongExercise(
-            id: "cmin",
-            title: "C natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["C", "D", "Eb", "F", "G", "Ab", "Bb", "C"]
-        ),
-        PlayAlongExercise(
-            id: "csmin",
-            title: "C♯ natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["C#", "D#", "E", "F#", "G#", "A", "B", "C#"]
-        ),
-        PlayAlongExercise(
-            id: "dmin",
-            title: "D natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["D", "E", "F", "G", "A", "Bb", "C", "D"]
-        ),
-        PlayAlongExercise(
-            id: "ebmin",
-            title: "E♭ natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["Eb", "F", "Gb", "Ab", "Bb", "Cb", "Db", "Eb"]
-        ),
-        PlayAlongExercise(
-            id: "emin",
-            title: "E natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["E", "F#", "G", "A", "B", "C", "D", "E"]
-        ),
-        PlayAlongExercise(
-            id: "fmin",
-            title: "F natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["F", "G", "Ab", "Bb", "C", "Db", "Eb", "F"]
-        ),
-        PlayAlongExercise(
-            id: "fsmin",
-            title: "F♯ natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["F#", "G#", "A", "B", "C#", "D", "E", "F#"]
-        ),
-        PlayAlongExercise(
-            id: "gmin",
-            title: "G natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["G", "A", "Bb", "C", "D", "Eb", "F", "G"]
-        ),
-        PlayAlongExercise(
-            id: "gsmin",
-            title: "G♯ natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["G#", "A#", "B", "C#", "D#", "E", "F#", "G#"]
-        ),
-        PlayAlongExercise(
-            id: "amin",
-            title: "A natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["A", "B", "C", "D", "E", "F", "G", "A"]
-        ),
-        PlayAlongExercise(
-            id: "bbmin",
-            title: "B♭ natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["Bb", "C", "Db", "Eb", "F", "Gb", "Ab", "Bb"]
-        ),
-        PlayAlongExercise(
-            id: "bmin",
-            title: "B natural minor scale",
-            detail: "One octave, ascending",
-            difficulty: "Minor",
-            category: .naturalMinor,
-            writtenNotes: ["B", "C#", "D", "E", "F#", "G", "A", "B"]
-        ),
-        PlayAlongExercise(
-            id: "arpeggio",
-            title: "C major arpeggio",
-            detail: "C · E · G · C",
-            difficulty: "Beginner",
-            category: .practicePattern,
-            writtenNotes: ["C", "E", "G", "C"]
-        ),
-        PlayAlongExercise(
-            id: "chromatic",
-            title: "Chromatic run",
-            detail: "C up to G",
-            difficulty: "Challenge",
-            category: .practicePattern,
-            writtenNotes: ["C", "C#", "D", "Eb", "E", "F", "F#", "G"]
-        ),
-        PlayAlongExercise(
-            id: "longtones",
-            title: "Long tones",
-            detail: "C · G · C — hold each note",
-            difficulty: "Beginner",
-            category: .practicePattern,
-            writtenNotes: ["C", "G", "C"]
-        ),
+    /// Pair the generated written spelling with its register wherever a scale
+    /// is presented. This prevents an octave-free label from being mistaken
+    /// for a pitch-class-only target.
+    var writtenTargets: [String] {
+        guard let writtenMIDIs, writtenMIDIs.count == writtenNotes.count else { return writtenNotes }
+        return zip(writtenNotes, writtenMIDIs).map { note, midi in
+            "\(note)\((midi / 12) - 1)"
+        }
+    }
+
+    static let library: [PlayAlongExercise] = ScaleType.allCases.flatMap { type in
+        ScaleRoot.allCases.enumerated().compactMap { index, root in
+            let legacyID: String
+            switch type {
+            case .major: legacyID = ["cmaj", "dbmaj", "dmaj", "ebmaj", "emaj", "fmaj", "fsmaj", "gmaj", "abmaj", "amaj", "bbmaj", "bmaj"][index]
+            case .naturalMinor: legacyID = ["cmin", "csmin", "dmin", "ebmin", "emin", "fmin", "fsmin", "gmin", "gsmin", "amin", "bbmin", "bmin"][index]
+            case .harmonicMinor: legacyID = ["chmin", "dbhmin", "dhmin", "ebhmin", "ehmin", "fhmin", "fshmin", "ghmin", "abhmin", "ahmin", "bbhmin", "bhmin"][index]
+            case .melodicMinor: legacyID = ["cmmin", "dbmmin", "dmmin", "ebmmin", "emmin", "fmmin", "fsmmin", "gmmin", "abmmin", "ammin", "bbmmin", "bmmin"][index]
+            case .chromatic: legacyID = index == 0 ? "chromatic" : ["dbchromatic", "dchromatic", "ebchromatic", "echromatic", "fchromatic", "fschromatic", "gchromatic", "abchromatic", "achromatic", "bbchromatic", "bchromatic"][index - 1]
+            }
+            return scaleExercise(root: root, type: type, id: legacyID)
+        }
+    } + [
+        PlayAlongExercise(id: "arpeggio", title: "C major arpeggio", detail: "C · E · G · C", difficulty: "Beginner", category: .practicePattern, writtenNotes: ["C", "E", "G", "C"]),
+        PlayAlongExercise(id: "longtones", title: "Long tones", detail: "C · G · C — hold each note", difficulty: "Beginner", category: .practicePattern, writtenNotes: ["C", "G", "C"]),
     ]
 
+    /// A Core-backed exercise factory keeps the catalog aligned with scale spelling, direction, and octave behavior.
+    static func scaleExercise(
+        root: ScaleRoot,
+        type: ScaleType,
+        direction: ScaleDirection = .ascending,
+        octaves: ScaleOctaves = .one,
+        profile: InstrumentProfile? = nil,
+        id: String
+    ) -> PlayAlongExercise? {
+        // A three-octave request needs a known practical range. Do not present
+        // an unbounded sequence for an unknown profile and later imply that it
+        // is playable on the selected instrument.
+        guard octaves != .three || profile != nil else { return nil }
+        guard let scale = ScaleGenerator.generate(
+            root: root,
+            type: type,
+            octaves: octaves,
+            direction: direction,
+            profile: profile
+        ) else { return nil }
+        return PlayAlongExercise(
+            id: id,
+            title: NativeLocalization.format(
+                "%@ %@ scale",
+                NativeLocalization.preserve(root.rawValue),
+                NativeLocalization.string(type.displayName)
+            ),
+            detail: NativeLocalization.format(
+                "%@, %@",
+                NativeLocalization.string(octaves.displayName),
+                NativeLocalization.string(direction.displayName)
+            ),
+            difficulty: type.displayName,
+            category: type.category,
+            writtenNotes: scale.notes.map(\.writtenName),
+            writtenMIDIs: scale.notes.map(\.writtenMIDI)
+        )
+    }
+
+    /// UI-facing availability check for the scale picker. Unknown instruments
+    /// fail closed and insufficient ranges remain unavailable instead of
+    /// clipping, reducing octave count, or inventing a practical register.
+    static func isScaleAvailable(
+        root: ScaleRoot,
+        type: ScaleType,
+        octaves: ScaleOctaves,
+        direction: ScaleDirection,
+        instrumentID: String
+    ) -> Bool {
+        guard let profile = InstrumentProfiles.profile(for: instrumentID) else { return false }
+        return ScaleGenerator.generate(
+            root: root,
+            type: type,
+            octaves: octaves,
+            direction: direction,
+            profile: profile,
+            rangePolicy: .adapt
+        ) != nil
+    }
+
     static let defaultExercise = library[0]
+}
+
+extension ScaleOctaves {
+    var displayName: String {
+        switch self {
+        case .one: return "One octave"
+        case .two: return "Two octaves"
+        case .three: return "Three octaves"
+        }
+    }
+}
+
+/// Serializable, non-audio context for a completed visual scale. It keeps the
+/// exact generated exercise and timing settings available without inventing
+/// microphone frames, a recording URL, or pitch metrics.
+struct VisualScalePracticeConfiguration: Codable, Equatable {
+    let exerciseID: String
+    let instrumentID: String
+    let root: ScaleRoot
+    let type: ScaleType
+    let octaves: ScaleOctaves
+    let direction: ScaleDirection
+    var tempoBPM: Int
+    var loopCount: Int
+
+    init(
+        exerciseID: String,
+        instrumentID: String,
+        root: ScaleRoot,
+        type: ScaleType,
+        octaves: ScaleOctaves,
+        direction: ScaleDirection,
+        tempoBPM: Int,
+        loopCount: Int = 0
+    ) {
+        self.exerciseID = exerciseID
+        self.instrumentID = instrumentID
+        self.root = root
+        self.type = type
+        self.octaves = octaves
+        self.direction = direction
+        self.tempoBPM = min(180, max(40, tempoBPM))
+        self.loopCount = max(0, loopCount)
+    }
+}
+
+struct VisualScalePracticeCompletion: Equatable {
+    let activityInstanceID: UUID
+    let configuration: VisualScalePracticeConfiguration
+    let startedAt: Date
+    let completedAt: Date
+
+    init(
+        activityInstanceID: UUID = UUID(),
+        configuration: VisualScalePracticeConfiguration,
+        startedAt: Date,
+        completedAt: Date
+    ) {
+        self.activityInstanceID = activityInstanceID
+        self.configuration = configuration
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+    }
+}
+
+/// Local-only context for a score-led timer. It intentionally records only
+/// user-entered score metadata and the selected tempo; score images are never
+/// OCR'd and this configuration cannot claim detected notes or audio capture.
+struct ScoreGuidedPracticeConfiguration: Codable, Equatable {
+    let scoreID: ImportedScore.ID
+    let instrumentID: String
+    let pageNumber: Int
+    let tempoBPM: Int
+    let focusMeasures: String
+    let problemPassage: String
+    let practiceNotes: String
+
+    init(
+        scoreID: ImportedScore.ID,
+        instrumentID: String,
+        pageNumber: Int,
+        tempoBPM: Int,
+        focusMeasures: String,
+        problemPassage: String,
+        practiceNotes: String
+    ) {
+        self.scoreID = scoreID
+        self.instrumentID = instrumentID
+        self.pageNumber = max(1, pageNumber)
+        self.tempoBPM = min(240, max(30, tempoBPM))
+        self.focusMeasures = focusMeasures.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.problemPassage = problemPassage.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.practiceNotes = practiceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// A started score-guided timer that the UI can hold until the user finishes
+/// or exits. The identity makes completion idempotent across view redraws.
+struct ScoreGuidedPracticeRun: Equatable {
+    let activityInstanceID: UUID
+    let configuration: ScoreGuidedPracticeConfiguration
+    let startedAt: Date
+}
+
+struct ScoreGuidedPracticeCompletion: Equatable {
+    let activityInstanceID: UUID
+    let configuration: ScoreGuidedPracticeConfiguration
+    let startedAt: Date
+    let completedAt: Date
+    /// Exact elapsed active time supplied by the local timer when available.
+    /// `nil` retains compatibility with callers that only have timestamps.
+    let activeDurationSeconds: TimeInterval?
+
+    init(
+        activityInstanceID: UUID,
+        configuration: ScoreGuidedPracticeConfiguration,
+        startedAt: Date,
+        completedAt: Date,
+        activeDurationSeconds: TimeInterval? = nil
+    ) {
+        self.activityInstanceID = activityInstanceID
+        self.configuration = configuration
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.activeDurationSeconds = activeDurationSeconds.map { max(0, $0) }
+    }
+}
+
+/// Pure elapsed-time state for manual score practice. Time is accumulated only
+/// while running, so pausing for an interruption or background transition does
+/// not inflate the finished practice duration.
+struct ScoreGuidedPracticeTimerState: Equatable {
+    private(set) var accumulatedActiveSeconds: TimeInterval = 0
+    private(set) var activeSegmentStartedAt: Date?
+
+    var isRunning: Bool { activeSegmentStartedAt != nil }
+
+    mutating func start(at date: Date) {
+        guard activeSegmentStartedAt == nil else { return }
+        activeSegmentStartedAt = date
+    }
+
+    mutating func pause(at date: Date) {
+        guard let activeSegmentStartedAt else { return }
+        accumulatedActiveSeconds += max(0, date.timeIntervalSince(activeSegmentStartedAt))
+        self.activeSegmentStartedAt = nil
+    }
+
+    mutating func resume(at date: Date) {
+        start(at: date)
+    }
+
+    mutating func finish(at date: Date) -> TimeInterval {
+        pause(at: date)
+        return accumulatedActiveSeconds
+    }
+
+    func activeDuration(at date: Date) -> TimeInterval {
+        guard let activeSegmentStartedAt else { return accumulatedActiveSeconds }
+        return accumulatedActiveSeconds + max(0, date.timeIntervalSince(activeSegmentStartedAt))
+    }
+}
+
+extension ScaleType {
+    var category: PlayAlongExerciseCategory {
+        switch self {
+        case .major: return .major
+        case .naturalMinor: return .naturalMinor
+        case .harmonicMinor: return .harmonicMinor
+        case .melodicMinor: return .melodicMinor
+        case .chromatic: return .chromatic
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .major: return "Major"
+        case .naturalMinor: return "Natural minor"
+        case .harmonicMinor: return "Harmonic minor"
+        case .melodicMinor: return "Melodic minor"
+        case .chromatic: return "Chromatic"
+        }
+    }
+}
+
+private extension ScaleDirection {
+    var displayName: String {
+        switch self {
+        case .ascending: return "ascending"
+        case .descending: return "descending"
+        case .both: return "ascending and descending"
+        }
+    }
 }
 
 enum PlayAlongNoteRating: String, Codable, Equatable {
@@ -776,6 +910,7 @@ enum PlayAlongPhase: Equatable {
 
 struct PlayAlongGrader: Equatable {
     let writtenNotes: [String]
+    let writtenMIDIs: [Int]?
     private(set) var currentNoteIndex = 0
     private(set) var detectedNoteName: String?
     private(set) var detectedCents: Double?
@@ -796,6 +931,7 @@ struct PlayAlongGrader: Equatable {
 
     init(
         writtenNotes: [String],
+        writtenMIDIs: [Int]? = nil,
         holdDurationMs: Int = 2_000,
         minimumConfidence: Double = 0.95,
         minimumSamples: Int = 5,
@@ -803,6 +939,7 @@ struct PlayAlongGrader: Equatable {
         maximumDropoutMs: Int = 250
     ) {
         self.writtenNotes = writtenNotes
+        self.writtenMIDIs = writtenMIDIs?.count == writtenNotes.count ? writtenMIDIs : nil
         self.holdDurationMs = max(100, holdDurationMs)
         self.minimumConfidence = min(1, max(0, minimumConfidence))
         self.minimumSamples = max(1, minimumSamples)
@@ -819,6 +956,11 @@ struct PlayAlongGrader: Equatable {
         return writtenNotes[currentNoteIndex]
     }
 
+    private var currentWrittenMIDI: Int? {
+        guard !isComplete else { return nil }
+        return writtenMIDIs?[currentNoteIndex]
+    }
+
     var heldFraction: Double {
         guard firstMatchTimestampMs != nil else { return 0 }
         return min(1, max(0, Double(confirmedHoldDurationMs) / Double(holdDurationMs)))
@@ -833,9 +975,11 @@ struct PlayAlongGrader: Equatable {
             && [.flat, .inTune, .sharp].contains(frame.tuningStatus)
         detectedNoteName = confident ? frame.writtenNoteName : nil
         detectedCents = confident ? frame.centsDeviation : nil
-        let matchesTarget = confident
-            && PracticePitchMath.matchesPitchClass(frame.writtenNoteName, target)
-            && frame.centsDeviation != nil
+        let matchesPitchClass = PracticePitchMath.matchesPitchClass(frame.writtenNoteName, target)
+        let matchesOctave = currentWrittenMIDI.map { expectedMIDI in
+            frame.writtenOctave == (expectedMIDI / 12) - 1
+        } ?? true
+        let matchesTarget = confident && matchesPitchClass && matchesOctave && frame.centsDeviation != nil
 
         if matchesTarget, let cents = frame.centsDeviation {
             if let lastMatchTimestampMs,
@@ -865,7 +1009,7 @@ struct PlayAlongGrader: Equatable {
             }
         } else if confident,
                   let detected = frame.writtenNoteName,
-                  !PracticePitchMath.matchesPitchClass(detected, target) {
+                  (!PracticePitchMath.matchesPitchClass(detected, target) || !matchesOctave) {
             // A confidently played different note restarts this target. Brief
             // silence and low-confidence dropouts do not erase a good hold.
             resetCurrentHold()
@@ -972,6 +1116,7 @@ struct PlayAlongSession: Equatable {
         self.startedAt = startedAt
         grader = PlayAlongGrader(
             writtenNotes: exercise.writtenNotes,
+            writtenMIDIs: exercise.writtenMIDIs,
             holdDurationMs: holdDurationMs,
             minimumConfidence: minimumConfidence,
             minimumSamples: minimumSamples,
@@ -1432,6 +1577,18 @@ struct PracticeSession: Codable, Equatable, Identifiable {
     var attachedScoreID: ImportedScore.ID? = nil
     var practiceNotes: String = ""
     var source: PracticeSessionSource = .live
+    /// A persistent identity for the activity invocation. Session IDs are
+    /// retained for compatibility; this gives resumable activity records a
+    /// stable identity even if their payload evolves.
+    var activityInstanceID: UUID
+    var activity: PracticeSessionActivity
+    var completion: PracticeSessionCompletion
+    /// Present only for a completed visual scale. Its absence preserves the
+    /// legacy audio session schema and avoids treating visual practice as pitch capture.
+    var visualScaleConfiguration: VisualScalePracticeConfiguration?
+    /// Present only for a manually timed score-guided practice session.
+    /// It contains no OCR, pitch frames, or recording URL.
+    var scoreGuidedPracticeConfiguration: ScoreGuidedPracticeConfiguration?
 
     init(
         id: UUID,
@@ -1443,7 +1600,12 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         retainedRecordingURL: URL?,
         attachedScoreID: ImportedScore.ID? = nil,
         practiceNotes: String = "",
-        source: PracticeSessionSource = .live
+        source: PracticeSessionSource = .live,
+        activityInstanceID: UUID? = nil,
+        activity: PracticeSessionActivity = .tuning,
+        completion: PracticeSessionCompletion = .completed,
+        visualScaleConfiguration: VisualScalePracticeConfiguration? = nil,
+        scoreGuidedPracticeConfiguration: ScoreGuidedPracticeConfiguration? = nil
     ) {
         self.id = id
         self.name = name
@@ -1455,6 +1617,11 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         self.attachedScoreID = attachedScoreID
         self.practiceNotes = practiceNotes
         self.source = source
+        self.activityInstanceID = activityInstanceID ?? id
+        self.activity = activity
+        self.completion = completion
+        self.visualScaleConfiguration = visualScaleConfiguration
+        self.scoreGuidedPracticeConfiguration = scoreGuidedPracticeConfiguration
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1468,6 +1635,11 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         case attachedScoreID
         case practiceNotes
         case source
+        case activityInstanceID
+        case activity
+        case completion
+        case visualScaleConfiguration
+        case scoreGuidedPracticeConfiguration
     }
 
     init(from decoder: Decoder) throws {
@@ -1485,6 +1657,14 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         // fixture-first flow. Keep them quarantined as fixtures instead of
         // silently relabeling fabricated readings as microphone recordings.
         source = try container.decodeIfPresent(PracticeSessionSource.self, forKey: .source) ?? .sample
+        // Legacy snapshots only contained microphone-style sessions. Migrate
+        // those conservatively as completed tuning activity and use their
+        // existing stable session ID for the new activity identity.
+        activityInstanceID = try container.decodeIfPresent(UUID.self, forKey: .activityInstanceID) ?? id
+        activity = try container.decodeIfPresent(PracticeSessionActivity.self, forKey: .activity) ?? .tuning
+        completion = try container.decodeIfPresent(PracticeSessionCompletion.self, forKey: .completion) ?? .completed
+        visualScaleConfiguration = try container.decodeIfPresent(VisualScalePracticeConfiguration.self, forKey: .visualScaleConfiguration)
+        scoreGuidedPracticeConfiguration = try container.decodeIfPresent(ScoreGuidedPracticeConfiguration.self, forKey: .scoreGuidedPracticeConfiguration)
     }
 
     var averageAbsCents: Double {
@@ -1513,7 +1693,19 @@ struct PracticeSession: Codable, Equatable, Identifiable {
     }
 
     var validFrameCount: Int {
-        frames.filter(\.isValidForRecording).count
+        guard activity.contributesPitchMetrics else { return 0 }
+        return frames.filter(\.isValidForRecording).count
+    }
+
+    var isMeaningfulCapturedPractice: Bool {
+        activity.contributesPitchMetrics
+            && completion == .completed
+            && validFrameCount >= 8
+            && durationSeconds >= 1.5
+    }
+
+    var contributesPracticeTime: Bool {
+        completion == .completed && durationSeconds >= 1
     }
 
     var pitchCoverageLabel: String {
@@ -1532,6 +1724,8 @@ struct PracticeSession: Codable, Equatable, Identifiable {
             "Session: \(name)",
             "Instrument: \(instrumentDisplayName(instrumentId))",
             "Source: \(source.exportLabel)",
+            "Activity: \(activity.rawValue)",
+            "Completion: \(completion.rawValue)",
             "Started: \(formatter.string(from: startedAt))",
             "Ended: \(endedAt.map { formatter.string(from: $0) } ?? "Not ended")",
             "Duration: \(String(format: "%.0f", durationSeconds)) seconds",
@@ -1565,6 +1759,7 @@ struct AnalyticsSnapshot: Equatable {
     let latestSessionName: String?
     let latestSessionInTunePercentage: Double
     let totalPracticeSeconds: TimeInterval
+    let recordingSessionCount: Int
 
     var hasSessions: Bool {
         sessionCount > 0
@@ -1591,12 +1786,20 @@ struct AnalyticsSnapshot: Equatable {
     }
 
     init(sessions: [PracticeSession]) {
-        sessionCount = sessions.count
-        totalFrameCount = sessions.reduce(0) { $0 + $1.frames.count }
-        validFrameCount = sessions.reduce(0) { $0 + $1.validFrameCount }
-        totalPracticeSeconds = sessions.reduce(0) { $0 + $1.durationSeconds }
+        let completedSessions = sessions.filter { $0.completion == .completed }
+        // Older snapshots may contain short captures that predate the save
+        // gate. Keep their honest observed pitch data readable, while new
+        // capture saves must pass `isMeaningfulCapturedPractice`.
+        let pitchSessions = completedSessions.filter {
+            $0.activity.contributesPitchMetrics && $0.validFrameCount > 0
+        }
+        sessionCount = completedSessions.count
+        recordingSessionCount = pitchSessions.count
+        totalFrameCount = pitchSessions.reduce(0) { $0 + $1.frames.count }
+        validFrameCount = pitchSessions.reduce(0) { $0 + $1.validFrameCount }
+        totalPracticeSeconds = completedSessions.filter(\.contributesPracticeTime).reduce(0) { $0 + $1.durationSeconds }
 
-        let validFrames = sessions.flatMap { $0.frames.filter(\.isValidForRecording) }
+        let validFrames = pitchSessions.flatMap { $0.frames.filter(\.isValidForRecording) }
         let allCents = validFrames.compactMap(\.centsDeviation)
         if allCents.isEmpty {
             averageAbsCents = 0
@@ -1607,17 +1810,49 @@ struct AnalyticsSnapshot: Equatable {
             averageInTunePercentage = Double(inTuneCount) / Double(allCents.count) * 100
         }
 
-        let eligibleSessions = sessions.filter { $0.validFrameCount > 0 }
+        let eligibleSessions = pitchSessions
         let bestSession = eligibleSessions.min { lhs, rhs in
             lhs.averageAbsCents < rhs.averageAbsCents
         }
         bestSessionName = bestSession?.name
 
-        let latestSession = sessions.max { lhs, rhs in
+        let latestSession = completedSessions.max { lhs, rhs in
             lhs.startedAt < rhs.startedAt
         }
         latestSessionName = latestSession?.name
         latestSessionInTunePercentage = latestSession?.inTunePercentage ?? 0
+    }
+}
+
+/// Stable machine-readable export contract. Keep this intentionally local and
+/// versioned so a future importer can distinguish it from an app snapshot.
+struct NativePracticeHistoryExport: Codable, Equatable {
+    static let schemaVersion = 1
+
+    let schemaVersion: Int
+    let exportedAt: Date
+    let selectedInstrumentID: String
+    let referencePitchHz: Double
+    let sessions: [PracticeSession]
+    let scores: [ImportedScore]
+
+    init(
+        exportedAt: Date = Date(),
+        selectedInstrumentID: String,
+        referencePitchHz: Double,
+        sessions: [PracticeSession],
+        scores: [ImportedScore]
+    ) {
+        self.schemaVersion = Self.schemaVersion
+        self.exportedAt = exportedAt
+        self.selectedInstrumentID = selectedInstrumentID
+        self.referencePitchHz = referencePitchHz
+        self.sessions = sessions.sorted {
+            $0.startedAt == $1.startedAt
+                ? $0.id.uuidString < $1.id.uuidString
+                : $0.startedAt < $1.startedAt
+        }
+        self.scores = scores.sorted { $0.id.uuidString < $1.id.uuidString }
     }
 }
 
@@ -1854,6 +2089,18 @@ enum AuthState: Equatable {
     }
 }
 
+enum GuestAccountUpgradeChoice: Equatable {
+    case merge
+    case keepSeparate
+    case cancel
+}
+
+struct GuestAccountUpgradePrompt: Equatable {
+    let email: String
+    let canMerge: Bool
+    let containsFileBackedData: Bool
+}
+
 enum UserVisibleError: LocalizedError, Equatable {
     case microphoneDenied
     case networkUnavailable
@@ -1867,6 +2114,9 @@ enum UserVisibleError: LocalizedError, Equatable {
     case missingAuthConfiguration
     case authenticationFailed
     case secureStorageUnavailable
+    case secureStorageReadFailed
+    case secureStorageCorrupt
+    case secureStorageSaveFailed
     case secureStorageDeletionFailed
     case emailConfirmationRequired
     case microphoneUnavailable
@@ -1885,11 +2135,20 @@ enum UserVisibleError: LocalizedError, Equatable {
         case .accountDeletionRequiresConfirmation: return NativeLocalization.string("Please confirm deletion and try again.")
         case .missingAuthConfiguration: return NativeLocalization.string("Account sign-in isn't available right now. You can keep practicing as a guest.")
         case .authenticationFailed: return NativeLocalization.string("BrassTune could not complete authentication.")
-        case .secureStorageUnavailable: return NativeLocalization.string("BrassTune couldn't securely save your sign-in on this device. Check device storage and try again.")
+        case .secureStorageUnavailable: return NativeLocalization.string("BrassTune couldn't access secure sign-in storage on this device. Restart the app and try again.")
+        case .secureStorageReadFailed: return NativeLocalization.string("BrassTune couldn't read your saved sign-in on this device. Your sign-in was left unchanged; restart the app and try again.")
+        case .secureStorageCorrupt: return NativeLocalization.string("BrassTune found an unreadable saved sign-in on this device. Your sign-in was left unchanged; restart the app and try again.")
+        case .secureStorageSaveFailed: return NativeLocalization.string("BrassTune couldn't securely save your sign-in on this device. Check device storage and try again.")
         case .secureStorageDeletionFailed: return NativeLocalization.string("BrassTune couldn't remove the saved sign-in from this device. Restart the app to retry before using a shared device.")
         case .emailConfirmationRequired: return NativeLocalization.string("Check your email to confirm this BrassTune account before signing in.")
         case .microphoneUnavailable: return NativeLocalization.string("BrassTune could not hear the microphone. Check your audio input and try again.")
         case .apiRequestFailed(_, let message): return message
         }
     }
+}
+
+enum NativeReleaseFeatureFlags {
+    static let classes = false
+    static let offlinePacks = false
+    static let cloudBackup = false
 }

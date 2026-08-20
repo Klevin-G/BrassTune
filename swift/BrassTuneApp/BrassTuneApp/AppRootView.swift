@@ -4,33 +4,36 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
+#if PHYSICAL_RELEASE
+import AVKit
+#endif
 
 enum AppTab: String, CaseIterable, Identifiable {
+    case practice
     case tuner
-    case playAlong
+    case scales
     case progress
-    case classes
-    case settings
+    case more
 
     var id: String { rawValue }
 
     var title: LocalizedStringKey {
         switch self {
+        case .practice: return "Practice"
         case .tuner: return "Tuner"
-        case .playAlong: return "Play-Along"
+        case .scales: return "Scales"
         case .progress: return "Progress"
-        case .classes: return "Class"
-        case .settings: return "Settings"
+        case .more: return "More"
         }
     }
 
     var systemImage: String {
         switch self {
+        case .practice: return "sun.max"
         case .tuner: return "tuningfork"
-        case .playAlong: return "music.note.list"
+        case .scales: return "music.note.list"
         case .progress: return "chart.line.uptrend.xyaxis"
-        case .classes: return "person.3"
-        case .settings: return "gearshape"
+        case .more: return "ellipsis.circle"
         }
     }
 }
@@ -40,6 +43,7 @@ enum AppSceneAudioLifecycle {
     static func handleTransition(
         from previousPhase: ScenePhase,
         to currentPhase: ScenePhase,
+        preservePendingTunerStartWhileInactive: () -> Bool,
         cancelTunerStart: () -> Void,
         isTunerRecording: () -> Bool,
         stopTunerRecording: () -> Void,
@@ -47,7 +51,13 @@ enum AppSceneAudioLifecycle {
     ) {
         guard previousPhase == .active, currentPhase != .active else { return }
 
-        cancelTunerStart()
+        // System permission sheets temporarily make the scene inactive while
+        // the app is still foregrounded. Let the in-flight microphone request
+        // resolve so its real granted/denied state is published; a transition
+        // to background still cancels the request unconditionally.
+        if currentPhase != .inactive || !preservePendingTunerStartWhileInactive() {
+            cancelTunerStart()
+        }
         if isTunerRecording() {
             stopTunerRecording()
         }
@@ -59,17 +69,29 @@ struct AppRootView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var selectedTab: AppTab = .tuner
+    @State private var selectedTab: AppTab = .practice
+    @State private var practicePath = NavigationPath()
+    @State private var practiceNavigationGeneration = UUID()
     @State private var onboardingPresented: Bool
     @State private var guestAccountPromptMode: GatewayAuthMode?
     private let resetUITestState: Bool
+    private let forceAuthGatewayLaunch: Bool
     private let settingsOnlyLaunch: Bool
     private let uiTestMode: Bool
+
+#if PHYSICAL_RELEASE
+    private var physicalRoutePickerTestMode: Bool {
+        ProcessInfo.processInfo.arguments.contains("UITEST_PHYSICAL_ROUTE_PICKER")
+    }
+#endif
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         settingsOnlyLaunch = arguments.contains("UITEST_SETTINGS")
         resetUITestState = arguments.contains("UITEST_RESET_STATE")
+        forceAuthGatewayLaunch = AuthService.allowsUITestAuthOverrides(
+            bundleIdentifier: Bundle.main.bundleIdentifier
+        ) && arguments.contains("UITEST_FORCE_AUTH_GATEWAY")
         uiTestMode = arguments.contains("UITEST_DEMO")
             || arguments.contains("UITEST_FIXTURES")
             || arguments.contains("UITEST_SETTINGS")
@@ -90,12 +112,21 @@ struct AppRootView: View {
                         SettingsView(onboardingPresented: $onboardingPresented)
                     }
                 }
-            } else if !model.gatewayCompleted {
+            } else if forceAuthGatewayLaunch || !model.gatewayCompleted {
                 AuthGatewayView()
             } else if onboardingPresented {
                 OnboardingView(isPresented: $onboardingPresented, selectedTab: $selectedTab)
             } else {
                 TabView(selection: $selectedTab) {
+                    practiceNavigation(path: $practicePath) {
+                        PracticeHomeView(selectedTab: $selectedTab)
+                    }
+                    .id(practiceNavigationGeneration)
+                    .tabItem {
+                        Label(AppTab.practice.title, systemImage: AppTab.practice.systemImage)
+                    }
+                    .tag(AppTab.practice)
+
                     practiceNavigation {
                         TunerView()
                     }
@@ -105,12 +136,12 @@ struct AppRootView: View {
                     .tag(AppTab.tuner)
 
                     practiceNavigation {
-                        PlayAlongView()
+                        ScalesTabView()
                     }
                     .tabItem {
-                        Label(AppTab.playAlong.title, systemImage: AppTab.playAlong.systemImage)
+                        Label(AppTab.scales.title, systemImage: AppTab.scales.systemImage)
                     }
-                    .tag(AppTab.playAlong)
+                    .tag(AppTab.scales)
 
                     practiceNavigation {
                         ProgressTabView(selectedTab: $selectedTab)
@@ -121,28 +152,18 @@ struct AppRootView: View {
                     .tag(AppTab.progress)
 
                     practiceNavigation {
-                        ClassesView()
+                        MoreView(onboardingPresented: $onboardingPresented)
                     }
                     .tabItem {
-                        Label(AppTab.classes.title, systemImage: AppTab.classes.systemImage)
+                        Label(AppTab.more.title, systemImage: AppTab.more.systemImage)
                     }
-                    .tag(AppTab.classes)
-
-                    practiceNavigation {
-                        SettingsView(onboardingPresented: $onboardingPresented)
-                    }
-                    .tabItem {
-                        Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage)
-                    }
-                    .tag(AppTab.settings)
+                    .tag(AppTab.more)
                 }
                 .tint(BTTheme.accent)
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
                 .onChange(of: selectedTab) { oldTab, newTab in
-                    if oldTab == .playAlong,
-                       newTab != .playAlong,
-                       model.playAlongPhase == .running || model.playAlongStartInProgress {
-                        model.stopPlayAlong()
-                    }
                     if oldTab == .tuner, newTab != .tuner {
                         model.cancelRecordingStart()
                         if model.audioEngine.recording {
@@ -153,9 +174,27 @@ struct AppRootView: View {
                         model.stopRecordingPlayback()
                         model.handlePracticeBackground()
                     }
+                    // A tab is a top-level destination, not a continuation of a
+                    // tool opened earlier. In particular, returning from
+                    // Progress to Practice must not restore the Drone screen.
+                    if newTab == .practice, oldTab != .practice {
+                        practicePath = NavigationPath()
+                        practiceNavigationGeneration = UUID()
+                    }
                 }
             }
         }
+#if PHYSICAL_RELEASE
+        .overlay(alignment: .topTrailing) {
+            if physicalRoutePickerTestMode {
+                PhysicalReleaseAudioRoutePicker()
+                    .frame(width: 52, height: 52)
+                    .padding(.top, 52)
+                    .padding(.trailing, 8)
+                    .accessibilityIdentifier("physical.routePicker")
+            }
+        }
+#endif
         .onChange(of: model.tutorialPresentationRequest) { _, _ in
             onboardingPresented = model.persistenceAccessState.canPersist
         }
@@ -179,15 +218,28 @@ struct AppRootView: View {
             }
         }
         .onChange(of: scenePhase) { previousPhase, currentPhase in
+#if PHYSICAL_RELEASE
+            // AVRoutePickerView temporarily marks the scene inactive while its
+            // system route sheet is presented. Physical-only route tests must
+            // keep the graph alive across that transition; a real background
+            // transition still follows the production teardown path below.
+            if physicalRoutePickerTestMode, currentPhase == .inactive {
+                return
+            }
+#endif
             AppSceneAudioLifecycle.handleTransition(
                 from: previousPhase,
                 to: currentPhase,
+                preservePendingTunerStartWhileInactive: {
+                    model.audioEngine.audioState == .permissionRequesting
+                },
                 cancelTunerStart: model.cancelRecordingStart,
                 isTunerRecording: { model.audioEngine.recording },
                 stopTunerRecording: model.stopRecording,
                 releasePracticeAudio: {
                     model.stopRecordingPlayback()
                     model.handlePracticeBackground()
+                    model.audioEngine.deactivateSessionImmediatelyIfIdle()
                 }
             )
             if previousPhase == .active, currentPhase != .active {
@@ -211,14 +263,17 @@ struct AppRootView: View {
     }
 
     private func practiceNavigation<Content: View>(
+        path: Binding<NavigationPath>? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        NavigationStack {
-            content()
+        Group {
+            if let path {
+                NavigationStack(path: path) { content() }
+            } else {
+                NavigationStack { content() }
+            }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            practiceStatusBanners
-        }
+        .safeAreaInset(edge: .top, spacing: 0) { practiceStatusBanners }
     }
 
     @ViewBuilder
@@ -258,10 +313,25 @@ struct AppRootView: View {
               let destination = model.consumePendingDestination() else { return }
         switch destination {
         case .classes:
-            selectedTab = .classes
+            selectedTab = .more
         }
     }
 }
+
+#if PHYSICAL_RELEASE
+private struct PhysicalReleaseAudioRoutePicker: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView(frame: .zero)
+        picker.prioritizesVideoDevices = false
+        picker.tintColor = UIColor.label
+        picker.activeTintColor = UIColor.systemOrange
+        picker.accessibilityIdentifier = "physical.routePicker"
+        return picker
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+#endif
 
 func instrumentSetupAccessibilityAnnouncement() -> String {
     [
@@ -325,14 +395,14 @@ struct OnboardingView: View {
                     let isReviewing = model.tutorialCompleted
                     model.completeTutorial()
                     if !isReviewing {
-                        selectedTab = .tuner
+                        selectedTab = .practice
                     }
                     isPresented = false
                 } label: {
                     Label {
-                        Text(verbatim: NativeLocalization.string("Continue to Tuner"))
+                        Text(verbatim: NativeLocalization.string("Continue to Practice"))
                     } icon: {
-                        Image(systemName: "tuningfork")
+                        Image(systemName: "sun.max")
                     }
                         .frame(maxWidth: .infinity)
                 }
@@ -372,7 +442,11 @@ struct OnboardingView: View {
 
 struct PlayAlongView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var moreWaysExpanded = false
+    @State private var moreWaysExpanded: Bool
+
+    init(libraryExpanded: Bool = false) {
+        _moreWaysExpanded = State(initialValue: libraryExpanded)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -684,6 +758,60 @@ struct TunerView: View {
         AppLanguage.launchOverride ?? model.appLanguage
     }
 
+    /// A deterministic launch-only state keeps the UI contract testable without
+    /// teaching the detector about presentation fixtures. It deliberately
+    /// supplies a populated but low-confidence frame, the state that must not
+    /// publish provisional measurements.
+    private var estimatingReadoutFixture: PitchFrame? {
+        guard model.testFixturesEnabled,
+              ProcessInfo.processInfo.arguments.contains("UITEST_TUNER_ESTIMATING_FRAME") else {
+            return nil
+        }
+        return PitchFrame(
+            timestampMs: 0,
+            frequencyHz: 440,
+            confidence: 0.4,
+            rms: 0.08,
+            centsDeviation: 0,
+            tuningStatus: .unstable,
+            writtenNoteName: "A",
+            writtenOctave: 4,
+            isValidForRecording: false
+        )
+    }
+
+    private var stableReadoutFixture: PitchFrame? {
+        guard model.testFixturesEnabled,
+              ProcessInfo.processInfo.arguments.contains("UITEST_TUNER_STABLE_FRAME") else {
+            return nil
+        }
+        return PitchFrame(
+            timestampMs: 0,
+            frequencyHz: 440,
+            confidence: 0.98,
+            rms: 0.08,
+            centsDeviation: 0,
+            tuningStatus: .inTune,
+            writtenNoteName: "A",
+            writtenOctave: 4,
+            isValidForRecording: true
+        )
+    }
+
+    private var readoutFrame: PitchFrame? {
+        estimatingReadoutFixture ?? stableReadoutFixture ?? activeFrame
+    }
+
+    private var readoutState: NativeAudioOperationalState {
+        if estimatingReadoutFixture != nil {
+            return .permissionGranted(.estimating)
+        }
+        if stableReadoutFixture != nil {
+            return .permissionGranted(.stable)
+        }
+        return audioEngine.audioState
+    }
+
     var body: some View {
         BTScreen {
             BTPageHeader(
@@ -692,12 +820,12 @@ struct TunerView: View {
                 subtitle: .verbatim(language.localized("Play a note and BrassTune will show whether it is flat, in tune, or sharp."))
             )
 
-            if hasMicrophoneIssue {
-                MicrophoneRecoveryCard()
-                    .accessibilityFocused($microphoneIssueFocused)
-            }
-
-            TunerReadout(frame: activeFrame, isListening: audioEngine.recording)
+            TunerReadout(
+                frame: readoutFrame,
+                state: readoutState,
+                instrumentName: instrumentDisplayName(model.selectedInstrumentId)
+            )
+            .accessibilityFocused($microphoneIssueFocused)
 
             NavigationLink {
                 DroneIntervalView()
@@ -708,7 +836,7 @@ struct TunerView: View {
             .buttonStyle(BTSecondaryButtonStyle())
             .accessibilityIdentifier("tuner.droneIntervalLink")
 
-            if !hasMicrophoneIssue, let notice = audioEngine.audioNotice {
+            if !shouldPresentRecoveryActions, let notice = audioEngine.audioNotice {
                 Text(verbatim: notice)
                     .font(.footnote)
                     .foregroundStyle(BTTheme.warning)
@@ -722,7 +850,7 @@ struct TunerView: View {
                 FloatingPracticeControlBar()
                     .padding(.horizontal, BTSpacing.lg)
                     .padding(.bottom, BTSpacing.md)
-            } else if hasMicrophoneIssue {
+            } else if shouldPresentRecoveryActions {
                 MicrophoneRecoveryActions {
                     Task { await model.startRecording() }
                 }
@@ -732,7 +860,7 @@ struct TunerView: View {
                 VStack(spacing: BTSpacing.sm) {
                     Text("Tap Start Listening, allow microphone access, then play for 2–3 seconds.")
                         .font(.footnote)
-                        .foregroundStyle(BTTheme.muted)
+                        .foregroundStyle(BTTheme.tunerSecondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("tuner.microphoneGuidance")
                     Button {
@@ -741,7 +869,7 @@ struct TunerView: View {
                         Label("Start listening", systemImage: "mic.fill")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                    .buttonStyle(BTPrimaryButtonStyle())
                     .disabled(model.recordingStartInProgress)
                     .accessibilityIdentifier("tuner.recordButton")
                 }
@@ -758,14 +886,20 @@ struct TunerView: View {
         }
     }
 
-    private var hasMicrophoneIssue: Bool {
-        audioEngine.permissionDenied || model.lastError == .microphoneUnavailable
+    private var shouldPresentRecoveryActions: Bool {
+        switch audioEngine.audioState {
+        case .permissionDenied, .permissionRestrictedOrUnavailable,
+             .permissionGranted(.interrupted), .permissionGranted(.routeChanged),
+             .permissionGranted(.recoverableError), .permissionGranted(.fatalError):
+            return true
+        default:
+            return model.lastError == .microphoneUnavailable
+        }
     }
 
     private var microphoneIssueMessage: String? {
-        guard hasMicrophoneIssue else { return nil }
-        return model.lastError?.localizedDescription
-            ?? UserVisibleError.microphoneDenied.localizedDescription
+        guard shouldPresentRecoveryActions else { return nil }
+        return tunerOperationalCopy(for: audioEngine.audioState).detail
     }
 
     private func focusMicrophoneIssueIfNeeded() {
@@ -795,6 +929,7 @@ private struct MicrophoneRationalePresentation: Identifiable {
 private struct MicrophoneRationaleView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -809,12 +944,12 @@ private struct MicrophoneRationaleView: View {
                 Text(verbatim: NativeLocalization.string(
                     "Practice recordings and imported sheet music stay on this device unless you choose to share or export them."
                 ))
-                    .foregroundStyle(BTTheme.muted)
+                    .foregroundStyle(BTTheme.tunerSecondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("microphone.rationaleDisclosure")
                 Text("Your first tap asks for microphone access.")
                     .font(.footnote)
-                    .foregroundStyle(BTTheme.muted)
+                    .foregroundStyle(BTTheme.tunerSecondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Button {
@@ -849,22 +984,32 @@ private struct MicrophoneRationaleView: View {
 
 private struct TunerReadout: View {
     let frame: PitchFrame?
-    let isListening: Bool
+    let state: NativeAudioOperationalState
+    let instrumentName: String
     @EnvironmentObject private var model: AppModel
 
     private var language: AppLanguage {
         AppLanguage.launchOverride ?? model.appLanguage
     }
 
+    private var hasUsablePitch: Bool {
+        frame?.frequencyHz != nil && frame?.writtenNoteName != nil
+    }
+
+    private var hasStableTunerFrame: Bool {
+        guard let frame else { return false }
+        return NativeAudioEngine.isStableTunerFrame(frame)
+    }
+
     private var noteLabel: String {
-        guard frame?.isValidForRecording == true,
-              let note = frame?.writtenNoteName else { return language.localized("Play a note") }
+        guard isStable, let note = frame?.writtenNoteName else {
+            return operationalCopy.title
+        }
         return NativeLocalization.isolate("\(note)\(frame?.writtenOctave.map(String.init) ?? "")")
     }
 
     private var verdict: String {
-        guard isListening else { return language.localized("Ready") }
-        guard let frame else { return language.localized("Listening…") }
+        guard isStable, let frame else { return operationalCopy.detail }
         switch frame.tuningStatus {
         case .inTune: return language.localized("In tune — hold it steady")
         case .sharp: return language.localized("A little sharp — ease down")
@@ -874,19 +1019,44 @@ private struct TunerReadout: View {
     }
 
     private var tint: Color {
-        guard let frame else { return BTTheme.muted }
+        guard isStable else { return operationalCopy.tint }
+        guard let frame else { return BTTheme.tunerSecondaryText }
         switch frame.tuningStatus {
         case .inTune: return BTTheme.success
         case .sharp: return BTTheme.sharp
         case .flat: return BTTheme.flat
-        case .silence, .noLock, .unstable: return BTTheme.muted
+        case .silence, .noLock, .unstable: return BTTheme.tunerSecondaryText
         }
     }
 
+    private var isStable: Bool {
+        state == .permissionGranted(.stable) && hasUsablePitch && hasStableTunerFrame
+    }
+
+    private var operationalCopy: TunerOperationalCopy {
+        tunerOperationalCopy(for: state)
+    }
+
+    private var signedCents: String? {
+        guard isStable, let cents = frame?.centsDeviation else { return nil }
+        let rounded = Int(cents.rounded())
+        return NativeLocalization.isolate("\(rounded > 0 ? "+" : "")\(rounded) cents")
+    }
+
     var body: some View {
-        BTCard(tint: BTTheme.surfaceWarm) {
+        BTCard(tint: isStable ? BTTheme.surfaceWarm : BTTheme.surfaceAlt) {
+            Label {
+                Text(verbatim: NativeLocalization.string(operationalCopy.title))
+            } icon: {
+                Image(systemName: operationalCopy.systemImage)
+            }
+                .font(.headline)
+                .foregroundStyle(operationalCopy.tint)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("tuner.signalState")
+
             Text(verbatim: noteLabel)
-                .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                .font(.system(isStable ? .largeTitle : .title2, design: .rounded).weight(.bold))
                 .foregroundStyle(tint)
                 .frame(maxWidth: .infinity)
                 .fixedSize(horizontal: false, vertical: true)
@@ -899,19 +1069,104 @@ private struct TunerReadout: View {
                 .multilineTextAlignment(.center)
                 .accessibilityIdentifier("tuner.verdict")
 
-            TuningMeter(cents: frame?.isValidForRecording == true ? frame?.centsDeviation : nil)
+            if isStable {
+                VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                    if let signedCents {
+                        tunerNumericRow("Cents", value: signedCents, identifier: "tuner.cents")
+                    }
+                    if let frequency = frame?.frequencyHz {
+                        tunerNumericRow(
+                            "Frequency",
+                            value: NativeLocalization.isolate(String(format: "%.1f Hz", frequency)),
+                            identifier: "tuner.frequency"
+                        )
+                    }
+                    tunerNumericRow(
+                        "Confidence",
+                        value: NativeLocalization.isolate("\(Int(((frame?.confidence ?? 0) * 100).rounded()))%"),
+                        identifier: "tuner.confidence"
+                    )
+                    tunerNumericRow("Instrument", value: instrumentName, identifier: "tuner.instrument")
+                }
+                .accessibilityElement(children: .contain)
+            }
+
+            if isStable {
+                TuningMeter(cents: frame?.centsDeviation)
+            }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: tunerVoiceOverState(frame: frame, isListening: isListening)))
+        .accessibilityLabel(Text(verbatim: tunerVoiceOverState(frame: frame, isListening: isStable, state: state)))
         .accessibilityIdentifier("tuner.readout")
+    }
+
+    private func tunerNumericRow(_ title: String, value: String, identifier: String) -> some View {
+        HStack {
+            Text(verbatim: NativeLocalization.string(title))
+                .foregroundStyle(BTTheme.tunerSecondaryText)
+            Spacer()
+            Text(verbatim: value)
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(BTTheme.text)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(identifier)
     }
 }
 
-func tunerVoiceOverState(frame: PitchFrame?, isListening: Bool) -> String {
+private struct TunerOperationalCopy {
+    let title: String
+    let detail: String
+    let systemImage: String
+    let tint: Color
+}
+
+private func tunerOperationalCopy(for state: NativeAudioOperationalState) -> TunerOperationalCopy {
+    switch state {
+    case .permissionNotDetermined:
+        return .init(title: "Microphone not started", detail: "Start listening when you are ready.", systemImage: "mic", tint: BTTheme.tunerSecondaryText)
+    case .permissionRequesting:
+        return .init(title: "Requesting microphone access", detail: "Waiting for your iOS permission choice.", systemImage: "mic.badge.plus", tint: BTTheme.accent)
+    case .permissionDenied:
+        return .init(title: "Microphone access is off", detail: "Allow microphone access in iOS Settings, then try again.", systemImage: "mic.slash.fill", tint: BTTheme.warning)
+    case .permissionRestrictedOrUnavailable:
+        return .init(title: "Microphone unavailable", detail: "BrassTune cannot hear a microphone on this device right now.", systemImage: "mic.slash.fill", tint: BTTheme.warning)
+    case .permissionGranted(.idle):
+        return .init(title: "Microphone available", detail: "Start listening, then play a comfortable note.", systemImage: "mic", tint: BTTheme.tunerSecondaryText)
+    case .permissionGranted(.starting):
+        return .init(title: "Starting microphone", detail: "Preparing the audio input.", systemImage: "waveform", tint: BTTheme.accent)
+    case .permissionGranted(.listeningNoSignal):
+        return .init(title: "Listening — no signal", detail: "Play for a moment at a comfortable volume.", systemImage: "ear", tint: BTTheme.tunerSecondaryText)
+    case .permissionGranted(.estimating):
+        return .init(title: "Finding your note", detail: "Keep the note steady while BrassTune estimates pitch.", systemImage: "waveform.path", tint: BTTheme.secondaryAccent)
+    case .permissionGranted(.stable):
+        return .init(title: "Signal locked", detail: "Pitch is available.", systemImage: "checkmark.circle.fill", tint: BTTheme.success)
+    case .permissionGranted(.interrupted):
+        return .init(title: "Microphone interrupted", detail: "Recording stopped because another audio session took over.", systemImage: "pause.circle", tint: BTTheme.warning)
+    case .permissionGranted(.routeChanged):
+        return .init(title: "Audio route changed", detail: "Check your headphones or speaker before listening again.", systemImage: "headphones", tint: BTTheme.warning)
+    case .permissionGranted(.recoverableError):
+        return .init(title: "Microphone needs attention", detail: "BrassTune could not start the microphone. Check your audio input and retry.", systemImage: "exclamationmark.triangle", tint: BTTheme.warning)
+    case .permissionGranted(.fatalError):
+        return .init(title: "Microphone unavailable", detail: "BrassTune could not continue this microphone session.", systemImage: "xmark.octagon", tint: BTTheme.danger)
+    }
+}
+
+func tunerVoiceOverState(
+    frame: PitchFrame?,
+    isListening: Bool,
+    state: NativeAudioOperationalState? = nil
+) -> String {
     guard isListening else {
+        guard let state else {
+            return [
+                NativeLocalization.string("Play a note"),
+                NativeLocalization.string("Ready"),
+            ].joined(separator: ", ")
+        }
         return [
-            NativeLocalization.string("Play a note"),
-            NativeLocalization.string("Ready"),
+            tunerOperationalCopy(for: state).title,
+            tunerOperationalCopy(for: state).detail,
         ].joined(separator: ", ")
     }
     guard let frame,
@@ -1489,7 +1744,7 @@ struct MetronomeView: View {
                     } label: {
                         Label("Down", systemImage: "minus")
                     }
-                    .buttonStyle(BTSecondaryButtonStyle())
+                    .buttonStyle(BTSecondaryButtonStyle(horizontalPadding: BTSpacing.xs))
                     .accessibilityIdentifier("metronome.tempoDown")
 
                     Button {
@@ -1497,7 +1752,7 @@ struct MetronomeView: View {
                     } label: {
                         Label("Tap tempo", systemImage: "hand.tap")
                     }
-                    .buttonStyle(BTSecondaryButtonStyle())
+                    .buttonStyle(BTSecondaryButtonStyle(horizontalPadding: BTSpacing.xs))
                     .accessibilityIdentifier("metronome.tapTempo")
 
                     Button {
@@ -1505,7 +1760,7 @@ struct MetronomeView: View {
                     } label: {
                         Label("Up", systemImage: "plus")
                     }
-                    .buttonStyle(BTSecondaryButtonStyle())
+                    .buttonStyle(BTSecondaryButtonStyle(horizontalPadding: BTSpacing.xs))
                     .accessibilityIdentifier("metronome.tempoUp")
                 }
                 Stepper(value: Binding(get: { model.metronome.bpm }, set: { model.setTempo($0) }), in: 20...300, step: 1) {
@@ -1599,6 +1854,7 @@ struct ScorePracticeView: View {
     @State private var showFileImporter = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var importError: String?
+    @AccessibilityFocusState private var importErrorFocused: Bool
 
     var body: some View {
         BTScreen {
@@ -1640,6 +1896,7 @@ struct ScorePracticeView: View {
                     Text(verbatim: importError)
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(BTTheme.danger)
+                        .accessibilityFocused($importErrorFocused)
                         .accessibilityIdentifier("score.import.error")
                 }
             }
@@ -1661,7 +1918,7 @@ struct ScorePracticeView: View {
                 try model.importScore(from: url)
                 importError = nil
             } catch {
-                importError = error.localizedDescription
+                importError = scoreImportFailureMessage(for: error)
             }
         }
         .onChange(of: selectedPhoto) { _, newValue in
@@ -1676,13 +1933,30 @@ struct ScorePracticeView: View {
                 }
             }
         }
+        .onChange(of: importError) { _, message in
+            importErrorFocused = message != nil
+        }
     }
+}
+
+func scoreImportFailureMessage(for error: Error) -> String? {
+    if error is CancellationError { return nil }
+    let cocoaError = error as NSError
+    if cocoaError.domain == NSCocoaErrorDomain,
+       cocoaError.code == NSUserCancelledError {
+        return nil
+    }
+    return error.localizedDescription
 }
 
 private struct ScoreDocumentCard: View {
     @EnvironmentObject private var model: AppModel
     @State private var confirmDelete = false
     @State private var showFullPageViewer = false
+    @State private var showRename = false
+    @State private var showGuidedPractice = false
+    @State private var scoreGuidedRun: ScoreGuidedPracticeRun?
+    @State private var renameTitle = ""
     let score: ImportedScore
 
     var body: some View {
@@ -1700,6 +1974,7 @@ private struct ScoreDocumentCard: View {
                                 .padding(5)
                                 .background(BTTheme.surface.opacity(0.72), in: Circle())
                                 .padding(6)
+                                .accessibilityHidden(true)
                         }
                 }
                 .buttonStyle(.plain)
@@ -1708,6 +1983,7 @@ private struct ScoreDocumentCard: View {
                     Text(verbatim: score.title)
                         .font(.title3.weight(.bold))
                         .foregroundStyle(BTTheme.text)
+                        .accessibilityIdentifier("score.card")
                     Text(verbatim: NativeLocalization.format(
                         "%@ • %@",
                         score.sourceKind.title,
@@ -1731,13 +2007,20 @@ private struct ScoreDocumentCard: View {
                         Button {
                             model.selectScorePage(scoreID: score.id, pageID: page.id)
                         } label: {
-                            Text(verbatim: NativeLocalization.format("Page %@", String(page.pageNumber)))
-                                .font(.caption.weight(.bold))
-                                .padding(.horizontal, BTSpacing.sm)
-                                .padding(.vertical, BTSpacing.xs)
-                                .background(page.id == score.selectedPage?.id ? BTTheme.accent.opacity(0.22) : BTTheme.surfaceAlt, in: Capsule())
+                            HStack(spacing: BTSpacing.xs) {
+                                Text(verbatim: NativeLocalization.format("Page %@", String(page.pageNumber)))
+                                if page.id == score.selectedPage?.id {
+                                    Image(systemName: "checkmark")
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, BTSpacing.sm)
+                            .frame(minHeight: 44)
+                            .background(page.id == score.selectedPage?.id ? BTTheme.accent.opacity(0.22) : BTTheme.surfaceAlt, in: Capsule())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(page.id == score.selectedPage?.id ? .isSelected : [])
                         .accessibilityIdentifier("score.page.\(page.pageNumber)")
                     }
                 }
@@ -1750,6 +2033,22 @@ private struct ScoreDocumentCard: View {
             ScoreAnnotationEditor(score: score)
 
             Button {
+                guard let run = model.startScoreGuidedPractice(scoreID: score.id) else { return }
+                scoreGuidedRun = run
+                showGuidedPractice = true
+            } label: {
+                Label("Start guided practice", systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTPrimaryButtonStyle())
+            .accessibilityIdentifier("score.startGuidedPractice")
+
+            Text("A manual all-notes routine uses your selected page, tempo target, and practice notes. It does not read or score the notation automatically.")
+                .font(.footnote)
+                .foregroundStyle(BTTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
                 showFullPageViewer = true
             } label: {
                 Label("View full page", systemImage: "arrow.up.left.and.arrow.down.right.magnifyingglass")
@@ -1757,11 +2056,12 @@ private struct ScoreDocumentCard: View {
             .buttonStyle(BTSecondaryButtonStyle())
             .accessibilityIdentifier("score.viewFullPage")
 
-            HStack(spacing: BTSpacing.md) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: BTSpacing.sm)], spacing: BTSpacing.sm) {
                 Button {
                     model.activeScoreID = score.id
                 } label: {
                     Label("Use in practice", systemImage: "pin")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BTSecondaryButtonStyle())
                 .accessibilityIdentifier("score.useInPractice")
@@ -1770,24 +2070,31 @@ private struct ScoreDocumentCard: View {
                     model.attachScoreToLatestSession(scoreID: score.id)
                 } label: {
                     Label("Attach to latest", systemImage: "paperclip")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BTSecondaryButtonStyle())
                 .disabled(model.sessions.isEmpty)
                 .accessibilityIdentifier("score.attachLatest")
             }
 
-            HStack(spacing: BTSpacing.md) {
+            Menu {
+                Button {
+                    renameTitle = score.title
+                    showRename = true
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .accessibilityIdentifier("score.rename")
+
                 ShareLink(item: score.exportText) {
                     Label("Export metadata", systemImage: "square.and.arrow.up")
                 }
-                .buttonStyle(BTSecondaryButtonStyle())
                 .accessibilityIdentifier("score.export")
 
                 if let fileURL = model.storedScoreFileURL(for: score) {
                     ShareLink(item: fileURL) {
                         Label("Share original file", systemImage: "doc")
                     }
-                    .buttonStyle(BTSecondaryButtonStyle())
                     .accessibilityIdentifier("score.shareFile")
                 }
 
@@ -1796,21 +2103,38 @@ private struct ScoreDocumentCard: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
-                .buttonStyle(BTSecondaryButtonStyle())
                 .accessibilityIdentifier("score.delete")
+            } label: {
+                Label("Score actions", systemImage: "ellipsis.circle")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(BTSecondaryButtonStyle())
+            .accessibilityIdentifier("score.actions")
         }
-        .accessibilityIdentifier("score.card")
-        .confirmationDialog("Delete this local score?", isPresented: $confirmDelete, titleVisibility: .visible) {
+        .alert("Delete this local score?", isPresented: $confirmDelete) {
             Button("Delete local score", role: .destructive) {
                 model.deleteScore(id: score.id)
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Keep score", role: .cancel) {}
         } message: {
             Text("This removes the imported file and clears score references from local sessions.")
         }
+        .alert("Rename score", isPresented: $showRename) {
+            TextField("Score title", text: $renameTitle)
+                .accessibilityIdentifier("score.rename.title")
+            Button("Rename") {
+                _ = model.renameScore(id: score.id, title: renameTitle)
+            }
+            .disabled(renameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || renameTitle.count > 120)
+            Button("Cancel", role: .cancel) {}
+        }
         .fullScreenCover(isPresented: $showFullPageViewer) {
             ScorePageViewerView(score: score)
+        }
+        .fullScreenCover(isPresented: $showGuidedPractice) {
+            if let scoreGuidedRun {
+                ScoreGuidedPracticeView(score: score, run: scoreGuidedRun)
+            }
         }
     }
 }
@@ -1936,7 +2260,6 @@ private struct ScorePageViewerView: View {
                 }
             }
         }
-        .accessibilityIdentifier("score.fullPageViewer")
     }
 
     private var topBar: some View {
@@ -1946,6 +2269,7 @@ private struct ScorePageViewerView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
                     .lineLimit(1)
+                    .accessibilityIdentifier("score.fullPageViewer")
                 Text(verbatim: isPDF
                     ? NativeLocalization.isolate(score.pageCountLabel)
                     : NativeLocalization.format(
@@ -1978,8 +2302,10 @@ private struct ScorePageViewerView: View {
                 pageIndex = max(0, pageIndex - 1)
             } label: {
                 Image(systemName: "chevron.left").font(.title3.weight(.bold))
+                    .frame(minWidth: 44, minHeight: 44)
             }
             .disabled(pageIndex <= 0)
+            .accessibilityLabel(Text(verbatim: NativeLocalization.string("Previous")))
             .accessibilityIdentifier("score.viewer.previousPage")
 
             Text(verbatim: NativeLocalization.isolate("\(currentPage?.pageNumber ?? pageIndex + 1) / \(score.pages.count)"))
@@ -1991,8 +2317,10 @@ private struct ScorePageViewerView: View {
                 pageIndex = min(score.pages.count - 1, pageIndex + 1)
             } label: {
                 Image(systemName: "chevron.right").font(.title3.weight(.bold))
+                    .frame(minWidth: 44, minHeight: 44)
             }
             .disabled(pageIndex >= score.pages.count - 1)
+            .accessibilityLabel(Text(verbatim: NativeLocalization.string("Next")))
             .accessibilityIdentifier("score.viewer.nextPage")
         }
         .foregroundStyle(.white)
@@ -2286,9 +2614,237 @@ private struct ScoreAnnotationEditor: View {
     }
 }
 
+/// A deliberately manual score routine. Imported PDFs and photos remain
+/// viewable practice material; BrassTune does not claim OCR, score following,
+/// or automatic note/rhythm grading for them.
+private struct ScoreGuidedPracticeView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    let score: ImportedScore
+    let run: ScoreGuidedPracticeRun
+
+    @State private var phase: ScoreGuidedPracticePhase = .ready
+    @State private var startedAt: Date?
+    @State private var timer = ScoreGuidedPracticeTimerState()
+    @State private var timerNow = Date()
+    @State private var completionSaved = false
+    @State private var currentNoteIndex = 0
+
+    private let writtenNoteRoutine = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"]
+
+    var body: some View {
+        NavigationStack {
+            BTScreen {
+                BTPageHeader(
+                    eyebrow: "Manual routine",
+                    title: "Guided score practice",
+                    subtitle: .verbatim("All notes at \(run.configuration.tempoBPM) BPM — follow your score and mark your own progress.")
+                )
+
+                if phase == .ready {
+                    Button { begin() } label: {
+                        Label("Begin routine", systemImage: "play.fill").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BTPrimaryButtonStyle())
+                    .accessibilityIdentifier("score.guided.begin")
+                } else if phase == .running {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: BTSpacing.sm) {
+                        Button {
+                            timer.pause(at: Date())
+                            timerNow = Date()
+                            phase = .paused
+                        } label: {
+                            Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("score.guided.pause")
+                        Button { finish() } label: {
+                            Label("Finish", systemImage: "checkmark").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTPrimaryButtonStyle())
+                        .disabled(activeDuration < 1)
+                        .accessibilityIdentifier("score.guided.finish")
+                    }
+                } else if phase == .paused {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: BTSpacing.sm) {
+                        Button {
+                            timer.resume(at: Date())
+                            timerNow = Date()
+                            phase = .running
+                        } label: {
+                            Label("Resume", systemImage: "play.fill").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTPrimaryButtonStyle())
+                        .accessibilityIdentifier("score.guided.resume")
+                        Button { finish() } label: {
+                            Label("Finish", systemImage: "checkmark").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .disabled(activeDuration < 1)
+                    }
+                }
+
+                BTCard(tint: BTTheme.surfaceWarm) {
+                    BTSectionHeader(title: .verbatim(score.title), subtitle: .verbatim("Selected score page \(run.configuration.pageNumber)"))
+                    Text("All notes")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(BTTheme.text)
+                    Text("Chromatic written-note check-in. This is a manual cue sequence, not automatic score following or performance scoring.")
+                        .font(.subheadline)
+                        .foregroundStyle(BTTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 52), spacing: BTSpacing.sm)], spacing: BTSpacing.sm) {
+                        ForEach(writtenNoteRoutine, id: \.self) { note in
+                            let isCurrent = writtenNoteRoutine[currentNoteIndex] == note
+                            Text(verbatim: NativeLocalization.preserve(note))
+                                .font(.headline.monospaced())
+                                .foregroundStyle(isCurrent ? BTTheme.text : BTTheme.muted)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(isCurrent ? BTTheme.accent.opacity(0.28) : BTTheme.surfaceAlt, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .accessibilityAddTraits(isCurrent ? .isSelected : [])
+                        }
+                    }
+                    .accessibilityIdentifier("score.guided.allNotes")
+
+                    if phase == .running || phase == .paused {
+                        Text(verbatim: NativeLocalization.format("Current note %@", NativeLocalization.preserve(writtenNoteRoutine[currentNoteIndex])))
+                            .font(.headline)
+                            .foregroundStyle(BTTheme.text)
+                            .accessibilityIdentifier("score.guided.currentNote")
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: BTSpacing.sm) {
+                            Button { currentNoteIndex = max(0, currentNoteIndex - 1) } label: {
+                                Label("Previous note", systemImage: "chevron.left").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(BTSecondaryButtonStyle())
+                            .disabled(currentNoteIndex == 0)
+                            .accessibilityIdentifier("score.guided.previousNote")
+                            Button { currentNoteIndex = min(writtenNoteRoutine.count - 1, currentNoteIndex + 1) } label: {
+                                Label("Next note", systemImage: "chevron.right").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(BTSecondaryButtonStyle())
+                            .disabled(currentNoteIndex == writtenNoteRoutine.count - 1)
+                            .accessibilityIdentifier("score.guided.nextNote")
+                        }
+                    }
+                }
+
+                BTCard {
+                    HStack {
+                        Label("Elapsed", systemImage: "timer")
+                        Spacer()
+                        Text(verbatim: NativeLocalization.isolate(elapsedTimeText))
+                            .font(.title2.monospacedDigit().weight(.semibold))
+                    }
+                    .foregroundStyle(BTTheme.text)
+                    .accessibilityIdentifier("score.guided.elapsed")
+
+                    if !run.configuration.focusMeasures.isEmpty || !run.configuration.problemPassage.isEmpty || !run.configuration.practiceNotes.isEmpty {
+                        Divider()
+                        if !run.configuration.focusMeasures.isEmpty { guidedDetail("Focus", run.configuration.focusMeasures) }
+                        if !run.configuration.problemPassage.isEmpty { guidedDetail("Passage", run.configuration.problemPassage) }
+                        if !run.configuration.practiceNotes.isEmpty { guidedDetail("Notes", run.configuration.practiceNotes) }
+                    }
+                }
+
+                switch phase {
+                case .ready:
+                    EmptyView()
+                case .running:
+                    EmptyView()
+                case .paused:
+                    EmptyView()
+                case .completed:
+                    BTCard(tint: BTTheme.surfaceWarm) {
+                        Label {
+                            Text(verbatim: NativeLocalization.string(completionSaved ? "Practice saved" : "Practice finished"))
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill")
+                        }
+                            .font(.headline)
+                            .foregroundStyle(BTTheme.success)
+                    }
+                    Button("Done") { dismiss() }
+                        .buttonStyle(BTPrimaryButtonStyle())
+                        .accessibilityIdentifier("score.guided.done")
+                }
+
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .accessibilityIdentifier("score.guided.cancel")
+            }
+            .navigationTitle("Guided practice")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .task(id: phase) {
+            while phase == .running && !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard phase == .running else { break }
+                timerNow = Date()
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard phase == .running, newPhase != .active else { return }
+            timer.pause(at: Date())
+            timerNow = Date()
+            phase = .paused
+        }
+    }
+
+    private var elapsedTimeText: String {
+        let wholeSeconds = Int(activeDuration.rounded(.down))
+        return String(format: "%02d:%02d", wholeSeconds / 60, wholeSeconds % 60)
+    }
+
+    private var activeDuration: TimeInterval { timer.activeDuration(at: timerNow) }
+
+    private func guidedDetail(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(verbatim: NativeLocalization.string(label)).font(.caption.weight(.bold)).foregroundStyle(BTTheme.muted)
+            Text(verbatim: value).font(.subheadline).foregroundStyle(BTTheme.text)
+        }
+    }
+
+    private func begin() {
+        startedAt = Date()
+        timer.start(at: startedAt ?? Date())
+        timerNow = startedAt ?? Date()
+        phase = .running
+    }
+
+    private func finish() {
+        let completedAt = Date()
+        let duration = timer.finish(at: completedAt)
+        timerNow = completedAt
+        guard duration >= 1 else { return }
+        let activeStart = startedAt ?? Date()
+        let completion = ScoreGuidedPracticeCompletion(
+            activityInstanceID: run.activityInstanceID,
+            configuration: run.configuration,
+            startedAt: activeStart,
+            completedAt: completedAt,
+            activeDurationSeconds: duration
+        )
+        completionSaved = model.saveScoreGuidedPracticeCompletion(completion)
+        phase = .completed
+    }
+}
+
+private enum ScoreGuidedPracticePhase: Equatable {
+    case ready
+    case running
+    case paused
+    case completed
+}
+
 @ViewBuilder
 func instrumentPickerOptions() -> some View {
-    Text(verbatim: NativeLocalization.string("Trumpet in Bb")).tag("trumpet")
+    Text(verbatim: NativeLocalization.string("Trumpet in B♭")).tag("trumpet")
     Text(verbatim: NativeLocalization.string("Horn in F")).tag("horn")
     Text(verbatim: NativeLocalization.string("Trombone")).tag("trombone")
     Text(verbatim: NativeLocalization.string("Euphonium")).tag("euphonium")

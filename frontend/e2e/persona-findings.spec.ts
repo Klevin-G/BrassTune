@@ -261,7 +261,8 @@ test('join return and privacy disclosure survive the auth gateway', async ({ pag
   await page.goto('/ensemble?join=BRASS7');
   const disclosure = page.getByText(/aggregate cloud practice totals/i);
   await expect(disclosure).toBeVisible();
-  await expect(disclosure).toContainText('class directors and BrassTune administrators');
+  await expect(disclosure).toContainText('class directors can see aggregate cloud practice totals');
+  await expect(disclosure).toContainText('limited set of authorized BrassTune service administrators may access account content');
   const signIn = page.getByRole('link', { name: 'Sign in or create an account' });
   await expect(signIn).toHaveAttribute('href', '/?next=%2Fensemble%3Fjoin%3DBRASS7');
   await signIn.click();

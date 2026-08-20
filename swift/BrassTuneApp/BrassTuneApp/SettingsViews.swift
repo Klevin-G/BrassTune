@@ -1,5 +1,6 @@
 import AuthenticationServices
 import SwiftUI
+import SafariServices
 import UIKit
 
 struct SettingsView: View {
@@ -61,9 +62,9 @@ struct SettingsView: View {
 
                     if model.appleSignInAvailable {
                         NativeAppleSignInButton(identifier: "settings.appleSignIn")
-                        if model.googleSignInAvailable {
-                            NativeGoogleSignInButton(identifier: "settings.googleSignIn")
-                        }
+                    }
+                    if model.googleSignInAvailable {
+                        NativeGoogleSignInButton(identifier: "settings.googleSignIn")
                     }
 
                     if model.authProviderConfigurationLoading {
@@ -175,30 +176,7 @@ struct SettingsView: View {
             }
 
             BTCard {
-                BTSectionHeader(title: "Tools")
-                SettingsNavigationRow(title: "Metronome", systemImage: "metronome", identifier: "settings.metronomeLink") {
-                    MetronomeView()
-                }
-                SettingsNavigationRow(
-                    title: "Sheet music",
-                    systemImage: "music.note.list",
-                    detail: NativeLocalization.isolate(String(model.scores.count)),
-                    identifier: "settings.scoresLink"
-                ) {
-                    ScorePracticeView()
-                }
-                SettingsNavigationRow(
-                    title: "Offline practice packs",
-                    systemImage: "shippingbox",
-                    detail: NativeLocalization.isolate(String(model.practicePacks.count)),
-                    identifier: "settings.practicePacksLink"
-                ) {
-                    PracticePacksView()
-                }
-            }
-
-            BTCard {
-                BTSectionHeader(title: "Your data", subtitle: "Export a copy or remove saved data.")
+                BTSectionHeader(title: "Your data", subtitle: "Export a copy or clear practice history while keeping imported scores.")
                 ShareLink(item: model.exportDataText()) {
                     Label("Export local data", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
@@ -209,7 +187,7 @@ struct SettingsView: View {
                 Button(role: .destructive) {
                     pendingDestructiveAction = .clearPracticeData
                 } label: {
-                    Label("Clear local practice data", systemImage: "trash")
+                    Label("Clear practice history", systemImage: "trash")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -297,7 +275,7 @@ struct SettingsView: View {
 
     private var deletionHelpText: String {
         if model.authState.usesRemoteAccount {
-            return NativeLocalization.string("Deleting your account also removes practice history and sheet music saved on this device.")
+            return NativeLocalization.string("Deleting your account removes its server record and clears the saved sign-in, practice history, and imported sheet music on this device.")
         }
         return NativeLocalization.string("This removes practice history, sheet music, and saved sign-in information from this device.")
     }
@@ -314,10 +292,10 @@ struct SettingsView: View {
     private func destructiveAlertMessage(for action: DestructiveAction) -> String {
         switch action {
         case .clearPracticeData:
-            return NativeLocalization.string("All practice history and imported sheet music on this device will be deleted. This can't be undone.")
+            return NativeLocalization.string("Practice history, saved recordings, and reflections stored on this device will be deleted. Imported sheet music and your account stay available. This can't be undone.")
         case .deleteAccount:
             if model.authState.usesRemoteAccount {
-                return NativeLocalization.string("Your account, saved sign-in, practice history, and imported sheet music will be deleted. This can't be undone.")
+                return NativeLocalization.string("Your server account record will be deleted, and this device will clear its saved sign-in, practice history, and imported sheet music. This can't be undone.")
             }
             return NativeLocalization.string("Practice history, imported sheet music, and saved sign-in information will be deleted from this device. This can't be undone.")
         }
@@ -326,7 +304,7 @@ struct SettingsView: View {
     private func destructiveButtonTitle(for action: DestructiveAction) -> String {
         switch action {
         case .clearPracticeData:
-            return NativeLocalization.string("Delete practice data")
+            return NativeLocalization.string("Delete practice history")
         case .deleteAccount:
             return NativeLocalization.string(model.authState.usesRemoteAccount ? "Delete account" : "Clear all data")
         }
@@ -374,7 +352,7 @@ struct NativeAppleSignInButton: View {
         case .failure(let error):
             if let authorizationError = error as? ASAuthorizationError,
                authorizationError.code == .canceled {
-                model.reportAuthFailure(.appleSignInCancelled)
+                return
             } else {
                 model.reportAuthFailure(.authenticationFailed)
             }
@@ -421,7 +399,8 @@ struct NativeGoogleSignInButton: View {
                 Text("Sign in with Google")
                     .font(.custom(
                         NativeGoogleSignInBranding.fontName,
-                        fixedSize: NativeGoogleSignInBranding.fontSize
+                        size: NativeGoogleSignInBranding.fontSize,
+                        relativeTo: .body
                     ))
                     .lineSpacing(NativeGoogleSignInBranding.lineSpacing)
                     .foregroundStyle(googleTextColor)
@@ -1172,41 +1151,20 @@ enum LegalKind {
 
 struct LegalDetailView: View {
     let kind: LegalKind
+    @State private var safariURL: URL?
 
     var body: some View {
         BTScreen {
-            switch kind {
-            case .privacy:
-                LegalCard(
-                    title: "Privacy Policy",
-                    messages: [
-                        "BrassTune uses account and practice data to provide tuning feedback and saved progress.",
-                        "Practice recordings and imported sheet music stay on this device unless you choose to share or export them.",
-                    ],
-                    destination: URL(string: "https://brasstune.vercel.app/privacy")!
-                )
-            case .terms:
-                LegalCard(
-                    title: "Terms of Service",
-                    messages: [
-                        "Use BrassTune only with consent and within the policies of the school, studio, or organization providing access.",
-                        "BrassTune is practice analytics software and does not replace instruction or hearing-safety guidance.",
-                    ],
-                    destination: URL(string: "https://brasstune.vercel.app/terms")!
-                )
-            case .support:
-                LegalCard(
-                    title: "Support",
-                    messages: [
-                        "Contact the teacher, director, or organization that provided BrassTune access.",
-                        "Tell them what you were doing, which screen you were on, and about when the problem happened.",
-                    ],
-                    destination: URL(string: "https://brasstune.vercel.app/support")!
-                )
-            }
+            LegalCard(document: document, openURL: { safariURL = $0 })
         }
         .navigationTitle(title)
         .accessibilityIdentifier("screen.legal.\(title)")
+        .sheet(isPresented: Binding(
+            get: { safariURL != nil },
+            set: { if !$0 { safariURL = nil } }
+        )) {
+            if let safariURL { SafariDocumentView(url: safariURL) }
+        }
     }
 
     private var title: String {
@@ -1216,27 +1174,73 @@ struct LegalDetailView: View {
         case .support: return NativeLocalization.string("Support")
         }
     }
+
+    private var document: LegalDocument {
+        switch kind {
+        case .privacy:
+            return LegalDocument(
+                title: "Privacy Policy",
+                url: URL(string: "https://brasstune.vercel.app/privacy")!,
+                sections: [
+                    ("Data BrassTune uses", ["BrassTune uses your profile, settings, practice sessions, pitch results, reflections, and recordings to provide practice features. Supabase provides account authentication and storage for signed-in cloud practice; Vercel hosts the web app and Render hosts the backend service.", "Native microphone audio and imported score pages stay on this device unless you explicitly export or share them. Signed-in web recording behavior is described on the published policy page."]),
+                    ("Class privacy", ["Class directors can see aggregate cloud practice totals from the date you join through class reports. They never receive your recordings, reflection text, or private session details. A limited set of authorized BrassTune service administrators may access account, session, and cloud-audio data only for security, support, abuse investigation, or service operation."]),
+                    ("Your control", ["You can export or delete saved data from Settings. Account access and local data are removed when deletion succeeds. If cloud-file cleanup is queued, BrassTune reports that pending state and continues the protected cleanup job instead of claiming every stored object is already gone. Exported copies are yours to manage."])
+                ]
+            )
+        case .terms:
+            return LegalDocument(
+                title: "Terms of Service",
+                url: URL(string: "https://brasstune.vercel.app/terms")!,
+                sections: [
+                    ("Using BrassTune", ["Use BrassTune with permission from the account holder, and follow your school or studio’s rules.", "BrassTune gives you practice feedback and tuning help. It does not replace a teacher, medical advice, or hearing-safety guidance.", "You choose when to record. Check exports before sharing them and follow your class or school rules for student data."]),
+                    ("Accounts and data", ["You can export your data and delete your account from Settings. When a teacher deletes their account, their classes are deleted too."])
+                ]
+            )
+        case .support:
+            return LegalDocument(
+                title: "Support",
+                url: URL(string: "https://brasstune.vercel.app/support")!,
+                sections: [
+                    ("Need help?", ["Students: your teacher or director can usually help fastest. For anything else, email us and tell us which screen you were on and roughly when it happened.", "Support contact: brasstune1@gmail.com"]),
+                    ("Common next steps", ["If the tuner stays quiet, check microphone access in Settings. You can export a session or delete your account from Settings."])
+                ]
+            )
+        }
+    }
+}
+
+private struct LegalDocument {
+    let title: String
+    let url: URL
+    let sections: [(String, [String])]
 }
 
 private struct LegalCard: View {
-    let title: BTCopy
-    let messages: [BTCopy]
-    let destination: URL
+    let document: LegalDocument
+    let openURL: (URL) -> Void
 
     var body: some View {
         BTCard {
-            BTSectionHeader(title: title)
-            ForEach(messages, id: \.self) { message in
-                Text(verbatim: message.resolved)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            BTSectionHeader(title: .verbatim(document.title), subtitle: "Published at the link below")
+            ForEach(document.sections, id: \.0) { section in
+                Text(verbatim: section.0).font(.headline)
+                ForEach(section.1, id: \.self) { message in
+                    Text(verbatim: message).font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
-            Link(destination: destination) {
-                Label("Open full policy and contact details", systemImage: "safari")
+            Text(verbatim: document.url.absoluteString).font(.footnote.monospaced()).foregroundStyle(BTTheme.muted).textSelection(.enabled).accessibilityIdentifier("legal.canonicalURL")
+            Button { openURL(document.url) } label: {
+                Label("Open published document", systemImage: "safari")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+            .accessibilityIdentifier("legal.openPublished")
         }
     }
+}
+
+private struct SafariDocumentView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }

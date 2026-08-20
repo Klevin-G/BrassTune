@@ -1,5 +1,12 @@
 # TestFlight upload — signed archive + export handoff
 
+> **Historical and superseded.** This file records the pre-Sign-in-with-Apple,
+> `0.1.0 (1)` handoff and must not be used as the current upload procedure. The
+> current source project is `1.0.0 (2)` with Sign in with Apple enabled, while
+> the latest documented App Store candidate is build 5. Use
+> `TESTFLIGHT_HANDOFF.md`, `DOCS_INDEX.md`, and
+> `APP_REVIEW_RESPONSE_2026-08-14.md` for current boundaries.
+
 This script prepares a signed archive only when owner-owned Apple signing and the
 required public production configuration are supplied. It does not create a
 signed archive or upload a build by itself in this repository state. The Apple
@@ -42,7 +49,7 @@ signing and `CODE_SIGNING_ALLOWED=YES`, then exports
 Then in App Store Connect → your app → **TestFlight**, add internal testers. Processing
 takes a few minutes; the first external build needs a short Beta App Review.
 
-## Current app metadata (change as desired)
+## Historical app metadata
 - Marketing version: `0.1.0`, build: `1` (bump `CURRENT_PROJECT_VERSION` per upload,
   or the export sets `manageAppVersionAndBuildNumber`).
 - Display name: **BrassTune**. Deployment target: iOS 17. Devices: iPhone + iPad.

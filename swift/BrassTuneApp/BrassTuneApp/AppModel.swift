@@ -1,10 +1,66 @@
 import Combine
 import CryptoKit
+import Darwin
 import Foundation
 import ImageIO
 import PDFKit
 import UIKit
 import UniformTypeIdentifiers
+
+/// Applies the same on-device privacy policy to every durable BrassTune
+/// artifact.  The operation is deliberately throwing: silently accepting a
+/// file that is eligible for backup or lacks data protection would make a
+/// local persistence failure look like a successful save.
+enum NativeLocalStorageProtection {
+    static let fileProtection = FileProtectionType.completeUntilFirstUserAuthentication
+
+    enum Error: LocalizedError {
+        case unsafeSymbolicLink(URL)
+
+        var errorDescription: String? {
+            switch self {
+            case .unsafeSymbolicLink:
+                return "BrassTune found an unsafe local-storage link."
+            }
+        }
+    }
+
+    static func apply(to url: URL) throws {
+        let fileManager = FileManager.default
+        guard url.isFileURL else { throw CocoaError(.fileNoSuchFile) }
+        if try url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true {
+            throw Error.unsafeSymbolicLink(url)
+        }
+        try fileManager.setAttributes([.protectionKey: fileProtection], ofItemAtPath: url.path)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutableURL = url
+        try mutableURL.setResourceValues(values)
+    }
+
+    /// Applies the policy to a pre-existing namespace without descending
+    /// through symlinks. A suspicious link is a hard error so the caller can
+    /// preserve the affected data rather than read or delete outside its
+    /// storage root.
+    static func migrateDirectoryIfPresent(_ directory: URL) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: directory.path) else { return }
+        try apply(to: directory)
+        let keys: Set<URLResourceKey> = [.isSymbolicLinkKey]
+        let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: []
+        )
+        while let item = enumerator?.nextObject() as? URL {
+            let values = try item.resourceValues(forKeys: keys)
+            if values.isSymbolicLink == true {
+                throw Error.unsafeSymbolicLink(item)
+            }
+            try apply(to: item)
+        }
+    }
+}
 
 @MainActor
 enum AppAudioOwnershipHandoff {
@@ -17,6 +73,10 @@ enum AppAudioOwnershipHandoff {
         if isRecording() {
             stopRecording()
         }
+    }
+
+    static func prepareForMetronomePlayback(stopTone: () -> Void) {
+        stopTone()
     }
 }
 
@@ -60,6 +120,15 @@ struct NativeRecordingFileStore {
         return retainedURL.standardizedFileURL
     }
 
+    func protectRecording(at url: URL?) throws {
+        guard let url, owns(url), fileExists(url) else { return }
+        try NativeLocalStorageProtection.apply(to: url.standardizedFileURL)
+    }
+
+    func migrateExistingStorageProtection() throws {
+        try NativeLocalStorageProtection.migrateDirectoryIfPresent(storageDirectory)
+    }
+
     func owns(_ url: URL) -> Bool {
         guard url.isFileURL else { return false }
         let base = storageDirectory.standardizedFileURL.resolvingSymlinksInPath()
@@ -84,17 +153,20 @@ enum PendingAppDestination: Equatable {
 
 @MainActor
 final class AppModel: ObservableObject {
-    /// Third-party native OAuth is intentionally not part of this shipping
-    /// configuration. Keeping this local gate separate from Supabase's remote
-    /// provider settings prevents a server-side toggle from exposing a
-    /// Google-only native flow while Sign in with Apple is deferred.
-    static let nativeThirdPartySignInEnabled = false
-
     @Published var config: AppConfig = .fromProcessEnvironment()
     @Published var authState: AuthState = .signedOut
     @Published private(set) var persistenceAccessState: PersistenceAccessState = .restoringIdentity
     @Published var selectedInstrumentId = "trumpet" { didSet { persistLocalData() } }
-    @Published var referencePitchHz = 440.0 { didSet { persistLocalData() } }
+    @Published var referencePitchHz = NativeReferencePitch.defaultHz {
+        didSet {
+            let sanitized = NativeReferencePitch.sanitized(referencePitchHz)
+            guard sanitized == referencePitchHz else {
+                referencePitchHz = sanitized
+                return
+            }
+            persistLocalData()
+        }
+    }
     @Published var sessions: [PracticeSession] = [] { didSet { persistLocalData() } }
     @Published var scores: [ImportedScore] = [] { didSet { persistLocalData() } }
     @Published var activeScoreID: ImportedScore.ID? { didSet { persistLocalData() } }
@@ -142,6 +214,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var persistedPracticeSuccessSequence = 0
     @Published private(set) var pendingDestination: PendingAppDestination?
     @Published private(set) var microphoneRationaleSeen = false { didSet { persistLocalData() } }
+    @Published private(set) var guestAccountUpgradePrompt: GuestAccountUpgradePrompt?
 
     let audioEngine: NativeAudioEngine
     let recordingPlayer: NativeRecordingPlayer
@@ -161,11 +234,21 @@ final class AppModel: ObservableObject {
     private var activeStorageNamespace: NativeStorageNamespace = .guest
     private let metronomeOutput: NativeMetronomeOutput
     private var isRestoringLocalState = false
-    private var metronomeTimer: Timer?
+    /// A restore may sanitize an existing on-disk snapshot, but persistence is
+    /// deliberately unavailable until its namespace identity is established.
+    /// Keep one deferred writeback token so migration never races namespace
+    /// selection or manufactures a snapshot when there was none to restore.
+    private var pendingRestoredSnapshotWriteback = false
+    /// Tracks the generation that consumed the deferred migration token. A
+    /// failed current write re-arms the token, but never retries by itself.
+    private var restoredSnapshotWritebackGeneration: Int?
+    private let metronomeClock = NativeMetronomeClock()
+    private var metronomeClockGeneration = UUID()
     private var tapTempoEvents: [Date] = []
     private var audioFrameCancellable: AnyCancellable?
     private var audioRecordingCancellable: AnyCancellable?
     private var playAlongFixtureTask: Task<Void, Never>?
+    private let playAlongFixturesEnabled: Bool
     private var playAlongUsesFixture = false
     private var playAlongStartToken: UUID?
     private var recordingStartToken: UUID?
@@ -176,6 +259,7 @@ final class AppModel: ObservableObject {
     private var retainedUnexpectedCaptureIDs = Set<NativeLiveCapture.ID>()
     private var guestProgressSafetyPromptHandled = false
     private let classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)?
+    private var pendingAuthenticatedSession: AuthSession?
 
     init(
         persistenceStore: NativePersistenceStore = .live(),
@@ -190,6 +274,7 @@ final class AppModel: ObservableObject {
         audioSessionCoordinator: NativeAudioSessionCoordinator = .shared,
         audioEngine: NativeAudioEngine? = nil,
         recordingPlayer: NativeRecordingPlayer? = nil,
+        playAlongFixturesEnabled: Bool = NativeAudioEngine.testFixturesEnabled,
         classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)? = nil
     ) {
         NativeLocalization.language = AppLanguage.launchOverride ?? .system
@@ -216,6 +301,7 @@ final class AppModel: ObservableObject {
         self.authService = authService
         self.audioEngine = audioEngine ?? NativeAudioEngine(audioSessionCoordinator: audioSessionCoordinator)
         self.recordingPlayer = recordingPlayer ?? NativeRecordingPlayer(audioSessionCoordinator: audioSessionCoordinator)
+        self.playAlongFixturesEnabled = playAlongFixturesEnabled
         self.metronomeOutput = NativeMetronomeOutput(audioSessionCoordinator: audioSessionCoordinator)
         self.classAccessTokenProvider = classAccessTokenProvider
         retryPendingAccountPurges()
@@ -234,6 +320,9 @@ final class AppModel: ObservableObject {
         }
         self.recordingPlayer.setPlaybackPreparation { [weak self] in
             self?.prepareForRecordingPlayback()
+        }
+        self.metronomeOutput.setLifecycleHandler { [weak self] event in
+            self?.handleMetronomeAudioLifecycleEvent(event)
         }
     }
 
@@ -270,6 +359,19 @@ final class AppModel: ObservableObject {
 
     var analyticsSnapshot: AnalyticsSnapshot {
         AnalyticsSnapshot(sessions: sessions)
+    }
+
+    /// Keeps recommendations actionable when live capture is unavailable.
+    /// Navigation maps warm-ups to Practice and plans to Scales.
+    var progressRecommendationDestination: PracticeSessionActivity {
+        switch audioEngine.audioState {
+        case .permissionDenied, .permissionRestrictedOrUnavailable:
+            return .guidedWarmup
+        case .permissionGranted(.recoverableError), .permissionGranted(.fatalError):
+            return .practicePlan
+        case .permissionNotDetermined, .permissionRequesting, .permissionGranted:
+            return .tuning
+        }
     }
 
     var playAlongExercises: [PlayAlongExercise] {
@@ -311,18 +413,16 @@ final class AppModel: ObservableObject {
     var accountUnavailableMessage: String? {
         accountFeaturesEnabled
             ? nil
-            : NativeLocalization.string("Practice as a guest today. Online backup and Classes will appear when account access is available.")
+            : NativeLocalization.string("Practice as a guest today. Account sign-in will be available when secure account access is ready.")
     }
 
     var appleSignInAvailable: Bool {
-        Self.nativeThirdPartySignInEnabled
-            && accountFeaturesEnabled
+        accountFeaturesEnabled
             && authProviderConfiguration?.apple == true
     }
 
     var googleSignInAvailable: Bool {
-        Self.nativeThirdPartySignInEnabled
-            && accountFeaturesEnabled
+        accountFeaturesEnabled
             && authProviderConfiguration?.google == true
     }
 
@@ -344,6 +444,20 @@ final class AppModel: ObservableObject {
         resetPlayAlong()
         recordingSource = NativeAudioEngine.defaultRecordingSource
         metronome = MetronomeSettings()
+        if ProcessInfo.processInfo.arguments.contains("UITEST_METRONOME_120_ACOUSTIC") {
+            metronome = MetronomeSettings(
+                bpm: 120,
+                beatsPerMeasure: 4,
+                beatUnit: 4,
+                subdivision: .quarter,
+                muted: false,
+                visualOnly: false,
+                hapticsEnabled: false,
+                volume: 0.65,
+                accentFirstBeat: false,
+                countInBeats: 0
+            )
+        }
         practiceFeatures = Self.freshPracticeFeatureState()
         successHapticsEnabled = true
         microphoneRationaleSeen = !ProcessInfo.processInfo.arguments.contains("UITEST_MIC_RATIONALE")
@@ -456,7 +570,7 @@ final class AppModel: ObservableObject {
             remainingSession = try authService.restoreSessionOrThrow()
         } catch {
             transitionToUnauthenticated(.signedOut)
-            setAuthFailure(UserVisibleError.secureStorageUnavailable)
+            setAuthFailure(KeychainStore.userVisibleError(for: error))
             return
         }
         if remainingSession == nil, let accountDigest {
@@ -482,7 +596,7 @@ final class AppModel: ObservableObject {
             storedSession = try authService.restoreSessionOrThrow()
         } catch {
             transitionToUnauthenticated(.signedOut)
-            setAuthFailure(UserVisibleError.secureStorageUnavailable)
+            setAuthFailure(KeychainStore.userVisibleError(for: error))
             return
         }
         guard let storedSession else {
@@ -505,7 +619,7 @@ final class AppModel: ObservableObject {
             } catch {
                 activateStorageNamespace(.guest)
                 authState = .signedOut
-                setAuthFailure(UserVisibleError.secureStorageDeletionFailed)
+                setAuthFailure(KeychainStore.userVisibleError(for: error))
             }
             return
         }
@@ -518,7 +632,7 @@ final class AppModel: ObservableObject {
                 try authService.signOut()
             } catch {
                 transitionToUnauthenticated(.signedOut)
-                setAuthFailure(UserVisibleError.secureStorageDeletionFailed)
+                setAuthFailure(KeychainStore.userVisibleError(for: error))
                 return
             }
             transitionToUnauthenticated(.signedOut)
@@ -547,7 +661,7 @@ final class AppModel: ObservableObject {
                     }
                 } catch {
                     transitionToUnauthenticated(.signedOut)
-                    setAuthFailure(UserVisibleError.secureStorageUnavailable)
+                    setAuthFailure(KeychainStore.userVisibleError(for: error))
                     return
                 }
             }
@@ -556,14 +670,12 @@ final class AppModel: ObservableObject {
                 setAuthFailure(error)
                 return
             }
-            try? authService.signOut()
-            transitionToUnauthenticated(.signedOut)
-            setAuthFailure(error)
+            expireStoredCredentialAndLock(error)
         }
     }
 
     func loadEnsembles() async {
-        if NativeAudioEngine.testFixturesEnabled {
+        if playAlongFixturesEnabled {
             if ensembles.isEmpty {
                 ensembles = Self.demoEnsembles
             }
@@ -629,7 +741,7 @@ final class AppModel: ObservableObject {
     }
 
     func loadEnsembleInvitations() async {
-        if NativeAudioEngine.testFixturesEnabled {
+        if playAlongFixturesEnabled {
             if ProcessInfo.processInfo.arguments.contains("UITEST_CLASS_FLOWS") {
                 ensembleInvitations = [
                     EnsembleInvitation(
@@ -1197,14 +1309,10 @@ final class AppModel: ObservableObject {
                 statusCode: 401,
                 message: NativeLocalization.string("Your sign-in expired. Sign in again, then retry.")
             )
-            try? authService.signOut()
-            transitionToUnauthenticated(.signedOut)
-            setAuthFailure(expired)
+            expireStoredCredentialAndLock(expired)
             return
         } else if visible == .authenticationFailed {
-            try? authService.signOut()
-            transitionToUnauthenticated(.signedOut)
-            setAuthFailure(visible)
+            expireStoredCredentialAndLock(visible)
             return
         }
         setAuthFailure(visible)
@@ -1218,16 +1326,34 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Non-retryable authentication failures must not claim the credential was
+    /// removed when Keychain deletion fails. The durable marker forces a
+    /// subsequent launch to retry deletion before restoring that identity.
+    private func expireStoredCredentialAndLock(_ originalError: Error) {
+        let digest = activeStorageNamespace.accountDigest
+        if let digest { pendingCredentialRemovalStore.enqueue(digest) }
+        do {
+            try authService.deleteStoredAuth()
+            if let digest { pendingCredentialRemovalStore.remove(digest) }
+            transitionToUnauthenticated(.signedOut)
+            setAuthFailure(originalError)
+        } catch {
+            transitionToUnauthenticated(.signedOut)
+            setAuthFailure(KeychainStore.userVisibleError(for: error))
+        }
+    }
+
     func signIn(email: String, password: String) async {
         guard beginAuthOperation() else { return }
         defer { authOperationInProgress = false }
         do {
-            let session = try await authService.signIn(email: email, password: password, config: config)
-            guard activateStorageNamespace(.account(userID: session.userID)) else { return }
-            authState = .signedIn(email: session.email)
-            gatewayCompleted = true
-            lastError = nil
-            setAuthNotice(NativeLocalization.string("Signed in."))
+            let session = try await authService.signIn(
+                email: email,
+                password: password,
+                config: config,
+                persist: !shouldDeferCredentialPersistenceForGuestUpgrade
+            )
+            completeAuthenticatedSession(session, showTutorial: false, notice: "Signed in.")
         } catch {
             setAuthFailure(error)
         }
@@ -1237,13 +1363,13 @@ final class AppModel: ObservableObject {
         guard beginAuthOperation() else { return }
         defer { authOperationInProgress = false }
         do {
-            let session = try await authService.signUp(email: email, password: password, config: config)
-            guard activateStorageNamespace(.account(userID: session.userID)) else { return }
-            authState = .signedIn(email: session.email)
-            gatewayCompleted = true
-            lastError = nil
-            setAuthNotice(NativeLocalization.string("Signed in."))
-            requestTutorialPresentation()
+            let session = try await authService.signUp(
+                email: email,
+                password: password,
+                config: config,
+                persist: !shouldDeferCredentialPersistenceForGuestUpgrade
+            )
+            completeAuthenticatedSession(session, showTutorial: true, notice: "Signed in.")
         } catch UserVisibleError.emailConfirmationRequired {
             transitionToUnauthenticated(.emailConfirmationRequired(email: email))
             lastError = nil
@@ -1269,14 +1395,6 @@ final class AppModel: ObservableObject {
 
     func loadAuthProviderConfiguration(force: Bool = false) async {
         if !force, authProviderConfiguration != nil { return }
-        guard Self.nativeThirdPartySignInEnabled else {
-            // Do not ask Supabase for remotely enabled OAuth providers when the
-            // native release intentionally ships email/password and guest only.
-            authProviderConfiguration = AuthProviderConfiguration(apple: false, google: false)
-            authProviderRecoveryMessage = nil
-            authProviderConfigurationLoading = false
-            return
-        }
         guard accountFeaturesEnabled else {
             authProviderConfiguration = nil
             authProviderRecoveryMessage = NativeLocalization.string(
@@ -1325,24 +1443,25 @@ final class AppModel: ObservableObject {
         guard beginAuthOperation() else { return }
         defer { authOperationInProgress = false }
         do {
-            let result = try await authService.signInWithApple(identityToken: identityToken, rawNonce: rawNonce, config: config)
-            guard activateStorageNamespace(.account(userID: result.session.userID)) else { return }
-            authState = .signedIn(email: result.session.email)
-            gatewayCompleted = true
-            lastError = nil
+            let result = try await authService.signInWithApple(
+                identityToken: identityToken,
+                rawNonce: rawNonce,
+                config: config,
+                persist: !shouldDeferCredentialPersistenceForGuestUpgrade
+            )
+            let shouldShowTutorial: Bool
             switch result.isNewUser {
             case true:
-                setAuthNotice(NativeLocalization.string("Signed in with Apple."))
-                requestTutorialPresentation()
+                shouldShowTutorial = true
             case false:
-                setAuthNotice(NativeLocalization.string("Signed in with Apple."))
+                shouldShowTutorial = false
             case nil:
                 // Some providers omit account-age timestamps. Touring the
                 // unknown case guarantees a newly created identity is not left
                 // without help; known returning accounts are not interrupted.
-                setAuthNotice(NativeLocalization.string("Signed in with Apple."))
-                requestTutorialPresentation()
+                shouldShowTutorial = true
             }
+            completeAuthenticatedSession(result.session, showTutorial: shouldShowTutorial, notice: "Signed in with Apple.")
         } catch {
             setAuthFailure(error)
         }
@@ -1356,13 +1475,11 @@ final class AppModel: ObservableObject {
         guard beginAuthOperation() else { return }
         defer { authOperationInProgress = false }
         do {
-            let session = try await authService.signInWithGoogle(config: config)
-            guard activateStorageNamespace(.account(userID: session.userID)) else { return }
-            authState = .signedIn(email: session.email)
-            gatewayCompleted = true
-            lastError = nil
-            setAuthNotice(NativeLocalization.string("Signed in with Google."))
-            requestTutorialPresentation()
+            let session = try await authService.signInWithGoogle(
+                config: config,
+                persist: !shouldDeferCredentialPersistenceForGuestUpgrade
+            )
+            completeAuthenticatedSession(session, showTutorial: true, notice: "Signed in with Google.")
         } catch is CancellationError {
             // View-lifecycle cancellation is not an authentication failure.
         } catch {
@@ -1372,6 +1489,221 @@ final class AppModel: ObservableObject {
 
     func reportAuthFailure(_ error: UserVisibleError) {
         setAuthFailure(error)
+    }
+
+    /// Authentication succeeds before an account namespace is selected. When
+    /// local guest work exists, deliberately ask what should happen to it
+    /// rather than silently hiding it behind a new identity.
+    private func completeAuthenticatedSession(
+        _ session: AuthSession,
+        showTutorial: Bool,
+        notice: String
+    ) {
+        guard activeStorageNamespace == .guest,
+              hasGuestPracticeData else {
+            activateAuthenticatedNamespace(session, showTutorial: showTutorial, notice: notice)
+            return
+        }
+        pendingAuthenticatedSession = session
+        guestAccountUpgradePrompt = GuestAccountUpgradePrompt(
+            email: session.email,
+            canMerge: !guestDataContainsFiles,
+            containsFileBackedData: guestDataContainsFiles
+        )
+        lastError = nil
+        setAuthNotice(NativeLocalization.string("Choose how to handle this device's guest practice before continuing."))
+    }
+
+    func resolveGuestAccountUpgrade(_ choice: GuestAccountUpgradeChoice) {
+        guard let session = pendingAuthenticatedSession else { return }
+        switch choice {
+        case .cancel:
+            // Credential persistence was deferred until an explicit choice.
+            // Discarding the in-memory token keeps the guest namespace active
+            // without writing a restorable account session to Keychain.
+            pendingAuthenticatedSession = nil
+            guestAccountUpgradePrompt = nil
+            lastError = nil
+            setAuthNotice(NativeLocalization.string("Stayed in guest practice. Your local practice remains unchanged."))
+        case .keepSeparate:
+            guard prepareGuestUpgradeTargetNamespace(for: session) else { return }
+            do {
+                try authService.persistSession(session)
+            } catch {
+                restoreGuestNamespaceAfterFailedUpgrade()
+                setAuthFailure(error)
+                return
+            }
+            pendingAuthenticatedSession = nil
+            guestAccountUpgradePrompt = nil
+            activateAuthenticatedNamespace(session, showTutorial: false, notice: "Signed in. Guest practice remains separate on this device.")
+        case .merge:
+            guard !guestDataContainsFiles else {
+                setAuthFailure(UserVisibleError.apiRequestFailed(
+                    statusCode: 409,
+                    message: NativeLocalization.string("Guest recordings or imported sheet music cannot be moved safely yet. Keep them separate or cancel so nothing is lost.")
+                ))
+                return
+            }
+            let guestSnapshot = makeLocalSnapshot()
+            guard prepareGuestUpgradeTargetNamespace(for: session) else { return }
+            mergeGuestSnapshot(guestSnapshot)
+            do {
+                // The account-side copy is a transaction boundary: do not
+                // make the credential restorable until the merged snapshot is
+                // synchronously written and protected in its target namespace.
+                try persistenceStore.saveOrThrow(makeLocalSnapshot())
+                try authService.persistSession(session)
+            } catch {
+                restoreGuestNamespaceAfterFailedUpgrade()
+                setAuthFailure(error)
+                return
+            }
+            pendingAuthenticatedSession = nil
+            guestAccountUpgradePrompt = nil
+            authState = .signedIn(email: session.email)
+            gatewayCompleted = true
+            lastError = nil
+            setAuthNotice(NativeLocalization.string("Signed in. Guest practice was merged without replacing existing account data."))
+        }
+    }
+
+    /// Prepares the account namespace before making the authentication choice
+    /// durable. `prepareStorageNamespace` deliberately fails closed for
+    /// corrupt snapshots and unsafe files; this wrapper restores the guest
+    /// namespace so a failed account read never strands or hides guest work.
+    private func prepareGuestUpgradeTargetNamespace(for session: AuthSession) -> Bool {
+        let namespace = NativeStorageNamespace.account(userID: session.userID)
+        guard activateStorageNamespace(namespace) else {
+            restoreGuestNamespaceAfterFailedUpgrade()
+            setAuthFailure(UserVisibleError.apiRequestFailed(
+                statusCode: 500,
+                message: NativeLocalization.string("BrassTune couldn't open this account's local practice data. Your guest practice is still available; keep it separate or cancel and try again after fixing the account data.")
+            ))
+            return false
+        }
+        return true
+    }
+
+    /// This is intentionally best-effort only after the guest snapshot was
+    /// flushed before the target activation. The target failure must not clear
+    /// the pending choice or persist its credentials.
+    private func restoreGuestNamespaceAfterFailedUpgrade() {
+        guard activateStorageNamespace(.guest) else {
+            persistenceAccessState = .lockedSignedOut
+            return
+        }
+        authState = .guest
+    }
+
+    private var hasGuestPracticeData: Bool {
+        !sessions.isEmpty
+            || !scores.isEmpty
+            || !practiceFeatures.customExercises.isEmpty
+            || !practiceFeatures.customPacks.isEmpty
+            || !practiceFeatures.metronomePresets.isEmpty
+            || !practiceFeatures.reflections.isEmpty
+            || !practiceFeatures.favorites.isEmpty
+            || !practiceFeatures.recents.isEmpty
+            || !practiceFeatures.playAlongAttempts.isEmpty
+            || practiceFeatures.warmupCheckpoint != nil
+            || practiceFeatures.workspaceCheckpoint != nil
+            || practiceFeatures.weeklyGoal != Self.freshPracticeFeatureState().weeklyGoal
+            || practiceFeatures.droneSettings != DroneSettings()
+    }
+
+    /// Only guest practice that could be hidden, split, or overwritten needs
+    /// an upgrade decision. Plain device preferences do not block sign-in.
+    private var shouldDeferCredentialPersistenceForGuestUpgrade: Bool {
+        activeStorageNamespace == .guest && hasGuestPracticeData
+    }
+
+    private var guestDataContainsFiles: Bool {
+        sessions.contains(where: { $0.retainedRecordingURL != nil })
+            || scores.contains(where: { $0.localFileName != nil })
+    }
+
+    private func activateAuthenticatedNamespace(
+        _ session: AuthSession,
+        showTutorial: Bool,
+        notice: String
+    ) {
+        guard activateStorageNamespace(.account(userID: session.userID)) else { return }
+        authState = .signedIn(email: session.email)
+        gatewayCompleted = true
+        lastError = nil
+        setAuthNotice(NativeLocalization.string(notice))
+        if showTutorial { requestTutorialPresentation() }
+    }
+
+    private func mergeGuestSnapshot(_ guest: NativeLocalSnapshot) {
+        func appendGuestItems<T: Identifiable>(_ guestItems: [T], to accountItems: [T]) -> [T]
+        where T.ID: Hashable {
+            let existingIDs = Set(accountItems.map(\.id))
+            return guestItems.filter { !existingIDs.contains($0.id) } + accountItems
+        }
+
+        let existingSessionIDs = Set(sessions.map(\.id))
+        let uniqueGuestSessions = guest.sessions.filter { !existingSessionIDs.contains($0.id) }
+        let existingScoreIDs = Set(scores.map(\.id))
+        let uniqueGuestScores = guest.scores.filter { !existingScoreIDs.contains($0.id) }
+        let existingReflectionIDs = Set(practiceFeatures.reflections.map(\.id))
+        let uniqueGuestReflections = (guest.practiceFeatures?.reflections ?? []).filter {
+            !existingReflectionIDs.contains($0.id)
+        }
+        let guestFeatures = guest.practiceFeatures ?? PracticeFeatureState()
+
+        isRestoringLocalState = true
+        sessions = uniqueGuestSessions + sessions
+        scores = uniqueGuestScores + scores
+        if activeScoreID == nil, let guestActive = guest.activeScoreID,
+           scores.contains(where: { $0.id == guestActive }) {
+            activeScoreID = guestActive
+        }
+        practiceFeatures.reflections = uniqueGuestReflections + practiceFeatures.reflections
+        practiceFeatures.customExercises = appendGuestItems(
+            guestFeatures.customExercises,
+            to: practiceFeatures.customExercises
+        )
+        practiceFeatures.customPacks = appendGuestItems(
+            guestFeatures.customPacks,
+            to: practiceFeatures.customPacks
+        )
+        practiceFeatures.metronomePresets = appendGuestItems(
+            guestFeatures.metronomePresets,
+            to: practiceFeatures.metronomePresets
+        )
+        practiceFeatures.favorites = appendGuestItems(
+            guestFeatures.favorites,
+            to: practiceFeatures.favorites
+        )
+        practiceFeatures.recents = appendGuestItems(
+            guestFeatures.recents,
+            to: practiceFeatures.recents
+        )
+        practiceFeatures.playAlongAttempts = appendGuestItems(
+            guestFeatures.playAlongAttempts,
+            to: practiceFeatures.playAlongAttempts
+        )
+        // Preferences have no stable identifier. Preserve the existing
+        // account choice whenever it differs from the default, otherwise
+        // carry forward the guest choice that the account has never set.
+        if practiceFeatures.weeklyGoal == Self.freshPracticeFeatureState().weeklyGoal {
+            practiceFeatures.weeklyGoal = guestFeatures.weeklyGoal
+        }
+        if practiceFeatures.droneSettings == DroneSettings() {
+            practiceFeatures.droneSettings = guestFeatures.droneSettings
+        }
+        // A destination account's paused routine takes precedence; its guest
+        // counterpart remains intact in the guest namespace. When there is no
+        // account checkpoint, continuing the guest routine is safe.
+        if practiceFeatures.warmupCheckpoint == nil {
+            practiceFeatures.warmupCheckpoint = guestFeatures.warmupCheckpoint
+        }
+        if practiceFeatures.workspaceCheckpoint == nil {
+            practiceFeatures.workspaceCheckpoint = guestFeatures.workspaceCheckpoint
+        }
+        isRestoringLocalState = false
     }
 
     private func beginAuthOperation() -> Bool {
@@ -1449,37 +1781,21 @@ final class AppModel: ObservableObject {
         recordingPlayer.stopAndUnload()
     }
 
-    func exportDataText() -> String {
-        var lines = [
-            "BrassTune local data export",
-            "Account state: \(authState.displayTitle)",
-            "Instrument: \(instrumentDisplayName(selectedInstrumentId))",
-            "Reference pitch: \(String(format: "%.1f", referencePitchHz)) Hz",
-            "Sessions: \(sessions.count)",
-            "Scores: \(scores.count)",
-            "Metronome: \(metronome.bpm) BPM, \(metronome.meterLabel), sound \(metronome.visualOnly ? "off" : "on")",
-            "Custom exercises: \(practiceFeatures.customExercises.count)",
-            "Metronome presets: \(practiceFeatures.metronomePresets.count)",
-            "Weekly goal: \(practiceFeatures.weeklyGoal.targetMinutes) minutes and \(practiceFeatures.weeklyGoal.targetSessions) sessions",
-            "Practice reflections: \(practiceFeatures.reflections.count)",
-            "Offline practice packs: \(practicePacks.count)",
-        ]
-        let analytics = analyticsSnapshot
-        if analytics.hasSessions {
-            lines.append("Average absolute cents: \(String(format: "%.1f", analytics.averageAbsCents))")
-            lines.append("Average in-tune percentage: \(String(format: "%.0f", analytics.averageInTunePercentage))%")
-            lines.append("")
-            lines.append("Sessions")
-            lines.append(contentsOf: sessions.map(\.exportText))
-        } else {
-            lines.append("No local practice sessions have been recorded.")
+    func exportDataText(exportedAt: Date = Date()) -> String {
+        let export = NativePracticeHistoryExport(
+            exportedAt: exportedAt,
+            selectedInstrumentID: selectedInstrumentId,
+            referencePitchHz: referencePitchHz,
+            sessions: sessions,
+            scores: scores
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(export), let text = String(data: data, encoding: .utf8) else {
+            return "{\"schema_version\":1,\"export_error\":\"encoding_failed\"}"
         }
-        if !scores.isEmpty {
-            lines.append("")
-            lines.append("Scores")
-            lines.append(contentsOf: scores.map(\.exportText))
-        }
-        return lines.joined(separator: "\n")
+        return text
     }
 
     func deleteAccount(confirmation: String) async {
@@ -1533,7 +1849,7 @@ final class AppModel: ObservableObject {
         do {
             hasStoredCredential = try authService.restoreSessionOrThrow() != nil
         } catch {
-            setAuthFailure(UserVisibleError.secureStorageUnavailable)
+            setAuthFailure(KeychainStore.userVisibleError(for: error))
             return
         }
         resetPlayAlong()
@@ -1548,7 +1864,7 @@ final class AppModel: ObservableObject {
                 try authService.deleteStoredAuth()
             } catch {
                 credentialRemovalFailed = true
-                setAuthFailure(UserVisibleError.secureStorageDeletionFailed)
+                setAuthFailure(KeychainStore.userVisibleError(for: error))
             }
         }
         transitionToUnauthenticated(.signedOut)
@@ -1579,12 +1895,14 @@ final class AppModel: ObservableObject {
         pendingCredentialRemovalStore.enqueue(accountDigest)
         let purged = retryPendingAccountPurge(accountDigest)
         let credentialsRemoved: Bool
+        var credentialRemovalError: UserVisibleError?
         do {
             try authService.deleteStoredAuth()
             pendingCredentialRemovalStore.remove(accountDigest)
             credentialsRemoved = true
         } catch {
             credentialsRemoved = false
+            credentialRemovalError = KeychainStore.userVisibleError(for: error)
         }
         resetPlayAlong()
         stopMetronome()
@@ -1605,7 +1923,7 @@ final class AppModel: ObservableObject {
                     statusCode: 500,
                     message: NativeLocalization.string("Your account was deleted. BrassTune will retry removing its remaining local data the next time the app opens.")
                 )
-                : .secureStorageDeletionFailed
+                : (credentialRemovalError ?? .secureStorageDeletionFailed)
             let outcome = providerCleanupQueued
                 ? NativeLocalization.string(
                     purged
@@ -1619,7 +1937,7 @@ final class AppModel: ObservableObject {
                 )
             authNotice = credentialsRemoved
                 ? outcome
-                : "\(outcome) \(UserVisibleError.secureStorageDeletionFailed.localizedDescription)"
+                : "\(outcome) \((credentialRemovalError ?? .secureStorageDeletionFailed).localizedDescription)"
             authNoticeIsError = true
         }
     }
@@ -1693,6 +2011,9 @@ final class AppModel: ObservableObject {
             startDemoRecording()
         case .live:
             do {
+                // Release a possible audible click before capture acquires the
+                // measurement session; visual metronome state stays running.
+                if metronomeRunning { metronomeOutput.stop() }
                 let started = try await audioEngine.startLiveRecording(
                     instrumentId: selectedInstrumentId,
                     referencePitchHz: referencePitchHz,
@@ -1706,12 +2027,13 @@ final class AppModel: ObservableObject {
                 }
                 if !started {
                     lastError = .microphoneDenied
-                } else if metronomeRunning {
-                    metronomeOutput.stop()
                 }
             } catch {
                 lastError = .microphoneUnavailable
             }
+        case .manual:
+            // Manual practice is persisted directly and never starts an audio capture.
+            return
         }
     }
 
@@ -1725,14 +2047,48 @@ final class AppModel: ObservableObject {
         guard audioEngine.recording else { return }
         switch audioEngine.activeSource {
         case .live:
-            let capture = audioEngine.stopLiveRecording()
-            _ = saveRecordedSession(capture: capture, source: .live)
+            let completion = audioEngine.stopLiveRecording()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let capture = await completion.value
+                _ = self.handleUserStoppedLiveCapture(capture)
+            }
         case .sample:
             stopDemoRecording()
+        case .manual:
+            // The audio engine never owns manual sessions.
+            return
         }
     }
 
+    /// A deliberately stopped, too-short/no-signal tuner take is not a
+    /// microphone failure. Keep genuine pipeline/retention failures visible,
+    /// but return the idle tuner to its normal Start control when there was
+    /// simply nothing meaningful to save.
+    @discardableResult
+    func handleUserStoppedLiveCapture(_ capture: NativeLiveCapture) -> Bool {
+        let saved = saveRecordedSession(capture: capture, source: .live)
+        if !saved,
+           capture.completionReason == .userStopped,
+           capture.droppedInputFrameCount == 0,
+           capture.recordingRetentionFailure == nil,
+           lastError == .microphoneUnavailable {
+            lastError = nil
+            audioEngine.setExternalAudioNotice(nil)
+        }
+        return saved
+    }
+
     func startPlayAlong(exerciseID: String? = nil) async {
+        if let exerciseID,
+           playAlongExercises.contains(where: { $0.id == exerciseID }) {
+            selectedPlayAlongExerciseID = exerciseID
+        }
+        await startPlayAlong(exercise: selectedPlayAlongExercise)
+    }
+
+    /// Starts an explicitly supplied exercise without requiring it to be persisted in the library or custom exercises.
+    func startPlayAlong(exercise: PlayAlongExercise) async {
         guard !playAlongStartInProgress, playAlongPhase != .running else { return }
         recordingPlayer.stopAndUnload()
         cancelRecordingStart()
@@ -1746,10 +2102,6 @@ final class AppModel: ObservableObject {
             playAlongStartInProgress = false
         }
         lastError = nil
-        if let exerciseID,
-           playAlongExercises.contains(where: { $0.id == exerciseID }) {
-            selectedPlayAlongExerciseID = exerciseID
-        }
         if audioEngine.recording {
             stopRecording()
         }
@@ -1758,16 +2110,17 @@ final class AppModel: ObservableObject {
         playAlongGrade = nil
         playAlongPhase = .idle
         recordingSource = .live
-        if NativeAudioEngine.testFixturesEnabled {
-            playAlongSession = PlayAlongSession(exercise: selectedPlayAlongExercise)
+        if playAlongFixturesEnabled {
+            playAlongSession = PlayAlongSession(exercise: exercise)
             playAlongPhase = .running
             recordPracticeStart(
-                PracticeShortcut(kind: .playAlongExercise, referenceID: selectedPlayAlongExercise.id, title: selectedPlayAlongExercise.title)
+                PracticeShortcut(kind: .playAlongExercise, referenceID: exercise.id, title: exercise.title)
             )
-            startPlayAlongFixture(exercise: selectedPlayAlongExercise)
+            startPlayAlongFixture(exercise: exercise)
             return
         }
         do {
+            if metronomeRunning { metronomeOutput.stop() }
             let started = try await audioEngine.startLiveRecording(
                 instrumentId: selectedInstrumentId,
                 referencePitchHz: referencePitchHz,
@@ -1783,14 +2136,11 @@ final class AppModel: ObservableObject {
                 lastError = .microphoneDenied
                 return
             }
-            playAlongSession = PlayAlongSession(exercise: selectedPlayAlongExercise)
+            playAlongSession = PlayAlongSession(exercise: exercise)
             playAlongPhase = .running
             recordPracticeStart(
-                PracticeShortcut(kind: .playAlongExercise, referenceID: selectedPlayAlongExercise.id, title: selectedPlayAlongExercise.title)
+                PracticeShortcut(kind: .playAlongExercise, referenceID: exercise.id, title: exercise.title)
             )
-            if metronomeRunning {
-                metronomeOutput.stop()
-            }
         } catch {
             guard playAlongStartToken == startToken else { return }
             playAlongPhase = .idle
@@ -1808,18 +2158,23 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func stopPlayAlong() {
+    @discardableResult
+    func stopPlayAlong() -> Task<NativeLiveCapture, Never>? {
         playAlongStartToken = nil
         audioEngine.cancelPendingLiveStart()
         playAlongPhase = .idle
         playAlongFixtureTask?.cancel()
         playAlongFixtureTask = nil
         playAlongUsesFixture = false
+        let completion: Task<NativeLiveCapture, Never>?
         if audioEngine.recording, audioEngine.activeSource == .live {
-            audioEngine.discardLiveRecording()
+            completion = audioEngine.discardLiveRecording()
+        } else {
+            completion = nil
         }
         playAlongSession = nil
         playAlongGrade = nil
+        return completion
     }
 
     func resetPlayAlong() {
@@ -1838,23 +2193,42 @@ final class AppModel: ObservableObject {
 
     func clearLocalPracticeData() {
         resetPlayAlong()
-        clearLocalPracticeArtifacts()
+        _ = clearPracticeHistoryPreservingScores()
     }
 
     func startMetronome() {
         guard !metronomeRunning else { return }
         recordingPlayer.stopAndUnload()
+        AppAudioOwnershipHandoff.prepareForMetronomePlayback(
+            stopTone: { self.audioEngine.stopTone(deactivation: .immediate) }
+        )
         metronomeRunning = true
         metronomeTick = 0
         metronomeCountInRemaining = metronome.countInBeats
-        advanceMetronomeClock()
-        scheduleMetronomeTimer()
+        let generation = UUID()
+        metronomeClockGeneration = generation
+        let initialAccent = metronomeCountInRemaining == 0 && metronome.accentFirstBeat
+        metronomeOutput.playTick(
+            settings: effectiveMetronomeSettings,
+            accent: initialAccent,
+            onInitialPulseScheduled: { [weak self] anchorHostTime in
+                guard let self,
+                      self.metronomeRunning,
+                      self.metronomeClockGeneration == generation else { return }
+                self.advanceMetronomeClock(
+                    scheduledHostTime: anchorHostTime,
+                    pulseIndex: 0,
+                    emitAudio: false
+                )
+                self.scheduleMetronomeClock(anchorHostTime: anchorHostTime, generation: generation)
+            }
+        )
     }
 
     func stopMetronome() {
         metronomeRunning = false
-        metronomeTimer?.invalidate()
-        metronomeTimer = nil
+        metronomeClockGeneration = UUID()
+        metronomeClock.stop()
         metronomeCountInRemaining = 0
         metronomeLastPulseWasAccented = false
         metronomeOutput.stop()
@@ -2034,6 +2408,89 @@ final class AppModel: ObservableObject {
         activeScoreID = score.id
     }
 
+    /// Starts a local, score-led timer. This deliberately does not create an
+    /// audio capture, infer notes from the image, or persist a completion.
+    func startScoreGuidedPractice(
+        scoreID: ImportedScore.ID,
+        tempoBPM: Int? = nil,
+        startedAt: Date = Date()
+    ) -> ScoreGuidedPracticeRun? {
+        guard let score = scores.first(where: { $0.id == scoreID }) else { return nil }
+        activeScoreID = score.id
+        let configuration = ScoreGuidedPracticeConfiguration(
+            scoreID: score.id,
+            instrumentID: selectedInstrumentId,
+            pageNumber: score.selectedPage?.pageNumber ?? score.pages.first?.pageNumber ?? 1,
+            tempoBPM: tempoBPM ?? score.annotation.tempoTarget,
+            focusMeasures: score.annotation.focusMeasures,
+            problemPassage: score.annotation.problemPassage,
+            practiceNotes: score.annotation.notes
+        )
+        return ScoreGuidedPracticeRun(
+            activityInstanceID: UUID(),
+            configuration: configuration,
+            startedAt: startedAt
+        )
+    }
+
+    /// Saves one completed score-guided timer after at least one second. The
+    /// resulting session truthfully contains no microphone frames or recording.
+    @discardableResult
+    func saveScoreGuidedPracticeCompletion(_ completion: ScoreGuidedPracticeCompletion) -> Bool {
+        let duration = completion.activeDurationSeconds
+            ?? completion.completedAt.timeIntervalSince(completion.startedAt)
+        guard duration >= 1,
+              completion.configuration.instrumentID == selectedInstrumentId,
+              scores.contains(where: { $0.id == completion.configuration.scoreID }),
+              !sessions.contains(where: { $0.activityInstanceID == completion.activityInstanceID }) else {
+            return false
+        }
+        let score = scores.first { $0.id == completion.configuration.scoreID }
+        let session = PracticeSession(
+            id: completion.activityInstanceID,
+            name: score?.title ?? "Score-guided practice",
+            instrumentId: completion.configuration.instrumentID,
+            startedAt: completion.completedAt.addingTimeInterval(-duration),
+            endedAt: completion.completedAt,
+            frames: [],
+            retainedRecordingURL: nil,
+            attachedScoreID: completion.configuration.scoreID,
+            practiceNotes: scoreGuidedPracticeNotes(for: completion.configuration),
+            source: .manual,
+            activityInstanceID: completion.activityInstanceID,
+            activity: .practicePlan,
+            completion: .completed,
+            scoreGuidedPracticeConfiguration: completion.configuration
+        )
+        guard session.contributesPracticeTime else { return false }
+        sessions.insert(session, at: 0)
+        return true
+    }
+
+    private func scoreGuidedPracticeNotes(for configuration: ScoreGuidedPracticeConfiguration) -> String {
+        var lines = [NativeLocalization.format(
+            "Score-guided practice, page %@, at %@ BPM.",
+            String(configuration.pageNumber),
+            String(configuration.tempoBPM)
+        )]
+        if !configuration.focusMeasures.isEmpty { lines.append("Focus: \(configuration.focusMeasures)") }
+        if !configuration.problemPassage.isEmpty { lines.append("Passage: \(configuration.problemPassage)") }
+        if !configuration.practiceNotes.isEmpty { lines.append("Notes: \(configuration.practiceNotes)") }
+        return lines.joined(separator: " ")
+    }
+
+    @discardableResult
+    func renameScore(id: ImportedScore.ID, title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.count <= 120,
+              let index = scores.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+        scores[index].title = trimmed
+        return true
+    }
+
     func selectScorePage(scoreID: ImportedScore.ID, pageID: ScorePage.ID) {
         updateScore(scoreID) { score in
             score.selectedPageID = pageID
@@ -2086,36 +2543,59 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func scheduleMetronomeTimer() {
-        metronomeTimer?.invalidate()
+    private func scheduleMetronomeClock(
+        anchorHostTime: UInt64 = mach_absolute_time(),
+        generation: UUID? = nil
+    ) {
         guard metronomeRunning else { return }
-        // Schedule in .common modes so the beat does not pause while the user
-        // scrolls a list (the main run loop switches to .tracking during scroll,
-        // and a .default-only timer stops firing there).
-        let timer = Timer(timeInterval: metronome.intervalSeconds, repeats: true) { [weak self] _ in
+        let generation = generation ?? UUID()
+        metronomeClockGeneration = generation
+        let intervalSeconds = metronome.intervalSeconds
+        metronomeClock.start(intervalSeconds: intervalSeconds, anchorHostTime: anchorHostTime) { [weak self] pulseIndex, hostTime in
             Task { @MainActor in
-                guard let self, self.metronomeRunning else { return }
-                self.advanceMetronomeClock()
+                guard let self,
+                      self.metronomeRunning,
+                      self.metronomeClockGeneration == generation else { return }
+                self.advanceMetronomeClock(
+                    scheduledHostTime: hostTime,
+                    pulseIndex: pulseIndex
+                )
             }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        metronomeTimer = timer
     }
 
-    /// One scheduled pulse. Kept separate from Timer plumbing so the
+    /// One scheduled pulse. Kept separate from clock plumbing so the
     /// count-in state is deterministic and can be exercised without waiting
     /// on the run loop. Count-in clicks never masquerade as measure accents.
-    func advanceMetronomeClock() {
+    func advanceMetronomeClock(
+        scheduledHostTime: UInt64 = mach_absolute_time(),
+        pulseIndex: UInt64 = 0,
+        emitAudio: Bool = true
+    ) {
         guard metronomeRunning else { return }
         if metronomeCountInRemaining > 0 {
             metronomeCountInRemaining -= 1
             metronomeLastPulseWasAccented = false
-            metronomeOutput.playTick(settings: effectiveMetronomeSettings, accent: false)
+            if emitAudio {
+                metronomeOutput.playTick(
+                    settings: effectiveMetronomeSettings,
+                    accent: false,
+                    hostTime: scheduledHostTime,
+                    pulseIndex: pulseIndex
+                )
+            }
             return
         }
         let accent = metronome.accentFirstBeat && metronomeTick == 0
         metronomeLastPulseWasAccented = accent
-        metronomeOutput.playTick(settings: effectiveMetronomeSettings, accent: accent)
+        if emitAudio {
+            metronomeOutput.playTick(
+                settings: effectiveMetronomeSettings,
+                accent: accent,
+                hostTime: scheduledHostTime,
+                pulseIndex: pulseIndex
+            )
+        }
         metronomeTick = (metronomeTick + 1) % max(1, metronome.beatsPerMeasure * metronome.subdivision.ticksPerBeat)
     }
 
@@ -2125,7 +2605,7 @@ final class AppModel: ObservableObject {
         if settings.visualOnly || settings.muted || settings.volume <= 0 {
             metronomeOutput.stop()
         }
-        scheduleMetronomeTimer()
+        scheduleMetronomeClock()
     }
 
     private var effectiveMetronomeSettings: MetronomeSettings {
@@ -2135,6 +2615,23 @@ final class AppModel: ObservableObject {
         mutedSettings.visualOnly = true
         mutedSettings.volume = 0
         return mutedSettings
+    }
+
+    private func handleMetronomeAudioLifecycleEvent(_ event: NativeMetronomeOutput.LifecycleEvent) {
+        guard metronomeRunning else { return }
+        stopMetronome()
+        let message: String
+        switch event {
+        case .routeChanged:
+            message = NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
+        case .interruption:
+            message = NativeLocalization.string("Microphone interrupted")
+        case .mediaServicesReset:
+            message = NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
+        case .outputFailure:
+            message = NativeLocalization.string("Your audio output changed. Check your headphones or speaker before continuing.")
+        }
+        lastError = .apiRequestFailed(statusCode: 0, message: message)
     }
 
     private func observeAudioFrames() {
@@ -2218,18 +2715,61 @@ final class AppModel: ObservableObject {
             playAlongUsesFixture = false
             return
         }
-        let capture = audioEngine.stopLiveRecording()
-        if !capture.frames.isEmpty || capture.recordingURL != nil {
-            _ = saveRecordedSession(
-                capture: capture,
-                source: .live,
-                preferredName: session.exercise.title,
-                practiceNotes: NativeLocalization.format(
-                    "Play-Along: %@.",
-                    session.exercise.title
+        let completion = audioEngine.stopLiveRecording()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let capture = await completion.value
+            if !capture.frames.isEmpty || capture.recordingURL != nil {
+                _ = self.saveRecordedSession(
+                    capture: capture,
+                    source: .live,
+                    preferredName: session.exercise.title,
+                    practiceNotes: NativeLocalization.format(
+                        "Play-Along: %@.",
+                        session.exercise.title
+                    ),
+                    activity: .playAlong
                 )
-            )
+            }
         }
+    }
+
+    @discardableResult
+    func saveVisualScaleCompletion(_ completion: VisualScalePracticeCompletion) -> Bool {
+        let duration = completion.completedAt.timeIntervalSince(completion.startedAt)
+        guard duration >= 1,
+              completion.configuration.instrumentID == selectedInstrumentId,
+              !sessions.contains(where: { $0.activityInstanceID == completion.activityInstanceID }) else {
+            return false
+        }
+
+        let configuration = completion.configuration
+        let scaleName = NativeLocalization.format(
+            "%@ %@ scale",
+            NativeLocalization.preserve(configuration.root.rawValue),
+            NativeLocalization.string(configuration.type.displayName)
+        )
+        let session = PracticeSession(
+            id: completion.activityInstanceID,
+            name: scaleName,
+            instrumentId: configuration.instrumentID,
+            startedAt: completion.startedAt,
+            endedAt: completion.completedAt,
+            frames: [],
+            retainedRecordingURL: nil,
+            practiceNotes: NativeLocalization.format(
+                "Visual scale practice at %@ BPM.",
+                String(configuration.tempoBPM)
+            ),
+            source: .manual,
+            activityInstanceID: completion.activityInstanceID,
+            activity: .visualScalePractice,
+            completion: .completed,
+            visualScaleConfiguration: configuration
+        )
+        guard session.contributesPracticeTime else { return false }
+        sessions.insert(session, at: 0)
+        return true
     }
 
     @discardableResult
@@ -2240,7 +2780,8 @@ final class AppModel: ObservableObject {
         practiceNotes: String? = nil,
         retainedRecordingURL: URL? = nil,
         startedAt explicitStartedAt: Date? = nil,
-        endedAt explicitEndedAt: Date? = nil
+        endedAt explicitEndedAt: Date? = nil,
+        activity: PracticeSessionActivity = .tuning
     ) -> Bool {
         guard !frames.isEmpty else {
             lastError = .microphoneUnavailable
@@ -2260,8 +2801,13 @@ final class AppModel: ObservableObject {
             retainedRecordingURL: retainedRecordingURL,
             attachedScoreID: activeScore?.id,
             practiceNotes: practiceNotes ?? activeScore.map { "Practiced with \($0.title)." } ?? "",
-            source: source
+            source: source,
+            activity: activity
         )
+        guard session.isMeaningfulCapturedPractice else {
+            lastError = .microphoneUnavailable
+            return false
+        }
         sessions.insert(session, at: 0)
         return true
     }
@@ -2271,8 +2817,33 @@ final class AppModel: ObservableObject {
         capture: NativeLiveCapture,
         source: PracticeSessionSource,
         preferredName: String? = nil,
-        practiceNotes: String? = nil
+        practiceNotes: String? = nil,
+        activity: PracticeSessionActivity = .tuning
     ) -> Bool {
+        guard capture.droppedInputFrameCount == 0 else {
+            try? recordingFileStore.deleteRecording(at: capture.recordingURL)
+            let message = NativeLocalization.string(
+                "BrassTune couldn't save your latest changes on this device. Keep the app open, export your data if needed, and try again."
+            )
+            lastError = .apiRequestFailed(statusCode: 500, message: message)
+            audioEngine.setExternalAudioNotice(message)
+            return false
+        }
+        if let recordingURL = capture.recordingURL {
+            do {
+                try recordingFileStore.protectRecording(at: recordingURL)
+            } catch {
+                // Never retain an audio file whose on-device privacy attributes
+                // could not be applied. Best-effort cleanup is safe because the
+                // file has not been added to a session yet.
+                try? recordingFileStore.deleteRecording(at: recordingURL)
+                lastError = .apiRequestFailed(
+                    statusCode: 500,
+                    message: NativeLocalization.string("BrassTune couldn't secure this recording on your device, so it was not saved.")
+                )
+                return false
+            }
+        }
         let availableRecordingURL = recordingFileStore.availableURL(capture.recordingURL)
         if capture.recordingURL != nil, availableRecordingURL == nil {
             try? recordingFileStore.deleteRecording(at: capture.recordingURL)
@@ -2306,8 +2877,14 @@ final class AppModel: ObservableObject {
             retainedRecordingURL: availableRecordingURL,
             attachedScoreID: activeScore?.id,
             practiceNotes: practiceNotes ?? activeScore.map { "Practiced with \($0.title)." } ?? "",
-            source: source
+            source: source,
+            activity: activity
         )
+        guard session.isMeaningfulCapturedPractice else {
+            try? recordingFileStore.deleteRecording(at: availableRecordingURL)
+            lastError = .microphoneUnavailable
+            return false
+        }
         sessions.insert(session, at: 0)
         return true
     }
@@ -2336,7 +2913,8 @@ final class AppModel: ObservableObject {
             capture: capture,
             source: .live,
             preferredName: preferredName,
-            practiceNotes: practiceNotes
+            practiceNotes: practiceNotes,
+            activity: interruptedPlayAlong == nil ? .tuning : .playAlong
         )
         let savedMessage: String
         switch capture.completionReason {
@@ -2379,6 +2957,37 @@ final class AppModel: ObservableObject {
         NativeLocalization.string(
             "The recording reached its local limit. Saved audio is partial; tuning results include the full session."
         )
+    }
+
+    /// Clears only practice-derived artifacts. Imported score metadata and
+    /// files remain available for the next practice session; full account
+    /// deletion continues to use `clearLocalPracticeArtifacts()` below.
+    @discardableResult
+    private func clearPracticeHistoryPreservingScores() -> Bool {
+        recordingPlayer.stopAndUnload()
+        persistenceWriter.flush()
+        persistenceWriteGeneration &+= 1
+        do {
+            try recordingFileStore.deleteAllStoredFiles()
+        } catch {
+            lastError = .apiRequestFailed(
+                statusCode: 500,
+                message: NativeLocalization.string("BrassTune couldn't clear its saved local data, so your practice data was kept. Try again.")
+            )
+            return false
+        }
+
+        isRestoringLocalState = true
+        sessions.removeAll()
+        practiceFeatures.reflections.removeAll()
+        practiceFeatures.playAlongAttempts.removeAll()
+        practiceFeatures.warmupCheckpoint = nil
+        practiceFeatures.workspaceCheckpoint = nil
+        persistedSessionIDs = []
+        guestProgressSafetyPromptEligible = false
+        isRestoringLocalState = false
+        persistLocalData()
+        return true
     }
 
     @discardableResult
@@ -2463,10 +3072,14 @@ final class AppModel: ObservableObject {
         referencePitchHz = snapshot.referencePitchHz
         let restoredSessions = NativeAudioEngine.testFixturesEnabled
             ? snapshot.sessions
-            : snapshot.sessions.filter { $0.source == .live }
+            : snapshot.sessions.filter { $0.source != .sample }
+        var removedUnavailableRecordingReference = false
         sessions = restoredSessions.map { storedSession in
             var migrated = storedSession
             migrated.retainedRecordingURL = recordingFileStore.availableURL(storedSession.retainedRecordingURL)
+            if storedSession.retainedRecordingURL != migrated.retainedRecordingURL {
+                removedUnavailableRecordingReference = true
+            }
             return migrated
         }
         scores = NativeAudioEngine.testFixturesEnabled
@@ -2480,6 +3093,8 @@ final class AppModel: ObservableObject {
         gatewayCompleted = snapshot.gatewayCompleted ?? (snapshot.tutorialCompleted ?? false)
         appLanguage = snapshot.appLanguage ?? .system
         var restoredFeatures = snapshot.practiceFeatures ?? Self.freshPracticeFeatureState()
+        let hadRunningWarmupCheckpoint = restoredFeatures.warmupCheckpoint?.runningSince != nil
+        let hadRunningWorkspaceCheckpoint = restoredFeatures.workspaceCheckpoint?.blockRunningSince != nil
         // Persisted checkpoints are resumable navigation state, never proof
         // that audio or a clock is still running after process restoration.
         restoredFeatures.warmupCheckpoint?.runningSince = nil
@@ -2492,15 +3107,28 @@ final class AppModel: ObservableObject {
         persistedSessionIDs = Set(sessions.map(\.id))
         isRestoringLocalState = false
         let removedFixtures = sessions.count != snapshot.sessions.count || scores.count != snapshot.scores.count
-        if needsMetronomeDefaultMigration || removedFixtures || snapshot.metronomeDefaultsVersion != 2 {
-            persistLocalData()
-        }
+        let repairedActiveScore = activeScoreID != snapshot.activeScoreID
+        pendingRestoredSnapshotWriteback = needsMetronomeDefaultMigration
+            || removedFixtures
+            || removedUnavailableRecordingReference
+            || repairedActiveScore
+            || hadRunningWarmupCheckpoint
+            || hadRunningWorkspaceCheckpoint
+            || snapshot.metronomeDefaultsVersion != 2
+            || snapshot.snapshotVersion != 5
     }
 
     private func persistLocalData() {
         guard !isRestoringLocalState, persistenceAccessState.canPersist else { return }
+        let consumesRestoredSnapshotWriteback = pendingRestoredSnapshotWriteback
+        if consumesRestoredSnapshotWriteback {
+            pendingRestoredSnapshotWriteback = false
+        }
         persistenceWriteGeneration &+= 1
         let generation = persistenceWriteGeneration
+        if consumesRestoredSnapshotWriteback {
+            restoredSnapshotWritebackGeneration = generation
+        }
         let snapshot = makeLocalSnapshot()
         let store = persistenceStore
         persistenceWriter.save(
@@ -2522,8 +3150,14 @@ final class AppModel: ObservableObject {
         result: Result<Void, Error>
     ) {
         guard generation == persistenceWriteGeneration else { return }
+        let completesRestoredSnapshotWriteback = restoredSnapshotWritebackGeneration.map {
+            generation >= $0
+        } ?? false
         switch result {
         case .success:
+            if completesRestoredSnapshotWriteback {
+                restoredSnapshotWritebackGeneration = nil
+            }
             persistenceErrorMessage = nil
             let snapshotSessionIDs = Set(snapshot.sessions.map(\.id))
             let newlyPersistedSessionIDs = snapshotSessionIDs.subtracting(persistedSessionIDs)
@@ -2535,6 +3169,10 @@ final class AppModel: ObservableObject {
                 guestProgressSafetyPromptEligible = true
             }
         case .failure:
+            if completesRestoredSnapshotWriteback {
+                restoredSnapshotWritebackGeneration = nil
+                pendingRestoredSnapshotWriteback = true
+            }
             persistenceErrorMessage = NativeLocalization.string("BrassTune couldn't save your latest changes on this device. Keep the app open, export your data if needed, and try again.")
         }
     }
@@ -2543,6 +3181,8 @@ final class AppModel: ObservableObject {
     private func prepareStorageNamespace(_ namespace: NativeStorageNamespace) -> Bool {
         persistenceWriter.flush()
         persistenceWriteGeneration &+= 1
+        pendingRestoredSnapshotWriteback = false
+        restoredSnapshotWritebackGeneration = nil
         persistenceAccessState = .restoringIdentity
         recordingPlayer.stopAndUnload()
         stopFeatureAudio()
@@ -2575,6 +3215,9 @@ final class AppModel: ObservableObject {
             removeItem: recordingFileRemover
         )
         do {
+            try persistenceStore.migrateExistingStorageProtection()
+            try scoreImporter.migrateExistingStorageProtection()
+            try recordingFileStore.migrateExistingStorageProtection()
             try restoreLocalData()
             persistenceErrorMessage = nil
             return true
@@ -2593,6 +3236,9 @@ final class AppModel: ObservableObject {
             guard prepareStorageNamespace(namespace) else { return false }
         }
         persistenceAccessState = namespace.accessState
+        if pendingRestoredSnapshotWriteback {
+            persistLocalData()
+        }
         return true
     }
 
@@ -2815,6 +3461,7 @@ struct NativePersistenceStore: @unchecked Sendable {
     }
 
     func load() throws -> NativeLocalSnapshot? {
+        try migrateExistingStorageProtection()
         let data: Data
         do {
             data = try Data(contentsOf: fileURL)
@@ -2841,11 +3488,17 @@ struct NativePersistenceStore: @unchecked Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(snapshot)
         try writeData(data, fileURL)
+        try NativeLocalStorageProtection.apply(to: fileURL)
     }
 
     func clear() throws {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         try removeItem(fileURL)
+    }
+
+    func migrateExistingStorageProtection() throws {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        try NativeLocalStorageProtection.apply(to: fileURL)
     }
 }
 
@@ -2875,6 +3528,8 @@ struct NativeScoreImportService {
         case noPages
         case tooManyPages(maximum: Int)
         case cleanupFailed
+        case unsafeStoredFile
+        case storageProtectionFailed
 
         var errorDescription: String? {
             switch self {
@@ -2887,6 +3542,8 @@ struct NativeScoreImportService {
                 String(maximum)
             )
             case .cleanupFailed: return NativeLocalization.string("The score could not be imported, and BrassTune could not remove its copied file. The copied file remains on this device.")
+            case .unsafeStoredFile: return NativeLocalization.string("BrassTune found an unsafe local score-file reference. The score was kept, but its file was not opened or removed.")
+            case .storageProtectionFailed: return NativeLocalization.string("BrassTune could not secure the copied score file on this device, so the import was cancelled.")
             }
         }
     }
@@ -2929,15 +3586,16 @@ struct NativeScoreImportService {
             throw ImportError.unsupportedType
         }
 
-        try FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+        try prepareStorageDirectory()
         let fileName = "\(UUID().uuidString).\(url.pathExtension.isEmpty ? "score" : url.pathExtension)"
-        let storedURL = storageDirectory.appendingPathComponent(fileName)
+        let storedURL = try validatedStoredFileURL(named: fileName, requireExisting: false)
         if FileManager.default.fileExists(atPath: storedURL.path) {
             try removeItem(storedURL)
         }
         try FileManager.default.copyItem(at: url, to: storedURL)
 
         do {
+            try NativeLocalStorageProtection.apply(to: storedURL)
             switch sourceKind {
             case .filesPDF:
                 return try makePDFScore(from: storedURL, localFileName: fileName, fileSize: fileSize)
@@ -2958,11 +3616,27 @@ struct NativeScoreImportService {
 
     func importImageData(_ data: Data, preferredName: String, sourceKind: ScoreSourceKind) throws -> ImportedScore {
         guard data.count <= maxFileSizeBytes else { throw ImportError.fileTooLarge }
-        try FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
-        let fileName = "\(UUID().uuidString).png"
-        let storedURL = storageDirectory.appendingPathComponent(fileName)
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
+              let identifier = CGImageSourceGetType(imageSource) as String?,
+              let imageType = UTType(identifier) else {
+            throw ImportError.unreadableFile
+        }
+        let fileExtension: String
+        if imageType.conforms(to: .png) {
+            fileExtension = "png"
+        } else if imageType.conforms(to: .jpeg) {
+            fileExtension = "jpg"
+        } else if imageType.conforms(to: .heic) || imageType.conforms(to: .heif) {
+            fileExtension = "heic"
+        } else {
+            throw ImportError.unsupportedType
+        }
+        try prepareStorageDirectory()
+        let fileName = "\(UUID().uuidString).\(fileExtension)"
+        let storedURL = try validatedStoredFileURL(named: fileName, requireExisting: false)
         try data.write(to: storedURL, options: [.atomic])
         do {
+            try NativeLocalStorageProtection.apply(to: storedURL)
             var score = try makeImageScore(from: storedURL, localFileName: fileName, fileSize: Int64(data.count), sourceKind: sourceKind)
             score.title = preferredName
             return score
@@ -3006,20 +3680,65 @@ struct NativeScoreImportService {
 
     func deleteStoredFile(named fileName: String?) throws {
         guard let fileName else { return }
-        let url = storageDirectory.appendingPathComponent(fileName)
+        let url = try validatedStoredFileURL(named: fileName, requireExisting: true)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         try removeItem(url)
     }
 
     func storedFileURL(named fileName: String?) -> URL? {
-        guard let fileName else { return nil }
-        let url = storageDirectory.appendingPathComponent(fileName)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        guard let fileName,
+              let url = try? validatedStoredFileURL(named: fileName, requireExisting: true),
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
     }
 
     func deleteAllStoredFiles() throws {
         guard FileManager.default.fileExists(atPath: storageDirectory.path) else { return }
         try removeItem(storageDirectory)
+    }
+
+    func migrateExistingStorageProtection() throws {
+        try NativeLocalStorageProtection.migrateDirectoryIfPresent(storageDirectory)
+    }
+
+    private func prepareStorageDirectory() throws {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+        do {
+            try NativeLocalStorageProtection.apply(to: storageDirectory)
+        } catch {
+            throw ImportError.storageProtectionFailed
+        }
+    }
+
+    private func validatedStoredFileURL(named fileName: String, requireExisting: Bool) throws -> URL {
+        guard isSafeBasename(fileName) else { throw ImportError.unsafeStoredFile }
+        let base = storageDirectory.standardizedFileURL
+        let resolvedBase = base.resolvingSymlinksInPath()
+        guard resolvedBase == base else { throw ImportError.unsafeStoredFile }
+        if FileManager.default.fileExists(atPath: base.path),
+           try base.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true {
+            throw ImportError.unsafeStoredFile
+        }
+        let candidate = base.appendingPathComponent(fileName, isDirectory: false).standardizedFileURL
+        guard candidate.deletingLastPathComponent() == base else { throw ImportError.unsafeStoredFile }
+        if requireExisting, FileManager.default.fileExists(atPath: candidate.path) {
+            let values = try candidate.resourceValues(forKeys: [.isSymbolicLinkKey])
+            guard values.isSymbolicLink != true,
+                  candidate.resolvingSymlinksInPath().deletingLastPathComponent() == resolvedBase else {
+                throw ImportError.unsafeStoredFile
+            }
+        }
+        return candidate
+    }
+
+    private func isSafeBasename(_ name: String) -> Bool {
+        !name.isEmpty
+            && name != "."
+            && name != ".."
+            && !name.contains("/")
+            && !name.contains("\\")
+            && URL(fileURLWithPath: name).lastPathComponent == name
     }
 
     private func makePDFScore(from url: URL, localFileName: String, fileSize: Int64) throws -> ImportedScore {

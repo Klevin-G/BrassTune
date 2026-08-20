@@ -123,15 +123,78 @@ struct PracticeShortcut: Codable, Equatable, Identifiable {
 
 // MARK: - Guided warm-up
 
+enum GuidedWarmupStepKind: String, Codable, CaseIterable {
+    case breathe
+    case buzz
+    case longTone
+    case slur
+    case scale
+}
+
+enum GuidedWarmupBreathingPhase: String, Codable, CaseIterable {
+    case inhale
+    case hold
+    case exhale
+
+    var title: String {
+        switch self {
+        case .inhale: return NativeLocalization.string("Inhale")
+        case .hold: return NativeLocalization.string("Hold")
+        case .exhale: return NativeLocalization.string("Exhale")
+        }
+    }
+}
+
 struct GuidedWarmupStep: Codable, Equatable, Identifiable {
     let id: String
     let title: String
     let instruction: String
     let durationSeconds: TimeInterval
     let exerciseID: String?
+    let kind: GuidedWarmupStepKind
 
     var displayTitle: String { NativeLocalization.string(title) }
     var displayInstruction: String { NativeLocalization.string(instruction) }
+
+    init(
+        id: String,
+        title: String,
+        instruction: String,
+        durationSeconds: TimeInterval,
+        exerciseID: String?,
+        kind: GuidedWarmupStepKind? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.instruction = instruction
+        self.durationSeconds = durationSeconds
+        self.exerciseID = exerciseID
+        self.kind = kind ?? Self.inferredKind(for: id)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, instruction, durationSeconds, exerciseID, kind
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        instruction = try container.decode(String.self, forKey: .instruction)
+        durationSeconds = try container.decode(TimeInterval.self, forKey: .durationSeconds)
+        exerciseID = try container.decodeIfPresent(String.self, forKey: .exerciseID)
+        kind = try container.decodeIfPresent(GuidedWarmupStepKind.self, forKey: .kind) ?? Self.inferredKind(for: id)
+    }
+
+    private static func inferredKind(for id: String) -> GuidedWarmupStepKind {
+        switch id {
+        case "breathe": return .breathe
+        case "buzz": return .buzz
+        case "long-tone": return .longTone
+        case "slur": return .slur
+        default: return .scale
+        }
+    }
 }
 
 struct GuidedWarmupPlan: Codable, Equatable, Identifiable {
@@ -149,11 +212,11 @@ struct GuidedWarmupPlan: Codable, Equatable, Identifiable {
         id: "guided-five-minute",
         title: "Guided five-minute warm-up",
         steps: [
-            GuidedWarmupStep(id: "breathe", title: "Easy breaths", instruction: "Breathe in quietly for 4 counts and release for 8. Keep shoulders loose.", durationSeconds: 45, exerciseID: nil),
-            GuidedWarmupStep(id: "buzz", title: "Gentle buzz", instruction: "Buzz a comfortable pitch softly. Rest whenever the sound feels forced.", durationSeconds: 45, exerciseID: nil),
-            GuidedWarmupStep(id: "long-tone", title: "Centered long tones", instruction: "Play an easy note with a smooth start and steady air.", durationSeconds: 75, exerciseID: "longtones"),
-            GuidedWarmupStep(id: "slur", title: "Relaxed slurs", instruction: "Move between two comfortable notes without pressing the mouthpiece.", durationSeconds: 75, exerciseID: "intervals"),
-            GuidedWarmupStep(id: "scale", title: "Easy scale", instruction: "Finish with one slow scale at an even volume.", durationSeconds: 60, exerciseID: "cmaj"),
+            GuidedWarmupStep(id: "breathe", title: "Easy breaths", instruction: "Breathe in quietly for 4 counts, hold for 1, and release for 8. Keep shoulders loose.", durationSeconds: 45, exerciseID: nil, kind: .breathe),
+            GuidedWarmupStep(id: "buzz", title: "Gentle buzz", instruction: "Buzz a comfortable pitch softly. Rest whenever the sound feels forced.", durationSeconds: 45, exerciseID: nil, kind: .buzz),
+            GuidedWarmupStep(id: "long-tone", title: "Centered long tones", instruction: "Play an easy note with a smooth start and steady air.", durationSeconds: 75, exerciseID: "longtones", kind: .longTone),
+            GuidedWarmupStep(id: "slur", title: "Relaxed slurs", instruction: "Move between two comfortable notes without pressing the mouthpiece.", durationSeconds: 75, exerciseID: "intervals", kind: .slur),
+            GuidedWarmupStep(id: "scale", title: "Easy scale", instruction: "Finish with one slow scale at an even volume.", durationSeconds: 60, exerciseID: "cmaj", kind: .scale),
         ]
     )
 }
@@ -185,6 +248,60 @@ struct GuidedWarmupCheckpoint: Codable, Equatable {
         guard let current = currentStep(at: now, plan: plan) else { return 0 }
         return plan.steps.firstIndex(where: { $0.id == current.id }) ?? 0
     }
+
+    func elapsedInCurrentStep(at now: Date, plan: GuidedWarmupPlan = .fiveMinute) -> TimeInterval {
+        let stepStart = plan.steps.prefix(currentStepIndex(at: now, plan: plan)).reduce(0) { $0 + $1.durationSeconds }
+        let step = currentStep(at: now, plan: plan)
+        return min(step?.durationSeconds ?? 0, max(0, elapsed(at: now, plan: plan) - stepStart))
+    }
+
+    func totalProgress(at now: Date, plan: GuidedWarmupPlan = .fiveMinute) -> Double {
+        guard plan.durationSeconds > 0 else { return 0 }
+        return elapsed(at: now, plan: plan) / plan.durationSeconds
+    }
+
+    func stepProgress(at now: Date, plan: GuidedWarmupPlan = .fiveMinute) -> Double {
+        guard let step = currentStep(at: now, plan: plan), step.durationSeconds > 0 else { return 0 }
+        return elapsedInCurrentStep(at: now, plan: plan) / step.durationSeconds
+    }
+
+    func breathingCycle(at now: Date, plan: GuidedWarmupPlan = .fiveMinute) -> GuidedWarmupBreathingCycle? {
+        guard currentStep(at: now, plan: plan)?.kind == .breathe else { return nil }
+        return GuidedWarmupBreathingCycle(elapsedInStep: elapsedInCurrentStep(at: now, plan: plan))
+    }
+}
+
+struct GuidedWarmupBreathingCycle: Equatable {
+    static let inhaleSeconds: TimeInterval = 4
+    static let holdSeconds: TimeInterval = 1
+    static let exhaleSeconds: TimeInterval = 8
+    static let durationSeconds = inhaleSeconds + holdSeconds + exhaleSeconds
+
+    let elapsedInStep: TimeInterval
+
+    var elapsedInCycle: TimeInterval { elapsedInStep.truncatingRemainder(dividingBy: Self.durationSeconds) }
+    var cycleNumber: Int { Int(elapsedInStep / Self.durationSeconds) + 1 }
+    var phase: GuidedWarmupBreathingPhase {
+        if elapsedInCycle < Self.inhaleSeconds { return .inhale }
+        if elapsedInCycle < Self.inhaleSeconds + Self.holdSeconds { return .hold }
+        return .exhale
+    }
+    var phaseElapsed: TimeInterval {
+        switch phase {
+        case .inhale: return elapsedInCycle
+        case .hold: return elapsedInCycle - Self.inhaleSeconds
+        case .exhale: return elapsedInCycle - Self.inhaleSeconds - Self.holdSeconds
+        }
+    }
+    var phaseDuration: TimeInterval {
+        switch phase {
+        case .inhale: return Self.inhaleSeconds
+        case .hold: return Self.holdSeconds
+        case .exhale: return Self.exhaleSeconds
+        }
+    }
+    var remainingInPhase: TimeInterval { max(0, phaseDuration - phaseElapsed) }
+    var cycleProgress: Double { elapsedInCycle / Self.durationSeconds }
 }
 
 // MARK: - Goals, reflections, and Play-Along evidence
@@ -237,9 +354,92 @@ struct WeeklyPracticeProgress: Equatable {
         let interval = calendar.dateInterval(of: .weekOfYear, for: now)
         let start = interval?.start ?? calendar.startOfDay(for: now)
         let end = interval?.end ?? now.addingTimeInterval(7 * 86_400)
-        let included = sessions.filter { $0.startedAt >= start && $0.startedAt < end }
+        let included = sessions.filter {
+            $0.startedAt >= start && $0.startedAt < end && $0.contributesPracticeTime
+        }
         let minutes = Int((included.reduce(0) { $0 + $1.durationSeconds } / 60).rounded())
         return WeeklyPracticeProgress(minutes: minutes, sessionCount: included.count, startOfWeek: start)
+    }
+}
+
+/// A local-only practice consistency summary. It deliberately uses completed
+/// sessions that contribute real practice time; incomplete, zero-duration, and
+/// future-dated records must not make a streak look healthier than it is.
+struct PracticeStreakSummary: Equatable {
+    struct Day: Equatable, Identifiable {
+        let date: Date
+        let practiced: Bool
+
+        var id: Date { date }
+    }
+
+    let currentStreakDays: Int
+    let longestStreakDays: Int
+    let recentDays: [Day]
+
+    static func calculate(
+        sessions: [PracticeSession],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        recentDayCount: Int = 7
+    ) -> PracticeStreakSummary {
+        let dayCount = max(1, recentDayCount)
+        let today = calendar.startOfDay(for: now)
+        let practicedDays = Set(sessions.compactMap { session -> Date? in
+            guard session.contributesPracticeTime,
+                  session.startedAt <= now,
+                  (session.endedAt ?? session.startedAt) <= now else {
+                return nil
+            }
+            return calendar.startOfDay(for: session.startedAt)
+        })
+
+        // A calendar streak remains active through the current day even when
+        // today's practice has not started yet. If today is empty, begin at
+        // yesterday; a gap before yesterday deliberately resets the streak.
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)
+        var currentStreakDays = 0
+        var day: Date
+        if practicedDays.contains(today) {
+            day = today
+        } else if let yesterday, practicedDays.contains(yesterday) {
+            day = yesterday
+        } else {
+            day = today
+        }
+        while practicedDays.contains(day) {
+            currentStreakDays += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+
+        let orderedDays = practicedDays.sorted()
+        var longestStreakDays = 0
+        var runningStreakDays = 0
+        var previousDay: Date?
+        for practicedDay in orderedDays {
+            if let previousDay,
+               calendar.date(byAdding: .day, value: 1, to: previousDay) == practicedDay {
+                runningStreakDays += 1
+            } else {
+                runningStreakDays = 1
+            }
+            longestStreakDays = max(longestStreakDays, runningStreakDays)
+            previousDay = practicedDay
+        }
+
+        let recentDays = (0..<dayCount).compactMap { offset -> Day? in
+            guard let date = calendar.date(byAdding: .day, value: offset - (dayCount - 1), to: today) else {
+                return nil
+            }
+            return Day(date: date, practiced: practicedDays.contains(date))
+        }
+
+        return PracticeStreakSummary(
+            currentStreakDays: currentStreakDays,
+            longestStreakDays: longestStreakDays,
+            recentDays: recentDays
+        )
     }
 }
 
@@ -381,17 +581,12 @@ struct DroneSettings: Codable, Equatable {
 
 enum PracticePitchMath {
     static func transpositionSemitones(for instrumentID: String) -> Int? {
-        switch instrumentID {
-        case "trumpet", "cornet", "flugelhorn", "baritone": return 2
-        case "horn", "french-horn": return 7
-        case "trombone", "euphonium", "tuba": return 0
-        default: return nil
-        }
+        InstrumentProfiles.profile(for: instrumentID)?.transpositionSemitones
     }
 
     static func concertMIDI(forWrittenMIDI writtenMIDI: Int, instrumentID: String) -> Int? {
         guard let semitones = transpositionSemitones(for: instrumentID) else { return nil }
-        return writtenMIDI - semitones
+        return BrassTuneCore.transposeWrittenToConcert(writtenMIDI, semitones: semitones)
     }
 
     static func frequency(
@@ -907,9 +1102,29 @@ extension AppModel {
         completeWarmup(now: now)
     }
 
+    func moveWarmupStep(by offset: Int, now: Date = Date()) {
+        guard var checkpoint = practiceFeatures.warmupCheckpoint, !checkpoint.completed else { return }
+        let currentIndex = checkpoint.currentStepIndex(at: now)
+        let targetIndex = min(max(0, currentIndex + offset), GuidedWarmupPlan.fiveMinute.steps.count - 1)
+        guard targetIndex != currentIndex else { return }
+        let targetElapsed = GuidedWarmupPlan.fiveMinute.steps.prefix(targetIndex).reduce(0) { $0 + $1.durationSeconds }
+        let wasRunning = checkpoint.isRunning
+        checkpoint.accumulatedSeconds = targetElapsed
+        checkpoint.runningSince = wasRunning ? now : nil
+        practiceFeatures.warmupCheckpoint = checkpoint
+    }
+
+    func skipWarmupStep(now: Date = Date()) {
+        moveWarmupStep(by: 1, now: now)
+    }
+
     func resetWarmup() {
         stopFeatureAudio()
         practiceFeatures.warmupCheckpoint = nil
+    }
+
+    func discardWarmup() {
+        resetWarmup()
     }
 
     private func completeWarmup(now: Date) {
@@ -929,7 +1144,8 @@ extension AppModel {
                 frames: [],
                 retainedRecordingURL: nil,
                 practiceNotes: "Completed the guided five-minute warm-up.",
-                source: .live
+                source: .manual,
+                activity: .guidedWarmup
             ),
             at: 0
         )
@@ -1044,6 +1260,14 @@ extension AppModel {
     func finishWorkspace(now: Date = Date()) {
         guard var checkpoint = practiceFeatures.workspaceCheckpoint, !checkpoint.completed else { return }
         let activeDuration = checkpoint.activeElapsed(at: now)
+        // A plan can be resumed and navigated without being completed. Do not
+        // turn a tap on Finish into a history entry unless it contains a
+        // meaningful amount of intentional practice.
+        guard activeDuration >= 60 else {
+            checkpoint.blockRunningSince = nil
+            practiceFeatures.workspaceCheckpoint = checkpoint
+            return
+        }
         stopFeatureAudio()
         checkpoint.blockAccumulatedSeconds = checkpoint.elapsedInBlock(at: now)
         checkpoint.blockRunningSince = nil
@@ -1062,7 +1286,8 @@ extension AppModel {
                     "Completed offline practice pack: %@.",
                     checkpoint.pack.name
                 ),
-                source: .live
+                source: .manual,
+                activity: .practicePlan
             ),
             at: 0
         )

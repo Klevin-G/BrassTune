@@ -16,10 +16,12 @@ additional_redirect_urls = [
   "https://*-kelvis-prject.vercel.app/auth/reset-password",
   "http://localhost:5173/auth/callback",
   "http://localhost:5173/auth/reset-password",
-  # Native Google OAuth returns only to this reverse-domain scheme and path.
-  # The bounded state wildcard lets each ASWebAuthenticationSession validate
-  # its own cryptographic state before exchanging the PKCE authorization code.
+  # Native Google OAuth returns only to the matching production/development
+  # reverse-domain schemes and path. The bounded state wildcard lets each
+  # ASWebAuthenticationSession validate its own cryptographic state before
+  # exchanging the PKCE authorization code.
   "com.brasstune.auth://oauth/google\\?state=*",
+  "com.brasstune.auth.dev://oauth/google\\?state=*",
 ]
 jwt_expiry = 3600
 
@@ -44,8 +46,11 @@ enabled = true
 client_id = "env(SUPABASE_AUTH_GOOGLE_CLIENT_ID)"
 secret = "env(SUPABASE_AUTH_GOOGLE_SECRET)"
 
-# Apple OAuth (web) — requires an Apple Services ID + Sign in with Apple key.
-# The native iOS app uses the Sign in with Apple entitlement + button directly.
-# Left disabled until Apple credentials are configured.
+# Apple web OAuth and native ID-token sign-in share this provider. Supabase uses
+# the first client ID for web OAuth and accepts every listed App ID as a native
+# token audience. The rotating Apple client-secret JWT must be provided through
+# the environment and must never be committed.
 [auth.external.apple]
-enabled = false
+enabled = true
+client_id = "com.aryasalem.BrassTune.web,com.aryasalem.BrassTune,com.aryasalem.BrassTune.dev"
+secret = "env(SUPABASE_AUTH_APPLE_SECRET)"

@@ -8,6 +8,16 @@ test.beforeEach(async ({ page }) => {
       localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
       localStorage.setItem('brasstune.guestAccess', 'true');
       localStorage.setItem('brasstune.demoMode', 'true');
+      localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
+        version: 1,
+        customExercises: [],
+        metronomePresets: [],
+        favorites: [],
+        recents: [],
+        reflections: [],
+        warmup: { elapsedSeconds: 0, stepIndex: 0, updatedAt: '2026-08-03T12:00:00.000Z' },
+        weeklyGoal: { week: '2026-08-03', targetMinutes: 60, completedMinutes: 0, targetSessions: 3, completedSessions: 0 },
+      }));
       sessionStorage.setItem('e2e.practiceLibrary.initialized', 'true');
     }
   });
@@ -23,11 +33,11 @@ test('mobile practice home exposes resumable warm-up, drone, goals, packs, and v
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto('/practice');
   await expect(page.getByRole('heading', { name: 'Guided 5-minute warm-up' })).toBeVisible();
-  await expect(async () => {
-    const start = page.getByRole('button', { name: 'Start warm-up' });
-    if (await start.isVisible()) await start.click();
-    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
-  }).toPass({ timeout: 10_000 });
+  const start = page.getByRole('button', { name: 'Start warm-up' });
+  await expect(start).toBeVisible();
+  await start.focus();
+  await start.press('Enter');
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
   await page.getByRole('button', { name: 'Pause' }).click();
 
   await page.getByLabel('Practice tool').getByText('Drone / intervals').click();

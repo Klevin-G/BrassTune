@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import BrassTuneCore
 @testable import BrassTuneApp
 
 final class PracticeFeatureTests: XCTestCase {
@@ -65,6 +66,24 @@ final class PracticeFeatureTests: XCTestCase {
             PracticePackValidationError.missingExecutableContent(.drone).errorDescription,
             "Al bloque Nota pedal le falta su contenido de práctica."
         )
+    }
+
+    func testInstrumentDisplayNamesUseArabicCatalogValuesInsteadOfCoreFixtureCopy() {
+        let originalLanguage = NativeLocalization.language
+        defer { NativeLocalization.language = originalLanguage }
+
+        NativeLocalization.language = .arabic
+        for profile in InstrumentProfiles.all {
+            let localizedName = instrumentDisplayName(profile.id)
+            XCTAssertFalse(localizedName.isEmpty, "\(profile.id) must have a localized display name.")
+            XCTAssertNotEqual(
+                localizedName,
+                profile.displayName,
+                "\(profile.id) exposed the English shared-domain fixture instead of catalog-backed Arabic copy."
+            )
+        }
+        XCTAssertEqual(instrumentDisplayName("french-horn"), instrumentDisplayName("horn"), "Aliases must resolve through the same localized profile name.")
+        XCTAssertEqual(NativeLocalization.string("Unavailable"), "غير متاح")
     }
 
     func testFeatureStateDecodesWhenEveryNewFieldIsAbsent() throws {
@@ -139,7 +158,84 @@ final class PracticeFeatureTests: XCTestCase {
     func testGuidedWarmupMatchesFiveStepFiveMinuteContract() {
         XCTAssertEqual(GuidedWarmupPlan.fiveMinute.steps.map(\.id), ["breathe", "buzz", "long-tone", "slur", "scale"])
         XCTAssertEqual(GuidedWarmupPlan.fiveMinute.steps.map(\.durationSeconds), [45, 45, 75, 75, 60])
+        XCTAssertEqual(GuidedWarmupPlan.fiveMinute.steps.map(\.kind), [.breathe, .buzz, .longTone, .slur, .scale])
         XCTAssertEqual(GuidedWarmupPlan.fiveMinute.durationSeconds, 300)
+    }
+
+    func testWarmupStepMigratesMissingKindAndBreathingPhasesAreDeterministic() throws {
+        let legacy = Data("""
+        {"id":"breathe","title":"Easy breaths","instruction":"Breathe","durationSeconds":45}
+        """.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(GuidedWarmupStep.self, from: legacy).kind, .breathe)
+
+        XCTAssertEqual(GuidedWarmupBreathingCycle(elapsedInStep: 0).phase, .inhale)
+        XCTAssertEqual(GuidedWarmupBreathingCycle(elapsedInStep: 3.999).phase, .inhale)
+        XCTAssertEqual(GuidedWarmupBreathingCycle(elapsedInStep: 4).phase, .hold)
+        XCTAssertEqual(GuidedWarmupBreathingCycle(elapsedInStep: 5).phase, .exhale)
+        XCTAssertEqual(GuidedWarmupBreathingCycle(elapsedInStep: 13).phase, .inhale)
+        XCTAssertEqual(GuidedWarmupBreathingCycle(elapsedInStep: 26).cycleNumber, 3)
+    }
+
+    func testWarmupCheckpointDerivesStepAndProgressFromOneTimeline() {
+        let start = Date(timeIntervalSince1970: 10_000)
+        let checkpoint = GuidedWarmupCheckpoint(
+            planID: GuidedWarmupPlan.fiveMinute.id,
+            firstStartedAt: start,
+            accumulatedSeconds: 0,
+            runningSince: start,
+            completed: false
+        )
+        let breath = start.addingTimeInterval(17)
+        XCTAssertEqual(checkpoint.currentStepIndex(at: breath), 0)
+        XCTAssertEqual(checkpoint.elapsedInCurrentStep(at: breath), 17, accuracy: 0.001)
+        XCTAssertEqual(checkpoint.stepProgress(at: breath), 17.0 / 45.0, accuracy: 0.001)
+        XCTAssertEqual(checkpoint.totalProgress(at: breath), 17.0 / 300.0, accuracy: 0.001)
+        XCTAssertEqual(checkpoint.breathingCycle(at: breath)?.phase, .hold)
+
+        let boundary = start.addingTimeInterval(45)
+        XCTAssertEqual(checkpoint.currentStepIndex(at: boundary), 1)
+        XCTAssertEqual(checkpoint.elapsedInCurrentStep(at: boundary), 0, accuracy: 0.001)
+        XCTAssertNil(checkpoint.breathingCycle(at: boundary))
+    }
+
+    @MainActor
+    func testWarmupStepNavigationPreservesRunningAndPausedSemantics() throws {
+        let model = makeModel()
+        let start = Date(timeIntervalSince1970: 20_000)
+        model.startOrResumeWarmup(now: start)
+        model.moveWarmupStep(by: 1, now: start.addingTimeInterval(10))
+        XCTAssertEqual(try XCTUnwrap(model.currentWarmupCheckpoint).elapsed(at: start.addingTimeInterval(10)), 45, accuracy: 0.001)
+        XCTAssertTrue(model.currentWarmupCheckpoint?.isRunning == true)
+
+        model.pauseWarmup(now: start.addingTimeInterval(20))
+        model.skipWarmupStep(now: start.addingTimeInterval(2_000))
+        let paused = try XCTUnwrap(model.currentWarmupCheckpoint)
+        XCTAssertEqual(paused.accumulatedSeconds, 90, accuracy: 0.001)
+        XCTAssertNil(paused.runningSince)
+        XCTAssertEqual(paused.currentStepIndex(at: start.addingTimeInterval(9_000)), 2)
+
+        model.moveWarmupStep(by: -1, now: start.addingTimeInterval(9_001))
+        XCTAssertEqual(try XCTUnwrap(model.currentWarmupCheckpoint).accumulatedSeconds, 45, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testWarmupDiscardAndRestartClearOnlyCheckpointAndNeverDuplicateCompletion() {
+        let model = makeModel()
+        let start = Date(timeIntervalSince1970: 30_000)
+        model.startOrResumeWarmup(now: start)
+        model.pauseWarmup(now: start.addingTimeInterval(12))
+        model.discardWarmup()
+        XCTAssertNil(model.currentWarmupCheckpoint)
+        XCTAssertTrue(model.sessions.isEmpty)
+
+        model.startOrResumeWarmup(now: start.addingTimeInterval(100))
+        model.resetWarmup()
+        XCTAssertNil(model.currentWarmupCheckpoint)
+        model.startOrResumeWarmup(now: start.addingTimeInterval(200))
+        model.advanceWarmup(now: start.addingTimeInterval(500))
+        model.advanceWarmup(now: start.addingTimeInterval(800))
+        XCTAssertEqual(model.sessions.count, 1)
+        XCTAssertTrue(model.currentWarmupCheckpoint?.completed == true)
     }
 
     @MainActor
@@ -211,6 +307,76 @@ final class PracticeFeatureTests: XCTestCase {
         XCTAssertEqual(progress.sessionCount, 2)
     }
 
+    func testPracticeStreakUsesLocalCalendarDaysAndIgnoresInvalidOrFutureSessions() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Chicago")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 11, hour: 12))!
+        let march9Late = calendar.date(from: DateComponents(year: 2026, month: 3, day: 9, hour: 23, minute: 30))!
+        let march10 = calendar.date(from: DateComponents(year: 2026, month: 3, day: 10, hour: 9))!
+        let march11 = calendar.date(from: DateComponents(year: 2026, month: 3, day: 11, hour: 8))!
+        let march12 = calendar.date(from: DateComponents(year: 2026, month: 3, day: 12, hour: 8))!
+        let zeroDuration = PracticeSession(
+            id: UUID(), name: "Incomplete", instrumentId: "trumpet", startedAt: march10,
+            endedAt: march10, frames: [], retainedRecordingURL: nil
+        )
+
+        let summary = PracticeStreakSummary.calculate(
+            sessions: [
+                makeSession(startedAt: march9Late, duration: 90),
+                makeSession(startedAt: march10, duration: 90),
+                makeSession(startedAt: march11, duration: 90),
+                makeSession(startedAt: march12, duration: 90),
+                zeroDuration,
+            ],
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(summary.currentStreakDays, 3)
+        XCTAssertEqual(summary.longestStreakDays, 3)
+        XCTAssertEqual(summary.recentDays.count, 7)
+        XCTAssertEqual(summary.recentDays.filter(\.practiced).count, 3)
+        XCTAssertEqual(calendar.component(.day, from: summary.recentDays.last!.date), 11)
+    }
+
+    func testPracticeStreakRemainsActiveWhenYesterdayEndsTheRun() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 4, day: 8, hour: 10))!
+        let april5 = calendar.date(from: DateComponents(year: 2026, month: 4, day: 5, hour: 9))!
+        let april6 = calendar.date(from: DateComponents(year: 2026, month: 4, day: 6, hour: 9))!
+        let april7 = calendar.date(from: DateComponents(year: 2026, month: 4, day: 7, hour: 9))!
+
+        let summary = PracticeStreakSummary.calculate(
+            sessions: [
+                makeSession(startedAt: april5, duration: 60),
+                makeSession(startedAt: april6, duration: 60),
+                makeSession(startedAt: april7, duration: 60),
+            ],
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(summary.currentStreakDays, 3)
+        XCTAssertEqual(summary.longestStreakDays, 3)
+    }
+
+    func testPracticeStreakYesterdayOnlyIsActiveWithFixedCalendar() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 5, day: 10, hour: 8))!
+        let yesterday = calendar.date(from: DateComponents(year: 2026, month: 5, day: 9, hour: 19))!
+
+        let summary = PracticeStreakSummary.calculate(
+            sessions: [makeSession(startedAt: yesterday, duration: 60)],
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(summary.currentStreakDays, 1)
+        XCTAssertEqual(summary.longestStreakDays, 1)
+    }
+
     func testWeakTransitionRequiresThreeSamplesAndRanksDeterministically() {
         let twoAttempts = [attempt(destinationRating: .off, cents: 42), attempt(destinationRating: .off, cents: 38)]
         XCTAssertNil(WeakTransitionAnalyzer.insight(from: twoAttempts))
@@ -226,7 +392,8 @@ final class PracticeFeatureTests: XCTestCase {
         XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "trumpet"), 2)
         XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "cornet"), 2)
         XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "flugelhorn"), 2)
-        XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "baritone"), 2)
+        XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "baritone"), 14)
+        XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "euphonium-treble"), 14)
         XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "horn"), 7)
         XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "french-horn"), 7)
         XCTAssertEqual(PracticePitchMath.transpositionSemitones(for: "trombone"), 0)
@@ -259,17 +426,38 @@ final class PracticeFeatureTests: XCTestCase {
     }
 
     @MainActor
-    func testWorkspaceMovesOneBlockAtATimeAndSavesCompletion() {
+    func testWorkspaceMovesOneBlockAtATimeAndSavesCompletion() async {
         let model = makeModel()
-        let pack = PracticePack.builtIns[0]
+        let pack = PracticePack(
+            id: "workspace-navigation-test",
+            name: "Workspace navigation test",
+            detail: "Two instruction-only blocks avoid starting audio in a clock/navigation test.",
+            blocks: [
+                PracticePackBlock(
+                    title: "Block one",
+                    instruction: "Practice deliberately.",
+                    kind: .instruction,
+                    durationSeconds: 120
+                ),
+                PracticePackBlock(
+                    title: "Block two",
+                    instruction: "Continue deliberately.",
+                    kind: .instruction,
+                    durationSeconds: 120
+                ),
+            ],
+            isBuiltIn: false
+        )
         let start = Date(timeIntervalSince1970: 20_000)
         model.startWorkspace(pack: pack, now: start)
         XCTAssertEqual(model.currentWorkspaceCheckpoint?.blockIndex, 0)
         XCTAssertEqual(model.practiceFeatures.recents.first?.referenceID, pack.id)
 
-        model.moveWorkspace(by: 1, now: start.addingTimeInterval(10))
+        await model.beginWorkspaceCurrentBlock(now: start)
+        model.moveWorkspace(by: 1, now: start.addingTimeInterval(30))
         XCTAssertEqual(model.currentWorkspaceCheckpoint?.blockIndex, 1)
-        model.moveWorkspace(by: 99, now: start.addingTimeInterval(20))
+        await model.beginWorkspaceCurrentBlock(now: start.addingTimeInterval(30))
+        model.moveWorkspace(by: 99, now: start.addingTimeInterval(60))
         XCTAssertEqual(model.currentWorkspaceCheckpoint?.blockIndex, pack.blocks.count - 1)
 
         model.finishWorkspace(now: start.addingTimeInterval(60))

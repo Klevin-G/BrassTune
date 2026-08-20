@@ -30,16 +30,49 @@ export const demoProfileTransposition: Record<string, number> = {
   horn: 7,
   trombone: 0,
   euphonium: 0,
+  baritone: 14,
+  'euphonium-treble': 14,
   tuba: 0,
 };
 
-export const demoProfileFrequencyRanges: Record<string, { minFrequencyHz: number; maxFrequencyHz: number }> = {
+export type FrequencyRange = { minFrequencyHz: number; maxFrequencyHz: number };
+
+/**
+ * Broad, family-safe input windows. These only decide whether a pitch is a
+ * plausible detector result; they must not shrink as scale-practice ranges
+ * become more conservative.
+ */
+export const demoProfileDetectorFrequencyRanges: Record<string, FrequencyRange> = {
   trumpet: { minFrequencyHz: 130, maxFrequencyHz: 1500 },
   horn: { minFrequencyHz: 80, maxFrequencyHz: 1200 },
   trombone: { minFrequencyHz: 50, maxFrequencyHz: 700 },
   euphonium: { minFrequencyHz: 55, maxFrequencyHz: 800 },
+  baritone: { minFrequencyHz: 55, maxFrequencyHz: 800 },
+  'euphonium-treble': { minFrequencyHz: 55, maxFrequencyHz: 800 },
   tuba: { minFrequencyHz: 30, maxFrequencyHz: 500 },
 };
+
+/** Backwards-compatible name for consumers that need detector, not practice, bounds. */
+export const demoProfileFrequencyRanges = demoProfileDetectorFrequencyRanges;
+
+/** Ordinary verified practice range in concert MIDI; evaluated at the selected A4. */
+export const demoProfilePracticalMidiRanges: Record<string, { minimumMidi: number; maximumMidi: number }> = {
+  trumpet: { minimumMidi: 52, maximumMidi: 82 },
+  horn: { minimumMidi: 46, maximumMidi: 77 },
+  trombone: { minimumMidi: 40, maximumMidi: 70 },
+  euphonium: { minimumMidi: 40, maximumMidi: 70 },
+  baritone: { minimumMidi: 38, maximumMidi: 68 },
+  'euphonium-treble': { minimumMidi: 38, maximumMidi: 68 },
+  tuba: { minimumMidi: 26, maximumMidi: 65 },
+};
+
+export function practicalFrequencyRange(instrumentId: string, referencePitch = 440): FrequencyRange | undefined {
+  const range = demoProfilePracticalMidiRanges[instrumentId];
+  return range && {
+    minFrequencyHz: midiToFrequency(range.minimumMidi, referencePitch),
+    maxFrequencyHz: midiToFrequency(range.maximumMidi, referencePitch),
+  };
+}
 
 export const MIN_RECORDING_CONFIDENCE = 0.95;
 
@@ -95,8 +128,8 @@ export function pitchFrameFromFrequency(
       detector_source: detectorSource,
     };
   }
-  const range = demoProfileFrequencyRanges[instrumentId];
-  if (range && (frequency < range.minFrequencyHz || frequency > range.maxFrequencyHz)) {
+  const detectorRange = demoProfileDetectorFrequencyRanges[instrumentId];
+  if (detectorRange && (frequency < detectorRange.minFrequencyHz || frequency > detectorRange.maxFrequencyHz)) {
     return {
       timestamp_ms: timestampMs,
       frequency_hz: frequency,
@@ -123,6 +156,10 @@ export function pitchFrameFromFrequency(
   const written = midiToNote(nearest + (demoProfileTransposition[instrumentId] ?? 0));
   const status =
     confidence < MIN_RECORDING_CONFIDENCE ? 'unstable' : Math.abs(centsHint) <= 5 ? 'in_tune' : centsHint < -5 ? 'flat' : 'sharp';
+  // Practical ranges guide scale selection and empty-state analytics. A
+  // confident pitch inside the family-safe detector window remains a truthful
+  // recorded observation even if it is an advanced or pedal register note.
+  const isRecordable = status === 'flat' || status === 'in_tune' || status === 'sharp';
   return {
     timestamp_ms: timestampMs,
     frequency_hz: frequency,
@@ -138,8 +175,8 @@ export function pitchFrameFromFrequency(
     tuning_status: status,
     instrument_id: instrumentId,
     reference_pitch_hz: referencePitch,
-    is_valid_for_recording: status === 'flat' || status === 'in_tune' || status === 'sharp',
-    save_eligibility_reason: status === 'flat' || status === 'in_tune' || status === 'sharp' ? 'valid for recording' : 'confidence below 95%',
+    is_valid_for_recording: isRecordable,
+    save_eligibility_reason: isRecordable ? 'valid for recording' : 'confidence below 95%',
     detector_source: detectorSource,
   };
 }

@@ -1,19 +1,75 @@
 # Apple App Store Checklist
 
-Updated: 2026-07-24. This is a preparation checklist, not an App Store readiness decision.
+Updated: 2026-08-05. This is the native iOS submission checklist. It separates
+current-source simulator checks, signed build-only evidence, historical physical
+evidence, and the still-missing exact TestFlight candidate.
 
-## Current local and simulator evidence
+## Verified in this pass
 
-- The current native simulator build/run completed with zero warnings and errors; native unit tests passed `158` tests and all 20 UI scenarios passed in bounded batches. This remains unsigned simulator evidence.
-- The release script now fails closed on the Apple Team ID, bundle ID, public production Supabase URL, and public publishable key, and archives with `CODE_SIGNING_ALLOWED=YES`.
-- The target includes native auth, practice, class, localization, privacy, export, and account-deletion surfaces.
+- Swift Core passed `12/12`; the native app unit suite passed `240/240` on an
+  iPhone 17 Pro / iOS 26.5 simulator.
+- The selected non-physical UI suite passed `23/23`, zero failures/skips, and the
+  focused legal journey passed `1/1`.
+- The fresh current-source physical targeted suite passed `7/7`, zero
+  failures/skips, in 663.931 test seconds on the wired iPhone 15 Pro Max. It
+  includes strict Light/Dark structure, legal/support, More, guided score
+  practice, three-octave Scales, Practice reset, and the built-in-route audio
+  crash-family stress.
+- Current-source Release simulator compilation passed.
+- A fresh, no-install, no-archive generic iOS Release build completed with zero
+  Xcode errors or warnings using Apple Distribution and the explicit
+  `BrassTune App Store Distribution 2026` profile.
+- The built app is `com.aryasalem.BrassTune` version `1.0.0 (2)`. Its strict
+  signature is valid; the app and profile both contain Sign in with Apple
+  `Default`, `get-task-allow=false`, and `beta-reports-active=true`; the app and
+  dSYM UUID are `6F560646-9C34-38C0-B097-B05E8B70C0EC`.
+- `PrivacyInfo.xcprivacy` is present and valid, the non-exempt-encryption flag is
+  false, localization checks are clean, and public privacy/terms/support URLs
+  returned HTTP 200.
+- Five opaque 6.9-inch iPhone screenshots and two opaque 13-inch iPad screenshots
+  are prepared under `<user-home>/Library/Application Support/BrassTune/AppStoreSubmissionAssets-2026-08-05`.
+- Production TestFlight build `1.0.0 (2)` remained installed at its original
+  path and untouched. The isolated `.dev` app was rebuilt for the current-source
+  physical suite and then restored to a normal Debug `.dev` build.
 
-## Required before submission
+Evidence root:
 
-- Configure Apple Developer team, bundle identifier, signing, version/build policy, and App Store Connect record.
-- Native Apple sign-in and Google controls are intentionally hidden. Before offering native third-party sign-in, configure Sign in with Apple App ID/Services ID/key and the Supabase Apple provider, then re-enable Apple entitlement/control together with Google presentation only after live dual-provider verification.
-- Test a signed archive and TestFlight build on physical iPhone/iPad, including Ring/Silent behavior, microphone/brass input, Bluetooth/audio routes and interruptions, local recording deletion/file protection, accessibility, localization, auth lifecycle, export/delete, and class privacy.
-- Reconcile App Store Connect privacy answers with the signed build: native takes can be retained app-locally for listen-back but are not uploaded automatically; signed-in web takes upload on Stop through the authenticated backend/Supabase path; class reporting excludes recordings, reflection text, and private session detail. A limited set of authorized service administrators may access cloud account/session/audio data only for security, support, abuse investigation, or service operation.
-- Finalize icon, export compliance, age rating, review access, and metadata. Native legal/support actions link to the published HTTPS privacy, terms, and support pages.
+`<user-home>/Library/Application Support/BrassTune/ReleaseEvidence/NativeIOSContinuation-2026-08-05/AppStorePreflight`
 
-Simulator results do not prove signed archive, physical audio, TestFlight, App Store acceptance, or Apple provider availability.
+Prepared copy, privacy mapping, review notes, screenshot checksums, and the live
+App Store Connect audit are in
+[`APP_STORE_SUBMISSION_PACKET_2026-08-05.md`](APP_STORE_SUBMISSION_PACKET_2026-08-05.md).
+
+## Required before a new internal candidate
+
+- Reconcile the preserved dirty native worktree with the four upstream commits
+  and bind the intended source to an exact reviewed commit without discarding
+  unrelated user work.
+- Change the current build number from already-used `2` to a unique higher build
+  number. The earlier instruction prohibiting build 3 remains in force.
+- Archive and validate that exact source, retain the archive and dSYM, upload it
+  to TestFlight, wait for processing, and install the processed build without
+  using build 2 as the candidate.
+- Repeat the original three crash-family physical matrix against that exact
+  processed build. Preserve crash/device logs and keep unavailable Bluetooth,
+  wired, and audible AirPlay routes marked untested rather than passed.
+
+## Required before App Review
+
+- Populate the prepared screenshots, subtitle, promotional text, description,
+  keywords, support/marketing/privacy URLs, copyright, reviewer notes, and
+  category fields in App Store Connect.
+- Complete age rating, content rights, privacy questionnaire, pricing,
+  territory availability, and accessibility declarations against the final
+  processed binary.
+- Supply a monitored App Review phone number and make the Digital Services Act
+  trader declaration. These are owner/legal attestations and must not be guessed.
+- Select only the new crash-free candidate, keep manual release selected, run a
+  final read-only review, and then add the version to App Review.
+
+## Current decision
+
+**Blocked for App Store submission.** Local compilation, tests, screenshots, and
+distribution signing are prepared, but the exact unique-build archive,
+processed TestFlight candidate, exact-candidate physical closure, and live
+metadata/owner attestations do not yet exist.

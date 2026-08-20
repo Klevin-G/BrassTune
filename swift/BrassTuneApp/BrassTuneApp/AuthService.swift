@@ -6,7 +6,19 @@ import UIKit
 
 @MainActor
 final class AuthService: NSObject {
-    static let oauthCallbackScheme = "com.brasstune.auth"
+    static let productionOAuthCallbackScheme = "com.brasstune.auth"
+    static let developmentOAuthCallbackScheme = "com.brasstune.auth.dev"
+    static let productionBundleIdentifier = "com.aryasalem.BrassTune"
+    static let developmentBundleIdentifiers: Set<String> = [
+        "com.aryasalem.BrassTune.dev",
+        "com.brasstune.BrassTuneAppTests.dev",
+        "com.brasstune.BrassTuneAppUITests.dev",
+    ]
+    static let oauthCallbackSchemeInfoKey = "BRASSTUNE_AUTH_CALLBACK_SCHEME"
+    static let oauthCallbackScheme = resolvedOAuthCallbackScheme(
+        rawValue: Bundle.main.object(forInfoDictionaryKey: oauthCallbackSchemeInfoKey) as? String,
+        bundleIdentifier: Bundle.main.bundleIdentifier
+    )
     static let googleOAuthCallbackHost = "oauth"
     static let googleOAuthCallbackPath = "/google"
     static let passwordResetWebURLString = "https://brasstune.vercel.app/auth/reset-password"
@@ -27,21 +39,53 @@ final class AuthService: NSObject {
         deleteSessionPayload: (() throws -> Void)? = nil,
         webAuthentication: ((URL, String) async throws -> URL)? = nil
     ) {
+        let processArguments = ProcessInfo.processInfo.arguments
+        let bundleIdentifier = Bundle.main.bundleIdentifier
+        let authPersistenceDisabled = Self.shouldDisableAuthPersistence(
+            arguments: processArguments,
+            bundleIdentifier: bundleIdentifier
+        )
+        let authReadsEmpty = Self.shouldReturnEmptyAuthState(
+            arguments: processArguments,
+            bundleIdentifier: bundleIdentifier
+        )
         self.session = session
         self.readSessionPayload = readSessionPayload ?? {
-            if ProcessInfo.processInfo.arguments.contains("UITEST_AUTH_EMPTY") {
-                return nil
-            }
+            guard !authReadsEmpty else { return nil }
             return try KeychainStore.read(service: service, account: account)
         }
         self.saveSessionPayload = saveSessionPayload ?? { payload in
+            guard !authPersistenceDisabled else { return }
             try KeychainStore.save(payload, service: service, account: account)
         }
         self.deleteSessionPayload = deleteSessionPayload ?? {
+            guard !authPersistenceDisabled else { return }
             try KeychainStore.delete(service: service, account: account)
         }
         self.webAuthenticationOverride = webAuthentication
         super.init()
+    }
+
+    static func allowsUITestAuthOverrides(bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return developmentBundleIdentifiers.contains(bundleIdentifier)
+    }
+
+    static func shouldDisableAuthPersistence(
+        arguments: [String],
+        bundleIdentifier: String?
+    ) -> Bool {
+        allowsUITestAuthOverrides(bundleIdentifier: bundleIdentifier)
+            && arguments.contains("UITEST_AUTH_NO_PERSIST")
+    }
+
+    static func shouldReturnEmptyAuthState(
+        arguments: [String],
+        bundleIdentifier: String?
+    ) -> Bool {
+        allowsUITestAuthOverrides(bundleIdentifier: bundleIdentifier)
+            && (arguments.contains("UITEST_AUTH_EMPTY")
+                || arguments.contains("UITEST_AUTH_NO_PERSIST"))
     }
 
     func restoreSession() -> AuthSession? {
@@ -49,18 +93,29 @@ final class AuthService: NSObject {
     }
 
     func restoreSessionOrThrow() throws -> AuthSession? {
-        guard let payload = try readSessionPayload(),
+        let payload: String?
+        do {
+            payload = try readSessionPayload()
+        } catch {
+            throw KeychainStore.userVisibleError(for: error)
+        }
+        guard let payload,
               let data = payload.data(using: .utf8) else { return nil }
         do {
             return try JSONDecoder().decode(AuthSession.self, from: data)
         } catch {
             // Preserve unreadable credentials for explicit recovery instead of
             // silently treating them as absence and overwriting them.
-            throw UserVisibleError.secureStorageUnavailable
+            throw KeychainStore.userVisibleError(for: KeychainStoreError(operation: .read, status: nil, isCorrupt: true))
         }
     }
 
-    func signIn(email: String, password: String, config: AppConfig) async throws -> AuthSession {
+    func signIn(
+        email: String,
+        password: String,
+        config: AppConfig,
+        persist: Bool = true
+    ) async throws -> AuthSession {
         guard !email.isEmpty, !password.isEmpty else { throw UserVisibleError.authenticationFailed }
         let response = try await requestAuth(
             config: config,
@@ -72,11 +127,16 @@ final class AuthService: NSObject {
                 "password": password
             ]
         )
-        let session = try store(response: response, fallbackEmail: email)
+        let session = try store(response: response, fallbackEmail: email, persist: persist)
         return session
     }
 
-    func signUp(email: String, password: String, config: AppConfig) async throws -> AuthSession {
+    func signUp(
+        email: String,
+        password: String,
+        config: AppConfig,
+        persist: Bool = true
+    ) async throws -> AuthSession {
         guard !email.isEmpty, !password.isEmpty else { throw UserVisibleError.authenticationFailed }
         let response = try await requestAuth(
             config: config,
@@ -85,12 +145,13 @@ final class AuthService: NSObject {
             body: [
                 "email": email,
                 "password": password
-            ]
+            ],
+            decodesSignupUser: true
         )
-        if response.accessToken == nil, response.user?.email != nil {
+        if response.accessToken == nil, response.user != nil {
             throw UserVisibleError.emailConfirmationRequired
         }
-        return try store(response: response, fallbackEmail: email)
+        return try store(response: response, fallbackEmail: email, persist: persist)
     }
 
     func requestPasswordReset(email: String, config: AppConfig) async throws {
@@ -132,7 +193,12 @@ final class AuthService: NSObject {
         return try store(response: response, fallbackEmail: existing.email)
     }
 
-    func signInWithApple(identityToken: Data, rawNonce: String, config: AppConfig) async throws -> AppleSignInResult {
+    func signInWithApple(
+        identityToken: Data,
+        rawNonce: String,
+        config: AppConfig,
+        persist: Bool = true
+    ) async throws -> AppleSignInResult {
         guard let token = String(data: identityToken, encoding: .utf8), !token.isEmpty else {
             throw UserVisibleError.authenticationFailed
         }
@@ -147,7 +213,11 @@ final class AuthService: NSObject {
                 "nonce": rawNonce
             ]
         )
-        let session = try store(response: response, fallbackEmail: response.user?.email ?? "Apple user")
+        let session = try store(
+            response: response,
+            fallbackEmail: response.user?.email ?? "Apple user",
+            persist: persist
+        )
         return AppleSignInResult(session: session, isNewUser: Self.appleNewUserSignal(from: response.user))
     }
 
@@ -188,7 +258,7 @@ final class AuthService: NSObject {
         }
     }
 
-    func signInWithGoogle(config: AppConfig) async throws -> AuthSession {
+    func signInWithGoogle(config: AppConfig, persist: Bool = true) async throws -> AuthSession {
         let verifier = Self.randomURLSafeToken(byteCount: 48)
         let state = Self.randomURLSafeToken(byteCount: 32)
         let transaction = try Self.googleOAuthTransaction(
@@ -196,17 +266,20 @@ final class AuthService: NSObject {
             state: state,
             codeVerifier: verifier
         )
+        guard let callbackScheme = transaction.callbackURL.scheme else {
+            throw UserVisibleError.malformedResponse
+        }
         let callback: URL
         do {
             if let webAuthenticationOverride {
                 callback = try await webAuthenticationOverride(
                     transaction.authorizationURL,
-                    Self.oauthCallbackScheme
+                    callbackScheme
                 )
             } else {
                 callback = try await authenticateUsingWebSession(
                     url: transaction.authorizationURL,
-                    callbackScheme: Self.oauthCallbackScheme
+                    callbackScheme: callbackScheme
                 )
             }
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
@@ -221,7 +294,8 @@ final class AuthService: NSObject {
 
         let code = try Self.validatedGoogleOAuthCode(
             callback,
-            expectedState: transaction.state
+            expectedState: transaction.state,
+            callbackScheme: callbackScheme
         )
         let response = try await requestAuth(
             config: config,
@@ -233,14 +307,18 @@ final class AuthService: NSObject {
                 "code_verifier": transaction.codeVerifier,
             ]
         )
-        return try store(response: response, fallbackEmail: response.user?.email ?? "Google user")
+        return try store(
+            response: response,
+            fallbackEmail: response.user?.email ?? "Google user",
+            persist: persist
+        )
     }
 
     func signOut() throws {
         do {
             try deleteSessionPayload()
         } catch {
-            throw UserVisibleError.secureStorageDeletionFailed
+            throw KeychainStore.userVisibleError(for: error)
         }
     }
 
@@ -286,6 +364,20 @@ final class AuthService: NSObject {
         try signOut()
     }
 
+    /// Stores a previously authenticated session only after the user has
+    /// explicitly chosen how existing guest practice should be handled.
+    func persistSession(_ session: AuthSession) throws {
+        let data = try JSONEncoder().encode(session)
+        guard let payload = String(data: data, encoding: .utf8) else {
+            throw UserVisibleError.malformedResponse
+        }
+        do {
+            try saveSessionPayload(payload)
+        } catch {
+            throw KeychainStore.userVisibleError(for: error)
+        }
+    }
+
     func appleNonce() -> String {
         Self.randomNonce()
     }
@@ -298,11 +390,39 @@ final class AuthService: NSObject {
         SHA256.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
+    static func resolvedOAuthCallbackScheme(
+        rawValue: String?,
+        bundleIdentifier: String?
+    ) -> String? {
+        let expectedScheme: String
+        if bundleIdentifier == productionBundleIdentifier {
+            expectedScheme = productionOAuthCallbackScheme
+        } else if let bundleIdentifier,
+                  developmentBundleIdentifiers.contains(bundleIdentifier) {
+            expectedScheme = developmentOAuthCallbackScheme
+        } else {
+            return nil
+        }
+        guard let candidate = rawValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              candidate == expectedScheme else {
+            return nil
+        }
+        return expectedScheme
+    }
+
     static func googleOAuthTransaction(
         config: AppConfig,
         state: String,
-        codeVerifier: String
+        codeVerifier: String,
+        callbackScheme: String? = oauthCallbackScheme
     ) throws -> GoogleOAuthTransaction {
+        guard let callbackScheme,
+              let runtimeCallbackScheme = oauthCallbackScheme,
+              callbackScheme == runtimeCallbackScheme else {
+            throw UserVisibleError.oauthCallbackInvalid
+        }
         guard config.hasUsableAccountConfiguration,
               let supabaseURL = config.supabaseURL,
               !state.isEmpty,
@@ -311,7 +431,7 @@ final class AuthService: NSObject {
         }
         let challenge = base64URLEncoded(Data(SHA256.hash(data: Data(codeVerifier.utf8))))
         var callbackComponents = URLComponents()
-        callbackComponents.scheme = oauthCallbackScheme
+        callbackComponents.scheme = callbackScheme
         callbackComponents.host = googleOAuthCallbackHost
         callbackComponents.path = googleOAuthCallbackPath
         callbackComponents.queryItems = [URLQueryItem(name: "state", value: state)]
@@ -345,9 +465,13 @@ final class AuthService: NSObject {
 
     static func validatedGoogleOAuthCode(
         _ callbackURL: URL,
-        expectedState: String
+        expectedState: String,
+        callbackScheme: String? = oauthCallbackScheme
     ) throws -> String {
-        guard callbackURL.scheme?.lowercased() == oauthCallbackScheme,
+        guard let callbackScheme,
+              let runtimeCallbackScheme = oauthCallbackScheme,
+              callbackScheme == runtimeCallbackScheme,
+              callbackURL.scheme?.lowercased() == callbackScheme,
               callbackURL.host?.lowercased() == googleOAuthCallbackHost,
               callbackURL.path == googleOAuthCallbackPath,
               callbackURL.user == nil,
@@ -455,7 +579,11 @@ final class AuthService: NSObject {
         return expiresAt.timeIntervalSinceNow > 0
     }
 
-    private func store(response: SupabaseAuthResponse, fallbackEmail: String) throws -> AuthSession {
+    private func store(
+        response: SupabaseAuthResponse,
+        fallbackEmail: String,
+        persist: Bool = true
+    ) throws -> AuthSession {
         guard let accessToken = response.accessToken, !accessToken.isEmpty,
               let userID = response.user?.id?.trimmingCharacters(in: .whitespacesAndNewlines),
               !userID.isEmpty else { throw UserVisibleError.authenticationFailed }
@@ -466,9 +594,9 @@ final class AuthService: NSObject {
             email: response.user?.email ?? fallbackEmail,
             expiresAt: response.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
         )
-        let data = try JSONEncoder().encode(session)
-        guard let payload = String(data: data, encoding: .utf8) else { throw UserVisibleError.malformedResponse }
-        try saveSessionPayload(payload)
+        if persist {
+            try persistSession(session)
+        }
         return session
     }
 
@@ -478,7 +606,8 @@ final class AuthService: NSObject {
         query: [URLQueryItem] = [],
         bearerToken: String?,
         body: [String: String],
-        expiredSessionFailure: Bool = false
+        expiredSessionFailure: Bool = false,
+        decodesSignupUser: Bool = false
     ) async throws -> SupabaseAuthResponse {
         guard config.hasUsableAccountConfiguration,
               let supabaseURL = config.supabaseURL,
@@ -530,6 +659,9 @@ final class AuthService: NSObject {
             throw UserVisibleError.authenticationFailed
         }
         do {
+            if decodesSignupUser {
+                return try JSONDecoder().decode(SupabaseSignupResponse.self, from: data).authResponse
+            }
             return try JSONDecoder().decode(SupabaseAuthResponse.self, from: data)
         } catch {
             if data.isEmpty {
@@ -585,18 +717,45 @@ extension AuthService: ASWebAuthenticationPresentationContextProviding {
 enum KeychainStore {
     static let sessionAccessibility = kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String
 
-    static func save(_ value: String, service: String, account: String) throws {
+    /// Replaces a credential in place.  Deleting before an add creates a data
+    /// loss window: an unavailable Keychain would leave a user signed out even
+    /// though their previous credential was still valid.
+    static func save(
+        _ value: String,
+        service: String,
+        account: String,
+        update: ((CFDictionary, CFDictionary) -> OSStatus)? = nil,
+        add: ((CFDictionary) -> OSStatus)? = nil
+    ) throws {
         let data = Data(value.utf8)
-        try delete(service: service, account: account)
-        let query: [String: Any] = [
+        let identity: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account
+        ]
+        let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: sessionAccessibility
         ]
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else { throw UserVisibleError.secureStorageUnavailable }
+        let updateItem = update ?? { query, attributes in
+            SecItemUpdate(query, attributes)
+        }
+        let addItem = add ?? { query in
+            SecItemAdd(query, nil)
+        }
+
+        let updateStatus = updateItem(identity as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainStoreError(operation: .save, status: updateStatus)
+        }
+
+        var addQuery = identity
+        attributes.forEach { addQuery[$0.key] = $0.value }
+        let status = addItem(addQuery as CFDictionary)
+        guard status == errSecSuccess else {
+            throw KeychainStoreError(operation: .save, status: status)
+        }
     }
 
     static func read(service: String, account: String) throws -> String? {
@@ -610,10 +769,12 @@ enum KeychainStore {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess,
-              let data = result as? Data,
+        guard status == errSecSuccess else {
+            throw KeychainStoreError(operation: .read, status: status)
+        }
+        guard let data = result as? Data,
               let value = String(data: data, encoding: .utf8) else {
-            throw UserVisibleError.secureStorageUnavailable
+            throw KeychainStoreError(operation: .read, status: nil, isCorrupt: true)
         }
         return value
     }
@@ -626,8 +787,43 @@ enum KeychainStore {
         ]
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw UserVisibleError.secureStorageDeletionFailed
+            throw KeychainStoreError(operation: .delete, status: status)
         }
+    }
+
+    static func userVisibleError(for error: Error) -> UserVisibleError {
+        if let error = error as? UserVisibleError { return error }
+        guard let error = error as? KeychainStoreError else {
+            return .secureStorageUnavailable
+        }
+        if error.isCorrupt { return .secureStorageCorrupt }
+        if error.status == errSecMissingEntitlement || error.status == errSecNotAvailable {
+            return .secureStorageUnavailable
+        }
+        switch error.operation {
+        case .read: return .secureStorageReadFailed
+        case .save: return .secureStorageSaveFailed
+        case .delete: return .secureStorageDeletionFailed
+        }
+    }
+}
+
+enum KeychainOperation: Equatable {
+    case read
+    case save
+    case delete
+}
+
+struct KeychainStoreError: Error, Equatable {
+    let operation: KeychainOperation
+    /// Retained for diagnosis only; neither the query nor credential payload is logged.
+    let status: OSStatus?
+    let isCorrupt: Bool
+
+    init(operation: KeychainOperation, status: OSStatus?, isCorrupt: Bool = false) {
+        self.operation = operation
+        self.status = status
+        self.isCorrupt = isCorrupt
     }
 }
 
@@ -674,6 +870,52 @@ struct SupabaseAuthResponse: Decodable {
         case expiresIn = "expires_in"
         case user
     }
+
+    init(accessToken: String?, refreshToken: String?, expiresIn: Int?, user: SupabaseAuthUser?) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresIn = expiresIn
+        self.user = user
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accessToken = try container.decodeIfPresent(String.self, forKey: .accessToken)
+        refreshToken = try container.decodeIfPresent(String.self, forKey: .refreshToken)
+        expiresIn = try container.decodeIfPresent(Int.self, forKey: .expiresIn)
+        user = try container.decodeIfPresent(SupabaseAuthUser.self, forKey: .user)
+    }
+}
+
+/// `/auth/v1/signup` may return a confirmation-required UserSchema at the
+/// top level. Keep that compatibility path scoped to sign-up rather than
+/// accepting a top-level user for token, refresh, or OAuth responses.
+private struct SupabaseSignupResponse: Decodable {
+    let authResponse: SupabaseAuthResponse
+
+    init(from decoder: Decoder) throws {
+        let nestedResponse = try SupabaseAuthResponse(from: decoder)
+        guard nestedResponse.user == nil else {
+            authResponse = nestedResponse
+            return
+        }
+        let topLevelUser = try SupabaseAuthUser(from: decoder)
+        if topLevelUser.hasIdentityFields,
+           (nestedResponse.accessToken != nil || nestedResponse.refreshToken != nil) {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "A signup response must not combine session tokens with a top-level user."
+                )
+            )
+        }
+        authResponse = SupabaseAuthResponse(
+            accessToken: nestedResponse.accessToken,
+            refreshToken: nestedResponse.refreshToken,
+            expiresIn: nestedResponse.expiresIn,
+            user: topLevelUser.hasIdentityFields ? topLevelUser : nil
+        )
+    }
 }
 
 struct SupabaseAuthUser: Decodable {
@@ -687,5 +929,9 @@ struct SupabaseAuthUser: Decodable {
         case email
         case createdAt = "created_at"
         case lastSignInAt = "last_sign_in_at"
+    }
+
+    var hasIdentityFields: Bool {
+        id != nil || email != nil || createdAt != nil || lastSignInAt != nil
     }
 }

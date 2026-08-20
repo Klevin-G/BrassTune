@@ -24,6 +24,18 @@
     "expected_cents": 0.0
   },
   {
+    "name": "Concert B-flat2 appears as written C4 on B-flat treble euphonium",
+    "frequency_hz": 116.54094037952248,
+    "reference_pitch_hz": 440.0,
+    "instrument_id": "euphonium-treble",
+    "expected_concert_note": "Bb",
+    "expected_concert_octave": 2,
+    "expected_written_note": "C",
+    "expected_written_octave": 4,
+    "expected_nearest_midi": 46,
+    "expected_cents": 0.0
+  },
+  {
     "name": "A4 plus ten cents",
     "frequency_hz": 442.548894,
     "reference_pitch_hz": 440.0,
@@ -51,11 +63,11 @@
     "name": "Exact upper half-step also rounds toward the higher MIDI note",
     "frequency_hz": 479.82340237271336,
     "reference_pitch_hz": 440.0,
-    "instrument_id": "trombone",
+    "instrument_id": "trumpet",
     "expected_concert_note": "B",
     "expected_concert_octave": 4,
-    "expected_written_note": "B",
-    "expected_written_octave": 4,
+    "expected_written_note": "C#",
+    "expected_written_octave": 5,
     "expected_nearest_midi": 71,
     "expected_cents": -50.0
   }

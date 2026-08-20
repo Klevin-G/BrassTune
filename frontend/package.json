@@ -22,11 +22,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
     "lucide-react": "^0.468.0",
-    "pdfjs-dist": "^6.0.227",
+    "pdfjs-dist": "^6.2.108",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-intl": "10.1.18",
-    "react-router-dom": "^7.18.1",
+    "react-router-dom": "7.18.2",
     "recharts": "^2.12.7"
   },
   "devDependencies": {

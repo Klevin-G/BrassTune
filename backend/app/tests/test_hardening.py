@@ -42,6 +42,7 @@ from app.api.routes import (
     delete_session_audio,
     ensemble_group_roster,
     ensemble_group_summary,
+    get_session_audio,
     get_ensemble_group,
     join_ensemble_by_code,
     leave_ensemble_group,
@@ -1083,17 +1084,25 @@ def test_current_previous_period_improvement_uses_dates():
 def test_full_heatmap_includes_missing_insufficient_cells():
     profile = get_instrument_profile("trumpet")
     cells = build_instrument_heatmap(
-        [{"note_label": "D5", "written_note": "D", "written_octave": 5, "avg_signed_cents": 12, "avg_abs_cents": 12, "median_cents": 12, "stddev_cents": 2, "in_tune_percentage": 20, "duration_seconds": 4, "duration_ms": 4000, "sample_count": 20, "event_count": 1, "stability_score": 88, "trend": "Mostly sharp", "severity": "moderate issue", "problem_severity": 40}],
+        [
+            {"note_label": "D3", "written_note": "D", "written_octave": 3, "avg_signed_cents": -7, "avg_abs_cents": 7, "median_cents": -7, "stddev_cents": 2, "in_tune_percentage": 60, "duration_seconds": 4, "duration_ms": 4000, "sample_count": 20, "event_count": 1, "stability_score": 88, "trend": "Mostly flat", "severity": "good", "problem_severity": 21},
+            {"note_label": "D5", "written_note": "D", "written_octave": 5, "avg_signed_cents": 12, "avg_abs_cents": 12, "median_cents": 12, "stddev_cents": 2, "in_tune_percentage": 20, "duration_seconds": 4, "duration_ms": 4000, "sample_count": 20, "event_count": 1, "stability_score": 88, "trend": "Mostly sharp", "severity": "moderate issue", "problem_severity": 40},
+        ],
         profile,
     )
     labels = [cell["note_label"] for cell in cells]
     assert "F#3" in labels
+    assert "D3" in labels
+    assert "E3" not in labels
     assert "D5" in labels
     assert "C6" in labels
     missing = next(cell for cell in cells if cell["note_label"] == "F#3")
+    outside_practical = next(cell for cell in cells if cell["note_label"] == "D3")
     measured = next(cell for cell in cells if cell["note_label"] == "D5")
     assert missing["has_data"] is False
     assert missing["severity_color"] == "insufficient"
+    assert outside_practical["has_data"] is True
+    assert outside_practical["severity_color"] == "yellow"
     assert measured["has_data"] is True
     assert measured["severity_color"] == "orange"
 

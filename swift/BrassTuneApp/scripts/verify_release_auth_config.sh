@@ -1,20 +1,45 @@
 #!/bin/sh
 set -eu
 
+fail() {
+    echo "BrassTune release auth preflight failed: $1" >&2
+    exit 1
+}
+
+configuration=${CONFIGURATION:-}
+
+# Callback schemes are process identities, not interchangeable provider
+# settings. Enforce their exact bundle binding for Release and custom
+# Release-equivalent configurations before any guest-only early exit.
+case "$configuration" in
+    *Release*)
+        product_bundle_identifier=${PRODUCT_BUNDLE_IDENTIFIER:-}
+        callback_scheme=${BRASSTUNE_AUTH_CALLBACK_SCHEME:-}
+        case "$product_bundle_identifier" in
+            com.aryasalem.BrassTune)
+                expected_callback_scheme=com.brasstune.auth
+                ;;
+            com.aryasalem.BrassTune.dev|com.brasstune.BrassTuneAppTests.dev|com.brasstune.BrassTuneAppUITests.dev)
+                expected_callback_scheme=com.brasstune.auth.dev
+                ;;
+            *)
+                fail "PRODUCT_BUNDLE_IDENTIFIER is not an approved OAuth application identity."
+                ;;
+        esac
+        [ "$callback_scheme" = "$expected_callback_scheme" ] || \
+            fail "BRASSTUNE_AUTH_CALLBACK_SCHEME does not match PRODUCT_BUNDLE_IDENTIFIER."
+        ;;
+esac
+
 # A normal unsigned Release build is allowed to remain guest-only. Archive and
 # explicit preflight actions fail closed so an App Store candidate cannot imply
 # online account support without its public runtime values.
-if [ "${CONFIGURATION:-}" != "Release" ]; then
+if [ "$configuration" != "Release" ]; then
     exit 0
 fi
 if [ "${ACTION:-}" != "install" ] && [ "${BRASSTUNE_REQUIRE_ONLINE_AUTH:-NO}" != "YES" ]; then
     exit 0
 fi
-
-fail() {
-    echo "BrassTune release auth preflight failed: $1" >&2
-    exit 1
-}
 
 supabase_url=${BRASSTUNE_SUPABASE_URL:-}
 publishable_key=${BRASSTUNE_SUPABASE_PUBLISHABLE_KEY:-}

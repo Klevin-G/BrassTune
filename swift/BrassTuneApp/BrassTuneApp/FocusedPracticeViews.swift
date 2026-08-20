@@ -7,9 +7,9 @@ struct PlayAlongIdleView: View {
 
     var body: some View {
         BTPageHeader(
-            eyebrow: "Play-Along",
-            title: "Today's recommendation",
-            subtitle: "Start small, then choose another exercise when you want one."
+            eyebrow: "Guided Practice",
+            title: "Choose a clear next step",
+            subtitle: "Each routine tells you what it trains, what it needs, and when you are finished."
         )
         .accessibilityIdentifier("playAlong.hero")
 
@@ -24,15 +24,31 @@ struct PlayAlongIdleView: View {
             Text("5 minutes")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(BTTheme.accent)
+            Label("Steady air and relaxed attacks", systemImage: "wind")
+                .font(.subheadline)
+            Label("Any level · no microphone required", systemImage: "person.fill.checkmark")
+                .font(.subheadline)
+            Label("Complete five guided steps", systemImage: "checkmark.circle")
+                .font(.subheadline)
         }
         .accessibilityIdentifier("playAlong.recommendation")
+
+        if requiresNativeMicrophoneRecovery(model) {
+            MicrophoneRecoveryCard()
+            MicrophoneRecoveryActions {
+                Task {
+                    await model.startPlayAlong(exerciseID: model.selectedPlayAlongExerciseID)
+                }
+            }
+            .accessibilityIdentifier("playAlong.microphoneRecoveryActions")
+        }
 
         VStack(alignment: .leading, spacing: BTSpacing.md) {
             Button {
                 moreWaysExpanded.toggle()
             } label: {
                 HStack(spacing: BTSpacing.sm) {
-                    Label("More ways to practice", systemImage: "ellipsis.circle")
+                    Label("Choose another exercise", systemImage: "music.note.list")
                         .font(.headline)
                     Spacer()
                     Image(systemName: moreWaysExpanded ? "chevron.up" : "chevron.down")
@@ -45,7 +61,7 @@ struct PlayAlongIdleView: View {
             .buttonStyle(.plain)
             .btMinimumInteractiveSize()
             .accessibilityValue(moreWaysExpanded ? "Expanded" : "Collapsed")
-            .accessibilityHint("More ways to practice")
+            .accessibilityHint("Shows the exercise library and custom exercise builder")
             .accessibilityIdentifier("playAlong.moreWaysDisclosure")
 
             if moreWaysExpanded {
@@ -80,20 +96,22 @@ private struct PlayAlongMoreWaysView: View {
             NavigationLink {
                 CustomExerciseBuilderView()
             } label: {
-                Label("Create a Play-Along exercise", systemImage: "plus.circle")
+                Label("Build a custom scale exercise", systemImage: "plus.circle")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(BTSecondaryButtonStyle())
             .accessibilityIdentifier("practice.quickStart.builder")
 
-            NavigationLink {
-                PracticePacksView()
-            } label: {
-                Label("Offline practice packs", systemImage: "shippingbox")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if NativeReleaseFeatureFlags.offlinePacks {
+                NavigationLink {
+                    PracticePacksView()
+                } label: {
+                    Label("Downloaded practice routines", systemImage: "shippingbox")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("practice.quickStart.packs")
             }
-            .buttonStyle(BTSecondaryButtonStyle())
-            .accessibilityIdentifier("practice.quickStart.packs")
 
             Divider()
             exercisePicker
@@ -112,9 +130,6 @@ private struct PlayAlongMoreWaysView: View {
                 shortcuts: model.practiceFeatures.recents
             )
 
-            if model.audioEngine.permissionDenied || model.lastError == .microphoneUnavailable {
-                MicrophoneRecoveryCard()
-            }
         }
     }
 
@@ -136,6 +151,13 @@ private struct PlayAlongMoreWaysView: View {
             Text(verbatim: model.selectedPlayAlongExercise.displayDetail)
                 .font(.subheadline)
                 .foregroundStyle(BTTheme.muted)
+
+            Label("Pitch accuracy and smooth note changes", systemImage: "scope")
+                .font(.caption)
+            Label("About 3 minutes · microphone required", systemImage: "mic")
+                .font(.caption)
+            Label("Finish by holding each written note accurately", systemImage: "checkmark.circle")
+                .font(.caption)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: BTSpacing.sm) {
@@ -185,6 +207,16 @@ private struct PlayAlongMoreWaysView: View {
     }
 }
 
+@MainActor
+func requiresNativeMicrophoneRecovery(_ model: AppModel) -> Bool {
+    switch model.audioEngine.audioState {
+    case .permissionDenied, .permissionRestrictedOrUnavailable:
+        return true
+    default:
+        return model.lastError == .microphoneUnavailable
+    }
+}
+
 private struct PracticeShortcutSection: View {
     @EnvironmentObject private var model: AppModel
     let title: String
@@ -192,10 +224,13 @@ private struct PracticeShortcutSection: View {
     let shortcuts: [PracticeShortcut]
 
     var body: some View {
+        let visibleShortcuts = shortcuts.filter {
+            NativeReleaseFeatureFlags.offlinePacks || $0.kind != .practicePack
+        }
         VStack(alignment: .leading, spacing: BTSpacing.sm) {
             Text(verbatim: title)
                 .font(.headline)
-            if shortcuts.isEmpty {
+            if visibleShortcuts.isEmpty {
                 Label {
                     Text(verbatim: emptyMessage)
                 } icon: {
@@ -206,7 +241,7 @@ private struct PracticeShortcutSection: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("practice.shortcuts.empty")
             } else {
-                ForEach(shortcuts.prefix(3)) { shortcut in
+                ForEach(visibleShortcuts.prefix(3)) { shortcut in
                     shortcutDestination(shortcut)
                 }
             }
@@ -346,7 +381,7 @@ struct ProgressTabView: View {
     @Binding var selectedTab: AppTab
 
     var body: some View {
-        let snapshot = model.analyticsSnapshot
+        let weeklySnapshot = AnalyticsSnapshot(sessions: progressWeeklySessions(model.sessions))
         VStack(spacing: 0) {
             BTScreen {
                 BTPageHeader(
@@ -357,51 +392,32 @@ struct ProgressTabView: View {
 
                 ProgressTodaySection()
 
+                if weeklySnapshot.hasSessions {
+                    ProgressTrendsSection(snapshot: weeklySnapshot)
+                }
+
+                PracticeStreakCard(summary: PracticeStreakSummary.calculate(sessions: model.sessions))
+
+                ProgressNextStepSection(selectedTab: $selectedTab)
+                WeeklyGoalCard()
                 ProgressGettingStartedSection()
 
-                Text("This week")
-                    .font(.title2.weight(.bold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("progress.thisWeek")
-                WeeklyGoalCard()
-
-                ProgressNextStepSection()
-
-                if progressShouldShowWarmupResume(model.currentWarmupCheckpoint) {
-                    NavigationLink {
-                        GuidedWarmupView()
-                    } label: {
-                        Label("Resume warm-up", systemImage: "play.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(BTSecondaryButtonStyle())
-                    .accessibilityIdentifier("progress.resumeWarmup")
-                }
-
-                Button {
-                    selectedTab = .tuner
-                } label: {
-                    Label("Open Tuner", systemImage: "arrow.right.circle.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(BTPrimaryButtonStyle())
-                .accessibilityIdentifier("progress.openTuner")
-
-                if let _ = model.weakTransitionInsight {
-                    WeakTransitionCard()
-                }
-
-                if snapshot.hasSessions {
-                    ProgressTrendsSection(snapshot: snapshot)
-                    ProgressHistorySection()
-                }
+                if model.analyticsSnapshot.hasSessions { ProgressHistorySection() }
             }
             .accessibilityIdentifier("screen.progress")
         }
         .background(BTTheme.background.ignoresSafeArea())
         .navigationTitle("Progress")
     }
+}
+
+func progressWeeklySessions(
+    _ sessions: [PracticeSession],
+    now: Date = Date(),
+    calendar: Calendar = .current
+) -> [PracticeSession] {
+    guard let interval = calendar.dateInterval(of: .weekOfYear, for: now) else { return [] }
+    return sessions.filter { interval.contains($0.startedAt) }
 }
 
 func progressShouldShowWarmupResume(_ checkpoint: GuidedWarmupCheckpoint?) -> Bool {
@@ -436,7 +452,9 @@ func progressOnboardingMilestones(for model: AppModel) -> [ProgressOnboardingMil
         ProgressOnboardingMilestone(
             id: "warmup",
             title: NativeLocalization.string("Warm-up complete"),
-            earned: model.currentWarmupCheckpoint?.completed == true
+            earned: model.sessions.contains {
+                $0.activity == .guidedWarmup && $0.completion == .completed
+            } || model.currentWarmupCheckpoint?.completed == true
         ),
         ProgressOnboardingMilestone(
             id: "play-along",
@@ -452,12 +470,13 @@ private struct ProgressGettingStartedSection: View {
     var body: some View {
         let milestones = progressOnboardingMilestones(for: model)
         let earnedCount = milestones.filter(\.earned).count
-        VStack(alignment: .leading, spacing: BTSpacing.sm) {
-            Text("Getting started")
-                .font(.title2.weight(.bold))
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("progress.gettingStarted")
-            BTCard {
+        if earnedCount < milestones.count {
+            VStack(alignment: .leading, spacing: BTSpacing.sm) {
+                Text("Getting started")
+                    .font(.title2.weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("progress.gettingStarted")
+                BTCard {
                 Text(verbatim: NativeLocalization.format(
                     "%@ of %@ complete",
                     String(earnedCount),
@@ -466,17 +485,18 @@ private struct ProgressGettingStartedSection: View {
                     .font(.headline)
                     .foregroundStyle(earnedCount == milestones.count ? BTTheme.success : BTTheme.text)
 
-                ForEach(milestones) { milestone in
-                    Label {
-                        Text(verbatim: milestone.title)
-                    } icon: {
-                        Image(systemName: milestone.earned ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(milestone.earned ? BTTheme.success : BTTheme.muted)
+                    ForEach(milestones) { milestone in
+                        Label {
+                            Text(verbatim: milestone.title)
+                        } icon: {
+                            Image(systemName: milestone.earned ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(milestone.earned ? BTTheme.success : BTTheme.muted)
+                        }
+                        .accessibilityValue(milestone.earned
+                            ? NativeLocalization.string("Done")
+                            : NativeLocalization.string("Next step"))
+                        .accessibilityIdentifier("progress.milestone.\(milestone.id)")
                     }
-                    .accessibilityValue(milestone.earned
-                        ? NativeLocalization.string("Done")
-                        : NativeLocalization.string("Next step"))
-                    .accessibilityIdentifier("progress.milestone.\(milestone.id)")
                 }
             }
         }
@@ -487,7 +507,9 @@ private struct ProgressTodaySection: View {
     @EnvironmentObject private var model: AppModel
 
     private var todaySessions: [PracticeSession] {
-        model.sessions.filter { Calendar.current.isDateInToday($0.startedAt) }
+        model.sessions.filter {
+            Calendar.current.isDateInToday($0.startedAt) && $0.contributesPracticeTime
+        }
     }
 
     private var todayMinutes: Int {
@@ -508,7 +530,7 @@ private struct ProgressTodaySection: View {
                     Image(systemName: todaySessions.isEmpty ? "circle.dashed" : "checkmark.circle.fill")
                 }
                 .font(.headline)
-                .foregroundStyle(todaySessions.isEmpty ? BTTheme.muted : BTTheme.success)
+                .btReadableForeground()
                 Text(verbatim: todaySessions.isEmpty
                     ? NativeLocalization.string("One short session is enough to get moving.")
                     : NativeLocalization.format(
@@ -517,7 +539,7 @@ private struct ProgressTodaySection: View {
                         String(todaySessions.count)
                     ))
                     .font(.subheadline)
-                    .foregroundStyle(BTTheme.muted)
+                    .btReadableForeground()
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -527,24 +549,100 @@ private struct ProgressTodaySection: View {
 
 private struct ProgressNextStepSection: View {
     @EnvironmentObject private var model: AppModel
+    @Binding var selectedTab: AppTab
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.sm) {
             Text("Next step")
                 .font(.title2.weight(.bold))
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("progress.nextStep")
             BTCard {
-                Label("3-minute tuning check", systemImage: "tuningfork")
+                Label {
+                    Text(verbatim: recommendationTitle)
+                } icon: {
+                    Image(systemName: recommendationIcon)
+                }
                     .font(.headline)
-                Text(verbatim: model.analyticsSnapshot.hasSessions
-                    ? model.analyticsSnapshot.recommendation
-                    : NativeLocalization.string("Play one comfortable note, find the center, and save the result."))
+                Text(verbatim: recommendationText)
                     .font(.subheadline)
-                    .foregroundStyle(BTTheme.muted)
+                    .btReadableForeground()
                     .fixedSize(horizontal: false, vertical: true)
+
+                recommendedAction
             }
         }
-        .accessibilityIdentifier("progress.nextStep")
+    }
+
+    @ViewBuilder
+    private var recommendedAction: some View {
+        switch model.progressRecommendationDestination {
+        case .guidedWarmup:
+            NavigationLink {
+                GuidedWarmupView()
+            } label: {
+                Label("Start 5-minute warm-up", systemImage: "timer")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTPrimaryButtonStyle())
+            .accessibilityIdentifier("progress.nextStep.cta")
+        case .practicePlan:
+            Button {
+                selectedTab = .scales
+            } label: {
+                Label("Open Scales", systemImage: "music.note.list")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTPrimaryButtonStyle())
+            .accessibilityIdentifier("progress.nextStep.cta")
+        case .scalePractice, .visualScalePractice:
+            Button {
+                selectedTab = .scales
+            } label: {
+                Label("Open Scales", systemImage: "music.note.list")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTPrimaryButtonStyle())
+            .accessibilityIdentifier("progress.nextStep.cta")
+        case .tuning, .playAlong:
+            Button {
+                selectedTab = .tuner
+            } label: {
+                Label("Open Tuner", systemImage: "arrow.right.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTPrimaryButtonStyle())
+            .accessibilityIdentifier("progress.nextStep.cta")
+        }
+    }
+
+    private var recommendationTitle: String {
+        switch model.progressRecommendationDestination {
+        case .guidedWarmup: return NativeLocalization.string("5-minute warm-up")
+        case .practicePlan: return NativeLocalization.string("Practice without live listening")
+        case .tuning, .playAlong, .scalePractice, .visualScalePractice: return NativeLocalization.string("3-minute tuning check")
+        }
+    }
+
+    private var recommendationIcon: String {
+        switch model.progressRecommendationDestination {
+        case .guidedWarmup: return "timer"
+        case .practicePlan: return "music.note.list"
+        case .tuning, .playAlong, .scalePractice, .visualScalePractice: return "tuningfork"
+        }
+    }
+
+    private var recommendationText: String {
+        switch model.progressRecommendationDestination {
+        case .guidedWarmup:
+            return NativeLocalization.string("Microphone access is off. Start a guided warm-up to build steady air and relaxed attacks without listening.")
+        case .practicePlan:
+            return NativeLocalization.string("Live listening needs attention. Use a scale or practice plan while you check your audio connection.")
+        case .tuning, .playAlong, .scalePractice, .visualScalePractice:
+            return model.analyticsSnapshot.hasSessions
+                ? model.analyticsSnapshot.recommendation
+                : NativeLocalization.string("Play one comfortable note, find the center, and save the result.")
+        }
     }
 }
 
@@ -553,7 +651,7 @@ private struct ProgressTrendsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.sm) {
-            Text("Trends")
+            Text("Weekly trend")
                 .font(.title2.weight(.bold))
                 .accessibilityAddTraits(.isHeader)
             LazyVGrid(
@@ -579,12 +677,80 @@ private struct ProgressTrendsSection: View {
                 )
                 BTMetricTile(
                     title: "Recordings",
-                    value: .verbatim(NativeLocalization.isolate(String(snapshot.sessionCount))),
-                    detail: "total"
+                    value: .verbatim(NativeLocalization.isolate(String(snapshot.recordingSessionCount))),
+                    detail: "meaningful captures"
                 )
             }
             .accessibilityIdentifier("progress.metrics")
         }
+    }
+}
+
+private struct PracticeStreakCard: View {
+    let summary: PracticeStreakSummary
+
+    private var accessibilitySummary: String {
+        NativeLocalization.format(
+            "Current streak: %@ days. Longest streak: %@ days.",
+            String(summary.currentStreakDays),
+            String(summary.longestStreakDays)
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BTSpacing.sm) {
+            Text("Practice streak")
+                .font(.title2.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+
+            BTCard(tint: BTTheme.surfaceWarm) {
+                HStack(spacing: BTSpacing.md) {
+                    streakMetric(title: "Current streak", days: summary.currentStreakDays)
+                    Divider()
+                    streakMetric(title: "Longest streak", days: summary.longestStreakDays)
+                }
+
+                Text("Last 7 days")
+                    .font(.subheadline.weight(.semibold))
+                    .btReadableForeground()
+
+                HStack(spacing: BTSpacing.sm) {
+                    ForEach(summary.recentDays) { day in
+                        VStack(spacing: BTSpacing.xs) {
+                            Text(verbatim: day.date.formatted(.dateTime.weekday(.narrow)))
+                                .font(.caption.weight(.semibold))
+                                .btReadableForeground()
+                            Image(systemName: day.practiced ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(day.practiced ? BTTheme.success : BTTheme.muted)
+                                .accessibilityHidden(true)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide)))
+                        .accessibilityValue(day.practiced
+                            ? NativeLocalization.string("Practiced")
+                            : NativeLocalization.string("No practice"))
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("progress.streak")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(NativeLocalization.string("Practice streak"))
+        .accessibilityValue(accessibilitySummary)
+    }
+
+    private func streakMetric(title: String, days: Int) -> some View {
+        VStack(alignment: .leading, spacing: BTSpacing.xs) {
+            Text(verbatim: title)
+                .font(.caption.weight(.semibold))
+                .btReadableForeground()
+            Text(verbatim: NativeLocalization.format("%@ days", String(days)))
+                .font(.title3.weight(.bold).monospacedDigit())
+                .btReadableForeground()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -605,7 +771,7 @@ private struct ProgressHistorySection: View {
                 .accessibilityIdentifier("progress.allSessions")
             }
 
-            ForEach(model.sessions.prefix(3)) { session in
+            ForEach(model.sessions.filter(\.contributesPracticeTime).prefix(3)) { session in
                 NavigationLink {
                     SessionDetailView(sessionID: session.id)
                 } label: {
@@ -618,9 +784,15 @@ private struct ProgressHistorySection: View {
                                 .foregroundStyle(BTTheme.muted)
                         }
                         Spacer()
-                        Text(verbatim: NativeLocalization.isolate("\(Int(session.inTunePercentage.rounded()))%"))
-                            .font(.headline.monospacedDigit())
-                            .foregroundStyle(session.inTunePercentage >= 70 ? BTTheme.success : BTTheme.warning)
+                        if session.activity.contributesPitchMetrics {
+                            Text(verbatim: NativeLocalization.isolate("\(Int(session.inTunePercentage.rounded()))%"))
+                                .font(.headline.monospacedDigit())
+                                .foregroundStyle(session.inTunePercentage >= 70 ? BTTheme.success : BTTheme.warning)
+                        } else {
+                            Text(verbatim: NativeLocalization.string("Completed"))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(BTTheme.success)
+                        }
                         Image(systemName: "chevron.right")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -646,7 +818,7 @@ struct GuestProgressSafetyBanner: View {
             VStack(alignment: .leading, spacing: BTSpacing.xs) {
                 Text("Keep your progress safe")
                     .font(.headline)
-                Text("Create a free account to back up practice and join Classes.")
+                Text("Create a free account to personalize your BrassTune practice profile.")
                     .font(.footnote)
                     .foregroundStyle(BTTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
