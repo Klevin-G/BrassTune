@@ -1,25 +1,28 @@
 # BrassTune Release Evidence
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-23. The historical report below retains its original evidence. Current live and local facts are recorded separately and do not certify the present deployment, native build, physical-device behavior, or an App Store submission.
+Updated: 2026-08-23. The historical report below retains its original evidence. Current live and local facts are recorded separately and do not certify physical-device audio behavior or App Review acceptance.
 
 ## 2026-08-23 verified current evidence
 
 - Apple Developer membership: **Enrolled as Individual**.
 - The public [iTunes lookup for app 6795688588](https://itunes.apple.com/lookup?id=6795688588) returns BrassTune `1.0`, `sellerName`/`artistName` `Arya Salem`, and release date `2026-08-18`.
-- App Store Connect shows build 5 and supports creating a new iOS version; Pricing shows the app on sale. These observations do not establish a new submission, review outcome, or release readiness.
+- Source was merged through [PR #28](https://github.com/Klevin-G/BrassTune/pull/28) and pushed to `main` at `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`.
 - Backend validation: `346 passed, 13 skipped`; targeted Bandit and `pip-audit` passed. A disposable PostgreSQL 17 run passed the new avatar migration constraints and concurrent replacement regression.
 - Web validation: `279/279` units and the production build passed; local Playwright passed `548` with `7` capability skips across five projects; the offline production-build suite passed `3/3`.
 - Native validation: Swift Core passed `12/12`; the exact simulator app-unit suite passed `270/270`; the exact-current monolithic UI suite passed `26/26` in 790.802 test seconds on iPhone 17 Pro / iOS 26.5 simulator.
 - Connected iPhone validation: the Debug app initially exposed a missing Swift-package runtime search path, which was repaired with `@executable_path/Frameworks`. The signed physical app-unit suite then passed `259`, skipped `11` source-tree-only audits, and failed `0` on the connected iPhone 15 Pro Max / iOS 26.6.1. Physical UI automation reached a device authorization timeout before any scenario executed; that is not counted as an app test failure or a pass.
-- Static/release validation: localization passed with `890` static keys and `1,027` catalog entries; the design-token and privacy-manifest checks passed; documentation credits passed for `91` owned Markdown files; Supabase linked dry run and lint passed. The avatar migration has not yet been applied to production.
-- Vercel’s Apple production environment flag was updated to `true`, but the value is not live until a redeploy. No deployed behavior is claimed from that configuration update.
+- Static/release validation: localization passed with `890` static keys and `1,027` catalog entries; the design-token and privacy-manifest checks passed; documentation credits passed for `91` owned Markdown files. The Supabase avatar migration was applied to the linked project and its private bucket/schema constraints were verified.
+- Vercel deployment `dpl_JAMX7E6udEZ5atVD8EPZrcnEo1pS` is **READY** at [brasstune.vercel.app](https://brasstune.vercel.app) and its production metadata reports exact `main` SHA `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`.
+- Render remains stale at `1cd195ed75dee61420d497438f4a4b54c07be25f`. Dashboard deployment is blocked by its GitHub authentication handoff, and the exact-SHA GitHub Actions deployment dispatch is queued without a runner. Therefore no hosted smoke is claimed for the merged backend.
+- Build `1.0.1 (6)` was archived, exported, distribution-signed, and uploaded. TestFlight processing completed and build 6 is **Ready to Submit**. App Store Connect version `1.0.1` exists with build 6 attached and metadata saved. Its final Add for Review/submit action is intentionally held until Render serves the exact backend SHA and hosted smoke passes.
+- The App Privacy declaration is published for Email Address, User ID, Other User Content, Name, and Photos or Videos: each is linked to the user, used for App Functionality, and not used for tracking. Guest sign-in-required is unchecked.
 
 The individual developer-name result remains open: an individual cannot select `BrassTune`, and the existing name cannot be edited in the ordinary UI. Apple Developer Support or an eligible organization transfer is required; eligibility and legal DBA/trade-name treatment remain a human/Apple decision.
 
 ## Decision
 
-The current source candidate is locally verified but is not yet a release candidate: it remains uncommitted, the new Supabase migration is unapplied, Render/Vercel still serve an older revision, and build `1.0.1 (6)` has not been archived or uploaded. Historical deployment evidence below remains useful context but does not bind the current source to production. Physical app-unit execution passed after the runtime-path repair; attended microphone/speaker quality, physical UI automation, signed archive, TestFlight processing, and App Store resubmission remain separate gates.
+The source is committed and the web production deployment, Supabase migration, signed `1.0.1 (6)` archive, TestFlight processing, App Store version/metadata, and privacy declaration are current. Submission remains held because Render does not yet serve the exact backend revision and hosted smoke has not been rerun against that revision. Physical app-unit execution passed after the runtime-path repair; attended microphone/speaker quality and physical UI automation remain separate gates.
 
 ## Verified evidence
 
@@ -63,9 +66,9 @@ Security advisors returned two warnings: the `pg_net` extension is installed in 
 
 ## Remaining external gates
 
-- Signed archive and TestFlight upload.
-- Physical iPhone/iPad checks for Ring/Silent behavior, microphone/brass input, Bluetooth/audio routes, interruptions, local recording deletion, and file-protection behavior.
-- Live App Store Connect privacy answers, review metadata, age rating, export compliance, and review access.
-- Human language review.
+- Deploy Render at exact `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`, then run and retain hosted smoke evidence.
+- Complete the connected-iPhone UI suite after the device authorizes UI automation; conduct attended physical microphone/brass, Ring/Silent, Bluetooth/wired-route, interruption, local-recording deletion, and file-protection checks.
+- Add for Review/submit version `1.0.1` only after the backend/hosted gate; App Review acceptance remains external.
+- Human language review and developer-name action through Apple Support/entity/transfer path.
 
-No claim in this report establishes a signed archive, TestFlight build, App Store approval, signed-in private-audio lifecycle, or physical-device audio behavior.
+No claim in this report establishes hosted exact-backend behavior, App Review acceptance, signed-in private-audio lifecycle acceptance, or physical-device audio behavior.

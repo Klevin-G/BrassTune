@@ -3,9 +3,12 @@ Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-23 UTC.
 
-This document describes the current source candidate, `1.0.1 (6)`. It does not
-prove that an archive was created, an IPA was uploaded, TestFlight processed the
-build, or App Store Connect was changed.
+This document describes the current source candidate, `1.0.1 (6)`. The exact
+candidate was archived, exported, distribution-signed, and uploaded on
+2026-08-23; TestFlight processing completed and build 6 is **Ready to Submit**.
+Version `1.0.1` exists in App Store Connect with build 6 attached. These facts
+do not prove processed-build physical behavior, hosted backend correctness, or
+App Review acceptance.
 
 ## Candidate-version rule
 
@@ -39,11 +42,12 @@ the exact source revision and the `1.0.1 (6)` version/build inspection.
 
 ## Upload and candidate closure
 
-Upload the generated IPA through Transporter or a configured App Store Connect
-API-key workflow. Wait for TestFlight processing, then install and validate that
-exact processed build on the physical device before selecting it in App Store
-Connect. Do not use a simulator, a build-only archive, or an earlier TestFlight
-build as a substitute.
+The generated IPA was uploaded through Xcode and completed TestFlight processing.
+Do not use a simulator, a build-only archive, or an earlier TestFlight build as
+a substitute for physical processed-build validation. The remaining candidate
+closure is hosted exact-backend smoke followed by physical validation as
+applicable; Add for Review/submit is intentionally held until the backend
+revision gate passes.
 
 Use [TESTFLIGHT_HANDOFF.md](TESTFLIGHT_HANDOFF.md) for release-gate context and
 [APP_STORE_CHECKLIST.md](APP_STORE_CHECKLIST.md) for App Store metadata,
