@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 TOKENS_PATH = ROOT / "design" / "brasstune-tokens.json"
 SWIFT_THEME_PATH = ROOT / "swift" / "BrassTuneApp" / "BrassTuneApp" / "DesignSystem" / "BrassTuneDesignSystem.swift"
+APP_ROOT_PATH = ROOT / "swift" / "BrassTuneApp" / "BrassTuneApp" / "AppRootView.swift"
 TOLERANCE = 0.012
 
 REQUIRED_THEME_SYMBOLS = {
@@ -47,7 +48,16 @@ SEMANTIC_DECLARATIONS = {
     "sharp": "Color(uiColor: .systemOrange)",
     "flat": "Color(uiColor: .systemBlue)",
     "unstable": "Color(uiColor: .secondaryLabel)",
-    "muted": "Color(uiColor: .secondaryLabel)",
+}
+
+# Body copy must be opaque because it is rendered over both opaque cards and
+# composited floating material. `secondaryLabel` is intentionally translucent
+# and can fail contrast after compositing.
+OPAQUE_ADAPTIVE_DECLARATIONS = {
+    "muted": (
+        "light: UIColor(red: 0.235, green: 0.235, blue: 0.263, alpha: 1)",
+        "dark: UIColor(red: 0.922, green: 0.922, blue: 0.961, alpha: 1)",
+    ),
 }
 
 # Brand-bearing adaptive colors retain exact dark-mode anchors from the shared
@@ -97,6 +107,7 @@ def adaptive_dark_color(source: str, name: str) -> tuple[float, float, float] | 
 def main() -> int:
     tokens = json.loads(TOKENS_PATH.read_text())
     source = SWIFT_THEME_PATH.read_text()
+    app_root_source = APP_ROOT_PATH.read_text()
     failures: list[str] = []
 
     declared = declared_theme_symbols(source)
@@ -107,6 +118,14 @@ def main() -> int:
         declaration = f"static let {name} = {initializer}"
         if declaration not in source:
             failures.append(f"BTTheme.{name} must use adaptive semantic initializer {initializer}")
+
+    for name, declarations in OPAQUE_ADAPTIVE_DECLARATIONS.items():
+        if f"static let {name} = adaptive(" not in source:
+            failures.append(f"BTTheme.{name} must use an opaque adaptive UIColor")
+            continue
+        for declaration in declarations:
+            if declaration not in source:
+                failures.append(f"BTTheme.{name} must preserve opaque contrast value {declaration}")
 
     for swift_name, token_path in ADAPTIVE_DARK_TOKEN_MAP.items():
         actual = adaptive_dark_color(source, swift_name)
@@ -133,6 +152,18 @@ def main() -> int:
     for marker in required_glass_markers:
         if marker not in source:
             failures.append(f"Missing centralized Liquid Glass marker: {marker}")
+
+    semantic_bpm_style = ".font(.system(.largeTitle, design: .rounded).weight(.bold).monospacedDigit())"
+    if semantic_bpm_style not in app_root_source:
+        failures.append("Metronome BPM must use the semantic large-title Dynamic Type style")
+    if "bpmDisplaySize" in app_root_source:
+        failures.append("Metronome BPM must not use a custom point-size Dynamic Type path")
+
+    floating_bpm_text = 'NativeLocalization.format("BPM %@", String(model.metronome.bpm))'
+    if floating_bpm_text not in app_root_source:
+        failures.append("Floating tuner BPM must be a single localized semantic text element")
+    if 'Text("BPM")' in app_root_source:
+        failures.append("Floating tuner BPM must not use a fixed-size caption child")
 
     if failures:
         print("Design token verification failed:", file=sys.stderr)

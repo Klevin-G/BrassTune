@@ -1482,6 +1482,23 @@ final class BrassTuneAppUITests: XCTestCase {
     @MainActor
     private func waitForPhysicalElement(
         _ element: XCUIElement,
+        toHaveLabel expectedLabel: String,
+        enabled: Bool,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if element.exists, element.label == expectedLabel, element.isEnabled == enabled {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        } while Date() < deadline
+        return element.exists && element.label == expectedLabel && element.isEnabled == enabled
+    }
+
+    @MainActor
+    private func waitForPhysicalElement(
+        _ element: XCUIElement,
         toChangeFromLabel initialLabel: String,
         timeout: TimeInterval
     ) -> Bool {
@@ -1533,18 +1550,17 @@ final class BrassTuneAppUITests: XCTestCase {
         if app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 3) {
             app.descendants(matching: .any)["gateway.continueAsGuest"].tap()
             XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 8))
-            app.descendants(matching: .any)["onboarding.startPractice"].tap()
+            app.buttons["onboarding.startPractice"].tap()
         }
         if app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 3) {
             openTab("Tuner", in: app)
         }
         XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
 
-        let captureStart = app.descendants(matching: .any)["tuner.recordButton"]
+        let captureTake = app.buttons["tuner.take"]
         let captureStop = app.descendants(matching: .any)["tuner.floating.stop"]
-        XCTAssertTrue(captureStart.waitForExistence(timeout: 8))
-        captureStart.tap()
         allowMicrophonePermissionIfPresented()
+        XCTAssertTrue(captureTake.waitForExistence(timeout: 15))
         XCTAssertTrue(captureStop.waitForExistence(timeout: 15))
 
         var timerStop: XCUIElement?
@@ -1565,22 +1581,13 @@ final class BrassTuneAppUITests: XCTestCase {
 
         app.activate()
         XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
-        XCTAssertFalse(captureStop.exists, "Timer interruption must tear down the active capture.")
         let readout = app.descendants(matching: .any)["tuner.readout"]
         XCTAssertTrue(readout.waitForExistence(timeout: 5))
+        // The real timer interrupts the foreground audio session, and the
+        // Tuner's deliberate foreground contract resumes listening afterward.
+        XCTAssertTrue(captureTake.waitForExistence(timeout: 15), "Tuner must resume listening after the real timer interruption.")
+        XCTAssertTrue(captureStop.waitForExistence(timeout: 15))
         XCTAssertFalse(readout.label.contains("Ready"))
-        XCTAssertFalse(app.descendants(matching: .any)["tuner.meter"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["tuner.cents"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["tuner.frequency"].exists)
-
-        let retry = app.descendants(matching: .any)["microphone.retry"]
-        if retry.waitForExistence(timeout: 3) {
-            retry.tap()
-        } else {
-            XCTAssertTrue(captureStart.waitForExistence(timeout: 8))
-            captureStart.tap()
-        }
-        XCTAssertTrue(captureStop.waitForExistence(timeout: 15), "Tuner must restart after the real timer interruption.")
         preservePhysicalScreenshot(named: "Physical Tuner recovered after on-device timer interruption")
         captureStop.tap()
     }
@@ -1590,11 +1597,10 @@ final class BrassTuneAppUITests: XCTestCase {
         let app = launchPhysicalReleaseApp()
         openTab("Tuner", in: app)
 
-        let start = app.descendants(matching: .any)["tuner.recordButton"]
+        let take = app.buttons["tuner.take"]
         let stop = app.descendants(matching: .any)["tuner.floating.stop"]
-        XCTAssertTrue(start.waitForExistence(timeout: 8))
-        start.tap()
         allowMicrophonePermissionIfPresented()
+        XCTAssertTrue(take.waitForExistence(timeout: 15))
         XCTAssertTrue(stop.waitForExistence(timeout: 15))
 
         let note = app.descendants(matching: .any)["tuner.note"]
@@ -1659,11 +1665,10 @@ final class BrassTuneAppUITests: XCTestCase {
         let app = launchPhysicalReleaseApp(extraArguments: ["UITEST_TUNER_A440_STABILITY"])
         openTab("Tuner", in: app)
 
-        let start = app.descendants(matching: .any)["tuner.recordButton"]
+        let take = app.buttons["tuner.take"]
         let stop = app.descendants(matching: .any)["tuner.floating.stop"]
-        XCTAssertTrue(start.waitForExistence(timeout: 8))
-        start.tap()
         allowMicrophonePermissionIfPresented()
+        XCTAssertTrue(take.waitForExistence(timeout: 15))
         XCTAssertTrue(stop.waitForExistence(timeout: 15))
 
         let readout = app.descendants(matching: .any)["tuner.readout"]
@@ -2041,11 +2046,10 @@ final class BrassTuneAppUITests: XCTestCase {
         let app = launchPhysicalReleaseApp()
         openTab("Tuner", in: app)
 
-        let start = app.descendants(matching: .any)["tuner.recordButton"]
+        let take = app.buttons["tuner.take"]
         let stop = app.descendants(matching: .any)["tuner.floating.stop"]
-        XCTAssertTrue(start.waitForExistence(timeout: 8))
-        start.tap()
         allowMicrophonePermissionIfPresented()
+        XCTAssertTrue(take.waitForExistence(timeout: 15))
         XCTAssertTrue(stop.waitForExistence(timeout: 15))
 
         struct AcousticCase {
@@ -2118,9 +2122,6 @@ final class BrassTuneAppUITests: XCTestCase {
         let app = launchPhysicalReleaseApp()
         openTab("Tuner", in: app)
 
-        let start = app.descendants(matching: .any)["tuner.recordButton"]
-        XCTAssertTrue(start.waitForExistence(timeout: 8))
-        start.tap()
         denyMicrophonePermission()
 
         let readout = app.descendants(matching: .any)["tuner.readout"]
@@ -2185,22 +2186,21 @@ final class BrassTuneAppUITests: XCTestCase {
         if app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 3) {
             app.descendants(matching: .any)["gateway.continueAsGuest"].tap()
             XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 8))
-            app.descendants(matching: .any)["onboarding.startPractice"].tap()
+            app.buttons["onboarding.startPractice"].tap()
         }
         if app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 3) {
             openTab("Tuner", in: app)
         }
         XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
         let retry = app.descendants(matching: .any)["microphone.retry"]
-        let restart = app.descendants(matching: .any)["tuner.recordButton"]
+        let take = app.buttons["tuner.take"]
         if retry.waitForExistence(timeout: 3) {
             retry.tap()
         } else {
             XCTAssertTrue(
-                restart.waitForExistence(timeout: 5),
-                "After the Settings grant, Tuner must expose either Retry or its real capture start control."
+                take.waitForExistence(timeout: 15),
+                "After the Settings grant, Tuner must resume listening or expose Retry."
             )
-            restart.tap()
         }
 
         let stop = app.descendants(matching: .any)["tuner.floating.stop"]
@@ -2218,53 +2218,47 @@ final class BrassTuneAppUITests: XCTestCase {
         let app = launchPhysicalReleaseApp()
 
         openTab("Tuner", in: app)
-        let tunerStart = app.descendants(matching: .any)["tuner.recordButton"]
+        let tunerTake = app.buttons["tuner.take"]
         let tunerStop = app.descendants(matching: .any)["tuner.floating.stop"]
-        let tunerRetry = app.descendants(matching: .any)["microphone.retry"]
+        let tunerStart = app.descendants(matching: .any)["tuner.recordButton"]
         let tunerReadout = app.descendants(matching: .any)["tuner.readout"]
+        allowMicrophonePermissionIfPresented()
         for cycle in 0..<20 {
-            var started = false
-            for attempt in 0..<3 {
-                if tunerRetry.exists {
-                    XCTAssertFalse(
-                        tunerReadout.label.contains("Ready"),
-                        "An interrupted physical capture must not fabricate the Ready state."
-                    )
-                    tunerRetry.tap()
-                } else {
-                    XCTAssertTrue(tunerStart.waitForExistence(timeout: 8), "Tuner start missing on cycle \(cycle + 1)")
-                    tunerStart.tap()
-                    if cycle == 0, attempt == 0 {
-                        allowMicrophonePermissionIfPresented()
-                    }
-                }
-
-                if tunerStop.waitForExistence(timeout: 12) {
-                    started = true
-                    break
-                }
-
-                XCTAssertTrue(
-                    tunerRetry.waitForExistence(timeout: 3) || tunerStart.exists,
-                    "Live tuner neither started nor exposed a recoverable state on cycle \(cycle + 1), attempt \(attempt + 1)."
-                )
-            }
-            XCTAssertTrue(started, "Live tuner did not recover and start on cycle \(cycle + 1)")
-            guard started else { return }
+            XCTAssertTrue(tunerTake.waitForExistence(timeout: 12), "Always-on tuner missing on cycle \(cycle + 1)")
+            XCTAssertTrue(tunerStop.exists, "Always-on tuner stop control missing on cycle \(cycle + 1)")
             XCTAssertFalse(
                 tunerReadout.label.contains("Ready"),
-                "An active physical capture must not retain the idle Ready state."
+                "An active physical listener must not retain the idle Ready state."
             )
+            if cycle < 3 {
+                tunerTake.tap()
+                XCTAssertTrue(waitForPhysicalElement(tunerTake, toHaveLabel: "Stop take and save", timeout: 8), "Explicit take must start on cycle \(cycle + 1).")
+                tunerTake.tap()
+                XCTAssertTrue(waitForPhysicalElement(tunerTake, toHaveLabel: "Record take", enabled: true, timeout: 12), "Explicit take must finish saving before the next cycle.")
+            }
             tunerStop.tap()
+            XCTAssertTrue(tunerStart.waitForExistence(timeout: 12), "Manual Start Listening must appear after cycle \(cycle + 1).")
+            tunerStart.tap()
+            XCTAssertTrue(tunerTake.waitForExistence(timeout: 12))
+            XCTAssertTrue(tunerStop.waitForExistence(timeout: 12), "Tuner listener must reinstall after cycle \(cycle + 1).")
         }
 
-        XCTAssertTrue(tunerStart.waitForExistence(timeout: 8))
-        tunerStart.tap()
         XCTAssertTrue(tunerStop.waitForExistence(timeout: 12))
         XCUIDevice.shared.press(.home)
         app.activate()
         XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
-        XCTAssertFalse(tunerStop.exists, "Backgrounding must tear down the live input tap.")
+        // The listener is stopped while backgrounded, then resumed on the
+        // active Tuner surface. Unit lifecycle tests cover the
+        // ordering of the background teardown itself; this device probe covers
+        // the user-visible foreground-resume contract.
+        XCTAssertTrue(
+            tunerStop.waitForExistence(timeout: 12),
+            "Foregrounding Tuner must resume the always-on listener."
+        )
+        XCTAssertFalse(
+            tunerReadout.label.contains("Ready"),
+            "A resumed physical listener must not fabricate the idle Ready state."
+        )
 
         openTab("Scales", in: app)
         let scaleStart = app.descendants(matching: .any)["scales.start"]
@@ -2325,13 +2319,13 @@ final class BrassTuneAppUITests: XCTestCase {
         let app = launchPhysicalReleaseApp()
 
         openTab("Tuner", in: app)
+        let captureTake = app.buttons["tuner.take"]
         let captureStart = app.descendants(matching: .any)["tuner.recordButton"]
         let captureStop = app.descendants(matching: .any)["tuner.floating.stop"]
         let captureRetry = app.descendants(matching: .any)["microphone.retry"]
         let readout = app.descendants(matching: .any)["tuner.readout"]
-        XCTAssertTrue(captureStart.waitForExistence(timeout: 8))
-        captureStart.tap()
         allowMicrophonePermissionIfPresented()
+        XCTAssertTrue(captureTake.waitForExistence(timeout: 15))
         XCTAssertTrue(captureStop.waitForExistence(timeout: 15))
         preservePhysicalScreenshot(named: "Physical Tuner before media-services reset")
 
@@ -2955,7 +2949,7 @@ final class BrassTuneAppUITests: XCTestCase {
         if app.descendants(matching: .any)["screen.settings"].exists {
             return app.descendants(matching: .any)["settings.signOut"].waitForExistence(timeout: 12)
         }
-        let startPractice = app.descendants(matching: .any)["onboarding.startPractice"]
+        let startPractice = app.buttons["onboarding.startPractice"]
         if startPractice.waitForExistence(timeout: 3), startPractice.isHittable {
             startPractice.tap()
         }
@@ -2980,7 +2974,7 @@ final class BrassTuneAppUITests: XCTestCase {
             return app.descendants(matching: .any)["settings.createAccount"].waitForExistence(timeout: 8)
                 && !app.descendants(matching: .any)["settings.signOut"].exists
         }
-        let startPractice = app.descendants(matching: .any)["onboarding.startPractice"]
+        let startPractice = app.buttons["onboarding.startPractice"]
         if startPractice.waitForExistence(timeout: 3), startPractice.isHittable {
             startPractice.tap()
         }
@@ -3016,7 +3010,7 @@ final class BrassTuneAppUITests: XCTestCase {
 
     @MainActor
     private func dismissOnboardingIfPresented(in app: XCUIApplication) {
-        let startPractice = app.descendants(matching: .any)["onboarding.startPractice"]
+        let startPractice = app.buttons["onboarding.startPractice"]
         guard startPractice.waitForExistence(timeout: 3) else { return }
         startPractice.tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 8))
@@ -3118,7 +3112,7 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
         app.descendants(matching: .any)["gateway.continueAsGuest"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 8))
-        app.descendants(matching: .any)["onboarding.startPractice"].tap()
+        app.buttons["onboarding.startPractice"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 8))
         return app
     }

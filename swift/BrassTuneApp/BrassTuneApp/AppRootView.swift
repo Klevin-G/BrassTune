@@ -1475,15 +1475,17 @@ private struct FloatingPracticeControlBar: View {
                 .accessibilityIdentifier("tuner.floating.metronome")
                 .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.warning))
 
-                VStack(spacing: 0) {
-                    Text(verbatim: NativeLocalization.isolate(String(model.metronome.bpm)))
-                        .font(.headline.monospacedDigit())
-                    Text("BPM")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(BTTheme.muted)
-                }
-                .frame(minWidth: 52)
-                .accessibilityElement(children: .combine)
+                // Keep tempo in one semantic text element. The previous
+                // number-plus-fixed-caption stack was combined by VoiceOver
+                // as a single `BPM` element, but its caption could not scale
+                // with Dynamic Type.
+                Text(verbatim: NativeLocalization.format("BPM %@", String(model.metronome.bpm)))
+                    .font(.headline.monospacedDigit())
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minWidth: 52, maxWidth: 84)
+                    .accessibilityLabel(Text(verbatim: NativeLocalization.format("BPM %@", String(model.metronome.bpm))))
 
                 Button {
                     model.adjustTempo(by: -2)
@@ -1506,7 +1508,15 @@ private struct FloatingPracticeControlBar: View {
 
             Text(verbatim: NativeLocalization.string(model.tunerTakeSaveInProgress ? "Saving" : (audioEngine.takeRecording ? "Recording take" : (model.metronomeRunning ? "Visual beat while listening" : "Listening"))))
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(model.metronomeRunning ? BTTheme.warning : BTTheme.muted)
+                // Use opaque semantic text over the floating material. System
+                // orange and translucent secondary labels can lose contrast
+                // after Liquid Glass compositing on-device.
+                .foregroundStyle(model.metronomeRunning ? BTTheme.accent : BTTheme.muted)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .layoutPriority(1)
                 .scaleEffect(model.metronomeRunning && !reduceMotion ? model.metronomePulseScale : 1)
                 .animation(reduceMotion ? nil : .spring(response: 0.18, dampingFraction: 0.76), value: model.metronomePulseSequence)
         }
@@ -1888,29 +1898,18 @@ struct MetronomeView: View {
             )
 
             BTCard(tint: BTTheme.surfaceWarm) {
-                HStack(alignment: .center, spacing: BTSpacing.lg) {
-                    VStack(alignment: .leading, spacing: BTSpacing.sm) {
-                        Text(verbatim: NativeLocalization.isolate(String(model.metronome.bpm)))
-                            .font(.system(size: 58, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(BTTheme.accentSoft)
-                            .accessibilityIdentifier("metronome.bpm")
-                        Text(verbatim: NativeLocalization.format(
-                            "%@ • %@ • %@",
-                            model.metronome.meterLabel,
-                            model.metronome.subdivision.title,
-                            model.metronome.tempoUnitLabel
-                        ))
-                            .font(.headline)
-                            .foregroundStyle(BTTheme.muted)
-                            .accessibilityIdentifier("metronome.meter")
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: BTSpacing.lg) {
+                        metronomeReadout
+                        Spacer(minLength: BTSpacing.md)
+                        metronomePulse
                     }
-                    Spacer()
-                    Circle()
-                        .fill(model.metronomeRunning ? BTTheme.warning.opacity(0.90) : BTTheme.surfaceAlt)
-                        .frame(width: 74, height: 74)
-                        .scaleEffect(model.metronomeRunning && !reduceMotion ? model.metronomePulseScale : 1)
-                        .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72), value: model.metronomePulseSequence)
-                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: BTSpacing.md) {
+                        metronomeReadout
+                        metronomePulse
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
                 }
 
                 Button {
@@ -2036,6 +2035,38 @@ struct MetronomeView: View {
         }
         .navigationTitle("Metronome")
         .accessibilityIdentifier("screen.metronome")
+    }
+
+    private var metronomeReadout: some View {
+        VStack(alignment: .leading, spacing: BTSpacing.sm) {
+            Text(verbatim: NativeLocalization.isolate(String(model.metronome.bpm)))
+                // A semantic text style lets Dynamic Type scale this primary
+                // readout.  A custom @ScaledMetric point size still reports
+                // as a fixed font to the system accessibility audit.
+                .font(.system(.largeTitle, design: .rounded).weight(.bold).monospacedDigit())
+                .foregroundStyle(BTTheme.accentSoft)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityIdentifier("metronome.bpm")
+            Text(verbatim: NativeLocalization.format(
+                "%@ • %@ • %@",
+                model.metronome.meterLabel,
+                model.metronome.subdivision.title,
+                model.metronome.tempoUnitLabel
+            ))
+                .font(.headline)
+                .foregroundStyle(BTTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("metronome.meter")
+        }
+    }
+
+    private var metronomePulse: some View {
+        Circle()
+            .fill(model.metronomeRunning ? BTTheme.warning.opacity(0.90) : BTTheme.surfaceAlt)
+            .frame(width: 74, height: 74)
+            .scaleEffect(model.metronomeRunning && !reduceMotion ? model.metronomePulseScale : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72), value: model.metronomePulseSequence)
+            .accessibilityHidden(true)
     }
 }
 
