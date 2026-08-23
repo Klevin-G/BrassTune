@@ -1,7 +1,7 @@
 # iOS Simulator Report
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-23. The current source is merged on `main` at `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; historical revision references do not bind this candidate.
+Updated: 2026-08-23. The release implementation is merged at `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; later documentation-only commits do not change the candidate code, and historical revision references do not bind it.
 
 ## Verified simulator evidence
 
