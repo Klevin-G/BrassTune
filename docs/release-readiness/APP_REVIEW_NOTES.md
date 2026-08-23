@@ -1,7 +1,7 @@
 # App Review Notes Draft
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-23. This is prepared copy, not a saved App Store Connect record.
+Updated: 2026-08-23. This copy replaced stale review notes for submitted version `1.0.1` build 7; it is not a claim of App Review approval.
 
 ## Reviewer access
 
@@ -38,26 +38,22 @@ Updated: 2026-08-23. This is prepared copy, not a saved App Store Connect record
 - Raw microphone audio is not uploaded by the native app. Local score files and
   native recordings leave the device only through an explicit export/share action.
 - An optional profile photo is used only for the signed-in account profile. It
-  is intended to be stored privately, replaceable/removable, and queued for
-  cleanup on account deletion. Backend lifecycle validation and deployment
-  evidence are pending. It is not shown to class-report surfaces or used for
-  ads or tracking.
+  is stored privately, replaceable/removable, and queued for cleanup on account
+  deletion. It is not shown to class-report surfaces or used for ads or tracking.
 - Account deletion is available in app for signed-in accounts. Local guest data
   can be cleared separately.
 
-## Not yet ready to paste as a final submission
+## Submitted-candidate boundary
 
-- The intended next candidate is source version `1.0.1 (6)`; no archive,
-  upload, processed TestFlight install, or final dSYM is documented here.
-- No current-source archive, upload, processed TestFlight install, or final dSYM
-  has been produced.
-- The original audio crash families have strong repaired-source physical
-  evidence on the built-in route, including a fresh current-source `7/7`
-  targeted device pass, but not against the exact next processed build.
-- App Store Connect metadata, privacy (including Name and Photos or Videos for
-  the profile feature), age rating, price/availability,
-  accessibility labels, content rights, reviewer phone, and DSA trader status
-  are not complete.
+- Candidate `1.0.1 (7)` was archived/exported from `d371100`, uploaded, and is
+  TestFlight **Ready to Submit**. Its IPA has a strict valid distribution
+  signature, matching app/dSYM UUID `77D84475-6D50-3D94-B842-290431F0D74D`, and
+  SHA-256 `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`.
+- Version `1.0.1` build 7 is submitted and **Waiting for Review** with manual
+  release selected. This is not approval or release evidence.
+- Automated physical runs cover the listed UI/audio matrices, but calibrated
+  acoustic accuracy, accessory routes, Files/Photos fixtures, timer/media-reset
+  prerequisites, and full assistive-technology/iPad validation remain unavailable.
 
 See [`APP_STORE_SUBMISSION_PACKET_2026-08-05.md`](APP_STORE_SUBMISSION_PACKET_2026-08-05.md)
 for complete product-page copy and field-by-field answers.

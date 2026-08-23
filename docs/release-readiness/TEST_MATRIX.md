@@ -4,28 +4,29 @@ Project attribution: Kelvin Guo, Arya Salem.
 > Local-only evidence registry. It contains no credentials or raw identity data,
 > but user-home paths must be normalized before external publication.
 
-Updated: 2026-08-23. Historical rows below retain their original evidence and boundaries. The current snapshot does not mark physical-audio, hosted-exact-backend, or App Review acceptance complete.
+Updated: 2026-08-23. Historical rows below retain their original evidence and boundaries. The current snapshot records the deployed implementation, submitted native candidate, and their separate source identities.
 
 ## 2026-08-23 current snapshot
 
 | Gate | Evidence | Status / boundary |
 |---|---|---|
-| Source integration | PR #28 merged the release implementation at `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; later documentation-only evidence commits do not change candidate code | Exact release-code identity; does not prove deployment behavior. |
+| Deployed release implementation | PR #28 implementation `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0` | Vercel and Render serve this SHA; it is distinct from native archive source `d371100` and any future merge SHA. |
 | Backend tests | `346 passed, 13 skipped`; PostgreSQL 17 migration constraints and concurrent avatar PUT passed | Passed locally. |
 | Frontend units and build | `279/279` units; production build passed | Passed locally. |
-| Playwright | `548` passed, `7` capability skips, `0` failures across five projects; offline production-build suite `3/3` | Passed locally; skips are not passes and this is not physical-device evidence. |
+| Hosted strict Playwright | `50/50` across five projects | Passed against Vercel/Render exact release implementation. |
 | Swift domain package | `12/12` | Passed locally. |
-| Native simulator units | `270/270` on iPhone 17 Pro simulator | Passed; simulator evidence only. |
-| Native simulator UI | Exact-current monolithic suite `26/26`, zero failures/skips, 790.802 test seconds | Passed on iPhone 17 Pro / iOS 26.5 simulator; not physical-device evidence. |
-| Native localization/design/privacy | `890` static keys / `1,027` catalog entries, zero localization issues; design tokens and privacy plist passed | Automated source validation only. |
-| Connected iPhone app units | `259` passed, `11` source-tree-only audits skipped, `0` failed on iPhone 15 Pro Max / iOS 26.6.1 | Signed physical execution passed after adding `@executable_path/Frameworks`; it is not microphone or acoustic validation. |
-| Connected iPhone UI automation | Runner signed and installed; iOS timed out enabling automation before test execution | Infrastructure blocked; no UI scenario counted as pass or failure. |
+| Native simulator units | `272/272` | Passed; simulator evidence only. |
+| Native localization/design/privacy | `889` static keys / `1,027` catalog entries, zero violations; design/privacy/diff checks passed | Automated source validation only. |
+| Physical automation canary | `1/1` in 14.058 s | Passed on connected iPhone. |
+| Physical strict accessibility | `1/1` in 79.342 s | Passed; not full assistive-technology/iPad validation. |
+| Physical standard UI | `26/26` in 774.943 s | Passed on connected iPhone. Broad XCUI detector findings were audited as false positives using screenshots/token ratios. |
+| Physical expanded audio stress | `1/1` in 511.046 s: 20 tuner listener reinstalls, three explicit take/save cycles, remaining tools, and tab switching | Passed for exercised built-in route; not calibrated acoustic or accessory-route evidence. |
+| Physical sustained metronome | `1/1` at 120 BPM in about 209.963 s | Earlier physical run; timing/audibility boundaries remain route-specific. |
 | Documentation credits | `91` owned Markdown files | Deterministic verifier passed. |
 | Supabase checks | `20260823164123_add_private_profile_avatars.sql` applied to the linked project; migration history, profile/avatar columns, and private `profile-avatars` bucket constraints verified; linked lint reported zero errors | Live schema/configuration evidence; signed-in lifecycle acceptance remains pending. |
-| Vercel production | `dpl_JAMX7E6udEZ5atVD8EPZrcnEo1pS` READY at [brasstune.vercel.app](https://brasstune.vercel.app), provider metadata reports exact release-implementation SHA `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0` | Deployed frontend identity; backend/hosted end-to-end smoke remains blocked. |
-| Render production | `/api/version` reports stale `1cd195ed75dee61420d497438f4a4b54c07be25f` | Not current. Dashboard deploy is blocked by GitHub authentication and exact-SHA Actions dispatch is queued without a runner. |
-| Build 6 / TestFlight | `1.0.1 (6)` archive/export is distribution-signed and uploaded; processing completed and build 6 is Ready to Submit | App Store Connect candidate evidence; not a physical processed-build test or App Review acceptance. |
-| App Store Connect version | Version `1.0.1` created; build 6 attached; metadata saved; guest sign-in-required unchecked | Add for Review/submit intentionally held for exact backend deploy plus hosted smoke. |
+| Vercel + Render production | Both deployed at release implementation `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; strict hosted Playwright `50/50` | Exact hosted gate closed. |
+| Build 7 archive/export | `1.0.1 (7)` from `d371100`; Apple Distribution `Arya Salem`, team `8S79RLTSWV`, bundle `com.aryasalem.BrassTune`, production environment/API; strict IPA signature valid | App/dSYM UUID `77D84475-6D50-3D94-B842-290431F0D74D`; IPA SHA-256 `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`. |
+| TestFlight / App Store Connect | Upload succeeded; build 7 Ready to Submit; version `1.0.1` attached to build 7; stale review notes replaced; submitted | **Waiting for Review**, manual release selected; not App Review approval. |
 | App Privacy declaration | Email Address, User ID, Other User Content, Name, Photos or Videos; linked, App Functionality, not tracking | Published App Store Connect declaration; continue to reconcile with shipped behavior. |
 | App Store public listing | [iTunes lookup 6795688588](https://itunes.apple.com/lookup?id=6795688588) reports BrassTune `1.0`, seller/artist `Arya Salem`, release date `2026-08-18` | Public catalog evidence only. |
 | Apple membership / developer name | Membership is **Enrolled as Individual**; public developer name remains `Arya Salem` | `BrassTune` developer-name change needs an Apple account/entity path (Support and/or eligible transfer); no rename is claimed. |

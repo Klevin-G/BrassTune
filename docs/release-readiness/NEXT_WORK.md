@@ -36,12 +36,11 @@ Project attribution: Kelvin Guo, Arya Salem.
   - Acceptance criteria: beta feedback identifies whether analytics, heat map, progress, and coach recommendations are understandable and useful.
   - Verification command or evidence: beta issue tracker, release journey updates, or product decision notes.
 
-## Must Finish Before Public/App Store Release
+## Completed / superseded App Store setup
 
-- [P0] Complete Apple signing, archive, TestFlight, and App Store Connect setup
-  - Owner type: Apple
-  - Acceptance criteria: final bundle ID, team, profiles/certificates, App Store record, signed archive, TestFlight upload, review metadata, demo account or demo notes are complete.
-  - Verification command or evidence: Xcode archive/export logs, App Store Connect/TestFlight processing evidence, completed `APP_STORE_CHECKLIST.md`.
+- [x] Apple signing, archive, TestFlight, and App Store Connect setup for `1.0.1 (7)`: archive/export/upload succeeded, TestFlight is Ready to Submit, and version `1.0.1` is Waiting for Review with manual release. This is submission evidence, not approval.
+
+## Must Finish Before Public/App Store Release
 
 - [P0] Validate physical iPhone/iPad microphone behavior with real brass input
   - Owner type: hardware
