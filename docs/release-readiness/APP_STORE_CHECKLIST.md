@@ -7,15 +7,17 @@ evidence, and remaining hosted/physical/App Review gates.
 
 ## Current 2026-08-23 submission state
 
-- `main` is exact `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0` after PR #28.
+- The release implementation is exact
+  `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0` from PR #28. Later
+  documentation-only evidence commits do not change the candidate code.
 - Build `1.0.1 (6)` was archived, exported, distribution-signed, uploaded, and
   processed by TestFlight; it is **Ready to Submit**.
 - Version `1.0.1` was created, build 6 is attached, and metadata is saved.
   Guest sign-in-required is unchecked. App Privacy is published for Email
   Address, User ID, Other User Content, Name, and Photos or Videos; all are
   linked, for App Functionality, and not used for tracking.
-- Final Add for Review/submit is intentionally held until Render deploys exact
-  `main` and hosted smoke passes. Render currently reports stale
+- Final Add for Review/submit is intentionally held until Render deploys the
+  exact release implementation and hosted smoke passes. Render currently reports stale
   `1cd195ed75dee61420d497438f4a4b54c07be25f`; Vercel is READY at exact `main`.
 - The physical app-unit suite passed `259`, skipped `11` source-tree-only
   audits, and failed `0`; physical UI automation remains blocked before test
