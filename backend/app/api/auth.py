@@ -139,13 +139,8 @@ def _sync_supabase_user(db: Session, payload: dict) -> User:
     else:
         user.supabase_user_id = supabase_id
         user.email = email or user.email
-        if metadata.get("display_name"):
-            user.display_name = metadata["display_name"]
-            user.name = metadata["display_name"]
-        if metadata.get("username") and USERNAME_RE.match(str(metadata["username"])):
-            user.username = _unique_username(db, metadata["username"], user.id)
-        if is_valid_instrument_id(metadata.get("primary_instrument_id", "")):
-            user.primary_instrument_id = metadata["primary_instrument_id"]
+        # user_metadata is user-editable at the identity provider. It may seed a
+        # new row, but must never overwrite the app-owned profile on each token.
     # Admin membership is declaratively controlled by BRASSTUNE_ADMIN_EMAILS.
     # Grant admin to listed emails; revoke admin ONLY for users that this env
     # list previously granted (admin_granted_by_env), so admins granted some

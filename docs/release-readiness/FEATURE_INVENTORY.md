@@ -1,4 +1,5 @@
 # Feature Inventory
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-07-24. This is an implementation inventory, not a hosted-release claim.
 

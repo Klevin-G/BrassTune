@@ -1,9 +1,35 @@
 # Release Test Matrix
+Project attribution: Kelvin Guo, Arya Salem.
 
 > Local-only evidence registry. It contains no credentials or raw identity data,
 > but user-home paths must be normalized before external publication.
 
-Updated: 2026-08-06. The hosted backend is verified at merge revision `1cd195ed75dee61420d497438f4a4b54c07be25f` and the hosted frontend at `288d83091616acc0d906869bb6389721ac3a6017`. Native build `1.0.0 (3)` was archived from the preserved uncommitted worktree based on `0c03bb54595567166a145a9a2640f0f946432e11`, exported, uploaded, processed, assigned to internal QA, selected for version 1.0, and submitted to App Review at the owner's direction. App Store Connect reports **Waiting for Review**; manual release remains selected and the app is not public. The exact archive executable was also exported with a release-testing signature, installed on the wired iPhone, launched 20 times, and exercised through three complete physical audio matrices after XCTest authorization recovered. All three original crash families are closed for build 3 on the tested built-in route and screen-recording conditions. The owner-confirmed DSA non-trader declaration is Active for all 27 EU countries/regions. Documented P1 validation gaps remain open and were not relabeled as passes.
+Updated: 2026-08-23. Historical rows below retain their original evidence and boundaries. The current snapshot does not mark native/physical, deployment, or App Store submission work complete.
+
+## 2026-08-23 current snapshot
+
+| Gate | Evidence | Status / boundary |
+|---|---|---|
+| Backend tests | `346 passed, 13 skipped`; PostgreSQL 17 migration constraints and concurrent avatar PUT passed | Passed locally; migration is not yet applied to the linked production project. |
+| Frontend units and build | `279/279` units; production build passed | Passed locally. |
+| Playwright | `548` passed, `7` capability skips, `0` failures across five projects; offline production-build suite `3/3` | Passed locally; skips are not passes and this is not physical-device evidence. |
+| Swift domain package | `12/12` | Passed locally. |
+| Native simulator units | `270/270` on iPhone 17 Pro simulator | Passed; simulator evidence only. |
+| Native simulator UI | Exact-current monolithic suite `26/26`, zero failures/skips, 790.802 test seconds | Passed on iPhone 17 Pro / iOS 26.5 simulator; not physical-device evidence. |
+| Native localization/design/privacy | `890` static keys / `1,027` catalog entries, zero localization issues; design tokens and privacy plist passed | Automated source validation only. |
+| Connected iPhone app units | `259` passed, `11` source-tree-only audits skipped, `0` failed on iPhone 15 Pro Max / iOS 26.6.1 | Signed physical execution passed after adding `@executable_path/Frameworks`; it is not microphone or acoustic validation. |
+| Connected iPhone UI automation | Runner signed and installed; iOS timed out enabling automation before test execution | Infrastructure blocked; no UI scenario counted as pass or failure. |
+| Documentation credits | `91` owned Markdown files | Deterministic verifier passed. |
+| Supabase checks | Linked dry run would apply only `20260823164123_add_private_profile_avatars.sql`; linked lint reported zero errors | Configuration/check evidence only; migration and live lifecycle acceptance remain pending. |
+| Vercel Apple production flag | Production environment value updated to `true` | Not live until a redeploy; no deployed-behavior claim. |
+| App Store public listing | [iTunes lookup 6795688588](https://itunes.apple.com/lookup?id=6795688588) reports BrassTune `1.0`, seller/artist `Arya Salem`, release date `2026-08-18` | Public catalog evidence only. |
+| Apple membership and App Store Connect | Membership is **Enrolled as Individual**; App Store Connect shows build 5, can create a new iOS version, and Pricing shows the app on sale | Current console observations; they do not establish a new submission, review outcome, or release readiness. |
+
+The historical hosted/native rows below must not be read as proof of the current deployed revision or current physical-device state.
+
+## Historical 2026-08-06 context
+
+The hosted backend was verified at merge revision `1cd195ed75dee61420d497438f4a4b54c07be25f` and the hosted frontend at `288d83091616acc0d906869bb6389721ac3a6017`. Native build `1.0.0 (3)` was archived from the preserved uncommitted worktree based on `0c03bb54595567166a145a9a2640f0f946432e11`, exported, uploaded, processed, assigned to internal QA, selected for version 1.0, and submitted to App Review at the owner's direction. The contemporary App Store Connect view reported **Waiting for Review**, manual release selected, and the app not public. The exact archive executable was also exported with a release-testing signature, installed on the wired iPhone, launched 20 times, and exercised through three complete physical audio matrices after XCTest authorization recovered. All three original crash families were closed for build 3 on the tested built-in route and screen-recording conditions. The owner-confirmed DSA non-trader declaration was Active for all 27 EU countries/regions. Documented P1 validation gaps remained open and were not relabeled as passes.
 
 | Gate | Evidence | Status | Release meaning |
 |---|---|---|---|

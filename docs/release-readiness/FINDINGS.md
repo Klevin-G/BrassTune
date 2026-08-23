@@ -1,4 +1,5 @@
 # Release Findings
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## Fixed In This Pass
 

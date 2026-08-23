@@ -1,4 +1,5 @@
 # Domain Parity
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## Current Shared Domain State
 

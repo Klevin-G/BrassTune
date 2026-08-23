@@ -93,8 +93,18 @@ function SupportContact() {
   );
 }
 
-export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
+export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' | 'credits' }) {
   const { t } = useI18n();
+  if (kind === 'credits') {
+    return (
+      <ScreenContainer>
+        <PageHeader title={t('legal.creditsTitle')} description={t('legal.creditsDescription')} action={<BackButton />} />
+        <SectionCard title="BrassTune">
+          <p>{t('legal.creditsCreatedBy')}</p>
+        </SectionCard>
+      </ScreenContainer>
+    );
+  }
   if (kind === 'terms') {
     return (
       <ScreenContainer>
@@ -138,6 +148,10 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
           <p className="lg-lead">{t('legal.moreHelpBody')}</p>
           <SupportContact />
         </SectionCard>
+        <SectionCard title={t('legal.creditsTitle')}>
+          <p>{t('legal.creditsCreatedBy')}</p>
+          <Link className="ghost-button" to="/credits">{t('legal.creditsView')}</Link>
+        </SectionCard>
       </ScreenContainer>
     );
   }
@@ -152,13 +166,19 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' }) {
       <SectionCard title={t('legal.dataTitle')}>
         <p>{t('legal.dataBody1')}</p>
         <p>{t('legal.dataBody2')}</p>
+        <p>{t('legal.dataBody3')}</p>
       </SectionCard>
       <SectionCard title={t('legal.classTitle')}>
         <p>{t('legal.classBody')}</p>
       </SectionCard>
       <SectionCard title={t('legal.controlTitle')}>
         <p>{t('legal.controlBody')}</p>
+        <p>{t('legal.controlBody2')}</p>
         <Link className="primary-button" to="/settings">{t('legal.manage')}</Link>
+      </SectionCard>
+      <SectionCard title={t('legal.creditsTitle')}>
+        <p>{t('legal.creditsCreatedBy')}</p>
+        <Link className="ghost-button" to="/credits">{t('legal.creditsView')}</Link>
       </SectionCard>
     </ScreenContainer>
   );

@@ -1,4 +1,5 @@
 # Native Design Parity
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status: native visual polish upgraded locally; App Store, physical microphone, and provider gates remain open.
 

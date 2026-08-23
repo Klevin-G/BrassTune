@@ -1,4 +1,5 @@
 import math
+import unicodedata
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -54,9 +55,18 @@ class AudioFrameIn(BaseModel):
 
 class UserProfileUpdate(BaseModel):
     username: Optional[str] = Field(default=None, max_length=32)
-    display_name: Optional[str] = Field(default=None, max_length=120)
+    display_name: Optional[str] = Field(default=None, max_length=80)
     primary_instrument_id: Optional[str] = Field(default=None, max_length=40)
     onboarding_completed: bool = False
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def normalize_display_name(cls, value):
+        if value is None or not isinstance(value, str):
+            return value
+        # Normalize before Pydantic applies max_length so the public contract
+        # is 80 NFC Unicode code points, independent of decomposed input.
+        return unicodedata.normalize("NFC", value).strip()
 
     @field_validator("username")
     @classmethod

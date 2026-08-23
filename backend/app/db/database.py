@@ -197,6 +197,11 @@ def ensure_additive_columns() -> None:
             "email": "VARCHAR",
             "admin_granted_by_env": "BOOLEAN DEFAULT 0",
             "onboarding_completed_at": "DATETIME",
+            "profile_setup_completed_at": "DATETIME",
+            "avatar_object_key": "VARCHAR",
+            "avatar_mime_type": "VARCHAR",
+            "avatar_size_bytes": "INTEGER",
+            "avatar_updated_at": "DATETIME",
             "last_active_at": "DATETIME",
             "updated_at": "DATETIME",
         },
@@ -228,3 +233,23 @@ def ensure_additive_columns() -> None:
                 _add_sqlite_column(table_name, column_name, definition)
     _ensure_sqlite_account_deletion_user_id_nullable()
     _ensure_sqlite_deletion_tombstone_enforcement_phase()
+    user_columns = _sqlite_columns("users")
+    if {
+        "profile_setup_completed_at",
+        "onboarding_completed_at",
+        "username",
+        "display_name",
+    }.issubset(user_columns):
+        with engine.begin() as connection:
+            # Only established local accounts with a completed historical
+            # onboarding marker are backfilled. New provider-seeded accounts
+            # must explicitly confirm their profile in the authenticated flow.
+            connection.execute(
+                text(
+                    "update users set profile_setup_completed_at = onboarding_completed_at "
+                    "where profile_setup_completed_at is null "
+                    "and onboarding_completed_at is not null "
+                    "and username is not null and trim(username) <> '' "
+                    "and display_name is not null and trim(display_name) <> ''"
+                )
+            )

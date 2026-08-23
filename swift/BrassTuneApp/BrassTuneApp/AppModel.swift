@@ -1,4 +1,5 @@
 import Combine
+import AVFoundation
 import CryptoKit
 import Darwin
 import Foundation
@@ -183,9 +184,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var gatewayCompleted = false { didSet { persistLocalData() } }
     @Published private(set) var metronomeRunning = false
     @Published private(set) var metronomeTick = 0
+    /// Monotonic even when two adjacent pulses have the same beat index (for
+    /// example consecutive non-downbeats). Views animate this value, never a
+    /// repeating modulo beat index.
+    @Published private(set) var metronomePulseSequence: UInt64 = 0
+    /// A per-pulse visual transient. It always decays back to one so a
+    /// downbeat does not leave the metronome visually stuck enlarged.
+    @Published private(set) var metronomePulseScale: CGFloat = 1
     @Published private(set) var metronomeCountInRemaining = 0
     @Published private(set) var metronomeLastPulseWasAccented = false
     @Published private(set) var recordingStartInProgress = false
+    @Published private(set) var tunerTakeSaveInProgress = false
     @Published var selectedPlayAlongExerciseID = PlayAlongExercise.defaultExercise.id
     @Published private(set) var playAlongPhase: PlayAlongPhase = .idle
     @Published private(set) var playAlongStartInProgress = false
@@ -215,6 +224,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var pendingDestination: PendingAppDestination?
     @Published private(set) var microphoneRationaleSeen = false { didSet { persistLocalData() } }
     @Published private(set) var guestAccountUpgradePrompt: GuestAccountUpgradePrompt?
+    @Published private(set) var userProfile: NativeUserProfile?
+    @Published private(set) var profileAvatarData: Data?
+    @Published var profileEditorRequired = false
+    @Published private(set) var profileOperationInProgress = false
+    /// The credential can be valid while the optional profile service is
+    /// temporarily unavailable. Keep that distinction observable so the UI
+    /// can offer a retry without treating a network outage as a logout.
+    @Published private(set) var profileRefreshUnavailable = false
 
     let audioEngine: NativeAudioEngine
     let recordingPlayer: NativeRecordingPlayer
@@ -244,6 +261,8 @@ final class AppModel: ObservableObject {
     private var restoredSnapshotWritebackGeneration: Int?
     private let metronomeClock = NativeMetronomeClock()
     private var metronomeClockGeneration = UUID()
+    private var metronomeCountInGridTick = 0
+    private var metronomeCountInGridTicksRemaining = 0
     private var tapTempoEvents: [Date] = []
     private var audioFrameCancellable: AnyCancellable?
     private var audioRecordingCancellable: AnyCancellable?
@@ -309,11 +328,24 @@ final class AppModel: ObservableObject {
         self.audioEngine.setTonePlaybackPreparation { [weak self] in
             guard let self else { return }
             self.recordingPlayer.stopAndUnload()
-            AppAudioOwnershipHandoff.prepareForTonePlayback(
-                cancelPendingRecordingStart: self.cancelRecordingStart,
-                isRecording: { self.audioEngine.recording },
-                stopRecording: self.stopRecording
-            )
+            self.cancelRecordingStart()
+            guard self.audioEngine.recording else { return }
+            guard self.audioEngine.activeSource == .live else {
+                self.stopRecording()
+                return
+            }
+            // Passive tuner listening is disposable. A real take finishes on
+            // its own pipeline boundary before we tear down the listener.
+            if self.audioEngine.takeRecording,
+               let completion = self.audioEngine.finishLiveTake() {
+                _ = self.audioEngine.discardLiveRecording()
+                Task { @MainActor [weak self] in
+                    guard let self, let capture = await completion.value else { return }
+                    _ = self.handleUserStoppedLiveCapture(capture)
+                }
+            } else {
+                _ = self.audioEngine.discardLiveRecording()
+            }
         }
         self.audioEngine.setUnexpectedCaptureCompletion { [weak self] capture in
             self?.retainUnexpectedLiveCapture(capture)
@@ -484,6 +516,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Isolated UI-test fixture for the required-profile gate. It never
+    /// manufactures credentials or calls the profile service; production
+    /// profile completion remains server-authoritative.
+    func configureIncompleteProfileForUITesting() {
+        guard NativeAudioEngine.testFixturesEnabled,
+              ProcessInfo.processInfo.arguments.contains("UITEST_PROFILE_INCOMPLETE") else { return }
+        authState = .signedIn(email: "profile-fixture@brasstune.test")
+        userProfile = NativeUserProfile(
+            id: -1,
+            supabaseUserID: "profile-fixture-user",
+            username: nil,
+            displayName: nil,
+            email: "profile-fixture@brasstune.test",
+            primaryInstrumentID: selectedInstrumentId,
+            profileComplete: false,
+            avatarAvailable: false,
+            avatarUpdatedAt: nil
+        )
+        profileAvatarData = nil
+        profileEditorRequired = true
+        gatewayCompleted = true
+    }
+
     func enterGuestDemo(presentTutorial: Bool = true) {
         guard activateStorageNamespace(.guest) else {
             authState = .signedOut
@@ -500,8 +555,12 @@ final class AppModel: ObservableObject {
         authNotice = nil
         authNoticeIsError = false
         lastError = nil
+        profileRefreshUnavailable = false
         gatewayCompleted = true
-        if presentTutorial {
+        // Explicitly returning to durable guest practice should be immediate.
+        // Settings owns the deliberate replay path; only a first-time guest
+        // needs the walkthrough automatically.
+        if presentTutorial, !tutorialCompleted {
             requestTutorialPresentation()
         }
     }
@@ -604,7 +663,8 @@ final class AppModel: ObservableObject {
                 authState = .signedOut
                 return
             }
-            authState = .guest
+            authState = .signedOut
+            gatewayCompleted = false
             return
         }
         let storedNamespace = NativeStorageNamespace.account(userID: storedSession.userID)
@@ -645,6 +705,7 @@ final class AppModel: ObservableObject {
                 guard activateStorageNamespace(namespace) else { return }
                 authState = .signedIn(email: session.email)
                 lastError = nil
+                _ = await refreshProfile(for: session)
             }
         } catch is CancellationError {
             return
@@ -654,6 +715,7 @@ final class AppModel: ObservableObject {
                     if let session = try authService.unexpiredStoredSession() {
                         guard activateStorageNamespace(.account(userID: session.userID)) else { return }
                         authState = .signedIn(email: session.email)
+                        _ = await refreshProfile(for: session)
                         lastError = (error as? UserVisibleError) ?? .networkUnavailable
                         authNotice = NativeLocalization.string("You're offline. BrassTune kept your unexpired sign-in for local practice; online account features may be unavailable.")
                         authNoticeIsError = true
@@ -1353,23 +1415,37 @@ final class AppModel: ObservableObject {
                 config: config,
                 persist: !shouldDeferCredentialPersistenceForGuestUpgrade
             )
+            let profileResult = await refreshProfile(for: session)
+            guard profileResult != .identityMismatch else { return }
             completeAuthenticatedSession(session, showTutorial: false, notice: "Signed in.")
+            surfaceUnavailableProfileRefreshIfNeeded(profileResult)
         } catch {
             setAuthFailure(error)
         }
     }
 
-    func signUp(email: String, password: String) async {
+    func signUp(email: String, password: String, username: String? = nil, displayName: String? = nil) async {
         guard beginAuthOperation() else { return }
         defer { authOperationInProgress = false }
         do {
             let session = try await authService.signUp(
                 email: email,
                 password: password,
+                username: username,
+                displayName: displayName,
+                primaryInstrumentID: selectedInstrumentId,
                 config: config,
                 persist: !shouldDeferCredentialPersistenceForGuestUpgrade
             )
+            let profileResult = await refreshProfile(for: session)
+            guard profileResult != .identityMismatch else { return }
+            if profileResult == .unavailable {
+                // The account is authenticated, but setup cannot be silently
+                // skipped when its server-authoritative profile was unavailable.
+                profileEditorRequired = true
+            }
             completeAuthenticatedSession(session, showTutorial: true, notice: "Signed in.")
+            surfaceUnavailableProfileRefreshIfNeeded(profileResult)
         } catch UserVisibleError.emailConfirmationRequired {
             transitionToUnauthenticated(.emailConfirmationRequired(email: email))
             lastError = nil
@@ -1402,7 +1478,8 @@ final class AppModel: ObservableObject {
             )
             return
         }
-        if ProcessInfo.processInfo.arguments.contains("UITEST_AUTH_PROVIDERS") {
+        if NativeAudioEngine.testFixturesEnabled,
+           ProcessInfo.processInfo.arguments.contains("UITEST_AUTH_PROVIDERS") {
             authProviderConfiguration = AuthProviderConfiguration(apple: false, google: true)
             authProviderRecoveryMessage = NativeLocalization.string(
                 "One sign-in provider needs setup. Use an available provider or email and password."
@@ -1461,7 +1538,17 @@ final class AppModel: ObservableObject {
                 // without help; known returning accounts are not interrupted.
                 shouldShowTutorial = true
             }
+            let profileResult = await refreshProfile(for: result.session)
+            guard profileResult != .identityMismatch else { return }
+            // Only a positively identified new Apple account is forced into
+            // setup during a profile-service outage. Unknown/returning users
+            // keep their authenticated, retryable session instead of being
+            // trapped in an empty undismissable editor.
+            if profileResult == .unavailable, result.isNewUser == true {
+                profileEditorRequired = true
+            }
             completeAuthenticatedSession(result.session, showTutorial: shouldShowTutorial, notice: "Signed in with Apple.")
+            surfaceUnavailableProfileRefreshIfNeeded(profileResult)
         } catch {
             setAuthFailure(error)
         }
@@ -1479,7 +1566,21 @@ final class AppModel: ObservableObject {
                 config: config,
                 persist: !shouldDeferCredentialPersistenceForGuestUpgrade
             )
-            completeAuthenticatedSession(session, showTutorial: true, notice: "Signed in with Google.")
+            let profileResult = await refreshProfile(for: session)
+            guard profileResult != .identityMismatch else { return }
+            // Google does not provide a reliable account-age signal here. On
+            // an unavailable profile service, preserve the usable signed-in
+            // session and retry notice rather than locking an unknown or
+            // returning person in an undismissable empty editor. A verified
+            // incomplete Google profile still sets profileEditorRequired in
+            // refreshProfile(for:) above.
+            // Google has no reliable account-age field. A verified incomplete
+            // profile is the positive new-account signal; a verified complete
+            // or temporarily unavailable profile must not restart onboarding.
+            let shouldShowTutorial = profileResult == .verified
+                && userProfile?.profileComplete == false
+            completeAuthenticatedSession(session, showTutorial: shouldShowTutorial, notice: "Signed in with Google.")
+            surfaceUnavailableProfileRefreshIfNeeded(profileResult)
         } catch is CancellationError {
             // View-lifecycle cancellation is not an authentication failure.
         } catch {
@@ -1489,6 +1590,179 @@ final class AppModel: ObservableObject {
 
     func reportAuthFailure(_ error: UserVisibleError) {
         setAuthFailure(error)
+    }
+
+    func updateProfile(username: String, displayName: String) async -> Bool {
+        let wasCompletionRequired = profileEditorRequired
+        profileOperationInProgress = true
+        defer { profileOperationInProgress = false }
+        if NativeAudioEngine.testFixturesEnabled,
+           ProcessInfo.processInfo.arguments.contains("UITEST_PROFILE_INCOMPLETE") {
+            // The required-profile UI fixture intentionally has no credential
+            // or network route. Model the server's successful completion only
+            // for this isolated UI-test argument; production always follows
+            // the authenticated PATCH below.
+            let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let normalizedDisplayName = displayName
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .precomposedStringWithCanonicalMapping
+            guard !normalizedUsername.isEmpty, !normalizedDisplayName.isEmpty else { return false }
+            userProfile = NativeUserProfile(
+                id: -1,
+                supabaseUserID: "profile-fixture-user",
+                username: normalizedUsername,
+                displayName: normalizedDisplayName,
+                email: "profile-fixture@brasstune.test",
+                primaryInstrumentID: selectedInstrumentId,
+                profileComplete: true,
+                avatarAvailable: false,
+                avatarUpdatedAt: nil
+            )
+            // Keep a required editor presented until its staged avatar work
+            // has also completed. The editor releases this gate explicitly.
+            profileEditorRequired = wasCompletionRequired
+            profileRefreshUnavailable = false
+            lastError = nil
+            return true
+        }
+        do {
+            let token = try await validClassAccessToken()
+            let payload: [String: Any] = [
+                "username": username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                "display_name": displayName
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .precomposedStringWithCanonicalMapping,
+                "primary_instrument_id": selectedInstrumentId,
+                "onboarding_completed": true
+            ]
+            let body = try JSONSerialization.data(withJSONObject: payload)
+            let profile = try await apiClient.request(NativeUserProfile.self, path: "/api/users/me", method: "PATCH", body: body, config: config, bearerToken: token)
+            guard let session = try authService.restoreSessionOrThrow(), profile.supabaseUserID == session.userID else {
+                expireStoredCredentialAndLock(UserVisibleError.apiRequestFailed(statusCode: 401, message: NativeLocalization.string("The account profile did not match this sign-in. Sign in again.")))
+                return false
+            }
+            userProfile = profile
+            // Do not dismiss a required editor between its successful name
+            // PATCH and staged avatar upload/removal.
+            profileEditorRequired = wasCompletionRequired || !profile.profileComplete
+            profileRefreshUnavailable = false
+            lastError = nil
+            return true
+        } catch { setAuthFailure(error); return false }
+    }
+
+    func uploadProfileAvatar(_ jpegData: Data) async -> Bool {
+        profileOperationInProgress = true
+        defer { profileOperationInProgress = false }
+        do {
+            let token = try await validClassAccessToken()
+            let data = try await apiClient.data(path: "/api/users/me/avatar", method: "PUT", body: jpegData, config: config, bearerToken: token, contentType: "image/jpeg")
+            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+            let profile = try decoder.decode(NativeUserProfile.self, from: data)
+            guard let session = try authService.restoreSessionOrThrow(), profile.supabaseUserID == session.userID else {
+                expireStoredCredentialAndLock(UserVisibleError.apiRequestFailed(statusCode: 401, message: NativeLocalization.string("The account profile did not match this sign-in. Sign in again.")))
+                return false
+            }
+            userProfile = profile
+            profileRefreshUnavailable = false
+            await loadProfileAvatar(token: token)
+            return true
+        } catch { setAuthFailure(error); return false }
+    }
+
+    func deleteProfileAvatar() async -> Bool {
+        profileOperationInProgress = true
+        defer { profileOperationInProgress = false }
+        do {
+            let token = try await validClassAccessToken()
+            _ = try await apiClient.data(path: "/api/users/me/avatar", method: "DELETE", config: config, bearerToken: token)
+            profileAvatarData = nil
+            // DELETE has already been accepted. Do not use a later profile
+            // refresh (or an unrelated old error) to reinterpret this
+            // successful operation as a failure in the editor.
+            lastError = nil
+            return true
+        } catch {
+            setAuthFailure(error)
+            return false
+        }
+    }
+
+    /// Releases the non-dismissible completion sheet only after the editor
+    /// has finished every staged profile operation. Completion remains
+    func completeRequiredProfile() {
+        guard userProfile?.profileComplete == true else { return }
+        profileEditorRequired = false
+        profileRefreshUnavailable = false
+        lastError = nil
+    }
+
+    @discardableResult
+    func refreshCurrentProfile() async -> Bool {
+        guard !profileOperationInProgress,
+              let session = try? authService.restoreSessionOrThrow() else { return false }
+        profileOperationInProgress = true
+        defer { profileOperationInProgress = false }
+        let result = await refreshProfile(for: session)
+        guard result == .verified else { return false }
+        lastError = nil
+        authNotice = nil
+        authNoticeIsError = false
+        return true
+    }
+
+    private enum ProfileRefreshResult: Equatable {
+        case verified
+        case identityMismatch
+        case unavailable
+    }
+
+    /// Fetches the server profile after credentials have already been
+    /// authenticated. Only an explicit server identity mismatch invalidates
+    /// the credential. A malformed or unavailable profile service leaves the
+    /// authenticated session usable, with stale profile state cleared.
+    @discardableResult
+    private func refreshProfile(for session: AuthSession) async -> ProfileRefreshResult {
+        // Never let profile state from a previous identity survive a new
+        // credential refresh or a failed identity check.
+        userProfile = nil
+        profileAvatarData = nil
+        profileEditorRequired = false
+        profileRefreshUnavailable = false
+        do {
+            let token = try await authService.validAccessToken(config: config) ?? session.accessToken
+            let profile = try await apiClient.request(NativeUserProfile.self, path: "/api/users/me", config: config, bearerToken: token)
+            guard profile.supabaseUserID == session.userID else {
+                expireStoredCredentialAndLock(UserVisibleError.apiRequestFailed(statusCode: 401, message: NativeLocalization.string("The account profile did not match this sign-in. Sign in again.")))
+                return .identityMismatch
+            }
+            userProfile = profile
+            profileEditorRequired = !profile.profileComplete
+            if profile.avatarAvailable { await loadProfileAvatar(token: token) } else { profileAvatarData = nil }
+            return .verified
+        } catch is CancellationError {
+            return .unavailable
+        } catch {
+            profileRefreshUnavailable = true
+            lastError = (error as? UserVisibleError) ?? .networkUnavailable
+            authNotice = NativeLocalization.string("Your sign-in session is still active, but your BrassTune profile is temporarily unavailable. Retry or sign out.")
+            authNoticeIsError = true
+            return .unavailable
+        }
+    }
+
+    private func surfaceUnavailableProfileRefreshIfNeeded(_ result: ProfileRefreshResult) {
+        guard result == .unavailable, guestAccountUpgradePrompt == nil else { return }
+        authNotice = NativeLocalization.string("Your sign-in session is still active, but your BrassTune profile is temporarily unavailable. Retry or sign out.")
+        authNoticeIsError = true
+    }
+
+    private func loadProfileAvatar(token: String) async {
+        do {
+            profileAvatarData = try await apiClient.data(path: "/api/users/me/avatar", config: config, bearerToken: token)
+        } catch let error as UserVisibleError {
+            if case .apiRequestFailed(let status, _) = error, status == 404 { profileAvatarData = nil } else { setAuthFailure(error) }
+        } catch { setAuthFailure(error) }
     }
 
     /// Authentication succeeds before an account namespace is selected. When
@@ -1520,9 +1794,21 @@ final class AppModel: ObservableObject {
         case .cancel:
             // Credential persistence was deferred until an explicit choice.
             // Discarding the in-memory token keeps the guest namespace active
-            // without writing a restorable account session to Keychain.
+            // without writing a restorable account session to Keychain. Best
+            // effort remote revocation avoids leaving a temporary Supabase
+            // session alive when network/configuration allow it.
+            Task { [authService, config] in
+                await authService.revokeTemporarySession(session, config: config)
+            }
             pendingAuthenticatedSession = nil
             guestAccountUpgradePrompt = nil
+            // Profile refresh precedes the explicit guest-upgrade decision.
+            // A cancelled sign-in must discard that provisional account state
+            // without touching the active guest namespace or its practice.
+            userProfile = nil
+            profileAvatarData = nil
+            profileEditorRequired = false
+            profileRefreshUnavailable = false
             lastError = nil
             setAuthNotice(NativeLocalization.string("Stayed in guest practice. Your local practice remains unchanged."))
         case .keepSeparate:
@@ -1633,7 +1919,10 @@ final class AppModel: ObservableObject {
         gatewayCompleted = true
         lastError = nil
         setAuthNotice(NativeLocalization.string(notice))
-        if showTutorial { requestTutorialPresentation() }
+        // Namespace activation loads the account-local completion flag. Never
+        // replay onboarding for a returning account that already completed it
+        // on this device, even if a provider requests its new-user flow.
+        if showTutorial, !tutorialCompleted { requestTutorialPresentation() }
     }
 
     private func mergeGuestSnapshot(_ guest: NativeLocalSnapshot) {
@@ -2037,6 +2326,80 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Opens the tuner microphone once, without creating a practice session.
+    /// A later take reuses this exact capture/tap and only persists its marked
+    /// frame window.
+    func startTunerListening() async {
+        guard !recordingStartInProgress, !audioEngine.listening else { return }
+        recordingPlayer.stopAndUnload()
+        let token = UUID()
+        recordingStartToken = token
+        recordingStartInProgress = true
+        defer {
+            if recordingStartToken == token {
+                recordingStartToken = nil
+                recordingStartInProgress = false
+            }
+        }
+        lastError = nil
+        do {
+            if metronomeRunning { metronomeOutput.stop() }
+            let started = try await audioEngine.startLiveRecording(
+                instrumentId: selectedInstrumentId,
+                referencePitchHz: referencePitchHz,
+                recordingURL: nil
+            )
+            guard recordingStartToken == token else {
+                if started { _ = audioEngine.discardLiveRecording() }
+                return
+            }
+            if !started { lastError = .microphoneDenied }
+        } catch {
+            lastError = .microphoneUnavailable
+        }
+    }
+
+    func toggleTunerTake() {
+        if audioEngine.takeRecording {
+            guard let completion = audioEngine.finishLiveTake() else { return }
+            tunerTakeSaveInProgress = true
+            Task { @MainActor [weak self] in
+                defer { self?.tunerTakeSaveInProgress = false }
+                guard let self, let capture = await completion.value else { return }
+                _ = self.handleUserStoppedLiveCapture(capture)
+            }
+        } else {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if !self.audioEngine.listening {
+                    await self.startTunerListening()
+                }
+                _ = await self.audioEngine.beginLiveTake(
+                    recordingURL: self.recordingFileStore.destinationURL()
+                )
+            }
+        }
+    }
+
+    func stopTunerListening() {
+        guard audioEngine.listening else { return }
+        // Passive listening is disposable. An explicit take is not: close its
+        // writer/frame boundary first, then tear down the listener without
+        // ever converting preceding passive frames into a practice session.
+        if audioEngine.takeRecording,
+           let completion = audioEngine.finishLiveTake() {
+            tunerTakeSaveInProgress = true
+            _ = audioEngine.discardLiveRecording()
+            Task { @MainActor [weak self] in
+                defer { self?.tunerTakeSaveInProgress = false }
+                guard let self, let capture = await completion.value else { return }
+                _ = self.handleUserStoppedLiveCapture(capture)
+            }
+        } else {
+            _ = audioEngine.discardLiveRecording()
+        }
+    }
+
     func cancelRecordingStart() {
         recordingStartToken = nil
         recordingStartInProgress = false
@@ -2204,7 +2567,14 @@ final class AppModel: ObservableObject {
         )
         metronomeRunning = true
         metronomeTick = 0
+        metronomePulseSequence = 0
+        metronomePulseScale = 1
         metronomeCountInRemaining = metronome.countInBeats
+        metronomeCountInGridTick = 0
+        metronomeCountInGridTicksRemaining = metronome.countInBeats * max(
+            1,
+            (metronome.isCompoundMeter ? 3 : 1) * metronome.subdivision.ticksPerBeat
+        )
         let generation = UUID()
         metronomeClockGeneration = generation
         let initialAccent = metronomeCountInRemaining == 0 && metronome.accentFirstBeat
@@ -2215,12 +2585,17 @@ final class AppModel: ObservableObject {
                 guard let self,
                       self.metronomeRunning,
                       self.metronomeClockGeneration == generation else { return }
+                self.scheduleMetronomeClock(anchorHostTime: anchorHostTime, generation: generation)
+            },
+            onPulseDue: { [weak self] targetHostTime in
+                guard let self,
+                      self.metronomeRunning,
+                      self.metronomeClockGeneration == generation else { return }
                 self.advanceMetronomeClock(
-                    scheduledHostTime: anchorHostTime,
+                    scheduledHostTime: targetHostTime,
                     pulseIndex: 0,
                     emitAudio: false
                 )
-                self.scheduleMetronomeClock(anchorHostTime: anchorHostTime, generation: generation)
             }
         )
     }
@@ -2230,7 +2605,10 @@ final class AppModel: ObservableObject {
         metronomeClockGeneration = UUID()
         metronomeClock.stop()
         metronomeCountInRemaining = 0
+        metronomeCountInGridTick = 0
+        metronomeCountInGridTicksRemaining = 0
         metronomeLastPulseWasAccented = false
+        metronomePulseScale = 1
         metronomeOutput.stop()
     }
 
@@ -2259,8 +2637,14 @@ final class AppModel: ObservableObject {
     }
 
     func setMeter(beats: Int, unit: Int = 4) {
-        metronome.beatsPerMeasure = min(12, max(1, beats))
-        metronome.beatUnit = [2, 4, 8, 16].contains(unit) ? unit : 4
+        // Publish one validated settings value. Mutating the nested fields
+        // separately invokes metronome.didSet twice and can briefly restart a
+        // live clock at an invalid intermediate meter (for example 6/4 before
+        // 6/8).
+        var updated = metronome
+        updated.beatsPerMeasure = min(12, max(1, beats))
+        updated.beatUnit = [2, 4, 8, 16].contains(unit) ? unit : 4
+        metronome = updated
     }
 
     func toggleMetronomeMute() {
@@ -2268,20 +2652,24 @@ final class AppModel: ObservableObject {
     }
 
     func setMetronomeVisualOnly(_ visualOnly: Bool) {
-        metronome.visualOnly = visualOnly
+        var updated = metronome
+        updated.visualOnly = visualOnly
         if visualOnly {
-            metronome.muted = true
+            updated.muted = true
         } else {
-            metronome.muted = false
-            metronome.volume = max(0.6, metronome.volume)
+            updated.muted = false
+            updated.volume = max(0.6, updated.volume)
         }
+        metronome = updated
     }
 
     func setMetronomeVolume(_ volume: Double) {
         let clamped = min(1, max(0, volume))
-        metronome.volume = clamped
-        metronome.muted = clamped == 0
-        metronome.visualOnly = clamped == 0
+        var updated = metronome
+        updated.volume = clamped
+        updated.muted = clamped == 0
+        updated.visualOnly = clamped == 0
+        metronome = updated
     }
 
     func importSampleScore() {
@@ -2573,39 +2961,116 @@ final class AppModel: ObservableObject {
         emitAudio: Bool = true
     ) {
         guard metronomeRunning else { return }
-        if metronomeCountInRemaining > 0 {
-            metronomeCountInRemaining -= 1
-            metronomeLastPulseWasAccented = false
+        if metronomeCountInGridTicksRemaining > 0 {
             if emitAudio {
                 metronomeOutput.playTick(
                     settings: effectiveMetronomeSettings,
                     accent: false,
                     hostTime: scheduledHostTime,
-                    pulseIndex: pulseIndex
+                    pulseIndex: pulseIndex,
+                    onPulseDue: { [weak self] targetHostTime in
+                        self?.advanceMetronomeClock(
+                            scheduledHostTime: targetHostTime,
+                            pulseIndex: pulseIndex,
+                            emitAudio: false
+                        )
+                    }
                 )
+                return
             }
+            let countInGrid = max(
+                1,
+                (metronome.isCompoundMeter ? 3 : 1) * metronome.subdivision.ticksPerBeat
+            )
+            if metronomeCountInGridTick % countInGrid == 0 {
+                metronomeCountInRemaining = max(0, metronomeCountInRemaining - 1)
+            }
+            metronomeCountInGridTick &+= 1
+            metronomeCountInGridTicksRemaining -= 1
+            metronomeLastPulseWasAccented = false
+            metronomePulseSequence &+= 1
+            animateMetronomePulse(accented: false)
             return
         }
-        let accent = metronome.accentFirstBeat && metronomeTick == 0
-        metronomeLastPulseWasAccented = accent
+        let writtenBeat = metronomeTick / max(1, metronome.subdivision.ticksPerBeat)
+        let subdivisionIndex = metronomeTick % max(1, metronome.subdivision.ticksPerBeat)
+        let accent = metronomeCountInGridTicksRemaining == 0
+            && metronome.accentFirstBeat
+            && subdivisionIndex == 0
+            && metronome.groupingStarts.contains(writtenBeat)
         if emitAudio {
+            let callbackGeneration = metronomeClockGeneration
             metronomeOutput.playTick(
                 settings: effectiveMetronomeSettings,
                 accent: accent,
                 hostTime: scheduledHostTime,
-                pulseIndex: pulseIndex
+                pulseIndex: pulseIndex,
+                onPulseDue: { [weak self] targetHostTime in
+                    guard let self,
+                          self.metronomeRunning,
+                          self.metronomeClockGeneration == callbackGeneration else { return }
+                    self.advanceMetronomeClock(
+                        scheduledHostTime: targetHostTime,
+                        pulseIndex: pulseIndex,
+                        emitAudio: false
+                    )
+                }
             )
+            return
         }
+        metronomeLastPulseWasAccented = accent
         metronomeTick = (metronomeTick + 1) % max(1, metronome.beatsPerMeasure * metronome.subdivision.ticksPerBeat)
+        metronomePulseSequence &+= 1
+        animateMetronomePulse(accented: accent)
     }
 
     private func restartMetronomeIfNeeded() {
         guard metronomeRunning else { return }
-        let settings = effectiveMetronomeSettings
-        if settings.visualOnly || settings.muted || settings.volume <= 0 {
-            metronomeOutput.stop()
-        }
-        scheduleMetronomeClock()
+        // Preserve the next musical edge from the previous anchored timeline.
+        // Cancelling stale output generation prevents an old-rate click from
+        // landing beside the reconfigured timeline.
+        let nextEdge = metronomeClock.nextScheduledTargetHostTime()
+            ?? (mach_absolute_time() &+ AVAudioTime.hostTime(forSeconds: 0.08))
+        metronomeClock.stop()
+        // Keep the active output/session through a tempo change. Tearing it
+        // down forces a 100 ms reacquire margin and can cancel an imminent
+        // old-grid click before the new grid can replace it.
+        let generation = UUID()
+        metronomeClockGeneration = generation
+        let transitionTimeline = NativeMetronomeTimeline(
+            anchorHostTime: nextEdge,
+            intervalSeconds: metronome.intervalSeconds
+        )
+        let writtenBeat = metronomeTick / max(1, metronome.subdivision.ticksPerBeat)
+        let subdivisionIndex = metronomeTick % max(1, metronome.subdivision.ticksPerBeat)
+        let accent = metronomeCountInGridTicksRemaining == 0
+            && metronome.accentFirstBeat
+            && subdivisionIndex == 0
+            && metronome.groupingStarts.contains(writtenBeat)
+        metronomeOutput.playTick(
+            settings: effectiveMetronomeSettings,
+            accent: accent,
+            hostTime: nextEdge,
+            // Mark this as a fresh graph submission so NativeMetronomeOutput
+            // defers a stale old-rate edge until the session is ready. The
+            // callback is intentionally informational; the actual clock is
+            // anchored only when the accepted pulse becomes due below.
+            onInitialPulseScheduled: { _ in },
+            transitionBoundary: { readyHostTime in
+                transitionTimeline.firstBoundary(onOrAfter: readyHostTime)
+            },
+            onPulseDue: { [weak self] targetHostTime in
+                guard let self,
+                      self.metronomeRunning,
+                      self.metronomeClockGeneration == generation else { return }
+                self.advanceMetronomeClock(
+                    scheduledHostTime: targetHostTime,
+                    pulseIndex: 0,
+                    emitAudio: false
+                )
+                self.scheduleMetronomeClock(anchorHostTime: targetHostTime, generation: generation)
+            }
+        )
     }
 
     private var effectiveMetronomeSettings: MetronomeSettings {
@@ -2615,6 +3080,22 @@ final class AppModel: ObservableObject {
         mutedSettings.visualOnly = true
         mutedSettings.volume = 0
         return mutedSettings
+    }
+
+    private func animateMetronomePulse(accented: Bool) {
+        let sequence = metronomePulseSequence
+        // Alternate the nonaccent target slightly so an ultra-fast grid still
+        // has an observable change even before the previous spring settles.
+        metronomePulseScale = accented ? 1.18 : (sequence.isMultiple(of: 2) ? 1.07 : 1.11)
+        // At dense compound/subdivision grids a fixed 115 ms hold means the
+        // next tick arrives before the previous transient can return home.
+        // Release well within one grid interval so every pulse visibly moves.
+        let releaseSeconds = min(0.115, max(0.001, metronome.intervalSeconds * 0.5))
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(releaseSeconds))
+            guard let self, self.metronomePulseSequence == sequence else { return }
+            self.metronomePulseScale = 1
+        }
     }
 
     private func handleMetronomeAudioLifecycleEvent(_ event: NativeMetronomeOutput.LifecycleEvent) {
@@ -3262,6 +3743,11 @@ final class AppModel: ObservableObject {
         guestProgressSafetyPromptEligible = false
         persistedSessionIDs = []
         pendingDestination = nil
+        userProfile = nil
+        profileAvatarData = nil
+        profileEditorRequired = false
+        profileOperationInProgress = false
+        profileRefreshUnavailable = false
         gatewayCompleted = false
         tutorialCompleted = false
         appLanguage = .system

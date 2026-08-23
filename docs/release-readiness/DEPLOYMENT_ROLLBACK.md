@@ -1,4 +1,5 @@
 # Direct Deployment And Rollback
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-07-24. Deployed application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
 

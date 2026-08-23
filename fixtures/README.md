@@ -1,4 +1,5 @@
 # BrassTune Shared Fixtures
+Project attribution: Kelvin Guo, Arya Salem.
 
 These JSON fixtures define behavior that should stay identical between the web MVP and a future Swift/iPad app.
 

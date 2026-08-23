@@ -1,4 +1,5 @@
 # Swift Porting Notes
+Project attribution: Kelvin Guo, Arya Salem.
 
 The future iOS app should preserve the backend core behavior while replacing the web audio and server pieces with native equivalents.
 
@@ -142,4 +143,3 @@ Build shared test fixtures:
 - The same note events produce identical severity and recommendation categories.
 
 Those fixtures should run in pytest now and XCTest later.
-

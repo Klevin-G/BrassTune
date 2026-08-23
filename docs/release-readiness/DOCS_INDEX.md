@@ -1,7 +1,10 @@
 # Release Readiness Docs Index
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-19. Build `1.0.0 (5)` is the latest documented App Store
 candidate. Source-publication verification is separate from that signed binary.
+
+Project attribution is maintained in [Credits](../CREDITS.md): Kelvin Guo, Arya Salem.
 
 ## Current decision
 
@@ -26,6 +29,9 @@ remain open, and web/backend/source-publication evidence remains separate.
 | Latest App Store response/state | `APP_REVIEW_RESPONSE_2026-08-14.md` |
 | Historical build-3 physical/signing evidence | `NATIVE_PHYSICAL_RELEASE_REPORT_2026-08-06.md` |
 | Third-party button-art provenance | `../../THIRD_PARTY_ASSETS.md` |
+| Canonical project attribution | `../CREDITS.md` |
+| Physical-device automation prompt | `IPHONE_AUTOMATION_PROMPT.md` |
+| Retention, accessibility, and seller-name rationale | `PRODUCT_STEWARDSHIP_RATIONALE.md` |
 
 ## Evidence rule
 

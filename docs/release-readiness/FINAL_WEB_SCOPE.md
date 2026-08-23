@@ -1,4 +1,5 @@
 # Final Web Scope
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-06-21T05:24:54Z
 Branch: `arya/final-web-completion`

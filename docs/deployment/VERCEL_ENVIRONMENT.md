@@ -1,4 +1,5 @@
 # Vercel Environment
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-04. Production deployment remains pending exact-SHA CI and the rollout checklist.
 

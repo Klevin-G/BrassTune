@@ -1,5 +1,5 @@
 import { ArrowRight, Music2, X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '../i18n/LocaleContext';
 import { useAppSettings } from '../state/AppSettingsContext';
@@ -21,14 +21,25 @@ export function OnboardingFlow() {
     closeOnboarding,
   } = useAppSettings();
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const onboardingSavingRef = useRef(onboardingSaving);
   onboardingSavingRef.current = onboardingSaving;
   const navigate = useNavigate();
+  const [step, setStep] = useState(0);
+  const steps = [
+    { title: 'onboarding.title.instrument', body: 'onboarding.instrumentBody' },
+    { title: 'onboarding.title.tuner', body: 'onboarding.tunerBody' },
+    { title: 'onboarding.title.tools', body: 'onboarding.toolsBody' },
+    { title: 'onboarding.title.progress', body: 'onboarding.progressBody' },
+    { title: 'onboarding.title.settings', body: 'onboarding.settingsBody' },
+  ] as const;
+  const currentStep = steps[step];
 
   useEffect(() => {
     if (!onboardingOpen) return undefined;
+    setStep(0);
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButtonRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
@@ -68,6 +79,12 @@ export function OnboardingFlow() {
   }, [closeOnboarding, onboardingOpen]);
 
   useEffect(() => {
+    if (!onboardingOpen) return;
+    const frame = window.requestAnimationFrame(() => headingRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [onboardingOpen, step]);
+
+  useEffect(() => {
     if (!onboardingOpen || !onboardingSaving) return undefined;
     const frame = window.requestAnimationFrame(() => dialogRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
@@ -90,23 +107,18 @@ export function OnboardingFlow() {
         <div className="ob-heading">
           <span className="ob-heading-icon"><Music2 size={20} /></span>
           <div>
-            <p className="ob-eyebrow">{t('onboarding.eyebrow', { current: 1, total: 1 })}</p>
-            <h2 id="onboarding-title">{t('onboarding.title.instrument')}</h2>
+            <p className="ob-eyebrow">{t('onboarding.eyebrow', { current: step + 1, total: steps.length })}</p>
+            <h2 id="onboarding-title" ref={headingRef} tabIndex={-1}>{t(currentStep.title)}</h2>
           </div>
         </div>
 
         <div className="ob-step">
-          <p className="ob-lead">{t('onboarding.instrumentBody')}</p>
-          <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
-          <p className="ob-setup-note">{t('onboarding.instrumentHint')}</p>
-          <div className="ob-audience-grid">
-            {auth.isSignedIn
-              ? <div><strong>{t('onboarding.accountTitle')}</strong><span>{t('onboarding.accountBody')}</span></div>
-              : <div><strong>{t('onboarding.guestTitle')}</strong><span>{t('onboarding.guestBody')}</span></div>}
-            {!auth.configured && (
-              <div><strong>{t('onboarding.guestOnlyTitle')}</strong><span>{t('onboarding.guestOnlyBody')}</span></div>
-            )}
-          </div>
+          <p className="ob-lead">{t(currentStep.body)}</p>
+          {step === 0 && <><InstrumentSelector value={instrumentId} onChange={setInstrumentId} /><p className="ob-setup-note">{t('onboarding.instrumentHint')}</p></>}
+          {step === 4 && <p className="ob-setup-note">{t('onboarding.ready')}</p>}
+          {(step === 0 || step === 4) && <div className="ob-audience-grid">
+            {auth.isSignedIn ? <div><strong>{t('onboarding.accountTitle')}</strong><span>{t('onboarding.accountBody')}</span></div> : <div><strong>{t('onboarding.guestTitle')}</strong><span>{t('onboarding.guestBody')}</span></div>}
+          </div>}
         </div>
 
         {onboardingSaveError && (
@@ -120,8 +132,9 @@ export function OnboardingFlow() {
 
         <div className="ob-actions">
           <button className="ghost-button" type="button" onClick={closeOnboarding} disabled={onboardingSaving}>{t('onboarding.dismiss')}</button>
-          <button className="primary-button" type="button" onClick={() => void finish()} disabled={onboardingSaving}>
-            {onboardingSaving ? t('onboarding.saving') : t('onboarding.openTuner')}
+          {step > 0 && <button className="ghost-button" type="button" onClick={() => setStep((current) => current - 1)} disabled={onboardingSaving}>{t('onboarding.back')}</button>}
+          <button className="primary-button" type="button" onClick={() => step === steps.length - 1 ? void finish() : setStep((current) => current + 1)} disabled={onboardingSaving}>
+            {onboardingSaving ? t('onboarding.saving') : step === steps.length - 1 ? t('onboarding.openTuner') : t('onboarding.next')}
             <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
           </button>
         </div>

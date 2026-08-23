@@ -55,7 +55,7 @@ const cloudSession = {
 function seedGuestWorkspace(page: Page) {
   return page.addInitScript((session) => {
     localStorage.setItem('brasstune.guestSessions.v1', JSON.stringify([session]));
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
     localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.onboardingComplete', 'true');
   }, guestSession);
@@ -217,7 +217,62 @@ test('configured auth preserves the current route and always offers a guest esca
   await expect(guestEscape).toBeEnabled();
   await guestEscape.click();
   await expect(page).toHaveURL(/\/practice\/scorer\?exercise=cmaj$/);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBe('true');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('brasstune.guestAccess'))).toBe('true');
+});
+
+test('retained guest practice does not restore guest access after a cold browser reopen', async ({ page }) => {
+  // Do not use addInitScript here: it runs again on every navigation and would
+  // incorrectly restore the tab-scoped access marker that this test is meant
+  // to prove disappears when the browser closes.
+  await page.goto('/');
+  await page.evaluate((session) => {
+    localStorage.setItem('brasstune.guestSessions.v1', JSON.stringify([session]));
+    localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
+    localStorage.setItem('brasstune.onboardingComplete', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
+  }, guestSession);
+  await page.goto('/sessions');
+  await expect(page.locator('a[href="/sessions/-101"]')).toBeVisible();
+
+  // Closing a browser tab discards sessionStorage but leaves guest practice
+  // data in localStorage. Use a genuinely new page so React cannot retain an
+  // in-memory guestMode value from the original page.
+  await page.evaluate(() => {
+    // A prior release persisted this value. It must not grant access after the
+    // migration, even while the guest recording itself remains retained.
+    localStorage.setItem('brasstune.guestAccess', 'true');
+  });
+  const context = page.context();
+  await page.close();
+  const reopened = await context.newPage();
+  await reopened.goto('/sessions');
+
+  await expect(reopened).toHaveURL(/\/?\?next=%2Fsessions$/);
+  await expect.poll(() => reopened.evaluate(() => localStorage.getItem('brasstune.guestSessions.v1'))).toContain('Private guest audio');
+  await expect.poll(() => reopened.evaluate(() => sessionStorage.getItem('brasstune.guestAccess'))).toBeNull();
+  await expect.poll(() => reopened.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBeNull();
+
+  // Data stays durable, but becomes reachable only after a fresh, explicit
+  // guest entry in the reopened browser page.
+  await reopened.getByRole('button', { name: 'Start practicing' }).click();
+  await expect.poll(() => reopened.evaluate(() => sessionStorage.getItem('brasstune.guestAccess'))).toBe('true');
+  await reopened.goto('/sessions');
+  await expect(reopened.locator('a[href="/sessions/-101"]')).toBeVisible();
+});
+
+test('configured gateway makes account creation primary while guest practice stays secondary', async ({ page }) => {
+  await installSignedOutFixture(page);
+  await page.goto('/');
+
+  const createAccount = page.getByRole('link', { name: 'Create free account' });
+  const guest = page.getByRole('button', { name: 'Continue as guest' });
+  await expect(createAccount).toBeVisible();
+  await expect(guest).toBeVisible();
+  await expect(createAccount).toHaveClass(/primary-button/);
+  await expect(guest).toHaveClass(/ghost-button/);
+  const [createBox, guestBox] = await Promise.all([createAccount.boundingBox(), guest.boundingBox()]);
+  expect(createBox?.y).toBeLessThan(guestBox?.y ?? Number.POSITIVE_INFINITY);
+  await expect(page.getByText(/jump right in|no account needed/i)).toHaveCount(0);
 });
 
 test('auth guest escape rejects a normalized protocol-relative next target in the browser', async ({ page }) => {

@@ -1,6 +1,6 @@
 import { AlertTriangle, BarChart3, Check, DatabaseBackup, Download, LogIn, LogOut, Mic, MicOff, RefreshCcw, RotateCcw, Trash2, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { clearLocalSessions, downloadExport, friendlyUserFacingError, repairDemoData, resetDemoData } from '../api/client';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { ThemeSelector } from '../components/ThemeSelector';
@@ -9,7 +9,7 @@ import { GUEST_WORKSPACE_ACCESS, guestSessionsExport } from '../domain/guestSess
 import { PRACTICE_LIBRARY_PREFIX } from '../domain/practiceLibrary';
 import { clearLocalScoreDocuments } from '../domain/scoreDocuments';
 import { MAX_REFERENCE_PITCH, MIN_REFERENCE_PITCH, useAppSettings } from '../state/AppSettingsContext';
-import { useAuth } from '../state/AuthContext';
+import { isValidDisplayName, isValidProfileUsername, useAuth } from '../state/AuthContext';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
 import { useTheme } from '../state/ThemeContext';
 import './SettingsPage.css';
@@ -45,6 +45,7 @@ export function SettingsPage() {
   const auth = useAuth();
   const guestAccess = !auth.loading && !auth.isSignedIn && auth.guestMode ? GUEST_WORKSPACE_ACCESS : undefined;
   const location = useLocation();
+  const navigate = useNavigate();
   const practiceLibrary = usePracticeLibrary();
   const { setTheme } = useTheme();
   const { locale, t } = useI18n();
@@ -54,10 +55,27 @@ export function SettingsPage() {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [micCheck, setMicCheck] = useState<MicCheck>('idle');
   const [referencePitchInput, setReferencePitchInput] = useState(() => String(referencePitch));
+  const [profileUsername, setProfileUsername] = useState('');
+  const [profileDisplayName, setProfileDisplayName] = useState('');
+  const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
 
   useEffect(() => {
     setReferencePitchInput(String(referencePitch));
   }, [referencePitch]);
+
+  useEffect(() => {
+    setProfileUsername(auth.profile?.username ?? '');
+    setProfileDisplayName(auth.profile?.display_name ?? '');
+    setProfileSaveError(null);
+  }, [auth.profile?.id, auth.profile?.username, auth.profile?.display_name]);
+
+  useEffect(() => {
+    const next = new URLSearchParams(location.search).get('next');
+    if (auth.profile?.profile_complete && next?.startsWith('/') && !next.startsWith('//')) {
+      navigate(next, { replace: true });
+    }
+  }, [auth.profile?.profile_complete, location.search, navigate]);
 
   const commitReferencePitch = () => {
     const next = Number(referencePitchInput);
@@ -91,6 +109,30 @@ export function SettingsPage() {
       setMaintenanceStatus(locale === 'en' ? t('settings.deleteFailedDetail', { error: friendlyUserFacingError(error, t('settings.reconnect')) }) : t('settings.deleteFailed'));
     } finally {
       setBusyAction(null);
+    }
+  };
+
+  const submitProfileCompletion = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!isValidProfileUsername(profileUsername)) {
+      setProfileSaveError(t('auth.usernameFormat'));
+      return;
+    }
+    if (!isValidDisplayName(profileDisplayName)) {
+      setProfileSaveError(t('auth.displayNameFormat'));
+      return;
+    }
+    setProfileSaving(true);
+    setProfileSaveError(null);
+    try {
+      await auth.completeProfile({ username: profileUsername, displayName: profileDisplayName });
+    } catch (error) {
+      const messageId = error instanceof Error && error.message.startsWith('auth.')
+        ? error.message as Parameters<typeof t>[0]
+        : 'auth.profileCompletionRetry';
+      setProfileSaveError(t(messageId));
+    } finally {
+      setProfileSaving(false);
     }
   };
 
@@ -277,6 +319,54 @@ export function SettingsPage() {
         {!auth.isSignedIn && (
           <p className="set-hint">{t('settings.guestAccountHelp')}</p>
         )}
+        {auth.isSignedIn && auth.profile?.profile_complete === false && (
+          <form className="set-profile-completion" onSubmit={submitProfileCompletion} noValidate>
+            <div>
+              <h3>{t('auth.profileCompletionTitle')}</h3>
+              <p className="set-hint">{t('auth.profileCompletionBody')}</p>
+            </div>
+            <label className="field">
+              <span>{t('auth.username')}</span>
+              <input
+                value={profileUsername}
+                onChange={(event) => setProfileUsername(event.target.value)}
+                dir="ltr"
+                name="profile-username"
+                autoComplete="username"
+                minLength={3}
+                maxLength={32}
+                pattern="[A-Za-z0-9_-]{3,32}"
+                aria-invalid={profileUsername.length > 0 && !isValidProfileUsername(profileUsername)}
+                aria-describedby="profile-username-hint"
+              />
+              <span className="set-hint" id="profile-username-hint">{t('auth.usernameFormat')}</span>
+            </label>
+            <label className="field">
+              <span>{t('auth.displayName')}</span>
+              <input
+                value={profileDisplayName}
+                onChange={(event) => setProfileDisplayName(event.target.value)}
+                name="profile-display-name"
+                autoComplete="name"
+                required
+                aria-describedby="profile-display-name-hint"
+              />
+              <span className="set-hint" id="profile-display-name-hint">{t('auth.displayNameFormat')}</span>
+            </label>
+            {profileSaveError && <p className="set-profile-error" role="alert">{profileSaveError}</p>}
+            <button className="primary-button" type="submit" disabled={profileSaving}>
+              {profileSaving ? t('auth.working') : t('auth.completeProfile')}
+            </button>
+          </form>
+        )}
+        {auth.profileCompletionError && (
+          <div className="alert" role="status">
+            <span>{t(auth.profileCompletionError as Parameters<typeof t>[0])}</span>
+            <button className="ghost-button" type="button" onClick={() => void auth.retryProfileCompletion()}>
+              {t('auth.retryProfileCompletion')}
+            </button>
+          </div>
+        )}
         <div className="settings-actions">
           {auth.isSignedIn ? (
             <button className="ghost-button" type="button" onClick={() => auth.signOut().then(() => setMaintenanceStatus(t('settings.signedOut'))).catch(() => setMaintenanceStatus(t('settings.signOutFailed')))}>
@@ -313,6 +403,7 @@ export function SettingsPage() {
           <Link to="/privacy">{t('legal.privacy')}</Link>
           <Link to="/terms">{t('legal.terms')}</Link>
           <Link to="/support">{t('legal.support')}</Link>
+          <Link to="/credits">{t('legal.credits')}</Link>
         </div>
       </SectionCard>
 

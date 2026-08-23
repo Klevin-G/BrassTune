@@ -34,6 +34,7 @@
 		1A0000010000000000000025 /* GoogleSans-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000127 /* GoogleSans-Medium.ttf */; };
 		1A0000010000000000000026 /* GoogleSans-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000128 /* GoogleSans-OFL.txt */; };
 		1A0000010000000000000027 /* PrimaryNavigationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000129 /* PrimaryNavigationViews.swift */; };
+		1A0000010000000000000028 /* ProfileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000130 /* ProfileEditorView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -83,6 +84,7 @@
 		1A0000010000000000000127 /* GoogleSans-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "GoogleSans-Medium.ttf"; sourceTree = "<group>"; };
 		1A0000010000000000000128 /* GoogleSans-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "GoogleSans-OFL.txt"; sourceTree = "<group>"; };
 		1A0000010000000000000129 /* PrimaryNavigationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryNavigationViews.swift; sourceTree = "<group>"; };
+		1A0000010000000000000130 /* ProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEditorView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -141,6 +143,7 @@
 				1A0000010000000000000125 /* FocusedPracticeViews.swift */,
 				1A0000010000000000000126 /* NativePersistenceWriter.swift */,
 				1A0000010000000000000129 /* PrimaryNavigationViews.swift */,
+				1A0000010000000000000130 /* ProfileEditorView.swift */,
 				1A0000010000000000000707 /* DesignSystem */,
 				1A0000010000000000000706 /* Resources */,
 			);
@@ -395,6 +398,7 @@
 				1A0000010000000000000017 /* PracticeFeatureViews.swift in Sources */,
 				1A0000010000000000000019 /* Localization.swift in Sources */,
 				1A0000010000000000000027 /* PrimaryNavigationViews.swift in Sources */,
+				1A0000010000000000000028 /* ProfileEditorView.swift in Sources */,
 				1A0000010000000000000022 /* WelcomeAuthViews.swift in Sources */,
 				1A0000010000000000000023 /* FocusedPracticeViews.swift in Sources */,
 				1A0000010000000000000024 /* NativePersistenceWriter.swift in Sources */,
@@ -473,19 +477,20 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				BRASSTUNE_API_BASE_URL = "http://127.0.0.1:8000";
+				BRASSTUNE_API_BASE_URL = "https://brasstune-u8qj.onrender.com";
 				BRASSTUNE_AUTH_CALLBACK_SCHEME = com.brasstune.auth.dev;
-				BRASSTUNE_ENV = local;
+				BRASSTUNE_ENV = staging;
 				BRASSTUNE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_-DsTOfOANvuYlOtzg1fUaw_aEY5VvdS"; /* gitleaks:allow -- public Supabase client identifier */
 				BRASSTUNE_SUPABASE_URL = "https://yznziwewxrlwnwiynlvl.supabase.co";
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGN_ENTITLEMENTS = BrassTuneApp/BrassTuneApp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 8S79RLTSWV;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BrassTuneApp/Info.plist;
-				MARKETING_VERSION = 1.0.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0.1;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aryasalem.BrassTune.dev;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -506,11 +511,12 @@
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGN_ENTITLEMENTS = BrassTuneApp/BrassTuneApp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 8S79RLTSWV;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BrassTuneApp/Info.plist;
-				MARKETING_VERSION = 1.0.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aryasalem.BrassTune;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
@@ -522,7 +528,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 8S79RLTSWV;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				ONLY_ACTIVE_ARCH = YES;
@@ -537,7 +545,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 8S79RLTSWV;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.brasstune.BrassTuneAppTests.dev;

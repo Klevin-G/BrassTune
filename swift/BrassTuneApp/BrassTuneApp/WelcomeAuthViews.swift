@@ -182,23 +182,35 @@ private struct GatewayActions: View {
 
     var body: some View {
         VStack(spacing: BTSpacing.sm) {
-            Button(action: startAsGuest) {
-                Label("Start as guest", systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(BTPrimaryButtonStyle())
-            .accessibilityHint("Starts local practice without an online account")
-            .accessibilityIdentifier("gateway.continueAsGuest")
+            if model.accountFeaturesEnabled {
+                Button {
+                    authPresentation = GatewayAuthPresentation(mode: .createAccount, context: .standard)
+                } label: {
+                    Label("Create free account", systemImage: "person.crop.circle.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BTPrimaryButtonStyle())
+                .accessibilityHint("Save your profile and return to your practice on this device")
+                .accessibilityIdentifier("gateway.createAccount")
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: BTSpacing.sm) {
-                    accountButton(mode: .createAccount)
-                    accountButton(mode: .signIn)
+                Text("Create an account to choose a profile, keep your practice settings, and use account features when they are available.")
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("gateway.accountBenefits")
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: BTSpacing.sm) {
+                        accountButton(mode: .signIn)
+                        guestButton
+                    }
+                    VStack(spacing: BTSpacing.sm) {
+                        accountButton(mode: .signIn)
+                        guestButton
+                    }
                 }
-                VStack(spacing: BTSpacing.sm) {
-                    accountButton(mode: .createAccount)
-                    accountButton(mode: .signIn)
-                }
+            } else {
+                guestButton
             }
 
             if !model.accountFeaturesEnabled {
@@ -246,6 +258,24 @@ private struct GatewayActions: View {
         }
         .buttonStyle(BTSecondaryButtonStyle())
         .accessibilityIdentifier(mode == .createAccount ? "gateway.createAccount" : "gateway.signIn")
+    }
+
+    @ViewBuilder
+    private var guestButton: some View {
+        if model.accountFeaturesEnabled {
+            guestButtonBody.buttonStyle(BTSecondaryButtonStyle())
+        } else {
+            guestButtonBody.buttonStyle(BTPrimaryButtonStyle())
+        }
+    }
+
+    private var guestButtonBody: some View {
+        Button(action: startAsGuest) {
+            Label("Start as guest", systemImage: "play.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .accessibilityHint("Starts local practice without an online account")
+        .accessibilityIdentifier("gateway.continueAsGuest")
     }
 
     private func startAsGuest() {
@@ -384,6 +414,15 @@ struct GatewayAuthForm: View {
             focusAuthNoticeIfNeeded()
         }
         .onChange(of: model.authNotice) { _, _ in focusAuthNoticeIfNeeded() }
+        // A guest upgrade deliberately remains in guest state until its
+        // explicit decision. Dismiss only after merge/keep-separate has
+        // committed an authenticated namespace; cancellation remains on the
+        // gateway with the guest session intact.
+        .onChange(of: model.authState) { _, state in
+            guard state.usesRemoteAccount,
+                  model.guestAccountUpgradePrompt == nil else { return }
+            dismiss()
+        }
     }
 
     @ViewBuilder

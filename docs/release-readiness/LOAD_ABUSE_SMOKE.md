@@ -1,4 +1,5 @@
 # Load And Abuse Smoke
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status: conservative smoke guidance for closed beta. This is not a benchmark, penetration test, or capacity guarantee.
 

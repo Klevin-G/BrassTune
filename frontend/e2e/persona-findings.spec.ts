@@ -125,7 +125,7 @@ test('an exact verified account keeps local practice during profile outage witho
 
 test('focused pack completion stops elapsed time and records weekly activity once', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
   });
   await page.goto('/practice');
   await page.getByRole('button', { name: 'Start pack' }).first().click();
@@ -150,7 +150,7 @@ test('focused pack completion stops elapsed time and records weekly activity onc
 });
 
 test('a real Play-Along pack step owns weekly activity so final pack completion does not double-count', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('brasstune.guestAccess', 'true'));
+  await page.addInitScript(() => sessionStorage.setItem('brasstune.guestAccess', 'true'));
   await page.route('**/src/hooks/usePitchStream.ts*', (route) => route.fulfill({
     status: 200,
     contentType: 'application/javascript',
@@ -193,7 +193,7 @@ export function usePitchStream() {
 
 test('session review filters reflections and guest deletion detaches only the matching note', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
     const session = (id: number, name: string) => ({
       id,
       user_id: 0,
@@ -257,7 +257,7 @@ test('session review filters reflections and guest deletion detaches only the ma
 
 test('join return and privacy disclosure survive the auth gateway', async ({ page }) => {
   await routeAuthModule(page, signedOutAuthModule);
-  await page.addInitScript(() => localStorage.setItem('brasstune.guestAccess', 'true'));
+  await page.addInitScript(() => sessionStorage.setItem('brasstune.guestAccess', 'true'));
   await page.goto('/ensemble?join=BRASS7');
   const disclosure = page.getByText(/aggregate cloud practice totals/i);
   await expect(disclosure).toBeVisible();
@@ -342,7 +342,7 @@ test('disabled OAuth providers stay visibly unavailable and RTL auth callback ar
 test('Arabic auth and class surfaces preserve RTL semantics, mixed-direction tokens, and axe gates', async ({ page }) => {
   await routeAuthModule(page, signedOutAuthModule);
   await page.addInitScript(() => {
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
     localStorage.setItem('brasstune.locale', 'ar');
   });
   await page.goto('/ensemble?join=CMAJ7');
@@ -367,7 +367,7 @@ test('Arabic auth and class surfaces preserve RTL semantics, mixed-direction tok
   results = await new AxeBuilder({ page }).include('main').analyze();
   expect(results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([]);
 
-  await page.evaluate(() => localStorage.setItem('brasstune.guestAccess', 'true'));
+  await page.evaluate(() => sessionStorage.setItem('brasstune.guestAccess', 'true'));
   await page.goto('/practice/scorer');
   await expect(page.getByRole('button', { name: /سلم C الكبير/ }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /سلم ج الكبير/ })).toHaveCount(0);

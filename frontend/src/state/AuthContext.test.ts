@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   readVerifiedPracticeNamespace,
+  isValidProfileUsername,
+  normalizeProfileUsername,
+  profileCompletionPayload,
+  MAX_DISPLAY_NAME_LENGTH,
+  isValidDisplayName,
   startOAuthProviderSignIn,
   transitionToGuest,
   verifiedPracticeNamespaceKey,
@@ -134,6 +139,33 @@ describe('verified local practice namespace cache', () => {
     values.set(key, JSON.stringify({ version: 1, subject: 'subject-a', ownerId: 'account:42', injected: true }));
     expect(readVerifiedPracticeNamespace(storage, 'subject-a')).toBeNull();
     expect(readVerifiedPracticeNamespace(storage, 'x'.repeat(201))).toBeNull();
+  });
+});
+
+describe('profile-completion contract helpers', () => {
+  it('matches the backend username boundary exactly and normalizes only after validation', () => {
+    for (const username of ['abc', 'Ab_C-9', 'a'.repeat(32)]) {
+      expect(isValidProfileUsername(username)).toBe(true);
+    }
+    for (const username of ['ab', 'a'.repeat(33), 'name with space', 'name!', 'ümlaut']) {
+      expect(isValidProfileUsername(username)).toBe(false);
+    }
+    expect(normalizeProfileUsername('Ab_C-9')).toBe('ab_c-9');
+  });
+
+  it('sends both required fields together and rejects incomplete profile data', () => {
+    expect(profileCompletionPayload({ username: 'Player_7', display_name: '  Player Seven  ' }))
+      .toEqual({ username: 'player_7', display_name: 'Player Seven' });
+    expect(profileCompletionPayload({ username: 'no spaces', display_name: 'Player' })).toBeNull();
+    expect(profileCompletionPayload({ username: 'player', display_name: '   ' })).toBeNull();
+    expect(profileCompletionPayload({ username: 'player', display_name: 'a'.repeat(MAX_DISPLAY_NAME_LENGTH) })).toEqual({ username: 'player', display_name: 'a'.repeat(MAX_DISPLAY_NAME_LENGTH) });
+    expect(profileCompletionPayload({ username: 'player', display_name: 'a'.repeat(MAX_DISPLAY_NAME_LENGTH + 1) })).toBeNull();
+  });
+
+  it('counts normalized Unicode display names by code point', () => {
+    expect(isValidDisplayName('e\u0301'.repeat(80))).toBe(true);
+    expect(isValidDisplayName('😀'.repeat(80))).toBe(true);
+    expect(isValidDisplayName('😀'.repeat(81))).toBe(false);
   });
 });
 

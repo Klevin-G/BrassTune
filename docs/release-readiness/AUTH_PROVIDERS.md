@@ -1,4 +1,5 @@
 # Google and Apple Sign-in
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-19. Do not put credentials in Git, logs, screenshots, or this document.
 

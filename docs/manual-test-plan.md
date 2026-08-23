@@ -1,4 +1,5 @@
 # Manual Test Plan
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## New User
 

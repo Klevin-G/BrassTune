@@ -1,4 +1,5 @@
 # Historical Failure Log
+Project attribution: Kelvin Guo, Arya Salem.
 
 Past failure records are preserved in Git history. They reference retired hostnames, workflows, and release candidates and must not be treated as current production evidence.
 

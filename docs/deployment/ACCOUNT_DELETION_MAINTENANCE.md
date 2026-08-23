@@ -1,4 +1,5 @@
 # Account-deletion retry maintenance (Supabase only)
+Project attribution: Kelvin Guo, Arya Salem.
 
 The retry executor is scheduled inside Supabase with `pg_cron` and calls Render
 asynchronously with `pg_net`. It replaces the retired GitHub Actions workflow,

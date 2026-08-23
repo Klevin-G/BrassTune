@@ -762,6 +762,14 @@ struct MoreView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("more.support")
+
+                Divider()
+
+                NavigationLink { LegalDetailView(kind: .credits) } label: {
+                    MoreActionRow(title: "Credits", detail: "Meet the people behind BrassTune", systemImage: "person.2")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("more.credits")
             }
         }
         .navigationTitle("More")

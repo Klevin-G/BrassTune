@@ -1,4 +1,5 @@
 # Supabase Auth Setup
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-07-23. Apply only as part of the reviewed post-merge rollout.
 

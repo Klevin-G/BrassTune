@@ -8,7 +8,7 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
-    func testFirstRunGuestInstrumentSetupLeadsToPracticeAndPersists() throws {
+    func testGuestColdLaunchSignsOutButRetainsPracticeAfterExplicitReentry() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"]
         app.launch()
@@ -18,8 +18,11 @@ final class BrassTuneAppUITests: XCTestCase {
         app.descendants(matching: .any)["gateway.continueAsGuest"].tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.descendants(matching: .any)["onboarding.instrumentPicker"].isHittable)
-        app.descendants(matching: .any)["onboarding.startPractice"].tap()
+        let instrumentPicker = app.descendants(matching: .any)["onboarding.instrumentPicker"]
+        XCTAssertTrue(instrumentPicker.waitForExistence(timeout: 4))
+        XCTAssertGreaterThanOrEqual(instrumentPicker.frame.height, 44)
+        XCTAssertTrue(instrumentPicker.isHittable)
+        app.buttons["onboarding.startPractice"].tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 8))
         assertPrimaryTabs(in: app)
@@ -27,8 +30,75 @@ final class BrassTuneAppUITests: XCTestCase {
         app.terminate()
         app.launchArguments = ["UITEST_AUTH_EMPTY"]
         app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["gateway.continueAsGuest"].isHittable)
+        app.descendants(matching: .any)["gateway.continueAsGuest"].tap()
+        // Returning guests may explicitly replay the tutorial. It must not
+        // force instrument setup or erase the retained practice workspace.
+        let replayStart = app.buttons["onboarding.startPractice"]
+        if replayStart.waitForExistence(timeout: 2) {
+            replayStart.tap()
+        }
         XCTAssertTrue(app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.descendants(matching: .any)["screen.instrumentSetup"].exists)
+    }
+
+    @MainActor
+    func testOnboardingWalkthroughSupportsBackSkipReplayAndTunerFinish() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
+        app.descendants(matching: .any)["gateway.continueAsGuest"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.progress"].exists)
+
+        app.buttons["onboarding.next"].tap()
+        XCTAssertTrue(app.buttons["onboarding.back"].waitForExistence(timeout: 3))
+        app.buttons["onboarding.back"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.instrumentPicker"].waitForExistence(timeout: 3))
+
+        for _ in 0..<3 { app.buttons["onboarding.next"].tap() }
+        XCTAssertTrue(app.buttons["onboarding.continueToTuner"].waitForExistence(timeout: 3))
+        app.buttons["onboarding.continueToTuner"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
+
+        app.tabBars.buttons["More"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["more.settings"].waitForExistence(timeout: 5))
+        app.descendants(matching: .any)["more.settings"].tap()
+        app.descendants(matching: .any)["settings.reopenOnboarding"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 5))
+        app.buttons["onboarding.cancel"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.more"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testIncompleteAuthenticatedProfilePresentsRequiredEditor() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE", "UITEST_PROFILE_INCOMPLETE"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["screen.profileEditor"].waitForExistence(timeout: 8))
+        let username = app.textFields["profile.username"]
+        let displayName = app.textFields["profile.displayName"]
+        let save = app.buttons["profile.save"]
+        XCTAssertTrue(username.exists)
+        XCTAssertTrue(displayName.exists)
+        XCTAssertTrue(save.exists)
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertFalse(app.buttons["profile.cancel"].exists)
+
+        username.tap()
+        username.typeText("fixture_player")
+        XCTAssertFalse(save.isEnabled, "A display name is required to complete a new profile.")
+
+        displayName.tap()
+        displayName.typeText("Fixture Player")
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        XCTAssertFalse(app.descendants(matching: .any)["screen.profileEditor"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 8))
     }
 
     @MainActor
@@ -154,7 +224,9 @@ final class BrassTuneAppUITests: XCTestCase {
 
         let readout = app.descendants(matching: .any)["tuner.readout"]
         XCTAssertTrue(readout.waitForExistence(timeout: 8))
-        XCTAssertTrue(readout.label.contains("Microphone access is off"))
+        let deniedPredicate = NSPredicate(format: "label CONTAINS[c] %@", "Microphone access is off")
+        expectation(for: deniedPredicate, evaluatedWith: readout)
+        waitForExpectations(timeout: 8)
         XCTAssertTrue(readout.label.contains("Allow microphone access"))
         XCTAssertFalse(readout.label.contains("Ready"))
         XCTAssertFalse(app.descendants(matching: .any)["tuner.meter"].exists)
@@ -198,6 +270,23 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["tuner.confidence"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["tuner.instrument"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["tuner.meter"].exists)
+    }
+
+    @MainActor
+    func testTunerListeningDoesNotSaveUntilAnExplicitTakeStops() throws {
+        let app = launchFixtureApp()
+        openTab("Tuner", in: app)
+        let take = app.descendants(matching: .any)["tuner.take"]
+        let stopListening = app.descendants(matching: .any)["tuner.floating.stop"]
+        XCTAssertTrue(take.waitForExistence(timeout: 8))
+        XCTAssertTrue(stopListening.exists)
+        XCTAssertEqual(take.label, "Record take")
+        take.tap()
+        XCTAssertEqual(take.label, "Stop take and save")
+        take.tap()
+        XCTAssertEqual(take.label, "Record take")
+        stopListening.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["tuner.recordButton"].waitForExistence(timeout: 8))
     }
 
     @MainActor
@@ -444,6 +533,14 @@ final class BrassTuneAppUITests: XCTestCase {
         bringIntoView(email, in: app)
         XCTAssertTrue(email.exists)
         XCTAssertTrue(app.staticTexts["https://brasstune.vercel.app/support"].exists)
+        XCTAssertTrue(app.staticTexts["BrassTune is created by Kelvin Guo, Arya Salem."].exists)
+        app.navigationBars.buttons.firstMatch.tap()
+
+        let credits = app.descendants(matching: .any)["settings.creditsLink"]
+        bringIntoView(credits, in: app)
+        credits.tap()
+        XCTAssertTrue(app.staticTexts["Created by Kelvin Guo, Arya Salem."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["https://brasstune.vercel.app/credits"].exists)
     }
 
     @MainActor
@@ -617,12 +714,11 @@ final class BrassTuneAppUITests: XCTestCase {
     func testProgressShowsSavedHistoryAndDeniedMicGetsNonTunerRecommendation() throws {
         let app = launchFixtureApp()
         openTab("Tuner", in: app)
-        let start = app.descendants(matching: .any)["tuner.recordButton"]
-        XCTAssertTrue(start.waitForExistence(timeout: 8))
-        start.tap()
-        let stop = app.descendants(matching: .any)["tuner.floating.stop"]
-        XCTAssertTrue(stop.waitForExistence(timeout: 8))
-        stop.tap()
+        let take = app.descendants(matching: .any)["tuner.take"]
+        XCTAssertTrue(take.waitForExistence(timeout: 8))
+        take.tap()
+        XCTAssertEqual(take.label, "Stop take and save")
+        take.tap()
         openTab("Progress", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["progress.metrics"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["progress.allSessions"].exists)
@@ -729,6 +825,7 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launchArguments = [
             "UITEST_RESET_STATE",
             "UITEST_ENTRY_FLOW",
+            "UITEST_FIXTURES",
             "UITEST_AUTH_PROVIDERS",
         ]
         app.launchEnvironment = [

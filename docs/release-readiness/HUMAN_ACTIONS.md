@@ -1,4 +1,5 @@
 # Human and External Actions
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-07-24. These are real external gates, not missing local implementation work.
 

@@ -1,6 +1,14 @@
 # Phone Microphone Test Report
+Project attribution: Kelvin Guo, Arya Salem.
 
-Status: manual real-device testing still required.
+Status: signed native app-unit execution passed on the connected iPhone 15 Pro Max / iOS 26.6.1 on 2026-08-23. Physical microphone, acoustic, route, and browser checks below still require attended judgment.
+
+## 2026-08-23 connected-iPhone evidence
+
+- The initial device launch caught a real missing Swift-package runtime search path. Debug and Release now include `@executable_path/Frameworks`.
+- The signed device unit suite then passed `259` tests, skipped `11` host/source-tree-only audits, and failed `0`.
+- The UI runner signed and installed, but iOS timed out while enabling automation mode before any UI scenario executed. This is preserved as an infrastructure blocker, not relabeled as an app pass.
+- Simulator and deterministic audio tests do not establish audible click quality, drone timbre, brass-note lock, latency, Bluetooth behavior, or interruption recovery on the physical route.
 
 Automated Chromium simulation verifies layout and demo recording. It does not prove iPhone/iPad Safari microphone behavior.
 

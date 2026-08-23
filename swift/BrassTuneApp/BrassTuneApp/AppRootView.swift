@@ -74,6 +74,7 @@ struct AppRootView: View {
     @State private var practiceNavigationGeneration = UUID()
     @State private var onboardingPresented: Bool
     @State private var guestAccountPromptMode: GatewayAuthMode?
+    @State private var resumeTunerAfterForeground = false
     private let resetUITestState: Bool
     private let forceAuthGatewayLaunch: Bool
     private let settingsOnlyLaunch: Bool
@@ -81,20 +82,24 @@ struct AppRootView: View {
 
 #if PHYSICAL_RELEASE
     private var physicalRoutePickerTestMode: Bool {
-        ProcessInfo.processInfo.arguments.contains("UITEST_PHYSICAL_ROUTE_PICKER")
+        AuthService.allowsUITestAuthOverrides(bundleIdentifier: Bundle.main.bundleIdentifier)
+            && ProcessInfo.processInfo.arguments.contains("UITEST_PHYSICAL_ROUTE_PICKER")
     }
 #endif
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        settingsOnlyLaunch = arguments.contains("UITEST_SETTINGS")
-        resetUITestState = arguments.contains("UITEST_RESET_STATE")
-        forceAuthGatewayLaunch = AuthService.allowsUITestAuthOverrides(
+        let testArgumentsAllowed = AuthService.allowsUITestAuthOverrides(
             bundleIdentifier: Bundle.main.bundleIdentifier
-        ) && arguments.contains("UITEST_FORCE_AUTH_GATEWAY")
-        uiTestMode = arguments.contains("UITEST_DEMO")
-            || arguments.contains("UITEST_FIXTURES")
-            || arguments.contains("UITEST_SETTINGS")
+        )
+        settingsOnlyLaunch = testArgumentsAllowed && arguments.contains("UITEST_SETTINGS")
+        resetUITestState = testArgumentsAllowed && arguments.contains("UITEST_RESET_STATE")
+        forceAuthGatewayLaunch = testArgumentsAllowed && arguments.contains("UITEST_FORCE_AUTH_GATEWAY")
+        uiTestMode = testArgumentsAllowed && (
+            arguments.contains("UITEST_DEMO")
+                || arguments.contains("UITEST_FIXTURES")
+                || arguments.contains("UITEST_SETTINGS")
+        )
         _onboardingPresented = State(initialValue: false)
         _guestAccountPromptMode = State(initialValue: nil)
     }
@@ -166,8 +171,8 @@ struct AppRootView: View {
                 .onChange(of: selectedTab) { oldTab, newTab in
                     if oldTab == .tuner, newTab != .tuner {
                         model.cancelRecordingStart()
-                        if model.audioEngine.recording {
-                            model.stopRecording()
+                        if model.audioEngine.listening {
+                            model.stopTunerListening()
                         }
                     }
                     if oldTab != newTab {
@@ -227,6 +232,9 @@ struct AppRootView: View {
                 return
             }
 #endif
+            if previousPhase == .active, currentPhase != .active {
+                resumeTunerAfterForeground = selectedTab == .tuner
+            }
             AppSceneAudioLifecycle.handleTransition(
                 from: previousPhase,
                 to: currentPhase,
@@ -234,8 +242,8 @@ struct AppRootView: View {
                     model.audioEngine.audioState == .permissionRequesting
                 },
                 cancelTunerStart: model.cancelRecordingStart,
-                isTunerRecording: { model.audioEngine.recording },
-                stopTunerRecording: model.stopRecording,
+                isTunerRecording: { model.audioEngine.listening },
+                stopTunerRecording: model.stopTunerListening,
                 releasePracticeAudio: {
                     model.stopRecordingPlayback()
                     model.handlePracticeBackground()
@@ -245,10 +253,21 @@ struct AppRootView: View {
             if previousPhase == .active, currentPhase != .active {
                 model.flushPendingPersistence()
             }
+            if currentPhase == .active { resumeTunerIfReady() }
+            // A background transition also happens during normal app switching.
+            // iOS has no reliable termination callback, so guest access is
+            // reset on cold launch in restoreSession rather than here.
+        }
+        .onChange(of: model.tunerTakeSaveInProgress) { _, saving in
+            // A quick foreground can arrive while an explicit take is still
+            // draining/saving. Keep the intent until that boundary resolves,
+            // then resume the always-on listener if the person is still here.
+            if !saving { resumeTunerIfReady() }
         }
         .task {
             if resetUITestState {
                 model.resetForUITesting()
+                model.configureIncompleteProfileForUITesting()
             }
             guard !uiTestMode else { return }
             await model.restoreSession()
@@ -258,6 +277,14 @@ struct AppRootView: View {
         }
         .sheet(item: $guestAccountPromptMode) { mode in
             GatewayAuthForm(mode: mode)
+        }
+        .sheet(isPresented: $model.profileEditorRequired) {
+            ProfileEditorView(requiresCompletion: true)
+                // This binding only presents a server-required completion
+                // sheet. A transient profile outage can leave userProfile nil,
+                // so do not use the optional profile value to decide whether
+                // setup may be dismissed.
+                .interactiveDismissDisabled()
         }
         .nativeSuccessFeedback()
     }
@@ -316,6 +343,22 @@ struct AppRootView: View {
             selectedTab = .more
         }
     }
+
+    private func resumeTunerIfReady() {
+        guard scenePhase == .active,
+              resumeTunerAfterForeground,
+              selectedTab == .tuner else {
+            if scenePhase == .active, selectedTab != .tuner {
+                resumeTunerAfterForeground = false
+            }
+            return
+        }
+        guard !model.audioEngine.listening,
+              !model.recordingStartInProgress,
+              !model.tunerTakeSaveInProgress else { return }
+        resumeTunerAfterForeground = false
+        Task { await model.startTunerListening() }
+    }
 }
 
 #if PHYSICAL_RELEASE
@@ -346,86 +389,113 @@ struct OnboardingView: View {
     @Binding var isPresented: Bool
     @Binding var selectedTab: AppTab
     @State private var originalInstrumentID: String?
+    @State private var stepIndex = 0
     @AccessibilityFocusState private var setupHeaderFocused: Bool
+
+    private enum Step: Int, CaseIterable {
+        case instrument, tuner, pulse, progress
+
+        var symbol: String {
+            switch self {
+            case .instrument: return "music.note"
+            case .tuner: return "waveform"
+            case .pulse: return "metronome"
+            case .progress: return "chart.line.uptrend.xyaxis"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .instrument: return NativeLocalization.string("Choose your instrument")
+            case .tuner: return NativeLocalization.string("Tuner")
+            case .pulse: return NativeLocalization.string("Metronome")
+            case .progress: return NativeLocalization.string("Progress")
+            }
+        }
+    }
+
+    private var step: Step { Step(rawValue: stepIndex) ?? .instrument }
+    private var isLastStep: Bool { stepIndex == Step.allCases.count - 1 }
 
     var body: some View {
         NavigationStack {
             BTScreen {
                 VStack(alignment: .leading, spacing: BTSpacing.md) {
-                    Image(systemName: "music.note")
+                    ProgressView(value: Double(stepIndex + 1), total: Double(Step.allCases.count))
+                        .tint(BTTheme.accent)
+                        .accessibilityLabel(Text(verbatim: NativeLocalization.string("Tutorial progress")))
+                        .accessibilityIdentifier("onboarding.progress")
+                    Image(systemName: step.symbol)
                         .font(.system(size: 44, weight: .semibold))
                         .foregroundStyle(BTTheme.accent)
                         .accessibilityHidden(true)
-                    Text(verbatim: NativeLocalization.string("Choose your instrument"))
+                    Text(verbatim: step.title)
                         .font(.system(.largeTitle, design: .rounded).weight(.bold))
                         .foregroundStyle(BTTheme.text)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(verbatim: NativeLocalization.string(
-                        "BrassTune uses your instrument for written notes and concert-pitch transposition."
-                    ))
-                        .font(.body)
-                        .foregroundStyle(BTTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(verbatim: NativeLocalization.string("You can change it later in Settings."))
-                        .font(.body)
-                        .foregroundStyle(BTTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityFocused($setupHeaderFocused)
+                        .accessibilityIdentifier("onboarding.hero")
+                    stepContent
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(instrumentSetupAccessibilityAnnouncement())
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityFocused($setupHeaderFocused)
-                .accessibilityIdentifier("onboarding.hero")
 
-                BTCard {
-                    Picker(selection: $model.selectedInstrumentId) {
-                        instrumentPickerOptions()
-                    } label: {
-                        Text(verbatim: NativeLocalization.string("Instrument"))
-                    }
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .accessibilityIdentifier("onboarding.instrumentPicker")
-                }
             }
             .accessibilityIdentifier("screen.instrumentSetup")
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Button {
-                    let isReviewing = model.tutorialCompleted
-                    model.completeTutorial()
-                    if !isReviewing {
-                        selectedTab = .practice
+                HStack(spacing: BTSpacing.sm) {
+                    if stepIndex > 0 {
+                        Button {
+                            stepIndex -= 1
+                        } label: {
+                            Label {
+                                Text(verbatim: NativeLocalization.string("Back"))
+                            } icon: {
+                                Image(systemName: "chevron.left")
+                            }
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("onboarding.back")
                     }
-                    isPresented = false
-                } label: {
-                    Label {
-                        Text(verbatim: NativeLocalization.string("Continue to Practice"))
-                    } icon: {
-                        Image(systemName: "sun.max")
-                    }
+
+                    Button {
+                        if isLastStep {
+                            finishTutorial(routeToTuner: true)
+                        } else {
+                            stepIndex += 1
+                        }
+                    } label: {
+                        Label {
+                            Text(verbatim: NativeLocalization.string(
+                                isLastStep ? "Continue to Tuner" : "Next"
+                            ))
+                        } icon: {
+                            Image(systemName: isLastStep ? "tuningfork" : "arrow.right")
+                        }
                         .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                    .disabled(!model.persistenceAccessState.canPersist)
+                    .accessibilityIdentifier(isLastStep ? "onboarding.continueToTuner" : "onboarding.next")
                 }
-                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
-                .disabled(!model.persistenceAccessState.canPersist)
                 .padding(.horizontal, BTSpacing.lg)
                 .padding(.vertical, BTSpacing.sm)
                 .background(.bar)
-                .accessibilityIdentifier("onboarding.startPractice")
             }
             .toolbar {
-                if model.tutorialCompleted {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button {
-                            if let originalInstrumentID {
-                                model.selectedInstrumentId = originalInstrumentID
-                            }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        if model.tutorialCompleted, let originalInstrumentID {
+                            model.selectedInstrumentId = originalInstrumentID
                             isPresented = false
-                        } label: {
-                            Text(verbatim: NativeLocalization.string("Cancel"))
+                        } else {
+                            finishTutorial(routeToTuner: false)
                         }
-                        .accessibilityIdentifier("onboarding.cancel")
+                    } label: {
+                        Text(verbatim: NativeLocalization.string(model.tutorialCompleted ? "Cancel" : "Not now"))
                     }
+                    // Preserve the legacy smoke-test hook while giving the
+                    // walkthrough an explicit, always-available skip action.
+                    .accessibilityIdentifier(model.tutorialCompleted ? "onboarding.cancel" : "onboarding.startPractice")
                 }
             }
         }
@@ -437,6 +507,71 @@ struct OnboardingView: View {
                 setupHeaderFocused = true
             }
         }
+        .onChange(of: stepIndex) { _, _ in
+            DispatchQueue.main.async { setupHeaderFocused = true }
+        }
+    }
+
+    @ViewBuilder
+    private var stepContent: some View {
+        switch step {
+        case .instrument:
+            Text(verbatim: NativeLocalization.string(
+                "BrassTune uses your instrument for written notes and concert-pitch transposition."
+            ))
+            .font(.body)
+            .foregroundStyle(BTTheme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: NativeLocalization.string("You can change it later in Settings."))
+                .font(.body)
+                .foregroundStyle(BTTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            BTCard {
+                Menu {
+                    Picker(selection: $model.selectedInstrumentId) {
+                        instrumentPickerOptions()
+                    } label: {
+                        Text(verbatim: NativeLocalization.string("Instrument"))
+                    }
+                } label: {
+                    Label {
+                        Text(verbatim: NativeLocalization.string("Instrument"))
+                    } icon: {
+                        Image(systemName: "music.note")
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .accessibilityElement(children: .combine)
+                }
+                .btMinimumInteractiveSize(alignment: .leading)
+                .accessibilityIdentifier("onboarding.instrumentPicker")
+            }
+        case .tuner:
+            Text(verbatim: NativeLocalization.string("Start the tuner and save a short recording."))
+                .font(.body).foregroundStyle(BTTheme.muted).fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: NativeLocalization.string("Record take"))
+                .font(.headline).foregroundStyle(BTTheme.text)
+            Text(verbatim: NativeLocalization.string("Passive tuner audio is not saved unless you explicitly record a take."))
+                .font(.footnote).foregroundStyle(BTTheme.muted).fixedSize(horizontal: false, vertical: true)
+        case .pulse:
+            Text(verbatim: NativeLocalization.string("6/8, 9/8, and 12/8 use BPM as a dotted-quarter pulse."))
+                .font(.body).foregroundStyle(BTTheme.muted).fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: NativeLocalization.string("Drone and interval tuning"))
+                .font(.headline).foregroundStyle(BTTheme.text)
+            Text(verbatim: NativeLocalization.string("Keep a steady pulse. No microphone needed."))
+                .font(.footnote).foregroundStyle(BTTheme.muted).fixedSize(horizontal: false, vertical: true)
+        case .progress:
+            Text(verbatim: NativeLocalization.string("Your progress"))
+                .font(.body).foregroundStyle(BTTheme.muted).fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: NativeLocalization.string("Guest practice remains on this device. Create an account to back up progress and join Classes."))
+                .font(.footnote).foregroundStyle(BTTheme.muted).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func finishTutorial(routeToTuner: Bool) {
+        model.completeTutorial()
+        selectedTab = routeToTuner ? .tuner : .practice
+        isPresented = false
     }
 }
 
@@ -749,7 +884,7 @@ struct TunerView: View {
     @State private var microphoneRationalePresentation: MicrophoneRationalePresentation?
 
     private var activeFrame: PitchFrame? {
-        guard audioEngine.recording else { return nil }
+        guard audioEngine.listening else { return nil }
         guard audioEngine.activeSource == .live || model.testFixturesEnabled else { return nil }
         return audioEngine.currentFrame
     }
@@ -846,13 +981,13 @@ struct TunerView: View {
         }
         .accessibilityIdentifier("screen.tuner")
         .safeAreaInset(edge: .bottom) {
-            if audioEngine.recording {
+            if audioEngine.listening {
                 FloatingPracticeControlBar()
                     .padding(.horizontal, BTSpacing.lg)
                     .padding(.bottom, BTSpacing.md)
             } else if shouldPresentRecoveryActions {
                 MicrophoneRecoveryActions {
-                    Task { await model.startRecording() }
+                    Task { await model.startTunerListening() }
                 }
                     .padding(.horizontal, BTSpacing.lg)
                     .padding(.bottom, BTSpacing.md)
@@ -878,6 +1013,15 @@ struct TunerView: View {
             }
         }
         .onAppear { focusMicrophoneIssueIfNeeded() }
+        .task {
+            // Once the privacy rationale has been acknowledged, opening the
+            // tuner is the explicit user intent to listen.  Keep the capture
+            // running for the whole tuner visit; the red record control only
+            // bounds an optional saved take.
+            if model.microphoneRationaleSeen, !audioEngine.listening {
+                await model.startTunerListening()
+            }
+        }
         .onChange(of: microphoneIssueMessage) { _, _ in
             focusMicrophoneIssueIfNeeded()
         }
@@ -915,7 +1059,7 @@ struct TunerView: View {
 
     private func beginListening() {
         if model.microphoneRationaleSeen {
-            Task { await model.startRecording() }
+            Task { await model.startTunerListening() }
         } else {
             microphoneRationalePresentation = MicrophoneRationalePresentation()
         }
@@ -955,7 +1099,7 @@ private struct MicrophoneRationaleView: View {
                 Button {
                     model.markMicrophoneRationaleSeen()
                     dismiss()
-                    Task { await model.startRecording() }
+                    Task { await model.startTunerListening() }
                 } label: {
                     Text("Continue")
                         .frame(maxWidth: .infinity)
@@ -1284,20 +1428,38 @@ func tuningMeterIndicatorOffset(cents: Double?, width: CGFloat) -> CGFloat {
 
 private struct FloatingPracticeControlBar: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var audioEngine: NativeAudioEngine
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: BTSpacing.sm) {
             HStack(spacing: BTSpacing.sm) {
                 Button {
-                    model.stopRecording()
+                    model.toggleTunerTake()
                 } label: {
-                    Label("Stop and save", systemImage: "stop.fill")
+                    Label {
+                        Text(verbatim: NativeLocalization.string(
+                            audioEngine.takeRecording ? "Stop take and save" : "Record take"
+                        ))
+                    } icon: {
+                        Image(systemName: audioEngine.takeRecording ? "stop.fill" : "record.circle")
+                    }
                         .labelStyle(.iconOnly)
                 }
-                .accessibilityLabel(Text(verbatim: NativeLocalization.string("Stop and save recording")))
-                .accessibilityIdentifier("tuner.floating.stop")
+                .accessibilityLabel(Text(verbatim: NativeLocalization.string(audioEngine.takeRecording ? "Stop take and save" : "Record take")))
+                .accessibilityIdentifier("tuner.take")
                 .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.danger))
+                .disabled(model.tunerTakeSaveInProgress)
+
+                Button {
+                    model.stopTunerListening()
+                } label: {
+                    Label("Stop listening", systemImage: "ear.slash")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel(Text(verbatim: NativeLocalization.string("Stop listening")))
+                .accessibilityIdentifier("tuner.floating.stop")
+                .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
 
                 Button {
                     model.toggleMetronome()
@@ -1342,10 +1504,11 @@ private struct FloatingPracticeControlBar: View {
                 .buttonStyle(FloatingIconButtonStyle(tint: BTTheme.muted))
             }
 
-            Text(verbatim: NativeLocalization.string(model.metronomeRunning ? "Visual beat while recording" : "Recording"))
+            Text(verbatim: NativeLocalization.string(model.tunerTakeSaveInProgress ? "Saving" : (audioEngine.takeRecording ? "Recording take" : (model.metronomeRunning ? "Visual beat while listening" : "Listening"))))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(model.metronomeRunning ? BTTheme.warning : BTTheme.muted)
-                .scaleEffect(model.metronomeRunning && !reduceMotion ? 1.02 : 1)
+                .scaleEffect(model.metronomeRunning && !reduceMotion ? model.metronomePulseScale : 1)
+                .animation(reduceMotion ? nil : .spring(response: 0.18, dampingFraction: 0.76), value: model.metronomePulseSequence)
         }
         .padding(BTSpacing.md)
         .brassGlass(cornerRadius: BTTheme.radiusLarge, interactive: true)
@@ -1693,6 +1856,28 @@ struct MetronomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var advancedRhythmExpanded = false
 
+    private struct MeterPreset: Hashable {
+        let beats: Int
+        let unit: Int
+    }
+
+    private var meterPresets: [MeterPreset] {
+        let standard = [
+            MeterPreset(beats: 2, unit: 4),
+            MeterPreset(beats: 3, unit: 4),
+            MeterPreset(beats: 4, unit: 4),
+            MeterPreset(beats: 5, unit: 4),
+            MeterPreset(beats: 6, unit: 8),
+            MeterPreset(beats: 7, unit: 4),
+            MeterPreset(beats: 9, unit: 8),
+            MeterPreset(beats: 12, unit: 8),
+        ]
+        // Preserve a denominator selected through Advanced rhythm instead of
+        // silently rewriting it when the menu next renders.
+        let current = MeterPreset(beats: model.metronome.beatsPerMeasure, unit: model.metronome.beatUnit)
+        return standard.contains(current) ? standard : standard + [current]
+    }
+
     var body: some View {
         BTScreen {
             BTPageHeader(
@@ -1710,9 +1895,10 @@ struct MetronomeView: View {
                             .foregroundStyle(BTTheme.accentSoft)
                             .accessibilityIdentifier("metronome.bpm")
                         Text(verbatim: NativeLocalization.format(
-                            "%@ • %@",
+                            "%@ • %@ • %@",
                             model.metronome.meterLabel,
-                            model.metronome.subdivision.title
+                            model.metronome.subdivision.title,
+                            model.metronome.tempoUnitLabel
                         ))
                             .font(.headline)
                             .foregroundStyle(BTTheme.muted)
@@ -1722,8 +1908,8 @@ struct MetronomeView: View {
                     Circle()
                         .fill(model.metronomeRunning ? BTTheme.warning.opacity(0.90) : BTTheme.surfaceAlt)
                         .frame(width: 74, height: 74)
-                        .scaleEffect(model.metronomeRunning && !reduceMotion ? 1.0 + CGFloat(model.metronomeTick == 0 ? 0.18 : 0.06) : 1)
-                        .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72), value: model.metronomeTick)
+                        .scaleEffect(model.metronomeRunning && !reduceMotion ? model.metronomePulseScale : 1)
+                        .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72), value: model.metronomePulseSequence)
                         .accessibilityHidden(true)
                 }
 
@@ -1772,15 +1958,19 @@ struct MetronomeView: View {
             BTCard {
                 BTSectionHeader(title: "Sound and feel", subtitle: "The click is on by default. Use visual-only mode whenever you want silence.")
                 Picker("Meter", selection: Binding(
-                    get: { model.metronome.beatsPerMeasure },
-                    set: { model.setMeter(beats: $0, unit: model.metronome.beatUnit) }
+                    get: { MeterPreset(beats: model.metronome.beatsPerMeasure, unit: model.metronome.beatUnit) },
+                    set: { model.setMeter(beats: $0.beats, unit: $0.unit) }
                 )) {
-                    ForEach([2, 3, 4, 5, 6, 7, 9, 12], id: \.self) { beats in
-                        Text(verbatim: NativeLocalization.isolate("\(beats)/\(model.metronome.beatUnit)")).tag(beats)
+                    ForEach(meterPresets, id: \.self) { preset in
+                        Text(verbatim: NativeLocalization.isolate("\(preset.beats)/\(preset.unit)"))
+                            .tag(preset)
                     }
                 }
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("metronome.meterPicker")
+                .accessibilityHint(Text(verbatim: NativeLocalization.string(
+                    "6/8, 9/8, and 12/8 use BPM as a dotted-quarter pulse."
+                )))
 
                 Picker("Subdivision", selection: Binding(get: { model.metronome.subdivision }, set: { model.metronome.subdivision = $0 })) {
                     ForEach(MetronomeSubdivision.allCases) { subdivision in
@@ -1881,7 +2071,7 @@ struct ScorePracticeView: View {
                     .buttonStyle(BTSecondaryButtonStyle())
                     .accessibilityIdentifier("score.import.photos")
 
-                    if NativeTestFixtures.areEnabled {
+                    if NativeTestFixtures.areEnabled() {
                         Button {
                             model.importSampleScore()
                         } label: {

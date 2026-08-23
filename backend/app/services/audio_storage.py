@@ -1179,6 +1179,11 @@ def _mark_audio_job_retryable(db: Session, job_id: int, error_category: str) -> 
         return False
 
 
+def complete_storage_job(db: Session, job_id: int, status: str = "completed") -> bool:
+    """Public terminal transition for the shared private-object job table."""
+    return _mark_audio_job_completed(db, job_id, status=status)
+
+
 def _convert_reservation_to_cleanup(db: Session, reservation_id: int, reason: str, error_category: str) -> bool:
     try:
         job = db.query(AudioStorageJob).filter(AudioStorageJob.id == reservation_id).with_for_update().first()
@@ -1550,6 +1555,7 @@ def _claim_audio_job(db: Session, job_id: int) -> Optional[dict]:
             "size_bytes": int(job.size_bytes or 0),
             "user_id": job.user_id,
             "session_id": job.session_id,
+            "reason": job.reason,
         }
         db.add(job)
         db.commit()
@@ -1609,6 +1615,16 @@ def _convert_reconciliation_to_cleanup(db: Session, job_id: int) -> bool:
         return False
 
 
+def _delete_private_storage_job_object(payload: dict) -> None:
+    """Dispatch cleanup by the constrained provider, never by free-form reason."""
+    from app.services.profile_avatar import AVATAR_STORAGE_PROVIDER, delete_avatar
+
+    if payload["provider"] == AVATAR_STORAGE_PROVIDER:
+        delete_avatar(payload["object_key"])
+        return
+    _delete_audio_object(payload["provider"], payload["object_key"])
+
+
 def retry_audio_storage_jobs(db: Session, limit: int = 10) -> dict:
     """Idempotently process durable cleanup/reconciliation work."""
     candidate_ids = [candidate.id for candidate in _audio_retry_candidates(db, limit)]
@@ -1632,10 +1648,23 @@ def retry_audio_storage_jobs(db: Session, limit: int = 10) -> dict:
                 results.append({"job_id": payload["id"], "status": "retryable_failure"})
                 continue
 
+        if payload["action"] in {"avatar_upload_reservation", "avatar_metadata_reconciliation"}:
+            from app.services.profile_avatar import reconcile_avatar_storage_job
+
+            reconciled = reconcile_avatar_storage_job(db, payload)
+            if reconciled is True:
+                completed = _mark_audio_job_completed(db, payload["id"])
+                results.append({"job_id": payload["id"], "status": "completed" if completed else "pending"})
+                continue
+            if reconciled is None:
+                _mark_audio_job_retryable(db, payload["id"], "avatar_metadata_reconciliation_failed")
+                results.append({"job_id": payload["id"], "status": "retryable_failure"})
+                continue
+
         try:
-            _delete_audio_object(payload["provider"], payload["object_key"])
+            _delete_private_storage_job_object(payload)
         except Exception:
-            _mark_audio_job_retryable(db, payload["id"], "audio_object_cleanup_failed")
+            _mark_audio_job_retryable(db, payload["id"], "private_object_cleanup_failed")
             results.append({"job_id": payload["id"], "status": "retryable_failure"})
             continue
         completed = _mark_audio_job_completed(db, payload["id"])
@@ -1724,9 +1753,9 @@ def process_audio_delete_jobs(db: Session, job_ids: list[int]) -> dict:
             results.append({"job_id": payload["id"], "status": "retryable_failure"})
             continue
         try:
-            _delete_audio_object(payload["provider"], payload["object_key"])
+            _delete_private_storage_job_object(payload)
         except Exception:
-            _mark_audio_job_retryable(db, payload["id"], "audio_object_cleanup_failed")
+            _mark_audio_job_retryable(db, payload["id"], "private_object_cleanup_failed")
             results.append({"job_id": payload["id"], "status": "retryable_failure"})
             continue
         completed = _mark_audio_job_completed(db, payload["id"])

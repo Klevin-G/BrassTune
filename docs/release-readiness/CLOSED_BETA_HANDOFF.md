@@ -1,4 +1,5 @@
 # Closed Beta Handoff
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status: web/backend closed-beta production path deployed and smoke-passed in guest/auth-disabled mode; external provider/App Store/device gates remain.
 

@@ -1,4 +1,5 @@
 # Codex Agent Setup - BrassTune
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## Classification
 

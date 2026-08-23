@@ -59,7 +59,8 @@ enum AppLanguage: String, Codable, CaseIterable, Identifiable {
     }
 
     static var launchOverride: AppLanguage? {
-        ProcessInfo.processInfo.arguments.contains("UITEST_RTL") ? .arabic : nil
+        AuthService.allowsUITestAuthOverrides(bundleIdentifier: Bundle.main.bundleIdentifier)
+            && ProcessInfo.processInfo.arguments.contains("UITEST_RTL") ? .arabic : nil
     }
 }
 

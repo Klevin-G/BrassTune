@@ -88,6 +88,25 @@ struct SettingsView: View {
                 }
 
                 if model.authState.usesRemoteAccount {
+                    if model.profileRefreshUnavailable {
+                        Button("Retry profile") {
+                            Task { await model.refreshCurrentProfile() }
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .disabled(model.profileOperationInProgress)
+                        .accessibilityIdentifier("settings.profileRetry")
+                    }
+
+                    NavigationLink {
+                        ProfileEditorView(requiresCompletion: false)
+                    } label: {
+                        Label("Edit profile", systemImage: "person.crop.circle")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityHint("Change your username, display name, or optional profile photo")
+                    .accessibilityIdentifier("settings.editProfile")
+
                     Button {
                         Task { await model.signOut() }
                     } label: {
@@ -218,6 +237,9 @@ struct SettingsView: View {
                 }
                 SettingsNavigationRow(title: "Support", systemImage: "questionmark.circle", identifier: "settings.supportLink") {
                     LegalDetailView(kind: .support)
+                }
+                SettingsNavigationRow(title: "Credits", systemImage: "person.2", identifier: "settings.creditsLink") {
+                    LegalDetailView(kind: .credits)
                 }
                 Text(verbatim: NativeLocalization.format(
                     "Version %@ (%@)",
@@ -1147,6 +1169,7 @@ enum LegalKind {
     case privacy
     case terms
     case support
+    case credits
 }
 
 struct LegalDetailView: View {
@@ -1172,6 +1195,7 @@ struct LegalDetailView: View {
         case .privacy: return NativeLocalization.string("Privacy")
         case .terms: return NativeLocalization.string("Terms")
         case .support: return NativeLocalization.string("Support")
+        case .credits: return NativeLocalization.string("Credits")
         }
     }
 
@@ -1182,9 +1206,10 @@ struct LegalDetailView: View {
                 title: "Privacy Policy",
                 url: URL(string: "https://brasstune.vercel.app/privacy")!,
                 sections: [
-                    ("Data BrassTune uses", ["BrassTune uses your profile, settings, practice sessions, pitch results, reflections, and recordings to provide practice features. Supabase provides account authentication and storage for signed-in cloud practice; Vercel hosts the web app and Render hosts the backend service.", "Native microphone audio and imported score pages stay on this device unless you explicitly export or share them. Signed-in web recording behavior is described on the published policy page."]),
+                    ("Data BrassTune uses", ["BrassTune uses your profile, settings, practice sessions, pitch results, reflections, and recordings to provide practice features. Supabase provides account authentication and storage for signed-in cloud practice; Vercel hosts the web app and Render hosts the backend service.", NativeLocalization.string("Your linked profile display name and optional profile photo are stored privately for profile functionality, are not used for tracking, and the photo is re-encoded before upload."), "Native microphone audio and imported score pages stay on this device unless you explicitly export or share them. Signed-in web recording behavior is described on the published policy page."]),
                     ("Class privacy", ["Class directors can see aggregate cloud practice totals from the date you join through class reports. They never receive your recordings, reflection text, or private session details. A limited set of authorized BrassTune service administrators may access account, session, and cloud-audio data only for security, support, abuse investigation, or service operation."]),
-                    ("Your control", ["You can export or delete saved data from Settings. Account access and local data are removed when deletion succeeds. If cloud-file cleanup is queued, BrassTune reports that pending state and continues the protected cleanup job instead of claiming every stored object is already gone. Exported copies are yours to manage."])
+                    ("Your control", [NativeLocalization.string("Settings lets you export available practice data. Deleting your account requests deletion of your linked profile display name and optional photo; BrassTune reports any protected cloud cleanup still queued. Exported copies are yours to manage.")]),
+                    ("Credits", ["BrassTune is created by Kelvin Guo, Arya Salem."])
                 ]
             )
         case .terms:
@@ -1202,7 +1227,16 @@ struct LegalDetailView: View {
                 url: URL(string: "https://brasstune.vercel.app/support")!,
                 sections: [
                     ("Need help?", ["Students: your teacher or director can usually help fastest. For anything else, email us and tell us which screen you were on and roughly when it happened.", "Support contact: brasstune1@gmail.com"]),
-                    ("Common next steps", ["If the tuner stays quiet, check microphone access in Settings. You can export a session or delete your account from Settings."])
+                    ("Common next steps", ["If the tuner stays quiet, check microphone access in Settings. You can export a session or delete your account from Settings."]),
+                    ("Credits", ["BrassTune is created by Kelvin Guo, Arya Salem."])
+                ]
+            )
+        case .credits:
+            return LegalDocument(
+                title: "Credits",
+                url: URL(string: "https://brasstune.vercel.app/credits")!,
+                sections: [
+                    ("BrassTune", ["Created by Kelvin Guo, Arya Salem."])
                 ]
             )
         }

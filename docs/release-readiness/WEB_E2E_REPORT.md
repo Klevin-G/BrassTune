@@ -1,4 +1,5 @@
 # Historical Web E2E Report
+Project attribution: Kelvin Guo, Arya Salem.
 
 This report contains earlier browser evidence and old deployment hostnames. It is retained only as investigation history. Do not use it for current test counts, canonical URLs, or release status.
 

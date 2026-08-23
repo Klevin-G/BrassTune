@@ -1,4 +1,5 @@
 # Third-Party Asset Provenance
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-07-23.
 

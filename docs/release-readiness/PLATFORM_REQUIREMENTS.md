@@ -1,4 +1,5 @@
 # Platform Requirements
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-04 UTC. Primary-source links are included for traceability; this document records the current verified boundaries, not deployment approval.
 

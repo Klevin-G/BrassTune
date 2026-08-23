@@ -82,8 +82,15 @@ export const supabase = {
       const calls = Number(localStorage.getItem('brasstune.e2eSignOutCalls') || '0') + 1;
       localStorage.setItem('brasstune.e2eSignOutCalls', String(calls));
       localStorage.setItem('brasstune.e2eSignOutStarted', 'true');
-      const delayMs = Number(localStorage.getItem('brasstune.e2eSignOutDelayMs') || '0');
-      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (localStorage.getItem('brasstune.e2eSignOutHeld') === 'true') {
+        await new Promise((resolve) => {
+          const gate = window.setInterval(() => {
+            if (localStorage.getItem('brasstune.e2eSignOutRelease') !== 'true') return;
+            window.clearInterval(gate);
+            resolve(undefined);
+          }, 10);
+        });
+      }
       if (localStorage.getItem('brasstune.e2eSignOutFailure') === 'true') {
         return { error: new Error('network request failed') };
       }
@@ -456,7 +463,7 @@ test('a restored session profile failure keeps recovery controls visible and ret
 test('unresolved identity recovery awaits one guest transition and keeps failures visible', async ({ page }) => {
   await installSignedInClassFixture(page, { holdProfileUntilReleased: true });
   await page.addInitScript(() => {
-    localStorage.setItem('brasstune.e2eSignOutDelayMs', '1200');
+    localStorage.setItem('brasstune.e2eSignOutHeld', 'true');
     localStorage.setItem('brasstune.e2eSignOutFailure', 'true');
     localStorage.setItem('brasstune.e2eAuthStorageFailure', 'true');
   });
@@ -471,20 +478,22 @@ test('unresolved identity recovery awaits one guest transition and keeps failure
   await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutStarted'))).toBe('true');
   await expect(recoveryHeading).toBeVisible();
   await expect(page.getByText('Live mic', { exact: true })).toHaveCount(0);
+  await page.evaluate(() => localStorage.setItem('brasstune.e2eSignOutRelease', 'true'));
   await expect(page.getByRole('alert')).toHaveText('Sign-out could not complete. Try again.');
   await expect(guestButton).toBeEnabled();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutCalls'))).toBe('1');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBeNull();
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('brasstune.guestAccess'))).toBeNull();
 
   await page.evaluate(() => {
     localStorage.removeItem('brasstune.e2eSignOutFailure');
     localStorage.removeItem('brasstune.e2eAuthStorageFailure');
+    localStorage.removeItem('brasstune.e2eSignOutHeld');
   });
   await guestButton.click();
   await expect(page.getByText('Live mic', { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutCalls'))).toBe('2');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.e2eSignOutFinished'))).toBe('true');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestAccess'))).toBe('true');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('brasstune.guestAccess'))).toBe('true');
   await expect(recoveryHeading).toHaveCount(0);
 });
 
@@ -544,7 +553,7 @@ test('a delayed join from account A cannot reload or label account B', async ({ 
   expect(counters.groupLoads['token-b']).toBe(accountBLoadsBeforeRelease);
 });
 
-test('a new signed-in account completes one-step instrument setup and retries persistence', async ({ page }) => {
+test('a new signed-in account completes the five-step tour and retries persistence', async ({ page }) => {
   const counters = await installSignedInClassFixture(page, {
     onboardingCompletedAt: null,
     onboardingUpdateFailures: 1,
@@ -556,8 +565,14 @@ test('a new signed-in account completes one-step instrument setup and retries pe
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Choose your instrument' })).toBeVisible();
   await expect(dialog.getByText('Using an account')).toBeVisible();
-  await expect(dialog.getByRole('button', { name: /next|back|show me around/i })).toHaveCount(0);
+  await expect(dialog.getByText('App tour · Step 1 of 5')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Next' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Back' })).toHaveCount(0);
   await dialog.getByRole('combobox').selectOption('horn');
+  for (let index = 0; index < 4; index += 1) {
+    await dialog.getByRole('button', { name: 'Next' }).click();
+  }
+  await expect(dialog.getByText('App tour · Step 5 of 5')).toBeVisible();
   await dialog.getByRole('button', { name: 'Open the tuner' }).click();
   await expect(dialog.getByRole('button', { name: 'Saving tour…' })).toBeDisabled();
   await expect(dialog).toBeFocused();

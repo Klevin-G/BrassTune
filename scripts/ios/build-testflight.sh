@@ -27,7 +27,10 @@ BUNDLE_ID="$BRASSTUNE_BUNDLE_ID"
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PROJECT="$REPO_ROOT/swift/BrassTuneApp/BrassTuneApp.xcodeproj"
 SCHEME="BrassTuneApp"
-OUT="$REPO_ROOT/build/ios"
+OUT="${BRASSTUNE_RELEASE_OUT:-$REPO_ROOT/build/ios}"
+case "$OUT" in
+  ""|/) echo "BRASSTUNE_RELEASE_OUT must name a dedicated release-evidence directory." >&2; exit 1 ;;
+esac
 ARCHIVE="$OUT/BrassTuneApp.xcarchive"
 mkdir -p "$OUT"
 
@@ -44,6 +47,8 @@ case "$BUNDLE_ID" in
 esac
 
 CONFIGURATION=Release ACTION=install BRASSTUNE_REQUIRE_ONLINE_AUTH=YES \
+  PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+  BRASSTUNE_AUTH_CALLBACK_SCHEME=com.brasstune.auth \
   BRASSTUNE_ENV=production BRASSTUNE_API_BASE_URL=https://brasstune-u8qj.onrender.com \
   BRASSTUNE_SUPABASE_URL="$BRASSTUNE_SUPABASE_URL" \
   BRASSTUNE_SUPABASE_PUBLISHABLE_KEY="$BRASSTUNE_SUPABASE_PUBLISHABLE_KEY" \
@@ -76,7 +81,7 @@ cat > "$OUT/ExportOptions.plist" <<EOF
   <key>signingStyle</key><string>automatic</string>
   <key>teamID</key><string>${APPLE_TEAM_ID}</string>
   <key>uploadSymbols</key><true/>
-  <key>manageAppVersionAndBuildNumber</key><true/>
+  <key>manageAppVersionAndBuildNumber</key><false/>
 </dict>
 </plist>
 EOF

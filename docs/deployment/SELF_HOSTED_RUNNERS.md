@@ -1,4 +1,5 @@
 # Self-Hosted GitHub Runners
+Project attribution: Kelvin Guo, Arya Salem.
 
 Date: 2026-07-24
 

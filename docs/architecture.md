@@ -1,4 +1,5 @@
 # Architecture
+Project attribution: Kelvin Guo, Arya Salem.
 
 BrassTune Analytics is split into a React frontend, a FastAPI backend, and a portable domain core.
 
@@ -50,4 +51,3 @@ Note stats are duration-weighted. A note can be flagged by absolute error, signe
 ## Ensemble Mode
 
 The MVP creates a local group and seeded demo students. Ensemble endpoints aggregate real `PracticeSession` and `NoteEvent` rows, so the page is scaffolded but not static.
-

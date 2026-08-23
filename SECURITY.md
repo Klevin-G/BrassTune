@@ -1,4 +1,5 @@
 # Security Policy
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## Reporting a vulnerability
 

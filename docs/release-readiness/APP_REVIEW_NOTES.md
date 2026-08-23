@@ -1,6 +1,7 @@
 # App Review Notes Draft
+Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-05. This is prepared copy, not a saved App Store Connect record.
+Updated: 2026-08-23. This is prepared copy, not a saved App Store Connect record.
 
 ## Reviewer access
 
@@ -23,6 +24,12 @@ Updated: 2026-08-05. This is prepared copy, not a saved App Store Connect record
 > explicitly exports or shares them. Account creation, Apple sign-in, and Google
 > sign-in are optional and are not required to exercise the core app.
 
+> To review the optional account-profile flow, create an account, complete the
+> required username/display-name fields, then select an optional profile photo
+> through the system picker and save. The profile photo is sent only when saved,
+> stored privately for that account, and can be replaced or removed in the
+> profile editor. This flow is not required for the guest review path.
+
 ## Permission and data explanations
 
 - Microphone permission is used for live pitch detection during Tuner and
@@ -30,19 +37,25 @@ Updated: 2026-08-05. This is prepared copy, not a saved App Store Connect record
 - Files/Photos access is user-initiated for importing a local score.
 - Raw microphone audio is not uploaded by the native app. Local score files and
   native recordings leave the device only through an explicit export/share action.
+- An optional profile photo is used only for the signed-in account profile. It
+  is intended to be stored privately, replaceable/removable, and queued for
+  cleanup on account deletion. Backend lifecycle validation and deployment
+  evidence are pending. It is not shown to class-report surfaces or used for
+  ads or tracking.
 - Account deletion is available in app for signed-in accounts. Local guest data
   can be cleared separately.
 
 ## Not yet ready to paste as a final submission
 
-- Current source is still build `2`, which is already used by the five-crash
-  TestFlight build. A unique next build and exact candidate commit are required.
+- The intended next candidate is source version `1.0.1 (6)`; no archive,
+  upload, processed TestFlight install, or final dSYM is documented here.
 - No current-source archive, upload, processed TestFlight install, or final dSYM
   has been produced.
 - The original audio crash families have strong repaired-source physical
   evidence on the built-in route, including a fresh current-source `7/7`
   targeted device pass, but not against the exact next processed build.
-- App Store Connect metadata, privacy, age rating, price/availability,
+- App Store Connect metadata, privacy (including Name and Photos or Videos for
+  the profile feature), age rating, price/availability,
   accessibility labels, content rights, reviewer phone, and DSA trader status
   are not complete.
 

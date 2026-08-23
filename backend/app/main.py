@@ -37,6 +37,10 @@ _UUID_PATH_SEGMENT = re.compile(
 
 
 def should_seed_demo_data() -> bool:
+    # A stale opt-in flag must never seed demo identities or practice history
+    # in any deployed environment. Explicit seeding is local-only.
+    if app_environment() not in LOCAL_ENVIRONMENTS:
+        return False
     configured = os.getenv("BRASSTUNE_SEED_DEMO_DATA", "").strip().lower()
     if configured in {"1", "true", "yes", "on"}:
         return True
@@ -184,6 +188,7 @@ def _expensive_operation_family(request: Request, canonical_path: str) -> tuple[
         or canonical_path.endswith("/audio")
         or canonical_path == "/api/sessions/start"
         or canonical_path == "/api/users/me"
+        or (method == "PUT" and canonical_path == "/api/users/me/avatar")
     )
     if is_expensive_mutation:
         if canonical_path.endswith("/audio"):
@@ -202,6 +207,8 @@ def _expensive_operation_family(request: Request, canonical_path: str) -> tuple[
         return "audio-playback", _positive_int_env("BRASSTUNE_AUDIO_PLAYBACK_RATE_LIMIT_PER_MINUTE", 30)
     if method == "GET" and canonical_path == "/api/export/session/{id}/audio":
         return "audio-playback", _positive_int_env("BRASSTUNE_AUDIO_PLAYBACK_RATE_LIMIT_PER_MINUTE", 30)
+    if method == "GET" and canonical_path == "/api/users/me/avatar":
+        return "avatar-playback", _positive_int_env("BRASSTUNE_AVATAR_READ_RATE_LIMIT_PER_MINUTE", 30)
     if method == "GET" and (
         canonical_path.startswith("/api/export/")
         or canonical_path == "/api/users/me/export.zip"
@@ -268,7 +275,7 @@ app.add_middleware(
     allow_origins=_CORS_ALLOWED_ORIGINS,
     allow_origin_regex=_CORS_ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Audio-Duration-Seconds"],
 )
 

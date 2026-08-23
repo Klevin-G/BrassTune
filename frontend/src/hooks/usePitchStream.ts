@@ -183,6 +183,8 @@ interface UsePitchStreamOptions {
   recording: boolean;
   sessionId?: number;
   persistDemoFramesToBackend?: boolean;
+  /** A parent with a recording lifecycle can defer track teardown until its take saves. */
+  managePageLifecycle?: boolean;
   onFrame?: (frame: PitchFrame) => void;
 }
 
@@ -195,7 +197,7 @@ function audioContextConstructor() {
   return window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
 }
 
-export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch, recording, sessionId, persistDemoFramesToBackend = true, onFrame }: UsePitchStreamOptions) {
+export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch, recording, sessionId, persistDemoFramesToBackend = true, managePageLifecycle = true, onFrame }: UsePitchStreamOptions) {
   const { t } = useI18n();
   const [currentFrame, setCurrentFrame] = useState<PitchFrame | null>(null);
   const [history, setHistory] = useState<PitchFrame[]>([]);
@@ -241,8 +243,10 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
   const flushTimerRef = useRef<number | null>(null);
   const flushPromiseRef = useRef<Promise<PitchFrameFlushResult> | null>(null);
   const audioFrameTimingRef = useRef<AudioFrameTimingObservation>(EMPTY_AUDIO_FRAME_TIMING);
+  const enabledRef = useRef(enabled);
 
   useEffect(() => {
+    enabledRef.current = enabled;
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -705,6 +709,23 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
       stopMicrophone();
     };
   }, [clearFlushTimer, demoMode, flushPendingFrames, stopMicrophone]);
+
+  useEffect(() => {
+    if (!managePageLifecycle) return undefined;
+    const stopForBackground = () => stopMicrophone();
+    const restartForForeground = () => {
+      if (!document.hidden && enabledRef.current && !demoModeRef.current) void startMicrophone();
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) stopForBackground(); else restartForForeground();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', stopForBackground);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', stopForBackground);
+    };
+  }, [managePageLifecycle, startMicrophone, stopMicrophone]);
 
   return { currentFrame, history, statusMessage, micActive, mediaStream, streamInfo, startMicrophone, stopMicrophone, flushPendingFrames, finishPersistingFrames };
 }

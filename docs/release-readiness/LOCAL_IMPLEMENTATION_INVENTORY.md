@@ -1,4 +1,5 @@
 # Local Implementation Inventory
+Project attribution: Kelvin Guo, Arya Salem.
 
 2026-07-08 notice: this file is retained as historical June recovery inventory. It is not the current release decision; current PR #7 evidence is tracked in `WEB_RECOVERY_FINDINGS.md`, `WEB_E2E_REPORT.md`, and `WEB_PRODUCTION_COMPLETION_GATE.md`.
 

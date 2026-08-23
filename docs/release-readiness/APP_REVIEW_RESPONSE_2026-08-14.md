@@ -1,4 +1,5 @@
 # App Review response — Guideline 2.1 Information Needed
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status updated 2026-08-15 America/Chicago. Live App Store Connect is authoritative over older release documents.
 

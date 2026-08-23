@@ -1,10 +1,25 @@
 # BrassTune Release Evidence
+Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-07-24. Deployed application revision: `cfaa3c59d34676d180907c78d7cdd1b9de3299f7`.
+Updated: 2026-08-23. The historical report below retains its original evidence. Current live and local facts are recorded separately and do not certify the present deployment, native build, physical-device behavior, or an App Store submission.
+
+## 2026-08-23 verified current evidence
+
+- Apple Developer membership: **Enrolled as Individual**.
+- The public [iTunes lookup for app 6795688588](https://itunes.apple.com/lookup?id=6795688588) returns BrassTune `1.0`, `sellerName`/`artistName` `Arya Salem`, and release date `2026-08-18`.
+- App Store Connect shows build 5 and supports creating a new iOS version; Pricing shows the app on sale. These observations do not establish a new submission, review outcome, or release readiness.
+- Backend validation: `346 passed, 13 skipped`; targeted Bandit and `pip-audit` passed. A disposable PostgreSQL 17 run passed the new avatar migration constraints and concurrent replacement regression.
+- Web validation: `279/279` units and the production build passed; local Playwright passed `548` with `7` capability skips across five projects; the offline production-build suite passed `3/3`.
+- Native validation: Swift Core passed `12/12`; the exact simulator app-unit suite passed `270/270`; the exact-current monolithic UI suite passed `26/26` in 790.802 test seconds on iPhone 17 Pro / iOS 26.5 simulator.
+- Connected iPhone validation: the Debug app initially exposed a missing Swift-package runtime search path, which was repaired with `@executable_path/Frameworks`. The signed physical app-unit suite then passed `259`, skipped `11` source-tree-only audits, and failed `0` on the connected iPhone 15 Pro Max / iOS 26.6.1. Physical UI automation reached a device authorization timeout before any scenario executed; that is not counted as an app test failure or a pass.
+- Static/release validation: localization passed with `890` static keys and `1,027` catalog entries; the design-token and privacy-manifest checks passed; documentation credits passed for `91` owned Markdown files; Supabase linked dry run and lint passed. The avatar migration has not yet been applied to production.
+- Vercel’s Apple production environment flag was updated to `true`, but the value is not live until a redeploy. No deployed behavior is claimed from that configuration update.
+
+The individual developer-name result remains open: an individual cannot select `BrassTune`, and the existing name cannot be edited in the ordinary UI. Apple Developer Support or an eligible organization transfer is required; eligibility and legal DBA/trade-name treatment remain a human/Apple decision.
 
 ## Decision
 
-The web/backend production candidate is verified at the deployed revision above. Direct Render and Vercel identities report that exact SHA, hosted infrastructure smoke passed, and the strict hosted browser matrix passed. GitHub Actions was not used because its minutes are exhausted. This is not an Apple distribution or physical-device release decision.
+The current source candidate is locally verified but is not yet a release candidate: it remains uncommitted, the new Supabase migration is unapplied, Render/Vercel still serve an older revision, and build `1.0.1 (6)` has not been archived or uploaded. Historical deployment evidence below remains useful context but does not bind the current source to production. Physical app-unit execution passed after the runtime-path repair; attended microphone/speaker quality, physical UI automation, signed archive, TestFlight processing, and App Store resubmission remain separate gates.
 
 ## Verified evidence
 

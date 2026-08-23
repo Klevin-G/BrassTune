@@ -1,4 +1,5 @@
 # BrassTune App Store Submission Packet
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-05. This packet is prepared from the current native iOS source and a read-only App Store Connect audit. It is not evidence that a new build was archived, uploaded, selected, or submitted.
 
@@ -82,18 +83,27 @@ Suggested reviewer notes:
 
 ## App Privacy answers for the native build
 
-The final answers must match the final signed binary and `PrivacyInfo.xcprivacy`.
+This historical packet predates the local profile display-name/avatar feature.
+The final answers must match the final signed binary and `PrivacyInfo.xcprivacy`;
+the table below is not the prepared answer for a candidate that ships the new
+profile feature.
 
 | Data type | Collected | Linked to identity | Tracking | Purpose |
 |---|---:|---:|---:|---|
 | Contact Info — Email Address | Yes | Yes | No | App Functionality |
+| Contact Info — Name (display name) | Yes, if profile feature ships | Yes | No | App Functionality |
 | Identifiers — User ID | Yes | Yes | No | App Functionality |
 | User Content — Other User Content | Yes | Yes | No | App Functionality |
+| User Content — Photos or Videos (optional profile photo) | Yes, if profile feature ships | Yes | No | App Functionality |
 | Audio Data | No | No | No | Native audio is local unless the person explicitly exports or shares it |
 | Diagnostics, advertising, location, contacts, health, financial, browsing, search, purchases | No | No | No | Not collected by the native build |
 
 - Tracking: No.
 - Tracking domains: none.
+- The profile image is private account content, not a public social image. It
+  is not used for advertising, marketing, ad measurement, or data-broker
+  sharing. Verify backend deployment, private storage, removal/replacement and
+  account-deletion cleanup before saving these answers.
 - Privacy choices URL: leave blank unless a dedicated privacy-choices page is added; account deletion and local-data clearing are available in app.
 - Export compliance: `ITSAppUsesNonExemptEncryption = false` because the app uses Apple-provided HTTPS/TLS and platform security services without custom non-exempt cryptography.
 

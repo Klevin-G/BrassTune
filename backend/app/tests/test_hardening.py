@@ -183,6 +183,56 @@ def test_fresh_sqlite_tombstone_config_has_expand_phase_and_is_readiness_compati
     assert readiness_module.database_readiness_issues() == []
 
 
+def test_legacy_sqlite_users_receive_profile_avatar_columns(monkeypatch):
+    legacy_engine = create_engine("sqlite:///:memory:")
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                "create table users ("
+                "id integer not null primary key, name varchar not null, role varchar not null, "
+                "primary_instrument_id varchar not null)"
+            )
+        )
+    monkeypatch.setattr(database_module, "engine", legacy_engine)
+
+    database_module.ensure_additive_columns()
+
+    with legacy_engine.connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(text("pragma table_info(users)"))
+        }
+    assert {"avatar_object_key", "avatar_mime_type", "avatar_size_bytes", "avatar_updated_at"} <= columns
+
+
+def test_legacy_sqlite_backfills_only_established_profile_setup(monkeypatch):
+    legacy_engine = create_engine("sqlite:///:memory:")
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                "create table users (id integer not null primary key, name varchar not null, "
+                "username varchar, display_name varchar, onboarding_completed_at datetime)"
+            )
+        )
+        connection.execute(
+            text(
+                "insert into users (id, name, username, display_name, onboarding_completed_at) "
+                "values (1, 'Established', 'established', 'Established', current_timestamp), "
+                "(2, 'Seeded', 'seeded', 'Seeded', null)"
+            )
+        )
+    monkeypatch.setattr(database_module, "engine", legacy_engine)
+
+    database_module.ensure_additive_columns()
+
+    with legacy_engine.connect() as connection:
+        rows = connection.execute(
+            text("select id, profile_setup_completed_at from users order by id")
+        ).all()
+    assert rows[0][1] is not None
+    assert rows[1][1] is None
+
+
 def test_existing_sqlite_tombstone_config_adds_expand_phase(monkeypatch):
     legacy_engine = create_engine("sqlite:///:memory:")
     with legacy_engine.begin() as connection:
@@ -621,8 +671,18 @@ def test_cors_preflight_allows_public_headers_but_not_maintenance_secret():
                 "Access-Control-Request-Headers": "x-brasstune-maintenance-secret",
             },
         )
+        avatar_upload = client.options(
+            "/api/users/me/avatar",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
     assert allowed.status_code == 200
     assert blocked.status_code == 400
+    assert avatar_upload.status_code == 200
+    assert "PUT" in avatar_upload.headers["access-control-allow-methods"]
 
 
 def test_overlong_origin_is_rejected_before_cors_regex_processing():
@@ -761,6 +821,29 @@ def test_postgres_readiness_requires_terminal_job_identifier_nullability():
         "account_deletion_jobs",
         [{"name": "user_id", "nullable": False}],
     ) == ["Column account_deletion_jobs.user_id must be nullable."]
+
+
+def test_postgres_readiness_requires_avatar_private_job_constraint_vocabulary():
+    from app.db.readiness import _postgres_private_job_constraint_issues
+
+    valid = [
+        {
+            "conname": "audio_storage_jobs_action_check",
+            "definition": "check (action in ('upload_reservation', 'delete_object', 'reconcile_metadata', 'avatar_upload_reservation', 'avatar_metadata_reconciliation'))",
+        },
+        {
+            "conname": "audio_storage_jobs_provider_check",
+            "definition": "check (provider in ('local', 'supabase', 'unknown', 'supabase-avatar'))",
+        },
+    ]
+    assert _postgres_private_job_constraint_issues(valid) == []
+    assert _postgres_private_job_constraint_issues(valid[:1]) == [
+        "audio_storage_jobs provider constraint does not match the private-object job contract."
+    ]
+    weakened = [*valid[:1], {**valid[1], "definition": "check (provider in ('local', 'supabase', 'unknown', 'supabase-avatar', 'anything'))"}]
+    assert _postgres_private_job_constraint_issues(weakened) == [
+        "audio_storage_jobs provider constraint does not match the private-object job contract."
+    ]
 
 
 def test_postgres_readiness_tracks_account_deletion_expand_and_contract_phases():
@@ -1516,6 +1599,26 @@ def test_production_startup_does_not_seed_demo_data_by_default(monkeypatch):
     monkeypatch.setattr(main_module, "seed_demo_data", lambda db: calls.append(db))
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
+    assert calls == []
+
+
+@pytest.mark.parametrize("environment", ["production", "staging", "preview"])
+def test_deployed_startup_ignores_stale_explicit_demo_seed_flag(monkeypatch, environment):
+    _set_production_auth_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", environment)
+    monkeypatch.setenv("BRASSTUNE_SEED_DEMO_DATA", "1")
+    calls = []
+
+    class EmptyDB:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main_module, "init_db", lambda: None)
+    monkeypatch.setattr(main_module, "SessionLocal", lambda: EmptyDB())
+    monkeypatch.setattr(main_module, "seed_demo_data", lambda db: calls.append(db))
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+    assert main_module.should_seed_demo_data() is False
     assert calls == []
 
 
@@ -3639,7 +3742,40 @@ def test_account_deletion_local_cleanup_failure_does_not_delete_external_identit
         job = db.query(AccountDeletionJob).filter(AccountDeletionJob.user_id == user.id).one()
         assert job.status == "retryable_failure"
         assert job.stage == "local_cleanup_failed"
-        assert job.safe_error_category == "audio_cleanup_failed"
+        assert job.safe_error_category == "private_file_cleanup_failed"
+    finally:
+        db.close()
+
+
+def test_account_deletion_avatar_cleanup_failure_uses_general_private_file_category(monkeypatch):
+    db = _test_db()
+    try:
+        user = User(
+            id=151,
+            username="delete151",
+            name="Delete Avatar",
+            role="student",
+            primary_instrument_id="trumpet",
+            avatar_object_key="151/avatar.jpg",
+            avatar_mime_type="image/jpeg",
+            avatar_size_bytes=123,
+        )
+        db.add(user)
+        db.commit()
+        monkeypatch.setattr(
+            "app.services.profile_avatar.delete_avatar",
+            lambda _object_key: (_ for _ in ()).throw(RuntimeError("avatar storage unavailable")),
+        )
+
+        delete_my_account(
+            AccountDeletionRequest(confirmation="delete my account"),
+            db,
+            AuthContext(user=user, is_guest=False),
+        )
+
+        job = db.query(AudioStorageJob).filter(AudioStorageJob.object_key == "151/avatar.jpg").one()
+        assert job.status == "retryable_failure"
+        assert job.safe_error_category == "private_object_cleanup_failed"
     finally:
         db.close()
 
@@ -5213,6 +5349,85 @@ def test_audio_storage_jobs_migration_is_private_idempotent_and_indexed():
     assert "where status in ('reserved', 'pending', 'in_progress', 'retryable_failure')" in migration
     assert "default 7-day ttl" in migration
     assert "rollback notes" in migration
+
+
+def test_profile_avatar_migration_extends_private_job_constraints_without_weakening_privacy():
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260823164123_add_private_profile_avatars.sql"
+    ).read_text().lower()
+    assert "drop constraint if exists audio_storage_jobs_action_check" in migration
+    assert "'avatar_upload_reservation'" in migration
+    assert "'avatar_metadata_reconciliation'" in migration
+    assert "drop constraint if exists audio_storage_jobs_provider_check" in migration
+    assert "'supabase-avatar'" in migration
+    assert "audio_storage_jobs_terminal_privacy_check" not in migration
+
+
+@pytest.mark.skipif(database_backend(DATABASE_URL) != "postgresql", reason="PostgreSQL avatar migration compatibility regression")
+def test_postgres_profile_avatar_migration_accepts_owned_jobs_and_rejects_ownerless_active_jobs():
+    schema = "avatar_jobs_%s" % os.getpid()
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "supabase"
+        / "migrations"
+        / "20260823164123_add_private_profile_avatars.sql"
+    ).read_text().replace("public.", "%s." % schema)
+    raw_connection = engine.raw_connection()
+    driver_connection = raw_connection.driver_connection
+    original_autocommit = driver_connection.autocommit
+    driver_connection.autocommit = True
+    try:
+        with driver_connection.cursor() as cursor:
+            cursor.execute("drop schema if exists %s cascade" % schema)
+            cursor.execute("create schema %s" % schema)
+            cursor.execute(
+                "create table %s.users ("
+                "id bigserial primary key, username text, display_name text, onboarding_completed_at timestamptz)" % schema
+            )
+            cursor.execute(
+                "create table %s.audio_storage_jobs ("
+                "id bigserial primary key, user_id bigint, session_id bigint, "
+                "idempotency_key text not null unique, "
+                "action text not null constraint audio_storage_jobs_action_check "
+                "check (action in ('upload_reservation', 'delete_object', 'reconcile_metadata')), "
+                "provider text not null constraint audio_storage_jobs_provider_check "
+                "check (provider in ('local', 'supabase', 'unknown')), "
+                "object_key text not null, size_bytes integer not null default 0, "
+                "reason text not null, status text not null default 'pending', retry_count integer not null default 0, "
+                "next_retry_at timestamptz, safe_error_category text, details_json jsonb not null default '{}'::jsonb, "
+                "completed_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), "
+                "constraint audio_storage_jobs_terminal_privacy_check check ((status in ('completed', 'cancelled') "
+                "and user_id is null and session_id is null and idempotency_key = 'terminal:' || id::text "
+                "and object_key = '[redacted]' and size_bytes = 0 and details_json = '{}'::jsonb and completed_at is not null) "
+                "or (status not in ('completed', 'cancelled') and user_id is not null "
+                "and object_key <> '[redacted]' and completed_at is null)))" % schema
+            )
+
+            cursor.execute(migration)
+            cursor.execute(
+                "insert into %s.audio_storage_jobs "
+                "(user_id, idempotency_key, action, provider, object_key, size_bytes, reason, status) "
+                "values (42, 'avatar-reservation-owned', 'avatar_upload_reservation', 'supabase-avatar', "
+                "'42/new.jpg', 1024, 'avatar_upload_reserved', 'reserved')" % schema
+            )
+            with pytest.raises(CheckViolation):
+                cursor.execute(
+                    "insert into %s.audio_storage_jobs "
+                    "(user_id, idempotency_key, action, provider, object_key, size_bytes, reason, status) "
+                    "values (null, 'avatar-cleanup-ownerless', 'delete_object', 'supabase-avatar', "
+                    "'42/old.jpg', 0, 'avatar_account_deleted', 'pending')" % schema
+                )
+            driver_connection.rollback()
+    finally:
+        try:
+            with driver_connection.cursor() as cursor:
+                cursor.execute("drop schema if exists %s cascade" % schema)
+        finally:
+            driver_connection.autocommit = original_autocommit
+            raw_connection.close()
 
 
 def test_supabase_maintenance_scheduler_migration_fails_closed_and_is_private():

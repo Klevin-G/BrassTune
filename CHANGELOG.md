@@ -1,4 +1,5 @@
 # Changelog
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## Unreleased - 2026-08-19
 

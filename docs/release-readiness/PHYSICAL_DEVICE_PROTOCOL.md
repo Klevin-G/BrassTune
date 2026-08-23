@@ -1,4 +1,5 @@
 # Physical Device Protocol
+Project attribution: Kelvin Guo, Arya Salem.
 
 Simulator and generated audio tests do not prove microphone quality. Run this before App Store release.
 

@@ -1,4 +1,5 @@
 # Threat Model
+Project attribution: Kelvin Guo, Arya Salem.
 
 Date: 2026-06-18
 

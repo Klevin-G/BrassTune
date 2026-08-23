@@ -1,4 +1,5 @@
 # Post-Release Backlog
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-06-21T00:13:54Z
 

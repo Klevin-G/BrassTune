@@ -1,4 +1,5 @@
 # Accessibility Beta Checklist
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status: manual checklist plus automated axe smoke coverage.
 

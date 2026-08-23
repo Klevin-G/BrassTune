@@ -1,4 +1,5 @@
 # Historical CI Recovery Ledger
+Project attribution: Kelvin Guo, Arya Salem.
 
 This ledger predates the current self-hosted runner configuration and refers to retired workflow arrangements. It is retained as historical operational context only.
 

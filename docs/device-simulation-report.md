@@ -1,4 +1,5 @@
 # Device Simulation Report
+Project attribution: Kelvin Guo, Arya Salem.
 
 Generated: 2026-08-04T01:52:16.322Z
 Checkout: 0c03bb54595567166a145a9a2640f0f946432e11 (dirty worktree)

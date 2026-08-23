@@ -1,4 +1,5 @@
 # BrassTune Native Physical Release Report — 2026-08-05
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## 1. Outcome
 

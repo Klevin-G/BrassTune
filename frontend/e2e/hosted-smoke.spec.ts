@@ -40,6 +40,7 @@ const routes = [
   '/privacy',
   '/terms',
   '/support',
+  '/credits',
 ];
 
 const expectedRoutePaths = new Map([
@@ -87,7 +88,7 @@ async function assertNotProtectedPreview(response: Response | null, page: Page, 
 
 async function grantGuestAccess(page: Page) {
   await page.addInitScript(() => {
-    window.localStorage.setItem('brasstune.guestAccess', 'true');
+    window.sessionStorage.setItem('brasstune.guestAccess', 'true');
   });
 }
 

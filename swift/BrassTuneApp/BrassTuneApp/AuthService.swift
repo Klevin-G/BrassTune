@@ -9,7 +9,7 @@ final class AuthService: NSObject {
     static let productionOAuthCallbackScheme = "com.brasstune.auth"
     static let developmentOAuthCallbackScheme = "com.brasstune.auth.dev"
     static let productionBundleIdentifier = "com.aryasalem.BrassTune"
-    static let developmentBundleIdentifiers: Set<String> = [
+    nonisolated static let developmentBundleIdentifiers: Set<String> = [
         "com.aryasalem.BrassTune.dev",
         "com.brasstune.BrassTuneAppTests.dev",
         "com.brasstune.BrassTuneAppUITests.dev",
@@ -66,7 +66,7 @@ final class AuthService: NSObject {
         super.init()
     }
 
-    static func allowsUITestAuthOverrides(bundleIdentifier: String?) -> Bool {
+    nonisolated static func allowsUITestAuthOverrides(bundleIdentifier: String?) -> Bool {
         guard let bundleIdentifier else { return false }
         return developmentBundleIdentifiers.contains(bundleIdentifier)
     }
@@ -134,6 +134,9 @@ final class AuthService: NSObject {
     func signUp(
         email: String,
         password: String,
+        username: String? = nil,
+        displayName: String? = nil,
+        primaryInstrumentID: String? = nil,
         config: AppConfig,
         persist: Bool = true
     ) async throws -> AuthSession {
@@ -144,7 +147,12 @@ final class AuthService: NSObject {
             bearerToken: nil,
             body: [
                 "email": email,
-                "password": password
+                "password": password,
+                "data": [
+                    "username": username,
+                    "display_name": displayName,
+                    "primary_instrument_id": primaryInstrumentID
+                ].compactMapValues { $0 }
             ],
             decodesSignupUser: true
         )
@@ -335,7 +343,9 @@ final class AuthService: NSObject {
                 try signOut()
                 throw UserVisibleError.missingAuthConfiguration
             }
-            let url = supabaseURL.appending(path: "auth/v1/logout")
+            var components = URLComponents(url: supabaseURL.appending(path: "auth/v1/logout"), resolvingAgainstBaseURL: false)
+            components?.queryItems = [URLQueryItem(name: "scope", value: "local")]
+            guard let url = components?.url else { throw UserVisibleError.malformedResponse }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.timeoutInterval = 15
@@ -358,6 +368,24 @@ final class AuthService: NSObject {
         }
         try signOut()
         if let remoteError { throw remoteError }
+    }
+
+    /// The guest-upgrade decision intentionally defers Keychain persistence.
+    /// If the person cancels after Supabase has issued a temporary session,
+    /// revoke that session without touching any separately stored credential.
+    func revokeTemporarySession(_ session: AuthSession, config: AppConfig) async {
+        guard config.hasUsableAccountConfiguration,
+              let supabaseURL = config.supabaseURL,
+              let publishableKey = config.supabasePublishableKey else { return }
+        var components = URLComponents(url: supabaseURL.appending(path: "auth/v1/logout"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "scope", value: "local")]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(publishableKey, forHTTPHeaderField: "apikey")
+        _ = try? await self.session.data(for: request)
     }
 
     func deleteStoredAuth() throws {
@@ -605,7 +633,7 @@ final class AuthService: NSObject {
         path: String,
         query: [URLQueryItem] = [],
         bearerToken: String?,
-        body: [String: String],
+        body: [String: Any],
         expiredSessionFailure: Bool = false,
         decodesSignupUser: Bool = false
     ) async throws -> SupabaseAuthResponse {
@@ -656,7 +684,8 @@ final class AuthService: NSObject {
                     message: NativeLocalization.string("Your sign-in expired. Sign in again, then retry.")
                 )
             }
-            throw UserVisibleError.authenticationFailed
+            let failure = try? JSONDecoder().decode(SupabaseAuthFailure.self, from: data)
+            throw Self.safeAuthError(code: failure?.code, statusCode: statusCode)
         }
         do {
             if decodesSignupUser {
@@ -668,6 +697,19 @@ final class AuthService: NSObject {
                 return SupabaseAuthResponse(accessToken: nil, refreshToken: nil, expiresIn: nil, user: nil)
             }
             throw UserVisibleError.malformedResponse
+        }
+    }
+
+    private static func safeAuthError(code: String?, statusCode: Int) -> UserVisibleError {
+        switch (code ?? "").lowercased() {
+        case "invalid_credentials", "invalid_grant": return .invalidCredentials
+        case "email_not_confirmed": return .emailNotConfirmed
+        case "weak_password": return .weakPassword
+        case "over_request_rate_limit", "over_email_send_rate_limit", "over_sms_send_rate_limit": return .authRateLimited
+        case "provider_disabled", "validation_failed", "oauth_provider_not_supported": return .oauthProviderUnavailable
+        default:
+            if statusCode == 429 { return .authRateLimited }
+            return .authenticationFailed
         }
     }
 
@@ -856,6 +898,17 @@ struct GoogleOAuthTransaction: Equatable {
 
 private struct SupabaseAuthSettings: Decodable {
     let external: [String: Bool]
+}
+
+private struct SupabaseAuthFailure: Decodable {
+    let code: String?
+    let errorCode: String?
+    enum CodingKeys: String, CodingKey { case code; case errorCode = "error_code" }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        code = try values.decodeIfPresent(String.self, forKey: .code) ?? values.decodeIfPresent(String.self, forKey: .errorCode)
+        errorCode = try values.decodeIfPresent(String.self, forKey: .errorCode)
+    }
 }
 
 struct SupabaseAuthResponse: Decodable {

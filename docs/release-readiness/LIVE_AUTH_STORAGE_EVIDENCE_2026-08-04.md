@@ -1,4 +1,5 @@
 # Live auth and storage evidence — 2026-08-04
+Project attribution: Kelvin Guo, Arya Salem.
 
 > Local-only evidence registry. It contains no credentials or raw identity data,
 > but user-home paths must be normalized before external publication.

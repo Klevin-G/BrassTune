@@ -2,8 +2,13 @@ import Foundation
 import BrassTuneCore
 
 enum NativeTestFixtures {
-    static var areEnabled: Bool {
-        let arguments = ProcessInfo.processInfo.arguments
+    static func areEnabled(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier
+    ) -> Bool {
+        guard AuthService.allowsUITestAuthOverrides(bundleIdentifier: bundleIdentifier) else {
+            return false
+        }
         return arguments.contains("UITEST_DEMO") || arguments.contains("UITEST_FIXTURES")
     }
 }
@@ -311,8 +316,30 @@ struct MetronomeSettings: Codable, Equatable {
         "\(beatsPerMeasure)/\(beatUnit)"
     }
 
+    /// In 6/8, 9/8, and 12/8 the displayed tempo is the dotted-quarter
+    /// pulse, not an eighth-note tempo.  The clock still emits the written
+    /// eighth-note grid so grouping accents can be represented precisely.
+    var isCompoundMeter: Bool {
+        beatUnit == 8 && [6, 9, 12].contains(beatsPerMeasure)
+    }
+
+    /// Written-note indexes at the beginning of every primary compound pulse.
+    /// Keeping this derived from the meter means persisted legacy presets gain
+    /// the correct grouping without a migration.
+    var groupingStarts: [Int] {
+        isCompoundMeter ? Array(stride(from: 0, to: beatsPerMeasure, by: 3)) : [0]
+    }
+
+    var tempoUnitLabel: String {
+        isCompoundMeter
+            ? NativeLocalization.string("dotted-quarter pulse")
+            : NativeLocalization.format("1/%@ beat", String(beatUnit))
+    }
+
     var intervalSeconds: TimeInterval {
-        60.0 / Double(max(20, min(300, bpm))) / Double(subdivision.ticksPerBeat)
+        let basePulseSeconds = 60.0 / Double(max(20, min(300, bpm)))
+        let writtenBeatSeconds = isCompoundMeter ? basePulseSeconds / 3.0 : basePulseSeconds
+        return writtenBeatSeconds / Double(subdivision.ticksPerBeat)
     }
 
     mutating func validate() {
@@ -388,7 +415,7 @@ enum ScoreSourceKind: String, Codable, CaseIterable, Identifiable {
     }
 
     static var allCases: [ScoreSourceKind] {
-        NativeTestFixtures.areEnabled ? [.filesPDF, .filesImage, .photos, .sample] : [.filesPDF, .filesImage, .photos]
+        NativeTestFixtures.areEnabled() ? [.filesPDF, .filesImage, .photos, .sample] : [.filesPDF, .filesImage, .photos]
     }
 }
 
@@ -424,7 +451,7 @@ enum PracticeSessionSource: String, Codable, CaseIterable, Identifiable {
     }
 
     static var allCases: [PracticeSessionSource] {
-        NativeTestFixtures.areEnabled ? [.live, .sample] : [.live]
+        NativeTestFixtures.areEnabled() ? [.live, .sample] : [.live]
     }
 }
 
@@ -2095,6 +2122,28 @@ enum GuestAccountUpgradeChoice: Equatable {
     case cancel
 }
 
+struct NativeUserProfile: Codable, Equatable {
+    let id: Int
+    let supabaseUserID: String?
+    var username: String?
+    var displayName: String?
+    let email: String?
+    var primaryInstrumentID: String
+    let profileComplete: Bool
+    let avatarAvailable: Bool
+    let avatarUpdatedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, username, email
+        case supabaseUserID = "supabase_user_id"
+        case displayName = "display_name"
+        case primaryInstrumentID = "primary_instrument_id"
+        case profileComplete = "profile_complete"
+        case avatarAvailable = "avatar_available"
+        case avatarUpdatedAt = "avatar_updated_at"
+    }
+}
+
 struct GuestAccountUpgradePrompt: Equatable {
     let email: String
     let canMerge: Bool
@@ -2113,6 +2162,10 @@ enum UserVisibleError: LocalizedError, Equatable {
     case accountDeletionRequiresConfirmation
     case missingAuthConfiguration
     case authenticationFailed
+    case invalidCredentials
+    case emailNotConfirmed
+    case weakPassword
+    case authRateLimited
     case secureStorageUnavailable
     case secureStorageReadFailed
     case secureStorageCorrupt
@@ -2135,6 +2188,10 @@ enum UserVisibleError: LocalizedError, Equatable {
         case .accountDeletionRequiresConfirmation: return NativeLocalization.string("Please confirm deletion and try again.")
         case .missingAuthConfiguration: return NativeLocalization.string("Account sign-in isn't available right now. You can keep practicing as a guest.")
         case .authenticationFailed: return NativeLocalization.string("BrassTune could not complete authentication.")
+        case .invalidCredentials: return NativeLocalization.string("The email or password is incorrect. Check both and try again.")
+        case .emailNotConfirmed: return NativeLocalization.string("Confirm your email before signing in. Check your inbox and spam folder.")
+        case .weakPassword: return NativeLocalization.string("Choose a stronger password with at least 8 characters.")
+        case .authRateLimited: return NativeLocalization.string("Too many account attempts. Wait a few minutes, then try again.")
         case .secureStorageUnavailable: return NativeLocalization.string("BrassTune couldn't access secure sign-in storage on this device. Restart the app and try again.")
         case .secureStorageReadFailed: return NativeLocalization.string("BrassTune couldn't read your saved sign-in on this device. Your sign-in was left unchanged; restart the app and try again.")
         case .secureStorageCorrupt: return NativeLocalization.string("BrassTune found an unreadable saved sign-in on this device. Your sign-in was left unchanged; restart the app and try again.")

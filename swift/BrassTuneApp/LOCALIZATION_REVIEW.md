@@ -1,4 +1,5 @@
 # Native localization terminology review
+Project attribution: Kelvin Guo, Arya Salem.
 
 Reviewed: 2026-07-22
 

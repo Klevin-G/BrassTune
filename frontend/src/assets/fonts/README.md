@@ -1,4 +1,5 @@
 # Google sign-in font
+Project-integration attribution: Kelvin Guo, Arya Salem. This identifies project integration only; it does not claim authorship of the Google Sans font or alter its license.
 
 `GoogleSans-Medium.woff2` is a web subset of the canonical
 `swift/BrassTuneApp/BrassTuneApp/Resources/Fonts/GoogleSans-Medium.ttf`.

@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }) => {
       Object.keys(localStorage).filter((key) => key.startsWith('brasstune.')).forEach((key) => localStorage.removeItem(key));
       localStorage.setItem('brasstune.onboardingComplete', 'true');
       localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
-      localStorage.setItem('brasstune.guestAccess', 'true');
+      sessionStorage.setItem('brasstune.guestAccess', 'true');
       localStorage.setItem('brasstune.demoMode', 'true');
       localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({
         version: 1,
@@ -453,7 +453,7 @@ test('built-in shortcut labels follow the selected locale while custom titles an
     if (sessionStorage.getItem(seedKey) !== 'true') {
       localStorage.setItem('brasstune.onboardingComplete', 'true');
       localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
-      localStorage.setItem('brasstune.guestAccess', 'true');
+      sessionStorage.setItem('brasstune.guestAccess', 'true');
       localStorage.setItem('brasstune.demoMode', 'true');
       sessionStorage.setItem('e2e.practiceLibrary.initialized', 'true');
       localStorage.setItem('brasstune.practiceLibrary.v1.guest', JSON.stringify({

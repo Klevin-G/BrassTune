@@ -53,9 +53,23 @@
   gap: 10px;
 }
 
+.ag-create-account {
+  min-height: calc(var(--tap) + 4px);
+  margin-bottom: 8px;
+  font-size: 1rem;
+}
+
+.ag-account-benefit {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
 .ag-guest {
   min-height: calc(var(--tap) + 4px);
-  font-size: 1rem;
+  font-size: 0.94rem;
 }
 
 .ag-nudge {

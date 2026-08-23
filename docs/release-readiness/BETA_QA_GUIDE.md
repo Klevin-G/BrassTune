@@ -1,4 +1,5 @@
 # Closed-Beta QA Guide
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status: operational guide for owner-controlled closed-beta testing. BrassTune remains a closed-beta candidate; live provider, App Store, and physical-device gates remain outside this guide.
 

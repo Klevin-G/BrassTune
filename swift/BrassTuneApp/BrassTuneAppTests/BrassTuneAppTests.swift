@@ -111,6 +111,11 @@ private final class MetronomeGraphProbe: @unchecked Sendable {
     }
 }
 
+@MainActor
+private final class MetronomeTransitionProbe {
+    var visualTargets: [UInt64] = []
+}
+
 private final class AudioControlPlaneProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var storedEvents: [NativeAudioControlPlaneHooks.Event] = []
@@ -498,7 +503,7 @@ final class BrassTuneAppTests: XCTestCase {
 
     @MainActor
     func testShippingDefaultsUseLiveMicrophoneAndAudibleMetronome() {
-        XCTAssertFalse(NativeTestFixtures.areEnabled)
+        XCTAssertFalse(NativeTestFixtures.areEnabled())
         XCTAssertEqual(NativeAudioEngine.defaultRecordingSource, .live)
         XCTAssertEqual(PracticeSessionSource.allCases, [.live])
         XCTAssertFalse(ScoreSourceKind.allCases.contains(.sample))
@@ -901,7 +906,11 @@ final class BrassTuneAppTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("BrassTuneApp/Resources", isDirectory: true)
-        let localizableData = try Data(contentsOf: resourceDirectory.appendingPathComponent("Localizable.xcstrings"))
+        let localizableURL = resourceDirectory.appendingPathComponent("Localizable.xcstrings")
+        guard FileManager.default.fileExists(atPath: localizableURL.path) else {
+            throw XCTSkip("Source-tree localization audit runs on macOS/simulator hosts, not installed devices.")
+        }
+        let localizableData = try Data(contentsOf: localizableURL)
         let localizable = try XCTUnwrap(JSONSerialization.jsonObject(with: localizableData) as? [String: Any])
         let strings = try XCTUnwrap(localizable["strings"] as? [String: Any])
         for (key, rawEntry) in strings {
@@ -1032,6 +1041,9 @@ final class BrassTuneAppTests: XCTestCase {
         let fontURL = appDirectory.appendingPathComponent(
             "BrassTuneApp/Resources/Fonts/GoogleSans-Medium.ttf"
         )
+        guard FileManager.default.fileExists(atPath: fontURL.path) else {
+            throw XCTSkip("Source-tree font-license audit runs on macOS/simulator hosts, not installed devices.")
+        }
         let fontData = try Data(contentsOf: fontURL)
         let digest = SHA256.hash(data: fontData)
             .map { String(format: "%02x", $0) }
@@ -1651,6 +1663,9 @@ final class BrassTuneAppTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let infoURL = appDirectory.appendingPathComponent("BrassTuneApp/Info.plist")
+        guard FileManager.default.fileExists(atPath: infoURL.path) else {
+            throw XCTSkip("Source-tree Info.plist audit runs on macOS/simulator hosts, not installed devices.")
+        }
         let data = try Data(contentsOf: infoURL)
         let plist = try XCTUnwrap(
             PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
@@ -1779,13 +1794,20 @@ final class BrassTuneAppTests: XCTestCase {
             saveSessionPayload: { credentials.payload = $0 },
             deleteSessionPayload: { credentials.payload = nil }
         )
-        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: auth)
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
         model.config = makeAuthConfig()
         let duplicate = makeSession(name: "Existing account", cents: [1])
         let guestOnly = makeSession(name: "Guest only", cents: [2])
         defer { StubURLProtocol.handler = nil }
         StubURLProtocol.handler = { request in
-            .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"guest-upgrade","email":"player@example.com"}}"#.utf8))
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: self.profileResponseData(userID: "guest-upgrade", email: "player@example.com"))
+            }
+            return .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"guest-upgrade","email":"player@example.com"}}"#.utf8))
         }
 
         await model.signIn(email: "player@example.com", password: "password")
@@ -1818,6 +1840,8 @@ final class BrassTuneAppTests: XCTestCase {
         )
         relaunchedBeforeChoice.config = makeAuthConfig()
         await relaunchedBeforeChoice.restoreSession()
+        XCTAssertEqual(relaunchedBeforeChoice.authState, .signedOut)
+        relaunchedBeforeChoice.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(relaunchedBeforeChoice.authState, .guest)
         XCTAssertEqual(
             relaunchedBeforeChoice.sessions.map(\.id),
@@ -1855,21 +1879,33 @@ final class BrassTuneAppTests: XCTestCase {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-guest-choices-\(UUID().uuidString).json")
         let credentials = InMemoryAuthSessionStore()
         let auth = AuthService(session: makeStubSession(), readSessionPayload: { credentials.payload }, saveSessionPayload: { credentials.payload = $0 }, deleteSessionPayload: { credentials.payload = nil })
-        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: auth)
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
         model.config = makeAuthConfig()
         let guest = makeSession(name: "Guest survives", cents: [0])
         model.enterGuestDemo(presentTutorial: false)
         model.sessions = [guest]
         defer { StubURLProtocol.handler = nil }
         StubURLProtocol.handler = { request in
-            .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"guest-choice","email":"player@example.com"}}"#.utf8))
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: self.profileResponseData(userID: "guest-choice", email: "player@example.com", profileComplete: false))
+            }
+            return .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"guest-choice","email":"player@example.com"}}"#.utf8))
         }
 
         await model.signIn(email: "player@example.com", password: "password")
+        XCTAssertTrue(model.profileEditorRequired, "The provisional account can be incomplete before the guest makes a choice.")
         model.resolveGuestAccountUpgrade(.cancel)
         XCTAssertEqual(model.authState, .guest)
         XCTAssertEqual(model.sessions.map(\.id), [guest.id])
         XCTAssertNil(credentials.payload)
+        XCTAssertNil(model.userProfile)
+        XCTAssertNil(model.profileAvatarData)
+        XCTAssertFalse(model.profileEditorRequired)
+        XCTAssertFalse(model.profileRefreshUnavailable)
 
         await model.signIn(email: "player@example.com", password: "password")
         model.resolveGuestAccountUpgrade(.keepSeparate)
@@ -1878,6 +1914,398 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertNotNil(credentials.payload, "Keep separate is an explicit choice to persist the account session.")
         model.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(model.sessions.map(\.id), [guest.id])
+    }
+
+    @MainActor
+    func testProfileServiceOutageKeepsAuthenticatedSignInUsableAndClearsStaleProfile() async throws {
+        let auth = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? auth.signOut(); StubURLProtocol.handler = nil }
+        nonisolated(unsafe) var profileServiceRecovered = false
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-profile-outage-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
+        model.config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                if profileServiceRecovered {
+                    return .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: self.profileResponseData(userID: "profile-outage", email: "player@example.com"))
+                }
+                throw URLError(.notConnectedToInternet)
+            }
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"profile-outage","email":"player@example.com"}}"#.utf8)
+            )
+        }
+
+        await model.signIn(email: "player@example.com", password: "password")
+
+        XCTAssertEqual(model.authState, .signedIn(email: "player@example.com"))
+        XCTAssertTrue(model.profileRefreshUnavailable)
+        XCTAssertNil(model.userProfile)
+        XCTAssertNil(model.profileAvatarData)
+        XCTAssertTrue(model.authNotice?.localizedCaseInsensitiveContains("profile") == true)
+        XCTAssertTrue(model.authNoticeIsError)
+
+        profileServiceRecovered = true
+        let didRefreshProfile = await model.refreshCurrentProfile()
+        XCTAssertTrue(didRefreshProfile)
+        XCTAssertFalse(model.profileRefreshUnavailable)
+        XCTAssertNil(model.lastError)
+        XCTAssertNil(model.authNotice)
+        XCTAssertFalse(model.authNoticeIsError)
+        XCTAssertEqual(model.userProfile?.supabaseUserID, "profile-outage")
+    }
+
+    @MainActor
+    func testMalformedProfileDoesNotLogOutAuthenticatedSessionAndNewSignupRequiresRetryableSetup() async throws {
+        let auth = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? auth.signOut(); StubURLProtocol.handler = nil }
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-profile-malformed-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
+        model.config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: Data(#"{"unexpected":"profile payload"}"#.utf8)
+                )
+            }
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"profile-new","email":"new@example.com"}}"#.utf8)
+            )
+        }
+
+        await model.signUp(email: "new@example.com", password: "long-enough-password")
+
+        XCTAssertEqual(model.authState, .signedIn(email: "new@example.com"))
+        XCTAssertTrue(model.profileRefreshUnavailable)
+        XCTAssertTrue(model.profileEditorRequired)
+        XCTAssertNil(model.userProfile)
+        XCTAssertTrue(model.authNotice?.localizedCaseInsensitiveContains("retry") == true)
+    }
+
+    @MainActor
+    func testProfileEditorUsernameValidationAndBoundedAvatarPreparation() throws {
+        for username in ["abc", "A_very-valid-name_123", String(repeating: "z", count: 32)] {
+            XCTAssertTrue(ProfileEditorView.isValidUsername(username), username)
+        }
+        for username in ["ab", String(repeating: "z", count: 33), "has space", "trumpet!", "Émile"] {
+            XCTAssertFalse(ProfileEditorView.isValidUsername(username), username)
+        }
+        XCTAssertTrue(ProfileEditorView.isValidDisplayName(String(repeating: "A", count: 80)))
+        XCTAssertFalse(ProfileEditorView.isValidDisplayName(String(repeating: "A", count: 81)))
+        XCTAssertTrue(ProfileEditorView.isValidDisplayName(String(repeating: "e\u{301}", count: 80)))
+        XCTAssertFalse(ProfileEditorView.isValidDisplayName(String(repeating: "😀", count: 81)))
+        XCTAssertFalse(ProfileEditorView.isValidDisplayName(String(repeating: "👨‍👩‍👧‍👦", count: 12)))
+        XCTAssertFalse(ProfileEditorView.isValidDisplayName("   "))
+
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 2_048, height: 1_024))
+        let source = renderer.jpegData(withCompressionQuality: 0.7) { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2_048, height: 1_024))
+        }
+        let output = try XCTUnwrap(ProfileEditorView.prepareAvatarData(source))
+        let image = try XCTUnwrap(UIImage(data: output)?.cgImage)
+        XCTAssertLessThanOrEqual(max(image.width, image.height), 1_024)
+
+        let largeFormat = UIGraphicsImageRendererFormat()
+        largeFormat.scale = 1
+        let largeSourceRenderer = UIGraphicsImageRenderer(
+            size: CGSize(width: 4_097, height: 200),
+            format: largeFormat
+        )
+        let largeSource = largeSourceRenderer.jpegData(withCompressionQuality: 0.7) { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4_097, height: 200))
+        }
+        let downsampledLargeSource = try XCTUnwrap(ProfileEditorView.prepareAvatarData(largeSource))
+        let largeImage = try XCTUnwrap(UIImage(data: downsampledLargeSource)?.cgImage)
+        XCTAssertLessThanOrEqual(max(largeImage.width, largeImage.height), 1_024)
+        XCTAssertLessThanOrEqual(downsampledLargeSource.count, 5 * 1_024 * 1_024)
+
+        // A camera-like high-entropy JPEG can legitimately exceed the upload
+        // limit before thumbnailing. The source is accepted up to the local
+        // abuse cap; only the normalized output must fit the backend limit.
+        let side = 2_500
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        var random: UInt32 = 0x1234_5678
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            random = random &* 1_664_525 &+ 1_013_904_223
+            pixels[index] = UInt8(truncatingIfNeeded: random)
+            pixels[index + 1] = UInt8(truncatingIfNeeded: random >> 8)
+            pixels[index + 2] = UInt8(truncatingIfNeeded: random >> 16)
+            pixels[index + 3] = 255
+        }
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(pixels) as CFData))
+        let noisyImage = try XCTUnwrap(CGImage(
+            width: side,
+            height: side,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: side * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ))
+        let oversizedEncodedSource = try XCTUnwrap(UIImage(cgImage: noisyImage).jpegData(compressionQuality: 1))
+        XCTAssertGreaterThan(oversizedEncodedSource.count, 5 * 1_024 * 1_024)
+        let normalizedOversizedSource = try XCTUnwrap(ProfileEditorView.prepareAvatarData(oversizedEncodedSource))
+        XCTAssertLessThanOrEqual(normalizedOversizedSource.count, 5 * 1_024 * 1_024)
+    }
+
+    @MainActor
+    func testReleaseBundlesIgnoreUITestFixtureArguments() {
+        let productionBundleIdentifier = AuthService.productionBundleIdentifier
+        XCTAssertFalse(NativeTestFixtures.areEnabled(
+            arguments: ["UITEST_DEMO", "UITEST_FIXTURES"],
+            bundleIdentifier: productionBundleIdentifier
+        ))
+        XCTAssertTrue(NativeTestFixtures.areEnabled(
+            arguments: ["UITEST_FIXTURES"],
+            bundleIdentifier: "com.brasstune.BrassTuneAppTests.dev"
+        ))
+    }
+
+    @MainActor
+    func testSuccessfulAvatarDeleteIgnoresPriorUnrelatedError() async throws {
+        let client = APIClient(session: makeStubSession())
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-avatar-delete-\(UUID().uuidString).json")),
+            apiClient: client,
+            classAccessTokenProvider: { _ in "fresh-token" }
+        )
+        model.config = AppConfig(
+            environment: .staging,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
+            supabaseURL: nil,
+            supabasePublishableKey: nil
+        )
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.path, "/api/users/me/avatar")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fresh-token")
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data()
+            )
+        }
+        model.reportAuthFailure(.networkUnavailable)
+
+        let didDeleteAvatar = await model.deleteProfileAvatar()
+        XCTAssertTrue(didDeleteAvatar)
+        XCTAssertNil(model.lastError)
+    }
+
+    @MainActor
+    func testRequiredProfileWaitsForStagedAvatarOutcomeBeforeDismissal() async throws {
+        let auth = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? auth.signOut(); StubURLProtocol.handler = nil }
+        nonisolated(unsafe) var avatarUploadFails = true
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-required-avatar-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
+        model.config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/auth/v1/token"):
+                return .init(response: response, data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"required-avatar","email":"player@example.com"}}"#.utf8))
+            case ("GET", "/api/users/me"):
+                return .init(response: response, data: self.profileResponseData(userID: "required-avatar", email: "player@example.com", profileComplete: false))
+            case ("PATCH", "/api/users/me"):
+                return .init(response: response, data: self.profileResponseData(userID: "required-avatar", email: "player@example.com", profileComplete: true))
+            case ("PUT", "/api/users/me/avatar") where avatarUploadFails:
+                throw URLError(.notConnectedToInternet)
+            case ("PUT", "/api/users/me/avatar"):
+                return .init(response: response, data: self.profileResponseData(userID: "required-avatar", email: "player@example.com", profileComplete: true))
+            case ("GET", "/api/users/me/avatar"):
+                return .init(response: HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, data: Data())
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        await model.signIn(email: "player@example.com", password: "password")
+        XCTAssertTrue(model.profileEditorRequired)
+        let didSaveNames = await model.updateProfile(username: "player", displayName: "Player")
+        XCTAssertTrue(didSaveNames)
+        XCTAssertTrue(model.profileEditorRequired, "A required sheet must survive the successful name PATCH while its avatar is staged.")
+        let didFailAvatarUpload = await model.uploadProfileAvatar(Data([0xFF, 0xD8, 0xFF]))
+        XCTAssertFalse(didFailAvatarUpload)
+        XCTAssertTrue(model.profileEditorRequired, "A failed staged avatar upload must leave retry affordances visible.")
+
+        avatarUploadFails = false
+        let didUploadAvatar = await model.uploadProfileAvatar(Data([0xFF, 0xD8, 0xFF]))
+        XCTAssertTrue(didUploadAvatar)
+        XCTAssertTrue(model.profileEditorRequired)
+        model.completeRequiredProfile()
+        XCTAssertFalse(model.profileEditorRequired)
+    }
+
+    @MainActor
+    func testIncompleteProfilePatchFailureCanSignOutOfRequiredRecovery() async throws {
+        let auth = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? auth.signOut(); StubURLProtocol.handler = nil }
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-required-patch-failure-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
+        model.config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/auth/v1/token"):
+                return .init(response: response, data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"patch-recovery","email":"player@example.com"}}"#.utf8))
+            case ("GET", "/api/users/me"):
+                return .init(response: response, data: self.profileResponseData(userID: "patch-recovery", email: "player@example.com", profileComplete: false))
+            case ("PATCH", "/api/users/me"):
+                throw URLError(.notConnectedToInternet)
+            case ("POST", "/auth/v1/logout"):
+                return .init(response: response, data: Data())
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        await model.signIn(email: "player@example.com", password: "password")
+        XCTAssertTrue(model.profileEditorRequired)
+        let didSave = await model.updateProfile(username: "player", displayName: "Player")
+        XCTAssertFalse(didSave)
+        XCTAssertTrue(model.profileEditorRequired)
+
+        await model.signOut()
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertFalse(model.profileEditorRequired)
+    }
+
+    @MainActor
+    func testOAuthProfileOutageRequiresCompletionForNewAppleAndGoogleAccounts() async throws {
+        let appleCredentials = InMemoryAuthSessionStore()
+        let appleAuth = AuthService(
+            session: makeStubSession(),
+            service: "com.brasstune.tests.apple-profile-outage.\(UUID().uuidString)",
+            account: "current-session",
+            readSessionPayload: { appleCredentials.payload },
+            saveSessionPayload: { appleCredentials.payload = $0 },
+            deleteSessionPayload: { appleCredentials.payload = nil }
+        )
+        let appleModel = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-apple-profile-outage-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: appleAuth
+        )
+        appleModel.config = makeAuthConfig()
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/auth/v1/settings":
+                return .init(response: response, data: Data(#"{"external":{"apple":true,"google":true}}"#.utf8))
+            case "/auth/v1/token":
+                return .init(response: response, data: Data(#"{"access_token":"apple-access","refresh_token":"apple-refresh","expires_in":3600,"user":{"id":"apple-profile-outage","email":"apple@example.com","created_at":"2026-08-23T12:00:00Z","last_sign_in_at":"2026-08-23T12:00:01Z"}}"#.utf8))
+            case "/api/users/me":
+                throw URLError(.notConnectedToInternet)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        await appleModel.loadAuthProviderConfiguration()
+        await appleModel.completeAppleSignIn(identityToken: Data("apple-token".utf8), rawNonce: "nonce")
+        XCTAssertEqual(appleModel.authState, .signedIn(email: "apple@example.com"))
+        XCTAssertTrue(appleModel.profileRefreshUnavailable)
+        XCTAssertTrue(appleModel.profileEditorRequired)
+
+        let googleCredentials = InMemoryAuthSessionStore()
+        let googleAuth = AuthService(
+            session: makeStubSession(),
+            service: "com.brasstune.tests.google-profile-outage.\(UUID().uuidString)",
+            account: "current-session",
+            readSessionPayload: { googleCredentials.payload },
+            saveSessionPayload: { googleCredentials.payload = $0 },
+            deleteSessionPayload: { googleCredentials.payload = nil },
+            webAuthentication: { authorizationURL, _ in
+                let queryItems = URLComponents(url: authorizationURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                let redirect = try XCTUnwrap(queryItems.first(where: { $0.name == "redirect_to" })?.value)
+                var callback = try XCTUnwrap(URLComponents(string: redirect))
+                let state = try XCTUnwrap(callback.queryItems?.first(where: { $0.name == "state" })?.value)
+                callback.queryItems = [
+                    URLQueryItem(name: "state", value: state),
+                    URLQueryItem(name: "code", value: "google-code"),
+                ]
+                return try XCTUnwrap(callback.url)
+            }
+        )
+        let googleModel = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-google-profile-outage-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: googleAuth
+        )
+        googleModel.config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            switch request.url?.path {
+            case "/auth/v1/settings":
+                return .init(response: response, data: Data(#"{"external":{"apple":true,"google":true}}"#.utf8))
+            case "/auth/v1/token":
+                return .init(response: response, data: Data(#"{"access_token":"google-access","refresh_token":"google-refresh","expires_in":3600,"user":{"id":"google-profile-outage","email":"google@example.com"}}"#.utf8))
+            case "/api/users/me":
+                throw URLError(.notConnectedToInternet)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        await googleModel.loadAuthProviderConfiguration()
+        await googleModel.completeGoogleSignIn()
+        XCTAssertEqual(googleModel.authState, .signedIn(email: "google@example.com"))
+        XCTAssertTrue(googleModel.profileRefreshUnavailable)
+        XCTAssertFalse(googleModel.profileEditorRequired, "An unknown Google account must retain its retryable signed-in session during a profile outage.")
+    }
+
+    @MainActor
+    func testMismatchedProfileFailsClosedAndClearsStoredCredential() async throws {
+        let auth = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? auth.signOut(); StubURLProtocol.handler = nil }
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-profile-mismatch-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
+        model.config = makeAuthConfig()
+        StubURLProtocol.handler = { request in
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: self.profileResponseData(userID: "different-user", email: "other@example.com")
+                )
+            }
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"profile-owner","email":"player@example.com"}}"#.utf8)
+            )
+        }
+
+        await model.signIn(email: "player@example.com", password: "password")
+
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNil(auth.restoreSession())
+        XCTAssertNil(model.userProfile)
+        XCTAssertNil(model.profileAvatarData)
+        XCTAssertFalse(model.profileRefreshUnavailable)
+        XCTAssertTrue(model.authNotice?.localizedCaseInsensitiveContains("did not match") == true)
     }
 
     @MainActor
@@ -1907,7 +2335,13 @@ final class BrassTuneAppTests: XCTestCase {
         )
         try Data("not a BrassTune snapshot".utf8).write(to: targetStateURL)
         StubURLProtocol.handler = { request in
-            .init(
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: self.profileResponseData(userID: "corrupt-target", email: "player@example.com")
+                )
+            }
+            return .init(
                 response: HTTPURLResponse(
                     url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
                 )!,
@@ -1918,6 +2352,7 @@ final class BrassTuneAppTests: XCTestCase {
         let model = AppModel(
             persistenceStore: .ephemeral(fileURL: stateURL),
             scoreStorageDirectory: scoreDirectory,
+            apiClient: APIClient(session: makeStubSession()),
             authService: auth
         )
         model.config = makeAuthConfig()
@@ -1948,6 +2383,8 @@ final class BrassTuneAppTests: XCTestCase {
         )
         relaunched.config = makeAuthConfig()
         await relaunched.restoreSession()
+        XCTAssertEqual(relaunched.authState, .signedOut)
+        relaunched.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(relaunched.authState, .guest)
         XCTAssertEqual(relaunched.sessions.map(\.id), [guestSession.id])
         XCTAssertEqual(relaunched.scores.map(\.title), ["Guest score"])
@@ -1966,14 +2403,24 @@ final class BrassTuneAppTests: XCTestCase {
         )
         defer { StubURLProtocol.handler = nil }
         StubURLProtocol.handler = { request in
-            .init(
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: self.profileResponseData(userID: "keychain-target", email: "player@example.com")
+                )
+            }
+            return .init(
                 response: HTTPURLResponse(
                     url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
                 )!,
                 data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"keychain-target","email":"player@example.com"}}"#.utf8)
             )
         }
-        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: auth)
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
         model.config = makeAuthConfig()
         model.enterGuestDemo(presentTutorial: false)
         let guestSession = makeSession(name: "Guest survives credential failure", cents: [0])
@@ -2017,14 +2464,24 @@ final class BrassTuneAppTests: XCTestCase {
         )
         defer { StubURLProtocol.handler = nil }
         StubURLProtocol.handler = { request in
-            .init(
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: self.profileResponseData(userID: "merge-write-target", email: "player@example.com")
+                )
+            }
+            return .init(
                 response: HTTPURLResponse(
                     url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
                 )!,
                 data: Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"merge-write-target","email":"player@example.com"}}"#.utf8)
             )
         }
-        let model = AppModel(persistenceStore: store, authService: auth)
+        let model = AppModel(
+            persistenceStore: store,
+            apiClient: APIClient(session: makeStubSession()),
+            authService: auth
+        )
         model.config = makeAuthConfig()
         model.enterGuestDemo(presentTutorial: false)
         let guestSession = makeSession(name: "Guest survives merged write failure", cents: [0])
@@ -2048,6 +2505,8 @@ final class BrassTuneAppTests: XCTestCase {
         let relaunched = AppModel(persistenceStore: store, authService: auth)
         relaunched.config = makeAuthConfig()
         await relaunched.restoreSession()
+        XCTAssertEqual(relaunched.authState, .signedOut)
+        relaunched.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(relaunched.authState, .guest)
         XCTAssertEqual(relaunched.sessions.map(\.id), [guestSession.id])
     }
@@ -2192,7 +2651,7 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
-    func testTutorialCompletionPersistsAndExplicitGuestEntryRequestsReplay() {
+    func testTutorialCompletionPersistsAndExplicitGuestEntryDoesNotReplayAutomatically() {
         let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-\(UUID().uuidString).json")
         let store = NativePersistenceStore.ephemeral(fileURL: stateURL)
         let model = AppModel(persistenceStore: store)
@@ -2209,8 +2668,13 @@ final class BrassTuneAppTests: XCTestCase {
 
         restored.enterGuestDemo()
         XCTAssertEqual(restored.authState, .guest)
-        XCTAssertEqual(restored.tutorialPresentationRequest, 1)
-        XCTAssertTrue(restored.tutorialCompleted, "Replaying the tutorial must not erase prior completion.")
+        XCTAssertEqual(restored.tutorialPresentationRequest, 0)
+        XCTAssertTrue(restored.tutorialCompleted)
+
+        let fresh = AppModel(persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-fresh-guest-\(UUID().uuidString).json")))
+        fresh.enterGuestDemo()
+        XCTAssertEqual(fresh.tutorialPresentationRequest, 1)
+        XCTAssertFalse(fresh.tutorialCompleted)
     }
 
     @MainActor
@@ -2431,6 +2895,9 @@ final class BrassTuneAppTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("BrassTuneApp/Info.plist")
+        guard FileManager.default.fileExists(atPath: infoURL.path) else {
+            throw XCTSkip("Source-tree PhotosPicker audit runs on macOS/simulator hosts, not installed devices.")
+        }
         let data = try Data(contentsOf: infoURL)
         let plist = try XCTUnwrap(
             PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
@@ -2538,6 +3005,12 @@ final class BrassTuneAppTests: XCTestCase {
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             if request.url?.path == "/auth/v1/logout" {
                 return .init(response: response, data: Data())
+            }
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
+                let userID = authorization.contains("user-b") ? "user-b" : "user-a"
+                let email = userID == "user-b" ? "b@example.com" : "a@example.com"
+                return .init(response: response, data: self.profileResponseData(userID: userID, email: email))
             }
             if request.url?.host == AppConfig.approvedProductionAPIOrigin.host {
                 return .init(response: response, data: Data(#"{"deleted":true}"#.utf8))
@@ -2662,6 +3135,12 @@ final class BrassTuneAppTests: XCTestCase {
                 return .init(
                     response: HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!,
                     data: Data()
+                )
+            }
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: self.profileResponseData(userID: "rationale-user", email: "player@example.com")
                 )
             }
             return .init(
@@ -4442,7 +4921,7 @@ final class BrassTuneAppTests: XCTestCase {
                 error,
                 .apiRequestFailed(
                     statusCode: 422,
-                    message: NativeLocalization.string("The class service could not complete this request.")
+                    message: NativeLocalization.string("The BrassTune service could not complete this request.")
                 )
             )
         }
@@ -4664,6 +5143,12 @@ final class BrassTuneAppTests: XCTestCase {
             try? FileManager.default.removeItem(at: scoreDirectory)
         }
         StubURLProtocol.handler = { request in
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: self.profileResponseData(userID: "class-user", email: "class@example.com")
+                )
+            }
             let data = Data(#"{"access_token":"class-token","refresh_token":"class-refresh","expires_in":3600,"user":{"id":"class-user","email":"class@example.com"}}"#.utf8)
             return .init(
                 response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -5965,6 +6450,142 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testContinuousDroneOscillatorPreservesExactLowETFrequency() throws {
+        let sampleRate = 44_100.0
+        for frequency in [43.653_528_929, 58.270_470_19, 440, 554.365_261_953] {
+            let effective = NativeToneRenderState.effectiveFrequency(
+                frequencyHz: frequency,
+                sampleRate: sampleRate
+            )
+            XCTAssertEqual(effective, frequency, accuracy: 0.000_000_001)
+        }
+    }
+
+    func testContinuousDroneRenderKeepsFrequencyAndPhaseAcrossConsecutiveBuffersThenClearsSafely() throws {
+        let sampleRate = 44_100.0
+        let frequency = 43.653_528_929
+        let volume = 0.4
+        let frameCount: AVAudioFrameCount = 8_192
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)
+        )
+        let first = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
+        )
+        let second = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
+        )
+        first.frameLength = frameCount
+        second.frameLength = frameCount
+
+        let state = NativeToneRenderState()
+        state.configure(
+            frequenciesHz: [frequency],
+            volume: volume,
+            sampleRate: sampleRate
+        )
+        XCTAssertEqual(
+            state.render(
+                frameCount: first.frameLength,
+                audioBufferList: first.mutableAudioBufferList
+            ),
+            noErr
+        )
+        XCTAssertEqual(
+            state.render(
+                frameCount: second.frameLength,
+                audioBufferList: second.mutableAudioBufferList
+            ),
+            noErr
+        )
+
+        let firstSamples = try XCTUnwrap(first.floatChannelData?[0])
+        let secondSamples = try XCTUnwrap(second.floatChannelData?[0])
+        let firstRMS = sqrt(
+            (0..<Int(frameCount)).reduce(0.0) { partial, index in
+                partial + Double(firstSamples[index] * firstSamples[index])
+            } / Double(frameCount)
+        )
+        let secondRMS = sqrt(
+            (0..<Int(frameCount)).reduce(0.0) { partial, index in
+                partial + Double(secondSamples[index] * secondSamples[index])
+            } / Double(frameCount)
+        )
+        XCTAssertGreaterThan(firstRMS, 0.2)
+        XCTAssertLessThan(firstRMS, 0.35)
+        XCTAssertGreaterThan(secondRMS, 0.2)
+        XCTAssertLessThan(secondRMS, 0.35)
+        XCTAssertTrue(
+            (0..<Int(frameCount)).allSatisfy {
+                firstSamples[$0].isFinite && secondSamples[$0].isFinite
+            }
+        )
+
+        let rendered = (0..<Int(frameCount)).map { firstSamples[$0] }
+            + (0..<Int(frameCount)).map { secondSamples[$0] }
+        var positiveCrossings: [Double] = []
+        for index in 1..<rendered.count
+        where rendered[index - 1] <= 0 && rendered[index] > 0 {
+            let previous = Double(rendered[index - 1])
+            let current = Double(rendered[index])
+            positiveCrossings.append(
+                Double(index - 1) + (-previous / (current - previous))
+            )
+        }
+        XCTAssertGreaterThan(positiveCrossings.count, 10)
+        let firstCrossing = try XCTUnwrap(positiveCrossings.first)
+        let lastCrossing = try XCTUnwrap(positiveCrossings.last)
+        let measuredFrequency = Double(positiveCrossings.count - 1) * sampleRate
+            / (lastCrossing - firstCrossing)
+        XCTAssertEqual(
+            measuredFrequency,
+            frequency,
+            accuracy: 0.001,
+            "Consecutive production render buffers must retain the requested low equal-tempered frequency."
+        )
+
+        // Validate the oscillator against its exact unquantized phase over the
+        // whole two-buffer render. In particular, the first sample of the
+        // second buffer must be the next phase sample, not a loop restart.
+        let increment = 2 * Double.pi * frequency / sampleRate
+        for localIndex in [0, 1, Int(frameCount) - 1] {
+            let expected = Float(sin(Double(localIndex) * increment) * volume)
+            XCTAssertEqual(firstSamples[localIndex], expected, accuracy: 0.000_001)
+        }
+        for localIndex in [0, 1, Int(frameCount) - 1] {
+            let globalIndex = Int(frameCount) + localIndex
+            let expected = Float(sin(Double(globalIndex) * increment) * volume)
+            XCTAssertEqual(secondSamples[localIndex], expected, accuracy: 0.000_001)
+        }
+        let observedSeamStep = secondSamples[0] - firstSamples[Int(frameCount) - 1]
+        let expectedSeamStep = Float(
+            (sin(Double(frameCount) * increment) - sin(Double(frameCount - 1) * increment)) * volume
+        )
+        XCTAssertEqual(observedSeamStep, expectedSeamStep, accuracy: 0.000_001)
+
+        state.stop()
+        let cleared = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
+        )
+        cleared.frameLength = frameCount
+        let clearedSamples = try XCTUnwrap(cleared.floatChannelData?[0])
+        for index in 0..<Int(frameCount) { clearedSamples[index] = 0.75 }
+        XCTAssertEqual(
+            state.render(
+                frameCount: cleared.frameLength,
+                audioBufferList: cleared.mutableAudioBufferList
+            ),
+            noErr
+        )
+        XCTAssertTrue(
+            (0..<Int(frameCount)).allSatisfy {
+                clearedSamples[$0].isFinite && clearedSamples[$0] == 0
+            },
+            "A stopped oscillator must clear every requested output sample."
+        )
+    }
+
+    @MainActor
     func testMetronomeStopWithoutSessionOwnerIsNoOp() {
         var deactivationCount = 0
         let coordinator = NativeAudioSessionCoordinator(
@@ -6188,6 +6809,31 @@ final class BrassTuneAppTests: XCTestCase {
     }
 
     @MainActor
+    func testMetronomeScheduleFailureDoesNotPublishVisualOrHapticPulse() async {
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: {},
+            deactivateSession: {},
+            deactivationDelay: .zero
+        )
+        var publishedPulses = 0
+        let output = NativeMetronomeOutput(
+            audioSessionCoordinator: coordinator,
+            scheduleOverride: { _, _, _, completion in
+                completion(.failure(NativeAudioEngineError.outputUnavailable))
+            }
+        )
+        output.playTick(
+            settings: MetronomeSettings(),
+            accent: true,
+            onInitialPulseScheduled: { _ in publishedPulses += 1 },
+            onPulseDue: { _ in publishedPulses += 1 }
+        )
+        for _ in 0..<50 where output.lastFailure == nil { await Task.yield() }
+        XCTAssertEqual(output.lastFailure, .outputUnavailable)
+        XCTAssertEqual(publishedPulses, 0)
+    }
+
+    @MainActor
     func testMetronomeActivationFailureStopsAppModelAndPresentsRecoverableNotice() async {
         let probe = AudioControlPlaneProbe()
         probe.failingEvent = .activate
@@ -6236,6 +6882,132 @@ final class BrassTuneAppTests: XCTestCase {
             requestedHostTime &+ AVAudioTime.hostTime(
                 forSeconds: NativeMetronomeOutput.initialSchedulingMarginSeconds
             )
+        )
+    }
+
+    @MainActor
+    func testTempoChangeInsideLeadWindowAdvancesOneSharedEdgeAndKeepsNewGridContiguous() async throws {
+        let coordinator = NativeAudioSessionCoordinator(
+            activateSession: {},
+            deactivateSession: {},
+            deactivationDelay: .zero
+        )
+        var scheduledTargets: [UInt64] = []
+        var hapticHostTimes: [UInt64] = []
+        let transitionProbe = MetronomeTransitionProbe()
+        var activeGeneration = UUID()
+        let firstScheduleSubmitted = expectation(description: "old-rate edge submitted")
+        let newGridAdvanced = expectation(description: "shared edge plus two new-rate edges advanced")
+        let clock = NativeMetronomeClock()
+        let output = NativeMetronomeOutput(
+            audioSessionCoordinator: coordinator,
+            scheduleOverride: { _, _, targetHostTime, completion in
+                scheduledTargets.append(targetHostTime)
+                completion(.success(()))
+            },
+            onScheduleSubmitted: {
+                if scheduledTargets.count == 1 { firstScheduleSubmitted.fulfill() }
+            },
+            playHaptic: { _ in hapticHostTimes.append(mach_absolute_time()) }
+        )
+        var oldSettings = MetronomeSettings()
+        oldSettings.bpm = 120
+        oldSettings.hapticsEnabled = true
+        var newSettings = oldSettings
+        newSettings.bpm = 240
+        let oldGeneration = activeGeneration
+        let sharedEdge = mach_absolute_time() &+ AVAudioTime.hostTime(forSeconds: 0.2)
+
+        // This is the already-submitted edge from the old anchored timeline.
+        output.playTick(
+            settings: oldSettings,
+            accent: true,
+            hostTime: sharedEdge,
+            pulseIndex: 7,
+            onPulseDue: { targetHostTime in
+                guard activeGeneration == oldGeneration else { return }
+                transitionProbe.visualTargets.append(targetHostTime)
+            }
+        )
+        await fulfillment(of: [firstScheduleSubmitted], timeout: 1)
+
+        // Enter the same <=40 ms lead window used by NativeMetronomeClock,
+        // then change tempo while the old pulse is pending but already queued.
+        let desiredLeadTicks = AVAudioTime.hostTime(forSeconds: 0.025)
+        while mach_absolute_time() &+ desiredLeadTicks < sharedEdge {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        let changeHostTime = mach_absolute_time()
+        XCTAssertLessThan(changeHostTime, sharedEdge)
+        XCTAssertLessThanOrEqual(
+            AVAudioTime.seconds(forHostTime: sharedEdge - changeHostTime),
+            0.04
+        )
+
+        activeGeneration = UUID()
+        let newGeneration = activeGeneration
+        let newTimeline = NativeMetronomeTimeline(
+            anchorHostTime: sharedEdge,
+            intervalSeconds: newSettings.intervalSeconds
+        )
+        output.playTick(
+            settings: newSettings,
+            accent: true,
+            hostTime: sharedEdge,
+            pulseIndex: 0,
+            onPulseDue: { dueHostTime in
+                guard activeGeneration == newGeneration else { return }
+                transitionProbe.visualTargets.append(dueHostTime)
+                clock.start(
+                    intervalSeconds: newSettings.intervalSeconds,
+                    anchorHostTime: dueHostTime
+                ) { nextPulseIndex, nextTargetHostTime in
+                    Task { @MainActor in
+                        var nextSettings = MetronomeSettings()
+                        nextSettings.bpm = 240
+                        nextSettings.hapticsEnabled = true
+                        output.playTick(
+                            settings: nextSettings,
+                            accent: false,
+                            hostTime: nextTargetHostTime,
+                            pulseIndex: nextPulseIndex,
+                            onPulseDue: { nextDueHostTime in
+                                transitionProbe.visualTargets.append(nextDueHostTime)
+                                if transitionProbe.visualTargets.count == 3 {
+                                    clock.stop()
+                                    newGridAdvanced.fulfill()
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        )
+
+        await fulfillment(of: [newGridAdvanced], timeout: 2)
+        clock.stop()
+        output.stop()
+        await coordinator.flush()
+
+        let expectedVisualTargets = [
+            sharedEdge,
+            newTimeline.hostTime(forPulseIndex: 1),
+            newTimeline.hostTime(forPulseIndex: 2),
+        ]
+        XCTAssertEqual(
+            transitionProbe.visualTargets,
+            expectedVisualTargets,
+            "The old-generation callback must not double-advance the shared edge, and the new clock must remain on one anchored grid."
+        )
+        XCTAssertEqual(
+            hapticHostTimes.count,
+            expectedVisualTargets.count,
+            "Each accepted visual/clock edge must produce exactly one haptic, including the tempo-transition edge."
+        )
+        XCTAssertEqual(
+            scheduledTargets,
+            expectedVisualTargets,
+            "The already-accepted shared edge must remain the sole click, followed by a contiguous new-rate audio grid."
         )
     }
 
@@ -6329,6 +7101,47 @@ final class BrassTuneAppTests: XCTestCase {
 
         XCTAssertEqual(result.frames.count, 1)
         XCTAssertEqual(result.frames.first?.timestampMs, 321)
+    }
+
+    func testExplicitLiveTakeExcludesPassivePreBoundaryPCMAndSavesOnlyNewFrames() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-explicit-take-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)
+        )
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_096)
+        )
+        buffer.frameLength = 4_096
+        let samples = try XCTUnwrap(buffer.floatChannelData?[0])
+        for frame in 0..<Int(buffer.frameLength) {
+            samples[frame] = Float(sin(2 * Double.pi * 440 * Double(frame) / format.sampleRate) * 0.25)
+        }
+        let pipeline = try XCTUnwrap(NativeLiveCapturePipeline(
+            format: format,
+            frameCapacity: buffer.frameLength,
+            writer: nil,
+            instrumentId: "trumpet",
+            referencePitchHz: 440,
+            automaticallyDrain: false,
+            receiveFrame: { _ in }
+        ))
+
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 100)
+        XCTAssertEqual(try pipeline.beginRecording(destinationURL: destination), 0)
+        pipeline.enqueueFromRenderTap(buffer, timestampMs: 200)
+        let take = try XCTUnwrap(pipeline.finishRecording())
+
+        XCTAssertEqual(
+            take.frames.map(\.timestampMs),
+            [200],
+            "The queue-synchronized take boundary must drain passive PCM before installing the writer."
+        )
+        XCTAssertEqual(take.droppedInputFrameCount, 0)
+        XCTAssertEqual(take.recording?.retentionFailure, nil)
+        XCTAssertEqual(take.recording?.recordingURL, destination)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
     }
 
     func testLiveCapturePipelineCountsOverflowAndMarksResultIncomplete() throws {
@@ -7184,6 +7997,9 @@ final class BrassTuneAppTests: XCTestCase {
         var backendDeleteCount = 0
         StubURLProtocol.handler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(response: response, data: self.profileResponseData(userID: "user-a", email: "a@example.com"))
+            }
             if request.url?.host == AppConfig.approvedProductionAPIOrigin.host {
                 backendDeleteCount += 1
                 return .init(response: response, data: Data(#"{"deleted":false,"deletion_status":"external_cleanup_queued"}"#.utf8))
@@ -7241,6 +8057,8 @@ final class BrassTuneAppTests: XCTestCase {
         relaunchedModel.config = makeAuthConfig()
         await relaunchedModel.restoreSession()
 
+        XCTAssertEqual(relaunchedModel.authState, .signedOut)
+        relaunchedModel.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(relaunchedModel.authState, .guest)
         XCTAssertNil(authService.restoreSession())
         XCTAssertFalse(FileManager.default.fileExists(atPath: accountFile.path))
@@ -7269,6 +8087,9 @@ final class BrassTuneAppTests: XCTestCase {
         var backendDeleteCount = 0
         StubURLProtocol.handler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(response: response, data: self.profileResponseData(userID: "user-a", email: "a@example.com"))
+            }
             if request.url?.host == AppConfig.approvedProductionAPIOrigin.host {
                 backendDeleteCount += 1
                 return .init(response: response, data: Data(#"{"deleted":false,"deletion_status":"external_cleanup_queued"}"#.utf8))
@@ -7331,6 +8152,9 @@ final class BrassTuneAppTests: XCTestCase {
         defer { try? authService.signOut(); StubURLProtocol.handler = nil }
         StubURLProtocol.handler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            if request.url?.path == "/api/users/me", request.httpMethod == "GET" {
+                return .init(response: response, data: self.profileResponseData(userID: "user-a", email: "a@example.com"))
+            }
             if request.url?.host == AppConfig.approvedProductionAPIOrigin.host {
                 return .init(response: response, data: Data(#"{"deleted":true}"#.utf8))
             }
@@ -7453,6 +8277,24 @@ final class BrassTuneAppTests: XCTestCase {
             supabaseURL: URL(string: "https://project.supabase.co")!,
             supabasePublishableKey: "sb_publishable_test"
         )
+    }
+
+    private func profileResponseData(
+        userID: String,
+        email: String,
+        profileComplete: Bool = true
+    ) -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "id": 1,
+            "supabase_user_id": userID,
+            "username": "player",
+            "display_name": "Player",
+            "email": email,
+            "primary_instrument_id": "trumpet",
+            "profile_complete": profileComplete,
+            "avatar_available": false,
+            "avatar_updated_at": NSNull(),
+        ])
     }
 
     private func sharedFixtureURL(named name: String) throws -> URL {

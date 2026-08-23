@@ -1,6 +1,7 @@
 # Apple App Store Checklist
+Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-05. This is the native iOS submission checklist. It separates
+Updated: 2026-08-23. This is the native iOS submission checklist. It separates
 current-source simulator checks, signed build-only evidence, historical physical
 evidence, and the still-missing exact TestFlight candidate.
 
@@ -62,6 +63,20 @@ App Store Connect audit are in
 - Complete age rating, content rights, privacy questionnaire, pricing,
   territory availability, and accessibility declarations against the final
   processed binary.
+- In App Store Connect, add the profile-feature App Privacy entries if that
+  feature ships: **Contact Info — Name** and **User Content — Photos or
+  Videos**; each is linked to the user, not used for tracking, and used for
+  **App Functionality**. The checked-in `PrivacyInfo.xcprivacy` now contains
+  that mapping; confirm it in the final signed binary. This is prepared guidance
+  only: the App Store Connect questionnaire has not been updated by this
+  repository change.
+- Verify that the deployed avatar storage remains private and backend-proxied;
+  exercise upload, replacement, removal, account deletion cleanup, and the
+  account-export profile fields with a disposable account. The local backend
+  contract exports the current avatar only as `profile/avatar.jpg`, with bounded
+  metadata at `profile/avatar.json`; it never exposes the raw storage object
+  key/path and omits both entries when no avatar exists. Validate that contract
+  against the deployed candidate before relying on it.
 - Supply a monitored App Review phone number and make the Digital Services Act
   trader declaration. These are owner/legal attestations and must not be guessed.
 - Select only the new crash-free candidate, keep manual release selected, run a

@@ -1,4 +1,5 @@
 # Web Production Completion Gate
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-04. Historical deployed revision: `26683c82c42839016383fb9cab676c9a35d554ca`. It predates Apple web-provider enablement and is not evidence of the current hosted release candidate.
 

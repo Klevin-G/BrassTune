@@ -1,12 +1,12 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { deleteMyAccount, getCurrentUser, setAuthTokenProvider } from '../api/client';
+import { deleteMyAccount, getCurrentUser, setAuthTokenProvider, updateCurrentUser } from '../api/client';
 import { apiBase } from '../api/runtimeConfig';
 import { authProviders, supabase, supabaseConfigured } from '../lib/supabase';
 import { clearAccountPracticeState } from '../domain/practiceLibrary';
 import { oauthCallbackRedirectURL, passwordResetRedirectURL } from '../domain/authNavigation';
 
-interface BackendProfile {
+export interface BackendProfile {
   id: number;
   supabase_user_id?: string | null;
   username: string | null;
@@ -15,6 +15,7 @@ interface BackendProfile {
   role: string;
   primary_instrument_id: string;
   onboarding_completed_at?: string | null;
+  profile_complete?: boolean;
 }
 
 interface SignUpPayload {
@@ -32,6 +33,7 @@ interface AuthState {
   user: User | null;
   profile: BackendProfile | null;
   profileError: string | null;
+  profileCompletionError: string | null;
   hasAuthSession: boolean;
   isSignedIn: boolean;
   cloudReady: boolean;
@@ -50,12 +52,88 @@ interface AuthState {
   signOut: () => Promise<void>;
   deleteAccount: (confirmation: string) => Promise<{ deletionStatus?: string }>;
   refreshProfile: () => Promise<void>;
+  retryProfileCompletion: () => Promise<void>;
+  completeProfile: (fields: { username: string; displayName: string }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
 const accountsDisabledMessage = 'Accounts are not enabled in this build yet. You can still use guest practice.';
 const guestAccessKey = 'brasstune.guestAccess';
 const verifiedPracticeNamespacePrefix = 'brasstune.verifiedPracticeNamespace.v1.';
+const explicitSignupCompletionPrefix = 'brasstune.explicitSignupProfile.v1.';
+const explicitSignupCompletionMaxAgeMs = 30 * 60 * 1000;
+const usernameFormat = /^[A-Za-z0-9_-]{3,32}$/;
+export const MAX_DISPLAY_NAME_LENGTH = 80;
+
+export function normalizeDisplayName(value: string | null | undefined): string {
+  return (value ?? '').trim().normalize('NFC');
+}
+
+export function isValidDisplayName(value: string | null | undefined): boolean {
+  const normalized = normalizeDisplayName(value);
+  return normalized.length > 0 && Array.from(normalized).length <= MAX_DISPLAY_NAME_LENGTH;
+}
+
+export function normalizeProfileUsername(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+export function isValidProfileUsername(value: string | null | undefined): boolean {
+  return usernameFormat.test(value ?? '');
+}
+
+export function profileCompletionPayload(profile: Pick<BackendProfile, 'username' | 'display_name'>): { username: string; display_name: string } | null {
+  const username = normalizeProfileUsername(profile.username);
+  const displayName = normalizeDisplayName(profile.display_name);
+  if (!isValidProfileUsername(username) || !isValidDisplayName(displayName)) return null;
+  return { username, display_name: displayName };
+}
+
+function explicitSignupCompletionKey(subject: string) {
+  return `${explicitSignupCompletionPrefix}${encodeURIComponent(subject)}`;
+}
+
+function rememberExplicitSignupCompletion(subject: string) {
+  try {
+    // Use localStorage so a confirmation link opened in a new tab can carry
+    // this one-time consent forward. The marker contains no profile values.
+    localStorage.setItem(explicitSignupCompletionKey(subject), JSON.stringify({ createdAt: Date.now() }));
+  } catch {
+    // The explicit user action remains valid; this only opts into the
+    // convenience completion request after the backend profile is available.
+  }
+}
+
+function hasExplicitSignupCompletion(subject: string) {
+  try {
+    const key = explicitSignupCompletionKey(subject);
+    const value = JSON.parse(localStorage.getItem(key) ?? 'null') as Partial<{ createdAt: number }> | null;
+    const valid = value
+      && typeof value.createdAt === 'number'
+      && value.createdAt <= Date.now()
+      && Date.now() - value.createdAt <= explicitSignupCompletionMaxAgeMs;
+    if (!valid) localStorage.removeItem(key);
+    return Boolean(valid);
+  } catch {
+    return false;
+  }
+}
+
+function clearExplicitSignupCompletion(subject: string) {
+  try {
+    localStorage.removeItem(explicitSignupCompletionKey(subject));
+  } catch {
+    // Storage may be unavailable in restricted browser contexts.
+  }
+}
+
+function clearGuestAccess() {
+  // Guest practice data remains durable in localStorage. Access to that data is
+  // intentionally tab-scoped so closing the browser requires an explicit guest
+  // entry instead of silently reopening a shared-device session.
+  sessionStorage.removeItem(guestAccessKey);
+  localStorage.removeItem(guestAccessKey);
+}
 
 interface VerifiedPracticeNamespace {
   version: 1;
@@ -252,24 +330,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<BackendProfile | null>(null);
   const [localPracticeOwnerId, setLocalPracticeOwnerId] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileCompletionError, setProfileCompletionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [guestMode, setGuestMode] = useState(() => localStorage.getItem(guestAccessKey) === 'true');
+  const [guestMode, setGuestMode] = useState(() => {
+    // Migrate the legacy persistent access flag fail-closed on first load.
+    localStorage.removeItem(guestAccessKey);
+    return sessionStorage.getItem(guestAccessKey) === 'true';
+  });
   const [guestEntrySequence, setGuestEntrySequence] = useState(0);
   const profileRequestId = useRef(0);
   const profileRef = useRef(profile);
   const profileUserIdRef = useRef<string | null>(null);
   const sessionUserIdRef = useRef<string | null>(null);
   const localPracticeSubjectRef = useRef<string | null>(null);
+  // A session may publish more than one auth event while the initial profile
+  // request is pending. Keep completion attempts session-scoped so those
+  // events do not issue duplicate PATCHes or silently retry a failed one.
+  const profileCompletionStateRef = useRef(new Map<string, 'in-flight' | 'failed' | 'complete'>());
 
   const clearProfileState = useCallback((clearError = true) => {
     profileRef.current = null;
     profileUserIdRef.current = null;
     setProfile(null);
-    if (clearError) setProfileError(null);
+    if (clearError) {
+      setProfileError(null);
+      setProfileCompletionError(null);
+    }
   }, []);
 
   const resetAccountState = useCallback(() => {
     profileRequestId.current += 1;
+    profileCompletionStateRef.current.clear();
+    if (sessionUserIdRef.current) clearExplicitSignupCompletion(sessionUserIdRef.current);
     sessionUserIdRef.current = null;
     setSession(null);
     setUser(null);
@@ -282,6 +374,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const nextUserId = nextSession?.user.id ?? null;
     if (sessionUserIdRef.current !== nextUserId) {
       profileRequestId.current += 1;
+      profileCompletionStateRef.current.clear();
+      if (sessionUserIdRef.current) clearExplicitSignupCompletion(sessionUserIdRef.current);
       clearProfileState();
       sessionUserIdRef.current = nextUserId;
       localPracticeSubjectRef.current = nextUserId;
@@ -290,12 +384,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(nextSession);
     setUser(nextSession?.user ?? null);
     if (nextSession) {
-      localStorage.removeItem(guestAccessKey);
+      clearGuestAccess();
       setGuestMode(false);
     }
   }, [clearProfileState]);
 
-  const loadProfile = useCallback(async (activeSession: Session | null, options: { required?: boolean } = {}) => {
+  const loadProfile = useCallback(async (activeSession: Session | null, options: { required?: boolean; retryCompletion?: boolean } = {}) => {
     const requestId = ++profileRequestId.current;
     if (supabase && !activeSession) {
       clearProfileState();
@@ -327,7 +421,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLocalPracticeOwnerId(verifiedOwnerId);
       setProfile(current);
       setProfileError(null);
-      return current;
+      if (current.profile_complete !== false) {
+        setProfileCompletionError(null);
+        return current;
+      }
+
+      const completionSubject = activeSession?.user.id;
+      const completionState = completionSubject ? profileCompletionStateRef.current.get(completionSubject) : undefined;
+      if (completionState === 'complete') {
+        // The PATCH succeeded in this session, but an already in-flight GET
+        // can still carry the prior backend representation. Avoid another
+        // PATCH while preserving the completed state in the current UI.
+        const completed = { ...current, profile_complete: true };
+        profileRef.current = completed;
+        setProfile(completed);
+        setProfileCompletionError(null);
+        return completed;
+      }
+      if (completionState === 'in-flight' || (completionState === 'failed' && !options.retryCompletion)) {
+        return current;
+      }
+
+      const completionPayload = profileCompletionPayload(current);
+      if (!completionPayload || !activeSession?.access_token) {
+        if (completionSubject) profileCompletionStateRef.current.set(completionSubject, 'failed');
+        setProfileCompletionError('auth.profileCompletionFields');
+        return current;
+      }
+      if (!hasExplicitSignupCompletion(activeSession.user.id)) {
+        // OAuth and provider metadata are prefilled for convenience, not a
+        // substitute for the player's confirmation of their public profile.
+        setProfileCompletionError('auth.profileCompletionFields');
+        return current;
+      }
+      profileCompletionStateRef.current.set(activeSession.user.id, 'in-flight');
+      try {
+        // Bind this request to the profile-fetch session. The shared token
+        // provider can otherwise observe a later account switch mid-request.
+        const updated = await updateCurrentUser(completionPayload, { accessToken: activeSession.access_token }) as BackendProfile;
+        if (
+          requestId !== profileRequestId.current
+          || sessionUserIdRef.current !== activeSession.user.id
+          || profileUserIdRef.current !== activeSession.user.id
+        ) {
+          return null;
+        }
+        profileCompletionStateRef.current.set(activeSession.user.id, 'complete');
+        clearExplicitSignupCompletion(activeSession.user.id);
+        const completed = { ...current, ...updated, profile_complete: updated.profile_complete ?? true };
+        profileRef.current = completed;
+        setProfile(completed);
+        setProfileCompletionError(null);
+        return completed;
+      } catch {
+        if (requestId !== profileRequestId.current || sessionUserIdRef.current !== activeSession.user.id) {
+          return null;
+        }
+        profileCompletionStateRef.current.set(activeSession.user.id, 'failed');
+        // The already loaded profile remains usable; completion can be retried
+        // from Settings without discarding a valid authenticated session.
+        setProfileCompletionError('auth.profileCompletionRetry');
+        return current;
+      }
     } catch (error) {
       if (requestId !== profileRequestId.current) {
         return null;
@@ -348,6 +503,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshProfile = useCallback(async () => {
     await loadProfile(session);
   }, [loadProfile, session]);
+
+  const retryProfileCompletion = useCallback(async () => {
+    setProfileCompletionError(null);
+    await loadProfile(session, { retryCompletion: true });
+  }, [loadProfile, session]);
+
+  const completeProfile = useCallback(async (fields: { username: string; displayName: string }) => {
+    const activeSession = session;
+    const payload = profileCompletionPayload({ username: fields.username, display_name: fields.displayName });
+    if (!payload) throw new Error('auth.profileCompletionInvalid');
+    if (!activeSession?.access_token) throw new Error('auth.profileCompletionExpired');
+
+    const requestId = ++profileRequestId.current;
+    const subject = activeSession.user.id;
+    profileCompletionStateRef.current.set(subject, 'in-flight');
+    try {
+      const updated = await updateCurrentUser(payload, { accessToken: activeSession.access_token }) as BackendProfile;
+      if (requestId !== profileRequestId.current || sessionUserIdRef.current !== subject || profileUserIdRef.current !== subject) {
+        throw new Error('auth.profileCompletionAccountChanged');
+      }
+      profileCompletionStateRef.current.set(subject, 'complete');
+      clearExplicitSignupCompletion(subject);
+      const completed = { ...profileRef.current, ...updated, ...payload, profile_complete: updated.profile_complete ?? true } as BackendProfile;
+      profileRef.current = completed;
+      setProfile(completed);
+      setProfileCompletionError(null);
+    } catch (error) {
+      if (requestId === profileRequestId.current && sessionUserIdRef.current === subject) {
+        profileCompletionStateRef.current.set(subject, 'failed');
+        setProfileCompletionError('auth.profileCompletionRetry');
+      }
+      throw error;
+    }
+  }, [session]);
 
   useEffect(() => {
     setAuthTokenProvider(async () => {
@@ -389,7 +578,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.session && !loadedProfile) {
         throw new Error('Account profile is not ready yet. Try again in a moment.');
       }
-      localStorage.removeItem(guestAccessKey);
+      clearGuestAccess();
       setGuestMode(false);
     } catch (error) {
       await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
@@ -400,25 +589,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = useCallback(async (payload: SignUpPayload) => {
     if (!supabase) throw new Error(accountsDisabledMessage);
+    if (!isValidProfileUsername(payload.username)) {
+      throw new Error('auth.usernameFormat');
+    }
+    const username = normalizeProfileUsername(payload.username);
+    const displayName = payload.displayName.trim();
+    if (!displayName) {
+      throw new Error('auth.displayNameRequired');
+    }
     try {
       const { data, error } = await supabase.auth.signUp({
         email: payload.email,
         password: payload.password,
         options: {
           data: {
-            username: payload.username,
-            display_name: payload.displayName,
+            username,
+            display_name: displayName,
             primary_instrument_id: payload.primaryInstrumentId,
           },
         },
       });
       if (error) throw error;
+      if (data.user?.id) rememberExplicitSignupCompletion(data.user.id);
       adoptSession(data.session ?? null);
       const loadedProfile = await loadProfile(data.session ?? null, { required: Boolean(data.session) });
       if (data.session && !loadedProfile) {
         throw new Error('Account profile is not ready yet. Try again in a moment.');
       }
-      localStorage.removeItem(guestAccessKey);
+      clearGuestAccess();
       setGuestMode(false);
     } catch (error) {
       await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
@@ -476,7 +674,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) throw new Error(friendlyAuthError(error));
       }
     } finally {
-      localStorage.removeItem(guestAccessKey);
+      clearGuestAccess();
       setGuestMode(false);
       resetAccountState();
       if (!supabase) {
@@ -494,7 +692,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (supabase) {
       await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
     }
-    localStorage.removeItem(guestAccessKey);
+    clearGuestAccess();
     setGuestMode(false);
     resetAccountState();
     return { deletionStatus: result.deletion_status };
@@ -502,7 +700,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const continueAsGuest = useCallback(async () => {
     const activateGuest = () => {
-      localStorage.setItem(guestAccessKey, 'true');
+      // Keep the authorization marker out of durable storage. Practice data is
+      // deliberately not cleared and remains available after explicit re-entry.
+      localStorage.removeItem(guestAccessKey);
+      sessionStorage.setItem(guestAccessKey, 'true');
       setGuestMode(true);
       setGuestEntrySequence((value) => value + 1);
     };
@@ -528,7 +729,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [resetAccountState, session]);
 
   const exitGuest = useCallback(() => {
-    localStorage.removeItem(guestAccessKey);
+    clearGuestAccess();
     setGuestMode(false);
   }, []);
 
@@ -540,6 +741,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       profile,
       profileError,
+      profileCompletionError,
       hasAuthSession: Boolean(session),
       isSignedIn: Boolean(session && profile),
       cloudReady: Boolean(session && profile),
@@ -560,8 +762,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       deleteAccount,
       refreshProfile,
+      retryProfileCompletion,
+      completeProfile,
     }),
-    [continueAsGuest, deleteAccount, exitGuest, guestEntrySequence, guestMode, loading, localPracticeOwnerId, profile, profileError, refreshProfile, requestPasswordReset, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
+    [completeProfile, continueAsGuest, deleteAccount, exitGuest, guestEntrySequence, guestMode, loading, localPracticeOwnerId, profile, profileCompletionError, profileError, refreshProfile, requestPasswordReset, retryProfileCompletion, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

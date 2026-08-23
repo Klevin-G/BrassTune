@@ -161,12 +161,12 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
     }
 
     if (auth.guestEntrySequence > handledGuestEntrySequence.current) {
-      // Every explicit guest entry starts a fresh tour, even on a browser
-      // whose legacy shared flag says that another audience completed it.
+      // Guest access is tab-scoped, but completing the tour is a durable
+      // device preference. Returning guests can replay it from Settings.
       handledGuestEntrySequence.current = auth.guestEntrySequence;
-      localStorage.setItem(guestOnboardingCompleteKey, 'false');
-      setOnboardingComplete(false);
-      setOnboardingOpen(true);
+      const guestDecision = guestOnboardingDecision(localStorage.getItem(guestOnboardingCompleteKey));
+      setOnboardingComplete(guestDecision.completed);
+      setOnboardingOpen(guestDecision.open);
       setOnboardingSaveError(null);
       return;
     }

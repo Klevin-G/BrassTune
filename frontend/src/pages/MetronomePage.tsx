@@ -5,11 +5,11 @@ import { MetronomePresetPanel } from '../components/practice/MetronomePresetPane
 import { PageHeader, ScreenContainer, SectionCard, SegmentedControl, StatusBadge } from '../components/ui/AppPrimitives';
 import { PRACTICE_AUDIO_PAUSE_EVENT, type MetronomePreset } from '../domain/practiceLibrary';
 import { usePracticeLibrary } from '../state/PracticeLibraryContext';
-import { buildScheduledTicks, clampBpm, nextRampBpm, normalizeTimeSignature, secondsPerTick, subdivisionFactor, tapTempoBpm, type Subdivision } from '../domain/metronome';
+import { buildScheduledTicks, clampBpm, isAccentedMetronomeTick, nextRampBpm, normalizeTimeSignature, secondsPerTick, subdivisionFactor, tapTempoBpm, type Subdivision } from '../domain/metronome';
 import { useI18n } from '../i18n/LocaleContext';
 import './MetronomePage.css';
 
-type TimeSignaturePreset = '2/4' | '3/4' | '4/4' | '5/4' | '6/8' | '7/8' | 'custom';
+type TimeSignaturePreset = '2/4' | '3/4' | '4/4' | '5/4' | '6/8' | '7/8' | '9/8' | '12/8' | 'custom';
 
 const signaturePresets: Record<Exclude<TimeSignaturePreset, 'custom'>, { numerator: number; denominator: number }> = {
   '2/4': { numerator: 2, denominator: 4 },
@@ -18,6 +18,8 @@ const signaturePresets: Record<Exclude<TimeSignaturePreset, 'custom'>, { numerat
   '5/4': { numerator: 5, denominator: 4 },
   '6/8': { numerator: 6, denominator: 8 },
   '7/8': { numerator: 7, denominator: 8 },
+  '9/8': { numerator: 9, denominator: 8 },
+  '12/8': { numerator: 12, denominator: 8 },
 };
 
 function audioContextFactory() {
@@ -69,6 +71,8 @@ export function MetronomePage() {
   const nextTickTimeRef = useRef(0);
   const beatIndexRef = useRef(0);
   const subdivisionIndexRef = useRef(0);
+  const countInTicksRemainingRef = useRef(0);
+  const countInTicksTotalRef = useRef(0);
   const barCountRef = useRef(0);
   const bpmRef = useRef(bpm);
   const volumeRef = useRef(volume);
@@ -127,7 +131,9 @@ export function MetronomePage() {
   }, [practiceLibrary.library.metronomePresets, searchParams, t]);
 
   useEffect(() => {
-    bpmRef.current = clampBpm(bpm);
+    const previousBpm = bpmRef.current;
+    const nextBpm = clampBpm(bpm);
+    bpmRef.current = nextBpm;
     volumeRef.current = volume;
     mutedRef.current = muted;
     accentDownbeatRef.current = accentDownbeat;
@@ -137,8 +143,25 @@ export function MetronomePage() {
     barsPerStepRef.current = barsPerStep;
     subdivisionRef.current = subdivision;
     signatureRef.current = signature;
-    localStorage.setItem('brasstune.metronome.bpm', String(clampBpm(bpm)));
+    localStorage.setItem('brasstune.metronome.bpm', String(nextBpm));
     localStorage.setItem('brasstune.metronome.volume', String(volume));
+
+    if (previousBpm !== nextBpm && runningRef.current) {
+      const context = audioRef.current;
+      if (!context || context.state !== 'running') return;
+
+      // Keep the next beat's identity (and therefore compound-meter grouping),
+      // but never leave it stranded on the old tempo grid. A slower tempo
+      // keeps an already-near boundary; a faster tempo proportionally pulls a
+      // far-away boundary closer. Subsequent ticks use the new interval.
+      const oldTickSeconds = secondsPerTick(previousBpm, signatureRef.current, subdivisionRef.current);
+      const newTickSeconds = secondsPerTick(nextBpm, signatureRef.current, subdivisionRef.current);
+      const remainingSeconds = Math.max(0, nextTickTimeRef.current - context.currentTime);
+      const remainingPhase = Math.min(1, remainingSeconds / oldTickSeconds);
+      const nextDelaySeconds = Math.max(0.012, Math.min(remainingSeconds, remainingPhase * newTickSeconds));
+      cancelScheduledOutput();
+      nextTickTimeRef.current = context.currentTime + nextDelaySeconds;
+    }
   }, [accentDownbeat, barsPerStep, bpm, muted, rampEnabled, rampStep, signature, subdivision, targetBpm, volume]);
 
   const scheduleClick = (context: AudioContext, time: number, accented: boolean, subdivisionHit: boolean) => {
@@ -180,25 +203,43 @@ export function MetronomePage() {
     scheduledClicksRef.current.clear();
   };
 
+  const scheduleVisualPulse = (time: number, beatIndex: number, phase: 'count-in' | 'playing') => {
+    const context = audioRef.current;
+    if (!context) return;
+    const visualDelayMs = Math.max(0, (time - context.currentTime) * 1000);
+    const timer = window.setTimeout(() => {
+      visualTimersRef.current.delete(timer);
+      if (!runningRef.current) return;
+      setBeat(beatIndex);
+      setBeatOn(true);
+      setStatus(t(phase === 'count-in' ? 'metronome.countingIn' : 'metronome.playing'));
+    }, visualDelayMs);
+    visualTimersRef.current.add(timer);
+  };
+
   const scheduleLoop = () => {
     const context = audioRef.current;
     if (!context) return;
     const factor = subdivisionFactor(subdivisionRef.current);
     while (nextTickTimeRef.current < context.currentTime + 0.12) {
+      if (countInTicksRemainingRef.current > 0) {
+        const countInTick = countInTicksTotalRef.current - countInTicksRemainingRef.current;
+        const countInFactor = subdivisionFactor(subdivisionRef.current);
+        const countInBeat = Math.floor(countInTick / countInFactor) % signatureRef.current.numerator;
+        const countInSubdivision = countInTick % countInFactor;
+        const accented = isAccentedMetronomeTick(signatureRef.current, countInBeat, countInSubdivision, accentDownbeatRef.current);
+        scheduleClick(context, nextTickTimeRef.current, accented, countInSubdivision > 0);
+        if (countInSubdivision === 0) scheduleVisualPulse(nextTickTimeRef.current, countInBeat, 'count-in');
+        countInTicksRemainingRef.current -= 1;
+        nextTickTimeRef.current += secondsPerTick(bpmRef.current, signatureRef.current, subdivisionRef.current);
+        continue;
+      }
       const beatIndex = beatIndexRef.current;
       const subdivisionIndex = subdivisionIndexRef.current;
-      const accented = accentDownbeatRef.current && beatIndex === 0 && subdivisionIndex === 0;
+      const accented = isAccentedMetronomeTick(signatureRef.current, beatIndex, subdivisionIndex, accentDownbeatRef.current);
       scheduleClick(context, nextTickTimeRef.current, accented, subdivisionIndex > 0);
-      const visualDelayMs = Math.max(0, (nextTickTimeRef.current - context.currentTime) * 1000);
       if (subdivisionIndex === 0) {
-        const timer = window.setTimeout(() => {
-          visualTimersRef.current.delete(timer);
-          if (!runningRef.current) return;
-          setBeat(beatIndex);
-          setBeatOn(true);
-          setStatus(t('metronome.playing'));
-        }, visualDelayMs);
-        visualTimersRef.current.add(timer);
+        scheduleVisualPulse(nextTickTimeRef.current, beatIndex, 'playing');
       }
       nextTickTimeRef.current += secondsPerTick(bpmRef.current, signatureRef.current, subdivisionRef.current);
       subdivisionIndexRef.current += 1;
@@ -245,17 +286,15 @@ export function MetronomePage() {
       }
       cancelScheduledOutput();
       const startTime = context.currentTime + 0.08;
-      const countInTicks = countIn ? buildScheduledTicks({ startTime, bpm, signature, subdivision, bars: 1 }) : [];
-      nextTickTimeRef.current = countInTicks.length ? countInTicks[countInTicks.length - 1].time + secondsPerTick(bpm, signature, subdivision) : startTime;
+      countInTicksTotalRef.current = countIn ? signature.numerator * subdivisionFactor(subdivision) : 0;
+      countInTicksRemainingRef.current = countInTicksTotalRef.current;
+      nextTickTimeRef.current = startTime;
       beatIndexRef.current = 0;
       subdivisionIndexRef.current = 0;
       barCountRef.current = 0;
       setBeat(0);
       setBeatOn(false);
       runningRef.current = true;
-      for (const tick of countInTicks) {
-        scheduleClick(context, tick.time, tick.accented, tick.subdivisionIndex > 0);
-      }
       setRunning(true);
       setStatus(t(countIn ? 'metronome.countingIn' : 'metronome.playing'));
       const preset = practiceLibrary.library.metronomePresets.find((item) => item.id === searchParams.get('preset'));
@@ -263,6 +302,7 @@ export function MetronomePage() {
         ? { kind: 'metronome', id: preset.id, label: `${preset.name} · ${preset.bpm} BPM`, href: `/metronome?preset=${encodeURIComponent(preset.id)}` }
         : { kind: 'metronome', id: `${bpm}-${signature.numerator}-${signature.denominator}`, label: `${bpm} BPM · ${signature.numerator}/${signature.denominator}`, href: `/metronome?bpm=${bpm}` });
       timerRef.current = window.setInterval(scheduleLoop, 25);
+      scheduleLoop();
     } finally {
       startInFlightRef.current = false;
     }
@@ -274,6 +314,8 @@ export function MetronomePage() {
     runningRef.current = false;
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = null;
+    countInTicksRemainingRef.current = 0;
+    countInTicksTotalRef.current = 0;
     cancelScheduledOutput();
     setRunning(false);
     setBeatOn(false);
@@ -401,7 +443,7 @@ export function MetronomePage() {
           {Array.from({ length: signature.numerator }, (_, index) => (
             <span
               key={index}
-              className={`mt-beat${index === 0 ? ' accent' : ''}${beatOn && index === beat ? ' active' : ''}`}
+              className={`mt-beat${isAccentedMetronomeTick(signature, index, 0, accentDownbeat) ? ' accent' : ''}${beatOn && index === beat ? ' active' : ''}`}
               aria-hidden="true"
             />
           ))}
@@ -552,6 +594,8 @@ export function MetronomePage() {
                 { value: '5/4', label: '5/4' },
                 { value: '6/8', label: '6/8' },
                 { value: '7/8', label: '7/8' },
+                { value: '9/8', label: '9/8' },
+                { value: '12/8', label: '12/8' },
                 { value: 'custom', label: t('progress.custom') },
               ]}
               onChange={setSignaturePreset}

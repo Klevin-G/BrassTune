@@ -1,6 +1,9 @@
 # BrassTune
+Project attribution: Kelvin Guo, Arya Salem.
 
 BrassTune is a brass-practice app for live tuning, guided practice, local score work, session review, and recurring intonation analysis. The primary native client is the SwiftUI app under `swift/BrassTuneApp`; the repository also contains the React web client and FastAPI service used by the hosted companion experience.
+
+Project credits: Kelvin Guo, Arya Salem. See [Credits](docs/CREDITS.md) for the maintained attribution record.
 
 The project includes:
 

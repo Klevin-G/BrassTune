@@ -1,4 +1,5 @@
 # BrassTune Build-3 Physical and App Store Readiness Report — 2026-08-06
+Project attribution: Kelvin Guo, Arya Salem.
 
 Historical snapshot: build 3 was later rejected and replaced by build 5. See
 `APP_REVIEW_RESPONSE_2026-08-14.md` for the newer App Store state.

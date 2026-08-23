@@ -135,6 +135,11 @@ export function AuthGatewayPage() {
 
             {!auth.loading && auth.configured && (
               <>
+                <Link className="primary-button ag-block ag-create-account" to={`/auth/sign-up?next=${encodeURIComponent(next)}`}>
+                  <UserPlus size={18} />
+                  {t('auth.createFree')}
+                </Link>
+                <p className="ag-account-benefit">{t('auth.accountBenefit')}</p>
                 <div className="ag-providers">
                   <button
                     className="google-button ag-block"
@@ -161,8 +166,8 @@ export function AuthGatewayPage() {
                 </div>
                 <div className="auth-divider" aria-hidden="true"><span>{t('auth.or')}</span></div>
 
-                <button className="primary-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
-                  {t('auth.start')}
+                <button className="ghost-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
+                  {t('auth.continueGuest')}
                   <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
                 </button>
                 <p className="ag-nudge">{t('auth.newHere')}</p>
@@ -224,6 +229,7 @@ export function AuthGatewayPage() {
         <Link to="/privacy">{t('legal.privacy')}</Link>
         <Link to="/terms">{t('legal.terms')}</Link>
         <Link to="/support">{t('legal.support')}</Link>
+        <Link to="/credits">{t('legal.credits')}</Link>
       </footer>
     </ScreenContainer>
   );

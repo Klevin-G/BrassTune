@@ -1,4 +1,5 @@
 # Supabase Integration
+Project attribution: Kelvin Guo, Arya Salem.
 
 BrassTune supports local SQLite demo mode by default and Supabase-backed production mode when environment variables are configured.
 

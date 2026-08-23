@@ -29,10 +29,18 @@ from app.services.audio_storage import (
     _supabase_url,
     storage_backend,
 )
+from app.services.profile_avatar import (
+    ALLOWED_MIME_TYPES as ALLOWED_AVATAR_MIME_TYPES,
+    AVATAR_BUCKET,
+    MAX_UPLOAD_BYTES as MAX_AVATAR_UPLOAD_BYTES,
+)
 
 
 REQUIRED_TABLE_COLUMNS = {
-    "users": {"id", "supabase_user_id", "username", "email", "role", "primary_instrument_id"},
+    "users": {
+        "id", "supabase_user_id", "username", "email", "role", "primary_instrument_id", "profile_setup_completed_at",
+        "avatar_object_key", "avatar_mime_type", "avatar_size_bytes", "avatar_updated_at",
+    },
     "practice_sessions": {
         "id",
         "user_id",
@@ -145,6 +153,14 @@ BACKEND_APPLICATION_TABLES = {
     "maintenance_request_nonces",
 }
 DATA_API_ROLES = {"anon", "authenticated"}
+EXPECTED_PRIVATE_JOB_ACTIONS = {
+    "upload_reservation",
+    "delete_object",
+    "reconcile_metadata",
+    "avatar_upload_reservation",
+    "avatar_metadata_reconciliation",
+}
+EXPECTED_PRIVATE_JOB_PROVIDERS = {"local", "supabase", "unknown", "supabase-avatar"}
 
 _REVISION_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$", re.IGNORECASE)
 ACCOUNT_DELETION_CRON_JOB_NAME = "brasstune-account-deletion-retry"
@@ -564,6 +580,16 @@ def _postgres_audio_job_security_issues(connection) -> list[str]:
     if privacy_constraint_count != 1:
         issues.append("Validated terminal privacy constraint is required on audio_storage_jobs.")
 
+    constraint_rows = connection.execute(
+        text(
+            "select conname, pg_get_constraintdef(oid) as definition "
+            "from pg_constraint where conrelid = to_regclass('public.audio_storage_jobs') "
+            "and conname in ('audio_storage_jobs_action_check', 'audio_storage_jobs_provider_check') "
+            "and convalidated"
+        )
+    ).mappings()
+    issues.extend(_postgres_private_job_constraint_issues([dict(row) for row in constraint_rows]))
+
     rows = connection.execute(
         text(
             "select rolname, "
@@ -591,6 +617,21 @@ def _postgres_audio_job_security_issues(connection) -> list[str]:
             )
         ):
             issues.append("Service role must not access backend-only audio_storage_jobs.")
+    return issues
+
+
+def _postgres_private_job_constraint_issues(constraints: list[dict]) -> list[str]:
+    by_name = {
+        str(row.get("conname") or ""): set(
+            re.findall(r"'((?:''|[^'])*)'", str(row.get("definition") or ""))
+        )
+        for row in constraints
+    }
+    issues = []
+    if by_name.get("audio_storage_jobs_action_check") != EXPECTED_PRIVATE_JOB_ACTIONS:
+        issues.append("audio_storage_jobs action constraint does not match the private-object job contract.")
+    if by_name.get("audio_storage_jobs_provider_check") != EXPECTED_PRIVATE_JOB_PROVIDERS:
+        issues.append("audio_storage_jobs provider constraint does not match the private-object job contract.")
     return issues
 
 
@@ -692,6 +733,56 @@ def _postgres_storage_security_issues(connection, bucket_name: str) -> list[str]
     ).mappings()
     if any(_storage_policy_may_reach_bucket(dict(row), bucket_name) for row in policy_rows):
         issues.append("Browser-facing Storage policies may expose the configured audio bucket.")
+    return issues
+
+
+def _postgres_profile_avatar_storage_issues(connection) -> list[str]:
+    """Verify the backend-proxied avatar bucket without requiring browser policies.
+
+    Profile avatars are read and written exclusively through authenticated API
+    routes.  The private bucket must therefore have no browser-facing Storage
+    policy that could make a profile image independently addressable.
+    """
+    issues = []
+    columns = {
+        row["column_name"]
+        for row in connection.execute(
+            text(
+                "select column_name from information_schema.columns "
+                "where table_schema = 'storage' and table_name = 'buckets'"
+            )
+        ).mappings()
+    }
+    required_columns = {"id", "public", "file_size_limit", "allowed_mime_types"}
+    if required_columns - columns:
+        return ["Supabase profile-avatar bucket settings could not be fully verified."]
+
+    bucket = connection.execute(
+        text(
+            "select public, file_size_limit, allowed_mime_types "
+            "from storage.buckets where id = :bucket_name"
+        ),
+        {"bucket_name": AVATAR_BUCKET},
+    ).mappings().first()
+    if bucket is None:
+        issues.append("Private profile-avatar bucket is missing.")
+    else:
+        if bucket["public"] is not False:
+            issues.append("Profile-avatar bucket must be private.")
+        if int(bucket["file_size_limit"] or 0) != MAX_AVATAR_UPLOAD_BYTES:
+            issues.append("Profile-avatar bucket must enforce the backend upload-size limit.")
+        if set(bucket["allowed_mime_types"] or []) != set(ALLOWED_AVATAR_MIME_TYPES):
+            issues.append("Profile-avatar bucket MIME allowlist does not match the backend.")
+
+    policy_rows = connection.execute(
+        text(
+            "select tablename, policyname, roles, qual, with_check "
+            "from pg_policies where schemaname = 'storage' "
+            "and tablename in ('buckets', 'objects')"
+        )
+    ).mappings()
+    if any(_storage_policy_may_reach_bucket(dict(row), AVATAR_BUCKET) for row in policy_rows):
+        issues.append("Browser-facing Storage policies may expose the private profile-avatar bucket.")
     return issues
 
 
@@ -912,6 +1003,8 @@ def database_readiness_issues() -> list[str]:
                                 bucket_name,
                             )
                         )
+                if app_environment() in DEPLOYED_ENVIRONMENTS:
+                    issues.extend(_postgres_profile_avatar_storage_issues(connection))
     except (SQLAlchemyError, OSError, RuntimeError) as exc:
         # Driver messages can embed connection hosts, usernames, query text, or
         # provider details. Preserve the failure class without exposing it in

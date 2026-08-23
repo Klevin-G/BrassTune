@@ -1,4 +1,5 @@
 # TestFlight Handoff
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-05 UTC.
 

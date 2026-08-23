@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import AVFoundation
 import BrassTuneCore
 @testable import BrassTuneApp
 
@@ -34,6 +35,42 @@ final class PracticeFeatureTests: XCTestCase {
             )
             XCTAssertEqual(settings.intervalSeconds, metronomeCase.expectedSeconds, accuracy: 0.000_001, metronomeCase.name)
         }
+    }
+
+    func testCompoundMetersUseDottedQuarterTempoAndThreeNoteGroups() {
+        for beats in [6, 9, 12] {
+            let settings = MetronomeSettings(bpm: 120, beatsPerMeasure: beats, beatUnit: 8)
+            XCTAssertTrue(settings.isCompoundMeter, "\(beats)/8 must be a compound preset")
+            XCTAssertEqual(settings.groupingStarts, Array(stride(from: 0, to: beats, by: 3)))
+            XCTAssertEqual(settings.intervalSeconds, 1.0 / 6.0, accuracy: 0.000_001)
+            XCTAssertEqual(settings.tempoUnitLabel, "dotted-quarter pulse")
+        }
+        XCTAssertFalse(MetronomeSettings(bpm: 120, beatsPerMeasure: 7, beatUnit: 8).isCompoundMeter)
+    }
+
+    func testMetronomeTimelineStaysAnchoredAcrossPulseIndexes() {
+        let timeline = NativeMetronomeTimeline(anchorHostTime: 1_000, intervalSeconds: 0.5)
+        XCTAssertEqual(timeline.hostTime(forPulseIndex: 0), 1_000)
+        XCTAssertEqual(
+            timeline.hostTime(forPulseIndex: 7) - timeline.hostTime(forPulseIndex: 3),
+            timeline.intervalHostTicks * 4
+        )
+        let transitionBoundary = timeline.firstBoundary(onOrAfter: timeline.hostTime(forPulseIndex: 3) + timeline.intervalHostTicks / 3)
+        XCTAssertEqual(transitionBoundary, timeline.hostTime(forPulseIndex: 4), "A settings transition must preserve the next old musical edge.")
+    }
+
+    func testDroneLoopBufferHasNoPeriodicFadeDip() throws {
+        let buffer = try NativeToneBufferCache().buffer(for: [440, 554.3652619537442])
+        let samples = try XCTUnwrap(buffer.floatChannelData?[0])
+        let count = Int(buffer.frameLength)
+        func rms(_ start: Int, _ length: Int) -> Double {
+            let sum = (start..<(start + length)).reduce(0.0) { partial, index in
+                partial + Double(samples[index] * samples[index])
+            }
+            return sqrt(sum / Double(length))
+        }
+        XCTAssertGreaterThan(rms(500, 500), 0.1)
+        XCTAssertGreaterThan(rms(count - 1_000, 500), 0.1, "Loop tail must remain sustained rather than fading once per second.")
     }
 
     func testCustomExerciseValidationNormalizesAndBoundsNotes() throws {

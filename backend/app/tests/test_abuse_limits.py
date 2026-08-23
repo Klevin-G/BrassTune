@@ -39,6 +39,7 @@ def reset_abuse_state(monkeypatch):
     monkeypatch.setenv("BRASSTUNE_EXPENSIVE_MUTATION_RATE_LIMIT_PER_MINUTE", "60")
     monkeypatch.setenv("BRASSTUNE_EXPENSIVE_READ_RATE_LIMIT_PER_MINUTE", "10")
     monkeypatch.setenv("BRASSTUNE_AUDIO_PLAYBACK_RATE_LIMIT_PER_MINUTE", "100")
+    monkeypatch.setenv("BRASSTUNE_AVATAR_READ_RATE_LIMIT_PER_MINUTE", "100")
     monkeypatch.delenv("BRASSTUNE_TRUST_PROXY", raising=False)
     main_module._RATE_LIMIT_BUCKETS.clear()
     main_module._GLOBAL_RATE_LIMIT_BUCKETS.clear()
@@ -71,7 +72,7 @@ def _http_limit_app() -> FastAPI:
     app = FastAPI()
     app.middleware("http")(main_module.request_abuse_limits)
 
-    @app.api_route("/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
+    @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def ok(path: str):
         return {"path": path}
 
@@ -128,6 +129,35 @@ def test_expensive_mutation_budget_spans_rotated_resource_ids(monkeypatch):
         rotated = client.post("/api/ensemble/groups/101/members/by-username")
     assert first.status_code == 200
     assert rotated.status_code == 429
+
+
+def test_avatar_put_and_get_use_distinct_bounded_operation_families(monkeypatch):
+    monkeypatch.setenv("BRASSTUNE_EXPENSIVE_MUTATION_RATE_LIMIT_PER_MINUTE", "1")
+    monkeypatch.setenv("BRASSTUNE_AVATAR_READ_RATE_LIMIT_PER_MINUTE", "1")
+    with TestClient(_http_limit_app()) as client:
+        first_upload = client.put("/api/users/me/avatar")
+        blocked_upload = client.put("/api/users/me/avatar")
+        first_avatar_read = client.get("/api/users/me/avatar")
+        blocked_avatar_read = client.get("/api/users/me/avatar")
+    assert first_upload.status_code == 200
+    assert blocked_upload.status_code == 429
+    assert first_avatar_read.status_code == 200
+    assert blocked_avatar_read.status_code == 429
+
+    put_request = Request({
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "method": "PUT", "scheme": "https", "path": "/api/users/me/avatar",
+        "raw_path": b"/api/users/me/avatar", "query_string": b"", "headers": [],
+        "client": ("192.0.2.1", 1234), "server": ("testserver", 443),
+    })
+    get_request = Request({
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "method": "GET", "scheme": "https", "path": "/api/users/me/avatar",
+        "raw_path": b"/api/users/me/avatar", "query_string": b"", "headers": [],
+        "client": ("192.0.2.1", 1234), "server": ("testserver", 443),
+    })
+    assert main_module._expensive_operation_family(put_request, "/api/users/me/avatar") == ("account-mutation", 1)
+    assert main_module._expensive_operation_family(get_request, "/api/users/me/avatar") == ("avatar-playback", 1)
 
 
 def test_expensive_read_budget_spans_json_and_csv_export_routes(monkeypatch):
