@@ -8507,6 +8507,72 @@ final class BrassTuneAppTests: XCTestCase {
         return try XCTUnwrap(image.pngData())
     }
 
+    func testMutedThemeTextIsOpaqueAndMeetsContrastOnAuditedSurfaces() {
+        let surfaces: [(String, UIColor)] = [
+            ("background", UIColor(BTTheme.background)),
+            ("surface", UIColor(BTTheme.surface)),
+            ("surfaceAlt", UIColor(BTTheme.surfaceAlt)),
+            ("surfaceWarm", UIColor(BTTheme.surfaceWarm)),
+        ]
+
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let foreground = UIColor(BTTheme.muted).resolvedColor(with: traits)
+            XCTAssertEqual(foreground.cgColor.alpha, 1, accuracy: 0.000_001, "Muted text must be opaque in \(style).")
+
+            for (name, surface) in surfaces {
+                let background = surface.resolvedColor(with: traits)
+                XCTAssertGreaterThanOrEqual(
+                    contrastRatio(foreground, background),
+                    4.5,
+                    "Muted text must meet 4.5:1 on \(name) in \(style)."
+                )
+            }
+        }
+    }
+
+    func testTunerNeutralStatusTextMeetsContrastOnItsCardSurfaces() {
+        let surfaces: [(String, UIColor)] = [
+            ("tuner inactive", UIColor(BTTheme.surfaceAlt)),
+            ("tuner stable", UIColor(BTTheme.surfaceWarm)),
+        ]
+
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let foreground = UIColor(BTTheme.tunerSecondaryText).resolvedColor(with: traits)
+            XCTAssertEqual(foreground.cgColor.alpha, 1, accuracy: 0.000_001)
+
+            for (name, surface) in surfaces {
+                XCTAssertGreaterThanOrEqual(
+                    contrastRatio(foreground, surface.resolvedColor(with: traits)),
+                    4.5,
+                    "Neutral tuner status text must meet 4.5:1 on \(name) in \(style)."
+                )
+            }
+        }
+    }
+
+    private func contrastRatio(_ first: UIColor, _ second: UIColor) -> CGFloat {
+        let firstLuminance = relativeLuminance(first)
+        let secondLuminance = relativeLuminance(second)
+        return (max(firstLuminance, secondLuminance) + 0.05) / (min(firstLuminance, secondLuminance) + 0.05)
+    }
+
+    private func relativeLuminance(_ color: UIColor) -> CGFloat {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        XCTAssertTrue(color.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+
+        func linear(_ channel: CGFloat) -> CGFloat {
+            channel <= 0.04045
+                ? channel / 12.92
+                : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    }
+
     private func makePDFData(pageCount: Int) -> Data {
         let bounds = CGRect(x: 0, y: 0, width: 144, height: 144)
         return UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in

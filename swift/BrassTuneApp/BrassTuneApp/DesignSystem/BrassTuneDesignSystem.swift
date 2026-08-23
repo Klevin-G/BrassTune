@@ -65,11 +65,15 @@ enum BTTheme {
         light: UIColor(red: 0.553, green: 0.435, blue: 0.200, alpha: 0.34),
         dark: UIColor(red: 0.847, green: 0.647, blue: 0.247, alpha: 0.40)
     )
-    // Keep secondary copy distinct without reducing its system-provided
-    // contrast. `secondaryLabel` automatically strengthens with Increase
-    // Contrast, unlike a fixed-opacity custom gray.
+    // Secondary copy appears on opaque cards as well as translucent floating
+    // controls. UIKit's `secondaryLabel` intentionally carries alpha, which
+    // can fall below the text contrast threshold after those surfaces are
+    // composited. Keep this semantic token opaque in both appearances.
     static let text = Color.primary
-    static let muted = Color(uiColor: .secondaryLabel)
+    static let muted = adaptive(
+        light: UIColor(red: 0.235, green: 0.235, blue: 0.263, alpha: 1),
+        dark: UIColor(red: 0.922, green: 0.922, blue: 0.961, alpha: 1)
+    )
     static let accent = adaptive(
         // #84652B: white label contrast is above the 4.5:1 target in Light.
         light: UIColor(red: 0.518, green: 0.396, blue: 0.169, alpha: 1),
@@ -84,10 +88,7 @@ enum BTTheme {
     // Tuner guidance and neutral live-input states are rendered over multiple
     // card/background combinations. Keep this token fully opaque so it stays
     // readable instead of inheriting a translucent system secondary label.
-    static let tunerSecondaryText = adaptive(
-        light: UIColor(red: 0.235, green: 0.235, blue: 0.263, alpha: 1),
-        dark: UIColor(red: 0.922, green: 0.922, blue: 0.961, alpha: 1)
-    )
+    static let tunerSecondaryText = muted
     static let onAccent = adaptive(
         light: .white,
         dark: UIColor(red: 0.08, green: 0.07, blue: 0.05, alpha: 1)

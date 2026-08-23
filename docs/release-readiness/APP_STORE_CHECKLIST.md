@@ -7,21 +7,28 @@ evidence, and remaining hosted/physical/App Review gates.
 
 ## Current 2026-08-23 submission state
 
-- The release implementation is exact
-  `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0` from PR #28. Later
-  documentation-only evidence commits do not change the candidate code.
-- Build `1.0.1 (6)` was archived, exported, distribution-signed, uploaded, and
-  processed by TestFlight; it is **Ready to Submit**.
-- Version `1.0.1` was created, build 6 is attached, and metadata is saved.
+- Vercel and Render serve release implementation
+  `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; strict hosted Playwright passed
+  `50/50` across five projects. The native candidate source is distinct:
+  `d371100` on `arya/final-physical-release-20260823`. A future merge SHA must
+  not be substituted for either identifier.
+- Build `1.0.1 (7)` was archived/exported from `d371100`, with a strict valid
+  Apple Distribution signature (`Apple Distribution: Arya Salem`, team
+  `8S79RLTSWV`), production environment/API, bundle
+  `com.aryasalem.BrassTune`, matching app/dSYM UUID
+  `77D84475-6D50-3D94-B842-290431F0D74D`, and IPA SHA-256
+  `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`.
+- Build 7 upload succeeded and TestFlight is **Ready to Submit**. Version
+  `1.0.1` has build 7 attached; stale review notes were replaced and the
+  version was submitted. It is now **Waiting for Review** with manual release.
   Guest sign-in-required is unchecked. App Privacy is published for Email
   Address, User ID, Other User Content, Name, and Photos or Videos; all are
   linked, for App Functionality, and not used for tracking.
-- Final Add for Review/submit is intentionally held until Render deploys the
-  exact release implementation and hosted smoke passes. Render currently reports stale
-  `1cd195ed75dee61420d497438f4a4b54c07be25f`; Vercel is READY at exact `main`.
-- The physical app-unit suite passed `259`, skipped `11` source-tree-only
-  audits, and failed `0`; physical UI automation remains blocked before test
-  execution by device automation authorization.
+- Physical automation canary passed `1/1` in 14.058 s; strict accessibility
+  `1/1` in 79.342 s; standard UI `26/26` in 774.943 s; and expanded audio
+  stress `1/1` in 511.046 s, including 20 tuner listener reinstalls and three
+  explicit take/save cycles. Broad XCUI detector findings were audited as false
+  positives using screenshots/token ratios.
 
 ## Historical 2026-08-05 evidence
 
@@ -102,8 +109,8 @@ App Store Connect audit are in
 
 ## Current decision
 
-**Held before Add for Review.** The exact unique-build archive, processed
-TestFlight candidate, version metadata, and privacy declaration exist. Do not
-submit until Render serves exact `main` and the hosted smoke is recorded. The
-physical UI-automation authorization and attended physical-audio checks remain
-open; App Review acceptance is not implied.
+**Submitted; Waiting for Review.** Manual release remains selected. App Review
+acceptance is not implied. Unavailable attended gates remain: calibrated
+brass/acoustic accuracy; AirPlay/HomePod, Bluetooth, and wired routes;
+Files/Photos preseeded fixtures; timer/media-reset operator prerequisites; and
+full assistive-technology/iPad coverage.

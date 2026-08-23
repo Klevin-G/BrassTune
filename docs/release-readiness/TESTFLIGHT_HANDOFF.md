@@ -1,9 +1,16 @@
 # TestFlight Handoff
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-05 UTC.
+Updated: 2026-08-23 UTC. The dated build-2 material below is historical only.
 
-## Current native state
+## Current submitted candidate
+
+- Deployed web/backend implementation is `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; native archive source is distinct, `d371100` on `arya/final-physical-release-20260823`.
+- Build `1.0.1 (7)` archive/export/upload succeeded. Its IPA has a strict valid Apple Distribution signature for `Apple Distribution: Arya Salem`, team `8S79RLTSWV`, bundle `com.aryasalem.BrassTune`, production environment/API, matching app/dSYM UUID `77D84475-6D50-3D94-B842-290431F0D74D`, and SHA-256 `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`.
+- TestFlight reports build 7 **Ready to Submit**. Version `1.0.1` has build 7 attached, stale review notes were replaced, and the version is submitted as **Waiting for Review** with manual release selected.
+- Connected-iPhone evidence includes automation canary `1/1`, strict accessibility `1/1`, standard UI `26/26`, expanded audio stress `1/1`, and the earlier sustained 120-BPM check `1/1`; see `TEST_MATRIX.md` for exact durations and boundaries.
+
+## Historical 2026-08-05 native state
 
 - Production identity is configured: team `8S79RLTSWV`, bundle
   `com.aryasalem.BrassTune`, Sign in with Apple, Apple Distribution identity,
@@ -38,7 +45,7 @@ Evidence:
 
 `<user-home>/Library/Application Support/BrassTune/ReleaseEvidence/NativeIOSContinuation-2026-08-05/AppStorePreflight`
 
-## Exact next-candidate sequence
+## Historical next-candidate sequence (superseded by build 7)
 
 1. Reconcile the dirty native worktree with upstream and bind the intended
    candidate to an exact reviewed commit.
@@ -57,10 +64,11 @@ Evidence:
 
 ## Current decision
 
-**Blocked.** This handoff is locally archive-ready from a signing/configuration
-standpoint, but no unique exact candidate, archive, upload, processed install,
-or final physical closure exists. No App Store Connect field was changed, no
-build was uploaded, and no release package directory was created in this pass.
+**Submitted; Waiting for Review.** Manual release remains selected. App Review
+acceptance is external. Remaining unavailable checks are calibrated brass/acoustic
+accuracy, AirPlay/HomePod/Bluetooth/wired routes, Files/Photos preseeded
+fixtures, timer/media-reset operator prerequisites, and full assistive-tech/iPad
+coverage.
 
 ## Do not claim
 
