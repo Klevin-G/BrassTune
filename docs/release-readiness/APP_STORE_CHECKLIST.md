@@ -2,10 +2,26 @@
 Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-23. This is the native iOS submission checklist. It separates
-current-source simulator checks, signed build-only evidence, historical physical
-evidence, and the still-missing exact TestFlight candidate.
+current-source simulator checks, signed build evidence, historical physical
+evidence, and remaining hosted/physical/App Review gates.
 
-## Verified in this pass
+## Current 2026-08-23 submission state
+
+- `main` is exact `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0` after PR #28.
+- Build `1.0.1 (6)` was archived, exported, distribution-signed, uploaded, and
+  processed by TestFlight; it is **Ready to Submit**.
+- Version `1.0.1` was created, build 6 is attached, and metadata is saved.
+  Guest sign-in-required is unchecked. App Privacy is published for Email
+  Address, User ID, Other User Content, Name, and Photos or Videos; all are
+  linked, for App Functionality, and not used for tracking.
+- Final Add for Review/submit is intentionally held until Render deploys exact
+  `main` and hosted smoke passes. Render currently reports stale
+  `1cd195ed75dee61420d497438f4a4b54c07be25f`; Vercel is READY at exact `main`.
+- The physical app-unit suite passed `259`, skipped `11` source-tree-only
+  audits, and failed `0`; physical UI automation remains blocked before test
+  execution by device automation authorization.
+
+## Historical 2026-08-05 evidence
 
 - Swift Core passed `12/12`; the native app unit suite passed `240/240` on an
   iPhone 17 Pro / iOS 26.5 simulator.
@@ -41,7 +57,7 @@ Prepared copy, privacy mapping, review notes, screenshot checksums, and the live
 App Store Connect audit are in
 [`APP_STORE_SUBMISSION_PACKET_2026-08-05.md`](APP_STORE_SUBMISSION_PACKET_2026-08-05.md).
 
-## Required before a new internal candidate
+## Historical candidate prerequisites (satisfied or superseded)
 
 - Reconcile the preserved dirty native worktree with the four upstream commits
   and bind the intended source to an exact reviewed commit without discarding
@@ -55,7 +71,7 @@ App Store Connect audit are in
   processed build. Preserve crash/device logs and keep unavailable Bluetooth,
   wired, and audible AirPlay routes marked untested rather than passed.
 
-## Required before App Review
+## Historical App Review prerequisites (recheck against the current candidate)
 
 - Populate the prepared screenshots, subtitle, promotional text, description,
   keywords, support/marketing/privacy URLs, copyright, reviewer notes, and
@@ -84,7 +100,8 @@ App Store Connect audit are in
 
 ## Current decision
 
-**Blocked for App Store submission.** Local compilation, tests, screenshots, and
-distribution signing are prepared, but the exact unique-build archive,
-processed TestFlight candidate, exact-candidate physical closure, and live
-metadata/owner attestations do not yet exist.
+**Held before Add for Review.** The exact unique-build archive, processed
+TestFlight candidate, version metadata, and privacy declaration exist. Do not
+submit until Render serves exact `main` and the hosted smoke is recorded. The
+physical UI-automation authorization and attended physical-audio checks remain
+open; App Review acceptance is not implied.
