@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
     localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
     localStorage.setItem('brasstune.demoMode', 'true');
     let pageHidden = false;
     Object.defineProperty(document, 'hidden', {

@@ -5,7 +5,13 @@ import referenceToneCases from '../../../fixtures/reference_tone_cases.json';
 import transitionDrillCases from '../../../fixtures/transition_drill_cases.json';
 import transpositionCases from '../../../fixtures/transposition_cases.json';
 import { nearestMidiForFrequency } from './localPitchDetection';
-import { demoProfileFrequencyRanges, demoProfileTransposition, frequencyToMidi, midiToNote } from './music';
+import {
+  demoProfileDetectorFrequencyRanges,
+  demoProfileTransposition,
+  practicalFrequencyRange,
+  frequencyToMidi,
+  midiToNote,
+} from './music';
 import { intervalNoteLabel, referenceToneVoice, writtenNoteFrequency } from './referenceTone';
 import { generateWeakTransitionDrill, normalizeWeakDrillNoteLabel } from './transitionDrills';
 
@@ -23,11 +29,23 @@ describe('portable pitch and instrument contract', () => {
   it('keeps every instrument transposition and acoustic range fixture-aligned', () => {
     for (const testCase of transpositionCases) {
       expect(demoProfileTransposition[testCase.instrument_id], testCase.name).toBe(testCase.expected_written_midi - testCase.concert_midi);
-      expect(demoProfileFrequencyRanges[testCase.instrument_id], testCase.name).toEqual({
+      expect(practicalFrequencyRange(testCase.instrument_id), testCase.name).toEqual({
         minFrequencyHz: testCase.expected_min_frequency_hz,
         maxFrequencyHz: testCase.expected_max_frequency_hz,
       });
     }
+  });
+
+  it('keeps detector windows broad and exact per instrument family', () => {
+    expect(demoProfileDetectorFrequencyRanges).toEqual({
+      trumpet: { minFrequencyHz: 130, maxFrequencyHz: 1500 },
+      horn: { minFrequencyHz: 80, maxFrequencyHz: 1200 },
+      trombone: { minFrequencyHz: 50, maxFrequencyHz: 700 },
+      euphonium: { minFrequencyHz: 55, maxFrequencyHz: 800 },
+      baritone: { minFrequencyHz: 55, maxFrequencyHz: 800 },
+      'euphonium-treble': { minFrequencyHz: 55, maxFrequencyHz: 800 },
+      tuba: { minFrequencyHz: 30, maxFrequencyHz: 500 },
+    });
   });
 });
 

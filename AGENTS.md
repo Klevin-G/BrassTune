@@ -1,4 +1,5 @@
 # AGENTS.md - BrassTune
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## Project
 

@@ -36,29 +36,57 @@ enum BTSpacing {
     static let xxl: CGFloat = 32
 }
 
+private struct BTReadableForeground: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    func body(content: Content) -> some View {
+        content.foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+    }
+}
+
+extension View {
+    /// Resolves to an opaque concrete color after the current appearance is
+    /// known, so assistive audits can measure it against opaque card surfaces.
+    func btReadableForeground() -> some View { modifier(BTReadableForeground()) }
+}
+
 enum BTTheme {
     static let background = Color(uiColor: .systemGroupedBackground)
     static let backgroundTop = Color(uiColor: .systemBackground)
     static let surface = Color(uiColor: .secondarySystemGroupedBackground)
     static let surfaceAlt = Color(uiColor: .tertiarySystemGroupedBackground)
+    static let disabledSurface = Color(uiColor: .quaternarySystemFill)
     static let surfaceWarm = adaptive(
         light: UIColor(red: 1.000, green: 0.980, blue: 0.941, alpha: 1),
         dark: UIColor(red: 0.133, green: 0.106, blue: 0.059, alpha: 1)
     )
     static let panelLine = Color(uiColor: .separator).opacity(0.55)
+    static let disabledLine = Color(uiColor: .quaternaryLabel)
     static let strongLine = adaptive(
         light: UIColor(red: 0.553, green: 0.435, blue: 0.200, alpha: 0.34),
         dark: UIColor(red: 0.847, green: 0.647, blue: 0.247, alpha: 0.40)
     )
-    static let text = Color(uiColor: .label)
+    // Keep secondary copy distinct without reducing its system-provided
+    // contrast. `secondaryLabel` automatically strengthens with Increase
+    // Contrast, unlike a fixed-opacity custom gray.
+    static let text = Color.primary
     static let muted = Color(uiColor: .secondaryLabel)
     static let accent = adaptive(
-        light: UIColor(red: 0.553, green: 0.435, blue: 0.200, alpha: 1),
+        // #84652B: white label contrast is above the 4.5:1 target in Light.
+        light: UIColor(red: 0.518, green: 0.396, blue: 0.169, alpha: 1),
         dark: UIColor(red: 0.847, green: 0.647, blue: 0.247, alpha: 1)
     )
+    // Use the already-audited accent value in Light appearance. Preserve the
+    // shared gold400 anchor in Dark, where it remains legible on dark surfaces.
     static let accentSoft = adaptive(
-        light: UIColor(red: 0.553, green: 0.435, blue: 0.200, alpha: 1),
+        light: UIColor(red: 0.518, green: 0.396, blue: 0.169, alpha: 1),
         dark: UIColor(red: 0.941, green: 0.788, blue: 0.439, alpha: 1)
+    )
+    // Tuner guidance and neutral live-input states are rendered over multiple
+    // card/background combinations. Keep this token fully opaque so it stays
+    // readable instead of inheriting a translucent system secondary label.
+    static let tunerSecondaryText = adaptive(
+        light: UIColor(red: 0.235, green: 0.235, blue: 0.263, alpha: 1),
+        dark: UIColor(red: 0.922, green: 0.922, blue: 0.961, alpha: 1)
     )
     static let onAccent = adaptive(
         light: .white,
@@ -230,6 +258,7 @@ struct BTCard<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(BTTheme.text)
         .btContentSurface(tint: tint)
+        .btReadableForeground()
     }
 }
 
@@ -238,6 +267,9 @@ struct BTPageHeader: View {
     let title: BTCopy
     let subtitle: BTCopy
     var trailing: BTCopy?
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var readable: Color { colorScheme == .dark ? .white : .black }
 
     var body: some View {
         HStack(alignment: .top, spacing: BTSpacing.lg) {
@@ -247,12 +279,12 @@ struct BTPageHeader: View {
                     .foregroundStyle(BTTheme.accentSoft)
                 Text(title)
                     .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                    .foregroundStyle(BTTheme.text)
+                    .foregroundStyle(readable)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundStyle(BTTheme.muted)
+                    .foregroundStyle(readable)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: BTSpacing.md)
@@ -267,17 +299,20 @@ struct BTPageHeader: View {
 struct BTSectionHeader: View {
     let title: BTCopy
     var subtitle: BTCopy?
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var readable: Color { colorScheme == .dark ? .white : .black }
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.xs) {
             Text(title)
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(BTTheme.text)
+                .foregroundStyle(readable)
                 .accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundStyle(BTTheme.muted)
+                    .foregroundStyle(readable)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -290,12 +325,15 @@ struct BTMetricTile: View {
     var detail: BTCopy?
     var tint: Color = BTTheme.accent
     var interactive: Bool = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var readable: Color { colorScheme == .dark ? .white : .black }
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.xs) {
             Text(title)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(BTTheme.muted)
+                .foregroundStyle(readable)
             Text(value)
                 .font(.title2.weight(.bold))
                 .foregroundStyle(tint)
@@ -304,7 +342,7 @@ struct BTMetricTile: View {
             if let detail {
                 Text(detail)
                     .font(.caption)
-                    .foregroundStyle(BTTheme.muted)
+                    .foregroundStyle(readable)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -318,13 +356,14 @@ struct BTMetricTile: View {
 struct BTStatusPill: View {
     let text: BTCopy
     var tint: Color = BTTheme.accent
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Text(text)
             .font(.caption.weight(.semibold))
             .padding(.horizontal, BTSpacing.sm)
             .padding(.vertical, BTSpacing.xs)
-            .foregroundStyle(tint)
+            .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
             .background(tint.opacity(0.12))
             .overlay {
                 Capsule().stroke(tint.opacity(0.28), lineWidth: 1)
@@ -338,6 +377,9 @@ struct BTEmptyState: View {
     let title: BTCopy
     let message: BTCopy
     var systemImage: String = "music.note"
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var readable: Color { colorScheme == .dark ? .white : .black }
 
     var body: some View {
         BTCard {
@@ -350,7 +392,7 @@ struct BTEmptyState: View {
             .foregroundStyle(BTTheme.accent)
             Text(message)
                 .font(.subheadline)
-                .foregroundStyle(BTTheme.muted)
+                .foregroundStyle(readable)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -408,6 +450,7 @@ struct BrassGlassButtonStyle: PrimitiveButtonStyle {
 
 struct BTPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    var horizontalPadding: CGFloat = BTSpacing.lg
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: BTTheme.radius, style: .continuous)
@@ -416,6 +459,7 @@ struct BTPrimaryButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity)
             .frame(minHeight: 44)
             .padding(.vertical, BTSpacing.md)
+            .padding(.horizontal, horizontalPadding)
             .foregroundStyle(isEnabled ? BTTheme.onAccent : BTTheme.muted)
             .background(shape.fill(isEnabled ? BTTheme.accent : BTTheme.surfaceAlt))
             .contentShape(shape)
@@ -425,6 +469,8 @@ struct BTPrimaryButtonStyle: ButtonStyle {
 
 struct BTSecondaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
+    var horizontalPadding: CGFloat = BTSpacing.lg
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: BTTheme.radius, style: .continuous)
@@ -433,13 +479,18 @@ struct BTSecondaryButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity)
             .frame(minHeight: 44)
             .padding(.vertical, BTSpacing.md)
-            .foregroundStyle(isEnabled ? BTTheme.text : BTTheme.muted)
-            .background(shape.fill(BTTheme.surfaceAlt))
+            .padding(.horizontal, horizontalPadding)
+            // Disabled secondary actions need more than the platform's
+            // non-interactive trait: preserve a visibly quieter surface and
+            // announce their state to assistive technologies.
+            .foregroundStyle(isEnabled ? (colorScheme == .dark ? Color.white : Color.black) : BTTheme.muted)
+            .background(shape.fill(isEnabled ? BTTheme.surfaceAlt : BTTheme.disabledSurface))
             .overlay {
-                shape.stroke(BTTheme.panelLine, lineWidth: 1)
+                shape.stroke(isEnabled ? BTTheme.panelLine : BTTheme.disabledLine, lineWidth: 1)
             }
             .contentShape(shape)
-            .opacity(configuration.isPressed ? 0.82 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.82 : 1) : 0.72)
+            .accessibilityValue(isEnabled ? "" : NativeLocalization.string("Unavailable"))
     }
 }
 
@@ -449,6 +500,9 @@ struct BTInsightTile: View {
     let systemImage: String
     var tint: Color = BTTheme.accent
     var interactive: Bool = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var readable: Color { colorScheme == .dark ? .white : .black }
 
     var body: some View {
         HStack(alignment: .top, spacing: BTSpacing.md) {
@@ -460,10 +514,10 @@ struct BTInsightTile: View {
             VStack(alignment: .leading, spacing: BTSpacing.xs) {
                 Text(title)
                     .font(.headline)
-                    .foregroundStyle(BTTheme.text)
+                    .foregroundStyle(readable)
                 Text(detail)
                     .font(.caption)
-                    .foregroundStyle(BTTheme.muted)
+                    .foregroundStyle(readable)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

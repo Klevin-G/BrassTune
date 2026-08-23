@@ -1,4 +1,5 @@
 # Pitch Detection Notes
+Project attribution: Kelvin Guo, Arya Salem.
 
 The MVP supports two backend detection paths.
 

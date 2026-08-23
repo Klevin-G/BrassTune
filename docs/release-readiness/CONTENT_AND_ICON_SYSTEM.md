@@ -1,4 +1,5 @@
 # Content And Icon System
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-06-20 UTC.
 

@@ -47,6 +47,10 @@ function RequireAppAccess({ children }: { children: JSX.Element }) {
     return <div className="route-loading" role="status">{t('loading.session')}</div>;
   }
   if (accessState === 'allow') {
+    if (auth.hasAuthSession && auth.profile?.profile_complete === false && location.pathname !== '/settings') {
+      const next = `${location.pathname}${location.search}${location.hash}`;
+      return <Navigate to={`/settings?profileCompletion=1&next=${encodeURIComponent(next)}`} replace />;
+    }
     return children;
   }
   return <Navigate to={gatewayPathWithReturn(`${location.pathname}${location.search}${location.hash}`)} replace />;
@@ -90,6 +94,7 @@ export default function App() {
           <Route path="/privacy" element={<LegalPage kind="privacy" />} />
           <Route path="/terms" element={<LegalPage kind="terms" />} />
           <Route path="/support" element={<LegalPage kind="support" />} />
+          <Route path="/credits" element={<LegalPage kind="credits" />} />
           <Route path="/auth/sign-in" element={<AuthPage mode="sign-in" />} />
           <Route path="/auth/sign-up" element={<AuthPage mode="sign-up" />} />
           <Route path="/auth/reset-password" element={<AuthPage mode="reset" />} />

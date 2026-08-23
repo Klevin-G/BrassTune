@@ -23,6 +23,13 @@ class User(Base):
     admin_granted_by_env = Column(Boolean, nullable=False, default=False)
     primary_instrument_id = Column(String, nullable=False, default="trumpet")
     onboarding_completed_at = Column(DateTime, nullable=True)
+    # Set only after an authenticated account explicitly confirms both identity
+    # fields in the profile form; provider metadata must not bypass setup.
+    profile_setup_completed_at = Column(DateTime, nullable=True)
+    avatar_object_key = Column(String, nullable=True)
+    avatar_mime_type = Column(String, nullable=True)
+    avatar_size_bytes = Column(Integer, nullable=True)
+    avatar_updated_at = Column(DateTime, nullable=True)
     last_active_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)

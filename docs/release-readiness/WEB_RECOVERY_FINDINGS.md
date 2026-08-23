@@ -1,4 +1,5 @@
 # Historical Web Recovery Findings
+Project attribution: Kelvin Guo, Arya Salem.
 
 The former Render keepalive workflow and the old production-host assumptions in this record are retired. Keep this document only as historical debugging context; it does not define current workflows or release gates.
 

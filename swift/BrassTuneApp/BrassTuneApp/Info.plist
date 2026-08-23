@@ -10,6 +10,8 @@
 	<string>$(BRASSTUNE_API_BASE_URL)</string>
 	<key>BRASSTUNE_ENV</key>
 	<string>$(BRASSTUNE_ENV)</string>
+	<key>BRASSTUNE_AUTH_CALLBACK_SCHEME</key>
+	<string>$(BRASSTUNE_AUTH_CALLBACK_SCHEME)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -30,10 +32,10 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.brasstune.auth</string>
+			<string>$(BRASSTUNE_AUTH_CALLBACK_SCHEME)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.brasstune.auth</string>
+				<string>$(BRASSTUNE_AUTH_CALLBACK_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
@@ -64,8 +66,6 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>BrassTune uses the microphone to analyze brass pitch while you are actively tuning or recording.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>BrassTune can import score images you select from Photos for local practice notes.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIAppFonts</key>

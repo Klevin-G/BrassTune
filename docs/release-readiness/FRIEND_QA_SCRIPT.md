@@ -1,4 +1,5 @@
 # Friend QA Script
+Project attribution: Kelvin Guo, Arya Salem.
 
 Use disposable data only. Do not upload private student recordings.
 

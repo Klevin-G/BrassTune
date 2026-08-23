@@ -1,3 +1,6 @@
+# Closed Beta PR Body
+Project attribution: Kelvin Guo, Arya Salem.
+
 ## Status
 
 Web/backend closed-beta production path deployed and smoke-passed in guest/auth-disabled mode; native engineering parity in progress; external provider/App Store/device gates remaining.

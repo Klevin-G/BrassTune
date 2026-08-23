@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getInstruments } from '../api/client';
 import type { InstrumentProfile } from '../domain/types';
 import { useI18n } from '../i18n/LocaleContext';
@@ -15,11 +15,32 @@ const fallbackInstruments: InstrumentProfile[] = [
 export function InstrumentSelector({ value, onChange, compact = false, label }: { value: string; onChange: (value: string) => void; compact?: boolean; label?: string }) {
   const { t } = useI18n();
   const fieldLabel = label ?? t('instrument.label');
-  const [instruments, setInstruments] = useState<InstrumentProfile[]>([]);
+  // Keep a usable control through the first paint and any catalog outage.
+  const [instruments, setInstruments] = useState<InstrumentProfile[]>(fallbackInstruments);
+  const catalogGenerationRef = useRef(0);
   useEffect(() => {
+    const generation = catalogGenerationRef.current + 1;
+    catalogGenerationRef.current = generation;
+    let active = true;
+    let commitFrame: number | null = null;
+
+    const commit = (profiles: InstrumentProfile[]) => {
+      // The request can resolve while a NavLink transition is rendering. Wait
+      // until the next frame so this update is never a render-phase update.
+      commitFrame = window.requestAnimationFrame(() => {
+        if (active && catalogGenerationRef.current === generation) {
+          setInstruments(profiles.length > 0 ? profiles : fallbackInstruments);
+        }
+      });
+    };
+
     getInstruments()
-      .then((profiles) => setInstruments(profiles.length > 0 ? profiles : fallbackInstruments))
-      .catch(() => setInstruments(fallbackInstruments));
+      .then(commit)
+      .catch(() => commit(fallbackInstruments));
+    return () => {
+      active = false;
+      if (commitFrame !== null) window.cancelAnimationFrame(commitFrame);
+    };
   }, []);
   return (
     <label className={`select-wrap ${compact ? 'compact' : ''}`}>

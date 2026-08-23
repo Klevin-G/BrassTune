@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
       .forEach((key) => localStorage.removeItem(key));
     localStorage.setItem('brasstune.onboardingComplete', 'true');
     localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
   });
 });
 
@@ -41,6 +41,31 @@ test('legacy scorer links canonicalize without losing their exercise query or ha
   await page.goto('/practice/play-along?exercise=cmaj#target-note');
   await expect(page).toHaveURL(/\/practice\/scorer\?exercise=cmaj#target-note$/);
   await expect(page.getByRole('link', { name: 'Practice Scorer' })).toHaveClass(/active/);
+});
+
+test('immediate instrument catalog fulfillment does not cause a router render-phase warning', async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') consoleErrors.push(message.text());
+  });
+  await page.route('**/api/instruments', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([
+      { id: 'trumpet', display_name: 'Trumpet in Bb' },
+      { id: 'catalog-horn', display_name: 'Catalog horn' },
+    ]),
+  }));
+
+  await page.goto('/practice/scorer');
+  const instrument = page.getByRole('combobox', { name: 'Instrument' }).first();
+  // The resolved catalog commits after the router transition settles.
+  await expect(instrument.locator('option[value="catalog-horn"]')).toHaveCount(1);
+
+  await page.goto('/practice/play-along?exercise=cmaj');
+  await expect(page).toHaveURL(/\/practice\/scorer\?exercise=cmaj$/);
+  await expect(page.getByRole('heading', { name: 'Practice Scorer' })).toBeVisible();
+  expect(consoleErrors.filter((message) => /Cannot update a component .* while rendering|InstrumentSelector.*NavLink/i.test(message))).toEqual([]);
 });
 
 for (const width of [320, 375]) {

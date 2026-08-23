@@ -1,4 +1,5 @@
 # Beta Feedback Triage
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status: lightweight process for closed-beta feedback. Do not add third-party analytics or tracking by default.
 

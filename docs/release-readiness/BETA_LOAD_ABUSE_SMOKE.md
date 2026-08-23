@@ -1,4 +1,5 @@
 # Beta Load And Abuse Smoke
+Project attribution: Kelvin Guo, Arya Salem.
 
 This is the closed-beta filename for `LOAD_ABUSE_SMOKE.md`. Use the detailed checklist there.
 

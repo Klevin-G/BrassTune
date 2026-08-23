@@ -1,4 +1,5 @@
 # Historical Release Status — 2026-07-09
+Project attribution: Kelvin Guo, Arya Salem.
 
 This document is historical only. It must not be used to infer the current deployment, provider, runner, migration, or release state. Current candidate truth is maintained in `FINAL_REPORT.md`, `TEST_MATRIX.md`, and `POST_MERGE_PRODUCTION_CHECKLIST.md`.
 

@@ -37,8 +37,35 @@ export function secondsPerBeat(bpm: number) {
   return 60 / clampBpm(bpm);
 }
 
-export function secondsPerTick(bpm: number, _signature: TimeSignature, subdivision: Subdivision) {
-  return secondsPerBeat(bpm) / subdivisionFactor(subdivision);
+export function isCompoundMeter(signature: TimeSignature) {
+  return signature.denominator === 8 && [6, 9, 12].includes(signature.numerator);
+}
+
+/**
+ * The scheduler and the visual strip share this one definition of a strong
+ * beat. Compound meters pulse in dotted-quarter groups (0, 3, 6, 9), while
+ * other meters have a single bar downbeat. Turning accents off must affect
+ * both the audible click and the visible grouping.
+ */
+export function isAccentedMetronomeTick(
+  signature: TimeSignature,
+  beatIndex: number,
+  subdivisionIndex: number,
+  accentDownbeat = true,
+) {
+  if (!accentDownbeat || subdivisionIndex !== 0) return false;
+  const normalized = normalizeTimeSignature(signature.numerator, signature.denominator);
+  return isCompoundMeter(normalized) ? beatIndex % 3 === 0 : beatIndex === 0;
+}
+
+export function secondsPerTick(bpm: number, signature: TimeSignature, subdivision: Subdivision) {
+  const normalized = normalizeTimeSignature(signature.numerator, signature.denominator);
+  // Compound BPM is a dotted-quarter pulse. Ticks remain on the written
+  // eighth-note grid so the secondary group accents stay representable.
+  const writtenBeatSeconds = isCompoundMeter(normalized)
+    ? secondsPerBeat(bpm) / 3
+    : secondsPerBeat(bpm);
+  return writtenBeatSeconds / subdivisionFactor(subdivision);
 }
 
 export function ticksPerBar(signature: TimeSignature, subdivision: Subdivision) {
@@ -69,7 +96,7 @@ export function buildScheduledTicks({
       time: startTime + index * interval,
       beatIndex,
       subdivisionIndex,
-      accented: beatIndex === 0 && subdivisionIndex === 0,
+      accented: isAccentedMetronomeTick(normalized, beatIndex, subdivisionIndex),
     };
   });
 }

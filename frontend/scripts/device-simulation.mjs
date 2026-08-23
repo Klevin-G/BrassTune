@@ -393,7 +393,7 @@ async function runViewport(browser, viewport) {
     }
     localStorage.setItem('brasstune.onboardingComplete', 'true');
     localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
     window.__brasstuneErrors = [];
     window.addEventListener('unhandledrejection', (event) => {
       window.__brasstuneErrors.push(`Unhandled rejection: ${event.reason?.message || event.reason}`);

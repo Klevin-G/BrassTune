@@ -17,6 +17,17 @@ def iso(value):
     return value
 
 
+def swift_iso8601_utc(value):
+    """Return the strict RFC3339 shape accepted by Swift JSONDecoder.iso8601."""
+    if not isinstance(value, dt.datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    else:
+        value = value.astimezone(dt.timezone.utc)
+    return value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def audio_metadata_is_plausible(session) -> bool:
     """Conservatively hide legacy placeholder rows without deleting objects."""
     minimum_size = MIN_AUDIO_BYTES_BY_MIME_TYPE.get(getattr(session, "audio_mime_type", None))
@@ -61,6 +72,10 @@ def user_to_dict(user) -> Dict[str, Any]:
         "role": user.role,
         "primary_instrument_id": user.primary_instrument_id,
         "onboarding_completed_at": iso(user.onboarding_completed_at),
+        "profile_complete": bool(user.profile_setup_completed_at),
+        "profile_setup_completed_at": iso(user.profile_setup_completed_at),
+        "avatar_available": bool(user.avatar_object_key and user.avatar_mime_type and user.avatar_size_bytes),
+        "avatar_updated_at": swift_iso8601_utc(user.avatar_updated_at),
         "created_at": iso(user.created_at),
     }
 

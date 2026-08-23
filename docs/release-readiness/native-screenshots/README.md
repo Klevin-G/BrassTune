@@ -1,4 +1,5 @@
 # Native Screenshot Capture
+Project attribution: Kelvin Guo, Arya Salem.
 
 Do not commit huge screenshot sets. Keep only small representative PNGs when needed for release evidence.
 

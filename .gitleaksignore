@@ -1,0 +1,5 @@
+# Verified synthetic publishable-key fixtures already present in reachable history.
+a5d70e4ee971d994faae797dbc95af113fc81d9d:swift/BrassTuneApp/scripts/test_release_auth_config.sh:generic-api-key:29
+a5d70e4ee971d994faae797dbc95af113fc81d9d:swift/BrassTuneApp/scripts/test_release_auth_config.sh:generic-api-key:39
+a5d70e4ee971d994faae797dbc95af113fc81d9d:swift/BrassTuneApp/scripts/test_release_auth_config.sh:generic-api-key:58
+a5d70e4ee971d994faae797dbc95af113fc81d9d:swift/BrassTuneApp/scripts/test_release_auth_config.sh:generic-api-key:86

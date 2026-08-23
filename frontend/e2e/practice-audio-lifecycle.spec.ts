@@ -15,6 +15,18 @@ export const supabase = {
 };
 `;
 
+const guestAuthModule = `
+export const supabaseConfigured = true;
+export const authProviders = { google: false, apple: false };
+export const supabase = {
+  auth: {
+    getSession: async () => ({ data: { session: null } }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+    signOut: async () => ({ error: null }),
+  },
+};
+`;
+
 const stablePitchStreamModule = `
 const stream = { getTracks: () => [{ stop() {} }] };
 export function usePitchStream() {
@@ -50,15 +62,34 @@ const activeSession = {
   audio_available: false,
 };
 
-async function installTunerRecordingFixture(page: Page, options: { failFirstStop?: boolean; pendingStart?: boolean } = {}) {
+async function installTunerRecordingFixture(page: Page, options: { failFirstStop?: boolean; pendingStart?: boolean; guest?: boolean; realPitchStream?: boolean } = {}) {
   const calls = { starts: 0, uploads: 0, stops: 0 };
   let resolveStart: (() => void) | undefined;
   const startGate = options.pendingStart
     ? new Promise<void>((resolve) => { resolveStart = resolve; })
     : Promise.resolve();
 
-  await page.addInitScript(() => {
+  await page.addInitScript((realPitchStream) => {
     const state = { starts: 0, stops: 0 };
+    const sharedLifecycle = { events: [] as string[], trackStops: 0, microphoneRequests: 0 };
+    if (realPitchStream) {
+      const nextStream = () => {
+        const track = { kind: 'audio', readyState: 'live', onended: null as (() => void) | null, stop: () => { sharedLifecycle.events.push('track-stop'); sharedLifecycle.trackStops += 1; track.readyState = 'ended'; } };
+        return { getTracks: () => [track], getAudioTracks: () => [track] };
+      };
+      class SharedAudioContext {
+        state: AudioContextState = 'running'; sampleRate = 48_000; destination = {};
+        onstatechange: (() => void) | null = null;
+        resume() { return Promise.resolve(); }
+        close() { this.state = 'closed'; return Promise.resolve(); }
+        createMediaStreamSource() { return { connect: () => undefined, disconnect: () => undefined }; }
+        createScriptProcessor() { return { connect: () => undefined, disconnect: () => undefined, onaudioprocess: null }; }
+        createGain() { return { gain: { value: 0 }, connect: () => undefined, disconnect: () => undefined }; }
+      }
+      Object.defineProperty(window, 'AudioContext', { configurable: true, value: SharedAudioContext });
+      Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => { sharedLifecycle.microphoneRequests += 1; return nextStream(); } } });
+      (window as unknown as { __sharedTakeLifecycle: typeof sharedLifecycle }).__sharedTakeLifecycle = sharedLifecycle;
+    }
     class FakeMediaRecorder {
       static isTypeSupported() { return true; }
       mimeType = 'audio/webm';
@@ -70,23 +101,26 @@ async function installTunerRecordingFixture(page: Page, options: { failFirstStop
       }
       stop() {
         state.stops += 1;
+        if (realPitchStream) sharedLifecycle.events.push('recorder-stop');
         this.ondataavailable?.({ data: new Blob(['recorded audio'], { type: this.mimeType }) });
         this.onstop?.();
       }
     }
     Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: FakeMediaRecorder });
     (window as unknown as { __tunerRecorderTest: unknown }).__tunerRecorderTest = state;
-  });
+  }, options.realPitchStream ?? false);
   await page.route('**/src/lib/supabase.ts*', (route) => route.fulfill({
     status: 200,
     contentType: 'application/javascript',
-    body: signedInAuthModule,
+    body: options.guest ? guestAuthModule : signedInAuthModule,
   }));
-  await page.route('**/src/hooks/usePitchStream.ts*', (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/javascript',
-    body: stablePitchStreamModule,
-  }));
+  if (!options.realPitchStream) {
+    await page.route('**/src/hooks/usePitchStream.ts*', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: stablePitchStreamModule,
+    }));
+  }
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -163,7 +197,7 @@ test.beforeEach(async ({ page }) => {
       .forEach((key) => localStorage.removeItem(key));
     localStorage.setItem('brasstune.onboardingComplete', 'true');
     localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
   });
 });
 
@@ -319,7 +353,6 @@ test('leaving the Tuner route finalizes one active recorder and cloud session', 
   await page.goto('/practice');
   await page.getByRole('button', { name: 'Save this take' }).click();
   await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
-
   await page.getByRole('link', { name: 'Metronome' }).click();
 
   await expect(page).toHaveURL(/\/metronome$/);
@@ -358,7 +391,6 @@ test('a failed active Tuner stop keeps an AppShell navigation on Tuner until the
   await page.goto('/practice');
   await page.getByRole('button', { name: 'Save this take' }).click();
   await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
-
   await appShellLink(page, 'Progress').click();
 
   await expect.poll(() => fixture.calls.stops).toBe(1);
@@ -390,6 +422,75 @@ test('clicking the already-active Tuner navigation never finalizes an active tak
   await page.getByRole('button', { name: 'Stop and save' }).click();
   await expect.poll(() => fixture.calls.stops).toBe(1);
   await expect.poll(() => fixture.calls.uploads).toBe(1);
+});
+
+test('background and pagehide serialize one signed-in active-take finalization', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { realPitchStream: true });
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+  await page.evaluate(() => { (window as unknown as { __sharedTakeLifecycle: { events: string[] } }).__sharedTakeLifecycle.events.length = 0; });
+  const initialMicrophoneRequests = await page.evaluate(() => (
+    window as unknown as { __sharedTakeLifecycle: { microphoneRequests: number } }
+  ).__sharedTakeLifecycle.microphoneRequests);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('pagehide'));
+  });
+
+  await expect.poll(() => fixture.calls.uploads).toBe(1);
+  await expect.poll(() => fixture.calls.stops).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __tunerRecorderTest: { stops: number } }
+  ).__tunerRecorderTest.stops)).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __sharedTakeLifecycle: { events: string[] } }
+  ).__sharedTakeLifecycle.events)).toEqual(['recorder-stop', 'track-stop']);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __sharedTakeLifecycle: { microphoneRequests: number } }
+  ).__sharedTakeLifecycle.microphoneRequests)).toBe(initialMicrophoneRequests + 1);
+});
+
+test('background and pagehide serialize one guest active-take save', async ({ page }) => {
+  const fixture = await installTunerRecordingFixture(page, { guest: true, realPitchStream: true });
+  await page.goto('/practice');
+  await page.getByRole('button', { name: 'Save this take' }).click();
+  await expect(page.getByRole('button', { name: 'Stop and save' })).toBeVisible();
+  await page.evaluate(() => { (window as unknown as { __sharedTakeLifecycle: { events: string[] } }).__sharedTakeLifecycle.events.length = 0; });
+  const initialMicrophoneRequests = await page.evaluate(() => (
+    window as unknown as { __sharedTakeLifecycle: { microphoneRequests: number } }
+  ).__sharedTakeLifecycle.microphoneRequests);
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('pagehide'));
+  });
+
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __tunerRecorderTest: { stops: number } }
+  ).__tunerRecorderTest.stops)).toBe(1);
+  expect(fixture.calls.uploads).toBe(0);
+  expect(fixture.calls.stops).toBe(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('brasstune.guestSessions.v1'))).not.toBeNull();
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __sharedTakeLifecycle: { events: string[] } }
+  ).__sharedTakeLifecycle.events)).toEqual(['recorder-stop', 'track-stop']);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __sharedTakeLifecycle: { microphoneRequests: number } }
+  ).__sharedTakeLifecycle.microphoneRequests)).toBe(initialMicrophoneRequests + 1);
 });
 
 test('a failed pending Tuner stop keeps an AppShell navigation on Tuner until the player retries', async ({ page }) => {
@@ -771,10 +872,10 @@ test('a silent runtime Worker falls back after its bounded backlog watchdog', as
 
 test('Stop cancels scheduled count-in clicks and unmount closes the metronome context', async ({ page }) => {
   await page.addInitScript(() => {
-    const state = { closeCalls: 0, oscillators: [] as Array<{ stops: number[] }> };
+    const state = { closeCalls: 0, currentTime: 0, oscillators: [] as Array<{ stops: number[] }> };
     class FakeAudioContext {
       state: AudioContextState = 'running';
-      currentTime = 0;
+      get currentTime() { return state.currentTime; }
       destination = {};
       resume() { this.state = 'running'; return Promise.resolve(); }
       close() { state.closeCalls += 1; this.state = 'closed'; return Promise.resolve(); }
@@ -808,7 +909,12 @@ test('Stop cancels scheduled count-in clicks and unmount closes the metronome co
 
   await page.goto('/metronome');
   await page.getByRole('button', { name: 'Start', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __metronomeTest: { oscillators: unknown[] } }).__metronomeTest.oscillators.length)).toBe(4);
+  // The scheduler intentionally creates only the first click inside its
+  // look-ahead window. Advance the synthetic audio clock before requiring the
+  // rest of the count-in rather than treating all four as immediate output.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __metronomeTest: { oscillators: unknown[] } }).__metronomeTest.oscillators.length)).toBe(1);
+  await page.evaluate(() => { (window as unknown as { __metronomeTest: { currentTime: number } }).__metronomeTest.currentTime = 2; });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __metronomeTest: { oscillators: unknown[] } }).__metronomeTest.oscillators.length)).toBeGreaterThanOrEqual(4);
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __metronomeTest: { oscillators: Array<{ stops: number[] }> } }).__metronomeTest.oscillators.every((item) => item.stops.length >= 2))).toBe(true);
 
@@ -878,7 +984,10 @@ test('Metronome serializes rapid Start activation while AudioContext resume is p
   await page.evaluate(() => (window as unknown as { __metronomeStartTest: { finishResume: () => void } }).__metronomeStartTest.finishResume());
 
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __metronomeStartTest: { state: { oscillators: number } } }).__metronomeStartTest.state.oscillators)).toBe(4);
+  // One scheduled click is sufficient evidence that the single pending Start
+  // became active; the rolling scheduler creates later clicks as its audio
+  // clock enters their look-ahead window.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __metronomeStartTest: { state: { oscillators: number } } }).__metronomeStartTest.state.oscillators)).toBe(1);
 });
 
 test('sheet delete confirmation traps focus, closes on Escape, and restores focus', async ({ page }) => {

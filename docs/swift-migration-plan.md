@@ -1,4 +1,5 @@
 # Swift Migration Plan
+Project attribution: Kelvin Guo, Arya Salem.
 
 Branch: `swift-migration`
 

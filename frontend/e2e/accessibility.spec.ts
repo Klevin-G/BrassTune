@@ -14,6 +14,7 @@ const routes = [
   '/sessions/-12345',
   '/ensemble',
   '/privacy',
+  '/credits',
 ];
 
 test.beforeEach(async ({ page }) => {
@@ -21,7 +22,7 @@ test.beforeEach(async ({ page }) => {
     localStorage.setItem('brasstune.onboardingComplete', 'true');
     localStorage.setItem('brasstune.guestOnboardingComplete', 'true');
     localStorage.setItem('brasstune.demoMode', 'true');
-    localStorage.setItem('brasstune.guestAccess', 'true');
+    sessionStorage.setItem('brasstune.guestAccess', 'true');
     localStorage.setItem('brasstune.guestSessions.v1', JSON.stringify([
       {
         id: -12345,

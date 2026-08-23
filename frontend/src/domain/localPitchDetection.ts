@@ -1,4 +1,4 @@
-import { demoProfileFrequencyRanges, frequencyToMidi, pitchFrameFromFrequency } from './music';
+import { demoProfileDetectorFrequencyRanges, frequencyToMidi, pitchFrameFromFrequency } from './music';
 import type { PitchFrame } from './types';
 
 const DEFAULT_MIN_FREQUENCY = 55;
@@ -139,7 +139,7 @@ export function pitchFrameFromPcm(
   referencePitch: number,
   timestampMs: number,
 ): PitchFrame {
-  const range = demoProfileFrequencyRanges[instrumentId];
+  const range = demoProfileDetectorFrequencyRanges[instrumentId];
   const estimate = estimatePitchFromPcm(
     samples,
     sampleRate,

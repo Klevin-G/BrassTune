@@ -1,4 +1,5 @@
 # Security Review
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## Changes Added
 
@@ -17,6 +18,8 @@
 - HTTP abuse controls combine a per-client global budget, canonical route-family
   budget, and stricter class-join/expensive-operation budgets. Numeric and UUID
   path rotation cannot create a fresh route budget.
+- Authenticated profile-avatar reads have a dedicated route-family budget;
+  avatar writes remain expensive account mutations.
 - Render disables Uvicorn proxy-header rewriting; the application consumes the
   raw forwarding chain and validates Render's documented first client-IP entry.
   A malformed first entry fails back to the socket peer without scanning later
@@ -42,6 +45,8 @@
 Abuse-limit defaults can be tuned with `BRASSTUNE_GLOBAL_RATE_LIMIT_PER_MINUTE`,
 `BRASSTUNE_RATE_LIMIT_PER_MINUTE`, `BRASSTUNE_CLASS_JOIN_RATE_LIMIT_PER_MINUTE`,
 `BRASSTUNE_EXPENSIVE_MUTATION_RATE_LIMIT_PER_MINUTE`,
+`BRASSTUNE_AVATAR_READ_RATE_LIMIT_PER_MINUTE` (default `30`, only for
+`GET /api/users/me/avatar`),
 `BRASSTUNE_WS_MAX_CONNECTIONS_PER_IP`,
 `BRASSTUNE_WS_MAX_CONNECTIONS_PER_ACCOUNT`,
 `BRASSTUNE_WS_MAX_AUDIO_FRAMES_PER_SECOND`,
@@ -62,6 +67,10 @@ only as a deliberate unlimited local/test setting. Negative or invalid session,
 audio, HTTP, and WebSocket safety limits fall back to their safe defaults.
 Export limits are mandatory: zero, negative, or invalid values fall back to
 their safe defaults instead of disabling response-size protections.
+
+`PUT /api/users/me/avatar` does not use the avatar-read budget; it uses the
+existing expensive account-mutation limit. Keep all rate-limit settings in the
+backend environment and never expose them as frontend configuration or secrets.
 
 ## Tooling
 

@@ -1,4 +1,5 @@
 # Locked Release Scope
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-06-21T04:22:00Z
 Branch: `main`

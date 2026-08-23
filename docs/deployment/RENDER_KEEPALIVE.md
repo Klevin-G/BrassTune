@@ -1,4 +1,5 @@
 # Render operations (Supabase pg_cron)
+Project attribution: Kelvin Guo, Arya Salem.
 
 The Render free web service (`https://brasstune-u8qj.onrender.com`) spins down after
 ~15 minutes of inactivity, adding a ~40s cold start to the next request. It is kept

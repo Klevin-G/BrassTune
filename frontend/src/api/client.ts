@@ -123,13 +123,18 @@ export function getCurrentUser() {
     role: string;
     primary_instrument_id: string;
     onboarding_completed_at?: string | null;
+    profile_complete?: boolean;
   }>('/api/users/current');
 }
 
-export function updateCurrentUser(payload: { username?: string; display_name?: string; primary_instrument_id?: string; onboarding_completed?: boolean }) {
+export function updateCurrentUser(
+  payload: { username?: string; display_name?: string; primary_instrument_id?: string; onboarding_completed?: boolean },
+  options: { accessToken?: string } = {},
+) {
   return request('/api/users/me', {
     method: 'PATCH',
     body: JSON.stringify(payload),
+    headers: options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : undefined,
   });
 }
 

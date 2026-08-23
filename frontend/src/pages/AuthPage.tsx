@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { InstrumentSelector } from '../components/InstrumentSelector';
 import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
-import { useAuth } from '../state/AuthContext';
+import { isValidDisplayName, isValidProfileUsername, useAuth } from '../state/AuthContext';
 import {
   authPathWithReturn,
   clearPendingAuthReturn,
@@ -17,7 +17,6 @@ import { useI18n } from '../i18n/LocaleContext';
 import './AuthPage.css';
 
 const PASSWORD_MIN = 8;
-
 export const safeAuthNext = safeReturnPath;
 export const authPathWithNext = authPathWithReturn;
 
@@ -41,6 +40,7 @@ function AuthFooter() {
       <Link to="/privacy">{t('legal.privacy')}</Link>
       <Link to="/terms">{t('legal.terms')}</Link>
       <Link to="/support">{t('legal.support')}</Link>
+      <Link to="/credits">{t('legal.credits')}</Link>
     </footer>
   );
 }
@@ -163,6 +163,8 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
   const [passwordUpdated, setPasswordUpdated] = useState(false);
 
   const isSignup = mode === 'sign-up';
+  const usernameFormatHint = t('auth.usernameFormat');
+  const usernameInvalid = isSignup && username.length > 0 && !isValidProfileUsername(username);
   const isPasswordRecovery = mode === 'reset' && auth.hasAuthSession;
   const callbackProviderError = mode === 'callback'
     ? callbackParams().get('error_description') || callbackParams().get('error')
@@ -228,6 +230,14 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
         clearPendingAuthReturn();
         navigate(next);
       } else if (mode === 'sign-up') {
+        if (!isValidProfileUsername(username)) {
+          setMessage({ type: 'error', text: usernameFormatHint });
+          return;
+        }
+        if (!isValidDisplayName(displayName)) {
+          setMessage({ type: 'error', text: t('auth.displayNameFormat') });
+          return;
+        }
         rememberPendingAuthReturn(next);
         await auth.signUp({ email, password, username, displayName, primaryInstrumentId: instrumentId });
         setPendingSignup(true);
@@ -454,15 +464,20 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                         {t('auth.username')}
                         <input
                           value={username}
-                          onChange={(event) => setUsername(event.target.value.toLowerCase())}
+                          onChange={(event) => setUsername(event.target.value)}
                           dir="ltr"
                           name="username"
                           autoComplete="username"
                           required
                           minLength={3}
+                          maxLength={32}
+                          pattern="[A-Za-z0-9_-]{3,32}"
+                          aria-invalid={usernameInvalid}
+                          aria-describedby="signup-username-hint signup-username-error"
                           placeholder={t('auth.usernamePlaceholder')}
                         />
-                        <span className="au-field-hint">{t('auth.usernameHint')}</span>
+                        <span className="au-field-hint" id="signup-username-hint">{usernameFormatHint}</span>
+                        {usernameInvalid && <span className="au-field-hint" id="signup-username-error" role="alert">{usernameFormatHint}</span>}
                       </label>
                       <label>
                         {t('auth.displayName')}
@@ -475,7 +490,7 @@ export function AuthPage({ mode }: { mode: 'sign-in' | 'sign-up' | 'reset' | 'ca
                           required
                           placeholder={t('auth.displayNamePlaceholder')}
                         />
-                        <span className="au-field-hint">{t('auth.displayNameHint')}</span>
+                        <span className="au-field-hint">{t('auth.displayNameFormat')}</span>
                       </label>
                       <InstrumentSelector value={instrumentId} onChange={setInstrumentId} />
                     </>

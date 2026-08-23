@@ -29,15 +29,6 @@ struct PracticeQuickStartCard: View {
             .buttonStyle(BTSecondaryButtonStyle())
             .accessibilityIdentifier("practice.quickStart.builder")
 
-            NavigationLink {
-                PracticePacksView()
-            } label: {
-                Label("Offline practice packs", systemImage: "shippingbox")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(BTSecondaryButtonStyle())
-            .accessibilityIdentifier("practice.quickStart.packs")
-
             if !model.practiceFeatures.favorites.isEmpty {
                 Divider()
                 shortcutSection(title: "Favorites", shortcuts: model.practiceFeatures.favorites.prefix(3).map { $0 })
@@ -71,12 +62,7 @@ struct PracticeQuickStartCard: View {
                 }
                 .buttonStyle(.plain)
             case .practicePack:
-                NavigationLink {
-                    PracticePacksView()
-                } label: {
-                    ShortcutLabel(shortcut: shortcut)
-                }
-                .buttonStyle(.plain)
+                EmptyView()
             case .drone:
                 NavigationLink {
                     DroneIntervalView()
@@ -321,16 +307,25 @@ struct CustomExerciseBuilderView: View {
 
 struct GuidedWarmupView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dismiss) private var dismiss
     @AccessibilityFocusState private var stepFocused: Bool
+    @State private var showRestartConfirmation = false
+    @State private var showExitConfirmation = false
     private let plan = GuidedWarmupPlan.fiveMinute
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(
+            from: .now,
+            by: model.currentWarmupCheckpoint?.isRunning == true ? 0.1 : 1
+        )) { context in
             let checkpoint = model.currentWarmupCheckpoint
             let elapsed = checkpoint?.elapsed(at: context.date, plan: plan) ?? 0
             let remaining = max(0, plan.durationSeconds - elapsed)
             let step = checkpoint?.currentStep(at: context.date, plan: plan) ?? plan.steps[0]
             let stepIndex = checkpoint?.currentStepIndex(at: context.date, plan: plan) ?? 0
+            let stepElapsed = checkpoint?.elapsedInCurrentStep(at: context.date, plan: plan) ?? 0
+            let breathingCycle = checkpoint?.breathingCycle(at: context.date, plan: plan)
 
             BTScreen {
                 BTPageHeader(
@@ -355,6 +350,18 @@ struct GuidedWarmupView: View {
                     Text(verbatim: step.displayInstruction)
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
+                    WarmupStepCue(step: step)
+                    if let breathingCycle {
+                        BreathingOrb(cycle: breathingCycle, reduceMotion: reduceMotion)
+                            .accessibilityIdentifier("warmup.breathingOrb")
+                    }
+                    ProgressView(value: stepElapsed, total: step.durationSeconds)
+                        .tint(BTTheme.accent)
+                        .accessibilityLabel("Step progress")
+                        .accessibilityValue(NativeLocalization.format(
+                            "%@ percent",
+                            String(Int((checkpoint?.stepProgress(at: context.date, plan: plan) ?? 0) * 100))
+                        ))
                     ProgressView(value: elapsed, total: plan.durationSeconds)
                         .accessibilityLabel("Warm-up progress")
                         .accessibilityValue(NativeLocalization.format(
@@ -399,12 +406,28 @@ struct GuidedWarmupView: View {
                 }
 
                 if checkpoint != nil, checkpoint?.completed != true {
+                    ViewThatFits(in: .horizontal) {
+                        stepNavigationControls(stepIndex: stepIndex, now: context.date, horizontal: true)
+                        stepNavigationControls(stepIndex: stepIndex, now: context.date, horizontal: false)
+                    }
+
+                    Button {
+                        model.skipWarmupStep(now: context.date)
+                    } label: {
+                        Label("Skip this step", systemImage: "forward.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .disabled(stepIndex == plan.steps.count - 1)
+                    .accessibilityIdentifier("warmup.skip")
+
                     Button(role: .destructive) {
-                        model.resetWarmup()
+                        showRestartConfirmation = true
                     } label: {
                         Label("Restart from the beginning", systemImage: "arrow.counterclockwise")
                     }
                     .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("warmup.restart")
                 }
             }
             .onChange(of: context.date) { _, date in
@@ -413,18 +436,196 @@ struct GuidedWarmupView: View {
             .onChange(of: stepIndex) { _, _ in
                 stepFocused = true
                 if UIAccessibility.isVoiceOverRunning {
-                    UIAccessibility.post(notification: .announcement, argument: "Step \(stepIndex + 1). \(step.title). \(step.instruction)")
+                    let stepPosition = NativeLocalization.format(
+                        "Step %@ of %@",
+                        String(stepIndex + 1),
+                        String(plan.steps.count)
+                    )
+                    UIAccessibility.post(
+                        notification: .announcement,
+                        argument: "\(stepPosition). \(step.displayTitle). \(step.displayInstruction)"
+                    )
                 }
+            }
+            .onChange(of: breathingCycle?.phase) { _, phase in
+                guard let phase, UIAccessibility.isVoiceOverRunning else { return }
+                UIAccessibility.post(notification: .announcement, argument: phase.title)
             }
         }
         .navigationTitle("Warm-up")
         .accessibilityIdentifier("screen.warmup")
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(
+            model.currentWarmupCheckpoint != nil && model.currentWarmupCheckpoint?.completed != true
+        )
         .onDisappear { model.pauseWarmup() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Exit") {
+                    showExitConfirmation = true
+                }
+                .accessibilityIdentifier("warmup.exit")
+            }
+        }
+        .confirmationDialog("Restart this warm-up?", isPresented: $showRestartConfirmation, titleVisibility: .visible) {
+            Button("Restart warm-up", role: .destructive) {
+                model.resetWarmup()
+                model.startOrResumeWarmup()
+            }
+        } message: {
+            Text("Your current warm-up progress will be discarded.")
+        }
+        .confirmationDialog("Leave warm-up?", isPresented: $showExitConfirmation, titleVisibility: .visible) {
+            Button("Keep warm-up paused") {
+                model.pauseWarmup()
+                dismiss()
+            }
+            Button("Discard warm-up", role: .destructive) {
+                model.discardWarmup()
+                dismiss()
+            }
+        } message: {
+            Text("You can keep this warm-up paused and resume it later, or discard its progress.")
+        }
     }
 
     private func timeLabel(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded(.up))
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    @ViewBuilder
+    private func stepNavigationControls(stepIndex: Int, now: Date, horizontal: Bool) -> some View {
+        if horizontal {
+            HStack(spacing: BTSpacing.sm) {
+                previousStepButton(stepIndex: stepIndex, now: now)
+                nextStepButton(stepIndex: stepIndex, now: now)
+            }
+        } else {
+            VStack(spacing: BTSpacing.sm) {
+                previousStepButton(stepIndex: stepIndex, now: now)
+                nextStepButton(stepIndex: stepIndex, now: now)
+            }
+        }
+    }
+
+    private func previousStepButton(stepIndex: Int, now: Date) -> some View {
+        Button {
+            model.moveWarmupStep(by: -1, now: now)
+        } label: {
+            Label("Previous step", systemImage: "backward.end.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BTSecondaryButtonStyle())
+        .disabled(stepIndex == 0)
+        .accessibilityIdentifier("warmup.previous")
+    }
+
+    private func nextStepButton(stepIndex: Int, now: Date) -> some View {
+        Button {
+            model.moveWarmupStep(by: 1, now: now)
+        } label: {
+            Label("Next step", systemImage: "forward.end.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BTSecondaryButtonStyle())
+        .disabled(stepIndex == plan.steps.count - 1)
+        .accessibilityIdentifier("warmup.next")
+    }
+}
+
+private struct WarmupStepCue: View {
+    let step: GuidedWarmupStep
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: cueTitle).font(.subheadline.weight(.semibold))
+                Text(verbatim: cueDetail).font(.footnote).foregroundStyle(BTTheme.muted)
+            }
+        } icon: {
+            Image(systemName: iconName).foregroundStyle(BTTheme.accent)
+        }
+        .padding(.vertical, BTSpacing.xs)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var iconName: String {
+        switch step.kind {
+        case .breathe: return "wind"
+        case .buzz: return "waveform"
+        case .longTone: return "music.note"
+        case .slur: return "arrow.triangle.branch"
+        case .scale: return "music.quarternote.3"
+        }
+    }
+
+    private var cueTitle: String {
+        switch step.kind {
+        case .breathe: return "Air cue"
+        case .buzz: return "Sound cue"
+        case .longTone: return "Tone target"
+        case .slur: return "Movement cue"
+        case .scale: return "Scale target"
+        }
+    }
+
+    private var cueDetail: String {
+        switch step.kind {
+        case .breathe: return "Let the air lead; keep the shoulders quiet."
+        case .buzz: return "Choose an effortless middle-register pitch."
+        case .longTone: return "Aim for a soft start and an even center."
+        case .slur: return "Let the air connect the notes before the fingers."
+        case .scale: return "Use the written scale target at an even volume."
+        }
+    }
+}
+
+private struct BreathingOrb: View {
+    let cycle: GuidedWarmupBreathingCycle
+    let reduceMotion: Bool
+
+    var body: some View {
+        VStack(spacing: BTSpacing.sm) {
+            ZStack {
+                Circle()
+                    .fill(BTTheme.accent.opacity(reduceMotion ? 0.15 : 0.22))
+                    .frame(width: 128, height: 128)
+                    .scaleEffect(reduceMotion ? 1 : orbScale)
+                    .animation(reduceMotion ? nil : .linear(duration: 0.1), value: cycle.phaseElapsed)
+                Circle()
+                    .trim(from: 0, to: max(0.02, cycle.cycleProgress))
+                    .stroke(BTTheme.accent, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                    .frame(width: 142, height: 142)
+                    .rotationEffect(.degrees(-90))
+                VStack(spacing: 2) {
+                    Text(verbatim: cycle.phase.title).font(.headline)
+                    Text(verbatim: "\(Int(cycle.remainingInPhase.rounded(.up))) sec").font(.caption.monospacedDigit())
+                }
+            }
+            Text(verbatim: "Breath \(cycle.cycleNumber) · \(Int((cycle.cycleProgress * 100).rounded()))% of cycle")
+                .font(.footnote)
+                .foregroundStyle(BTTheme.muted)
+        }
+        .padding(.vertical, BTSpacing.sm)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Breathing guide")
+        .accessibilityValue(
+            NativeLocalization.format(
+                "%@, %@ seconds remaining, breath %@",
+                NativeLocalization.string(cycle.phase.title),
+                String(Int(cycle.remainingInPhase.rounded(.up))),
+                String(cycle.cycleNumber)
+            )
+        )
+    }
+
+    private var orbScale: CGFloat {
+        switch cycle.phase {
+        case .inhale: return 0.72 + CGFloat(cycle.phaseElapsed / cycle.phaseDuration) * 0.28
+        case .hold: return 1
+        case .exhale: return 1 - CGFloat(cycle.phaseElapsed / cycle.phaseDuration) * 0.28
+        }
     }
 }
 
@@ -554,12 +755,14 @@ private struct RenameMetronomePresetView: View {
 
 struct WeeklyGoalCard: View {
     @EnvironmentObject private var model: AppModel
+    @State private var editingGoal = false
 
     var body: some View {
         let goal = model.practiceFeatures.weeklyGoal
         let progress = model.weeklyPracticeProgress
         BTCard(tint: BTTheme.surfaceWarm) {
             BTSectionHeader(title: "This week's goal", subtitle: "A new week starts using your device's calendar and time zone.")
+                .accessibilityIdentifier("progress.weeklyGoal")
             ProgressView(value: Double(progress.minutes), total: Double(goal.targetMinutes))
                 .accessibilityLabel("Weekly practice minutes")
                 .accessibilityValue(NativeLocalization.format(
@@ -567,6 +770,7 @@ struct WeeklyGoalCard: View {
                     String(progress.minutes),
                     String(goal.targetMinutes)
                 ))
+                .accessibilityRespondsToUserInteraction(false)
             Text(verbatim: NativeLocalization.format(
                 "%@ of %@ minutes · %@ of %@ sessions",
                 String(progress.minutes),
@@ -576,29 +780,58 @@ struct WeeklyGoalCard: View {
             ))
                 .font(.headline.monospacedDigit())
                 .fixedSize(horizontal: false, vertical: true)
-            Stepper(value: Binding(
-                get: { model.practiceFeatures.weeklyGoal.targetMinutes },
-                set: { model.updateWeeklyGoal(minutes: $0, sessions: model.practiceFeatures.weeklyGoal.targetSessions) }
-            ), in: 5...600, step: 5)
-            {
-                Text(verbatim: NativeLocalization.format("Goal: %@ minutes", String(goal.targetMinutes)))
-            }
-            .accessibilityIdentifier("progress.goalMinutes")
-            Stepper(value: Binding(
-                get: { model.practiceFeatures.weeklyGoal.targetSessions },
-                set: { model.updateWeeklyGoal(minutes: model.practiceFeatures.weeklyGoal.targetMinutes, sessions: $0) }
-            ), in: 1...21)
-            {
-                Text(verbatim: NativeLocalization.format("Goal: %@ sessions", String(goal.targetSessions)))
-            }
-            .accessibilityIdentifier("progress.goalSessions")
+            Button("Edit weekly goal") { editingGoal = true }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("progress.editWeeklyGoal")
         }
-        .accessibilityIdentifier("progress.weeklyGoal")
+        .sheet(isPresented: $editingGoal) { WeeklyGoalEditor() }
+    }
+}
+
+private struct WeeklyGoalEditor: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var minutes: Int
+    @State private var sessions: Int
+
+    init() {
+        _minutes = State(initialValue: 15)
+        _sessions = State(initialValue: 3)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Stepper(value: $minutes, in: 5...600, step: 5) {
+                    Text(verbatim: NativeLocalization.format("Goal: %@ minutes", String(minutes)))
+                }
+                    .accessibilityIdentifier("progress.goalMinutes")
+                Stepper(value: $sessions, in: 1...21) {
+                    Text(verbatim: NativeLocalization.format("Goal: %@ sessions", String(sessions)))
+                }
+                    .accessibilityIdentifier("progress.goalSessions")
+            }
+            .navigationTitle("Weekly goal")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        model.updateWeeklyGoal(minutes: minutes, sessions: sessions)
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                minutes = model.practiceFeatures.weeklyGoal.targetMinutes
+                sessions = model.practiceFeatures.weeklyGoal.targetSessions
+            }
+        }
     }
 }
 
 struct WeakTransitionCard: View {
     @EnvironmentObject private var model: AppModel
+    let beginPersonalDrill: (PlayAlongExercise) -> Void
 
     var body: some View {
         BTCard {
@@ -608,7 +841,7 @@ struct WeakTransitionCard: View {
                     .font(.title3.monospaced().weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
-                    Task { await model.startPlayAlong(exerciseID: insight.exercise.id) }
+                    beginPersonalDrill(insight.exercise)
                 } label: {
                     Label("Start personal drill", systemImage: "sparkles")
                         .frame(maxWidth: .infinity)

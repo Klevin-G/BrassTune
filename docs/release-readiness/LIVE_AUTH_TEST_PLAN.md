@@ -1,4 +1,5 @@
 # Live Auth Test Plan
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status: blocked until the owner provides disposable Supabase/Apple test configuration. Do not use personal credentials or real student data.
 

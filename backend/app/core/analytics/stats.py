@@ -6,7 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from app.core.instruments.profiles import InstrumentProfile
-from app.core.music.theory import midi_range_from_labels, midi_to_note_name
+from app.core.music.theory import midi_range_from_labels, midi_to_note_name, note_label_to_midi
 
 CENTERED_CENTS_LIMIT = 5.0
 
@@ -228,9 +228,11 @@ def build_heatmap(note_stats: Iterable[Dict[str, object]]) -> List[Dict[str, obj
 def build_instrument_heatmap(note_stats: Iterable[Dict[str, object]], instrument_profile: InstrumentProfile) -> List[Dict[str, object]]:
     stats_by_label = {str(stat["note_label"]): stat for stat in note_stats}
     cells: List[Dict[str, object]] = []
+    practical_labels = set()
     for midi in midi_range_from_labels(instrument_profile.typical_range_written):
         note = midi_to_note_name(midi, instrument_profile.preferred_note_spellings)
         label = "%s%s" % (note["note"], note["octave"])
+        practical_labels.add(label)
         stat = stats_by_label.get(label)
         if stat:
             cell = {
@@ -262,6 +264,25 @@ def build_instrument_heatmap(note_stats: Iterable[Dict[str, object]], instrument
                 "recommendation_summary": "No recorded attempts yet",
             }
         cells.append(cell)
+
+    # The practical range defines which empty cells are useful to pre-populate,
+    # but it must never erase a real observation. A broad detector window can
+    # intentionally capture register extensions outside that practical range.
+    outside_practical_stats = [
+        stat
+        for label, stat in stats_by_label.items()
+        if label not in practical_labels
+    ]
+    outside_practical_stats.sort(key=lambda stat: note_label_to_midi(str(stat["note_label"])))
+    cells.extend(
+        {
+            **stat,
+            "has_data": True,
+            "severity_color": heatmap_severity(stat),
+            "recommendation_summary": _summary_for_stat(stat),
+        }
+        for stat in outside_practical_stats
+    )
     return cells
 
 

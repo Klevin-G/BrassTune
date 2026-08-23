@@ -44,6 +44,32 @@
   gap: 8px;
 }
 
+.set-profile-completion {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.set-profile-completion .primary-button {
+  justify-self: start;
+}
+
+.set-profile-completion h3 {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.set-profile-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .set-choice .segmented-control {
   width: 100%;
 }

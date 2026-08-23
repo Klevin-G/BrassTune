@@ -1,18 +1,20 @@
 # iOS Simulator Report
+Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-07-24. Source candidate included in application revision: `26683c82c42839016383fb9cab676c9a35d554ca`.
+Updated: 2026-08-23. The current source remains uncommitted; historical revision references do not bind the new candidate.
 
 ## Verified simulator evidence
 
 | Check | Result |
 |---|---|
-| Swift domain package | `3/3` passed |
-| App unit tests | `145/145` passed on iPhone simulator |
-| App UI tests | `20/20` passed on iPhone simulator |
+| Swift domain package | `12/12` passed |
+| App unit tests | `270/270` passed on iPhone 17 Pro / iOS 26.2 simulator after the physical-signing test update |
+| App UI tests | Exact-current monolithic suite `26/26`, zero failures/skips, 790.802 test seconds on iPhone 17 Pro / iOS 26.5 simulator |
 | iPad first-run and main journey | Build/launch visually inspected; main adaptive journey passed |
 | Class privacy follow-up | Targeted class journey passed on iPhone and iPad after invitation privacy copy |
-| Localization verifier | 660 static keys, 718 catalog entries, 12 locales, 0 issues |
-| Debug build | Passed on dynamically discovered iPhone and iPad simulators |
+| Localization verifier | 890 static keys, 1,027 catalog entries, 12 locales, 0 issues |
+| Debug/Release simulator build | Passed; Release binary includes `@executable_path/Frameworks` for the embedded Swift package |
+| Manual simulator walkthrough | Gateway hierarchy, five-step tutorial, always-on Tuner plus explicit Record, first-play Metronome, More buttons, Credits, Privacy, and Support were rendered and inspected with XcodeBuildMCP |
 
 ## Implemented native scope
 

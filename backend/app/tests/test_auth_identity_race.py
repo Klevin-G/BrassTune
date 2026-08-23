@@ -156,3 +156,34 @@ def test_unmatched_identity_insert_conflict_returns_sanitized_retry(monkeypatch,
     assert blocked.value.__suppress_context__ is True
     for sensitive_value in (statement, supabase_id, email):
         assert sensitive_value not in caplog.text
+
+
+class _ExistingProfileSession:
+    def __init__(self, user): self.user = user
+    class _Query:
+        def __init__(self, session, model): self.session, self.model = session, model
+        def filter(self, *_args): return self
+        def order_by(self, *_args): return self
+        def first(self): return None if self.model is AccountDeletionJob else self.session.user
+    def query(self, model): return self._Query(self, model)
+    def add(self, _value): pass
+    def commit(self): pass
+    def refresh(self, _value): pass
+
+
+def test_existing_profile_is_not_overwritten_by_stale_user_metadata(monkeypatch):
+    user = _winner("subject-profile", "old@example.com")
+    user.username = "app-owned"
+    user.display_name = "App Owned"
+    user.name = "App Owned"
+    db = _ExistingProfileSession(user)
+    monkeypatch.setattr(auth_module, "deleted_identity_is_blocked", lambda *_args: False)
+    result = auth_module._sync_supabase_user(db, {
+        "id": "subject-profile", "email": "new@example.com",
+        "user_metadata": {"username": "stale-metadata", "display_name": "Stale Metadata", "primary_instrument_id": "trombone"},
+        "app_metadata": {},
+    })
+    assert result.email == "new@example.com"
+    assert result.username == "app-owned"
+    assert result.display_name == "App Owned"
+    assert result.primary_instrument_id == "trumpet"

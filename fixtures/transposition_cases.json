@@ -5,8 +5,12 @@
     "concert_midi": 60,
     "expected_written_midi": 62,
     "expected_written_label": "D4",
-    "expected_min_frequency_hz": 130,
-    "expected_max_frequency_hz": 1500,
+    "expected_min_frequency_hz": 164.81377845643496,
+    "expected_max_frequency_hz": 932.3275230361799,
+    "expected_detector_min_frequency_hz": 130,
+    "expected_detector_max_frequency_hz": 1500,
+    "expected_practical_min_frequency_hz": 164.81377845643496,
+    "expected_practical_max_frequency_hz": 932.3275230361799,
     "expected_typical_range_written": "F#3-C6"
   },
   {
@@ -15,8 +19,12 @@
     "concert_midi": 60,
     "expected_written_midi": 67,
     "expected_written_label": "G4",
-    "expected_min_frequency_hz": 80,
-    "expected_max_frequency_hz": 1200,
+    "expected_min_frequency_hz": 116.54094037952248,
+    "expected_max_frequency_hz": 698.4564628660078,
+    "expected_detector_min_frequency_hz": 80,
+    "expected_detector_max_frequency_hz": 1200,
+    "expected_practical_min_frequency_hz": 116.54094037952248,
+    "expected_practical_max_frequency_hz": 698.4564628660078,
     "expected_typical_range_written": "F3-C6"
   },
   {
@@ -25,8 +33,12 @@
     "concert_midi": 60,
     "expected_written_midi": 60,
     "expected_written_label": "C4",
-    "expected_min_frequency_hz": 50,
-    "expected_max_frequency_hz": 700,
+    "expected_min_frequency_hz": 82.4068892282175,
+    "expected_max_frequency_hz": 466.1637615180899,
+    "expected_detector_min_frequency_hz": 50,
+    "expected_detector_max_frequency_hz": 700,
+    "expected_practical_min_frequency_hz": 82.4068892282175,
+    "expected_practical_max_frequency_hz": 466.1637615180899,
     "expected_typical_range_written": "E2-Bb4"
   },
   {
@@ -35,9 +47,27 @@
     "concert_midi": 60,
     "expected_written_midi": 60,
     "expected_written_label": "C4",
-    "expected_min_frequency_hz": 55,
-    "expected_max_frequency_hz": 800,
+    "expected_min_frequency_hz": 82.4068892282175,
+    "expected_max_frequency_hz": 466.1637615180899,
+    "expected_detector_min_frequency_hz": 55,
+    "expected_detector_max_frequency_hz": 800,
+    "expected_practical_min_frequency_hz": 82.4068892282175,
+    "expected_practical_max_frequency_hz": 466.1637615180899,
     "expected_typical_range_written": "E2-Bb4"
+  },
+  {
+    "name": "B-flat treble euphonium sounds a major ninth below written pitch",
+    "instrument_id": "euphonium-treble",
+    "concert_midi": 46,
+    "expected_written_midi": 60,
+    "expected_written_label": "C4",
+    "expected_min_frequency_hz": 73.41619197935188,
+    "expected_max_frequency_hz": 415.3046975799451,
+    "expected_detector_min_frequency_hz": 55,
+    "expected_detector_max_frequency_hz": 800,
+    "expected_practical_min_frequency_hz": 73.41619197935188,
+    "expected_practical_max_frequency_hz": 415.3046975799451,
+    "expected_typical_range_written": "E3-Bb5"
   },
   {
     "name": "Tuba reads concert pitch",
@@ -45,8 +75,12 @@
     "concert_midi": 60,
     "expected_written_midi": 60,
     "expected_written_label": "C4",
-    "expected_min_frequency_hz": 30,
-    "expected_max_frequency_hz": 500,
+    "expected_min_frequency_hz": 36.70809598967594,
+    "expected_max_frequency_hz": 349.2282314330039,
+    "expected_detector_min_frequency_hz": 30,
+    "expected_detector_max_frequency_hz": 500,
+    "expected_practical_min_frequency_hz": 36.70809598967594,
+    "expected_practical_max_frequency_hz": 349.2282314330039,
     "expected_typical_range_written": "D1-F4"
   }
 ]

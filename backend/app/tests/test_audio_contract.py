@@ -172,9 +172,66 @@ def test_instrument_transposition_and_range_fixture_matches_backend_profiles():
     for case in fixture("transposition_cases.json"):
         profile = get_instrument_profile(case["instrument_id"])
         assert transpose_concert_to_written(case["concert_midi"], profile) == case["expected_written_midi"], case["name"]
-        assert profile.min_frequency_hz == case["expected_min_frequency_hz"], case["name"]
-        assert profile.max_frequency_hz == case["expected_max_frequency_hz"], case["name"]
+        assert profile.min_frequency_hz == case["expected_detector_min_frequency_hz"], case["name"]
+        assert profile.max_frequency_hz == case["expected_detector_max_frequency_hz"], case["name"]
         assert profile.typical_range_written == case["expected_typical_range_written"], case["name"]
+
+        # The legacy keys remain aliases for practical sounding limits until
+        # every app consumer has migrated to the explicit schema.
+        assert case["expected_min_frequency_hz"] == case["expected_practical_min_frequency_hz"]
+        assert case["expected_max_frequency_hz"] == case["expected_practical_max_frequency_hz"]
+        practical_start, practical_end = profile.typical_range_written.split("-", 1)
+        assert midi_to_frequency(note_label_to_midi(practical_start) - profile.transposition_semitones) == pytest.approx(
+            case["expected_practical_min_frequency_hz"]
+        )
+        assert midi_to_frequency(note_label_to_midi(practical_end) - profile.transposition_semitones) == pytest.approx(
+            case["expected_practical_max_frequency_hz"]
+        )
+
+
+@pytest.mark.parametrize("reference_pitch_hz", [430.0, 440.0, 450.0])
+def test_detector_window_boundaries_are_inclusive_and_independent_of_practical_range(reference_pitch_hz):
+    profile = get_instrument_profile("trumpet")
+    practical_written_midis = range(note_label_to_midi("F#3"), note_label_to_midi("C6") + 1)
+
+    for frequency_hz in (profile.min_frequency_hz, profile.max_frequency_hz):
+        frame = frequency_to_pitch_frame(
+            frequency_hz,
+            confidence=0.99,
+            rms=0.1,
+            timestamp_ms=0,
+            instrument_id=profile.id,
+            reference_pitch_hz=reference_pitch_hz,
+        )
+        assert frame.is_valid_for_recording is True
+        assert frame.nearest_midi is not None
+        assert frame.written_note_name is not None
+        written_midi = frame.nearest_midi + profile.transposition_semitones
+        assert written_midi not in practical_written_midis
+
+    for frequency_hz in (
+        math.nextafter(profile.min_frequency_hz, 0.0),
+        math.nextafter(profile.max_frequency_hz, math.inf),
+    ):
+        frame = frequency_to_pitch_frame(
+            frequency_hz,
+            confidence=0.99,
+            rms=0.1,
+            timestamp_ms=0,
+            instrument_id=profile.id,
+            reference_pitch_hz=reference_pitch_hz,
+        )
+        assert frame.is_valid_for_recording is False
+        assert frame.nearest_midi is None
+        assert frame.save_eligibility_reason == "outside instrument range"
+
+
+def test_b_flat_treble_low_brass_profiles_keep_major_ninth_transposition_and_family_detector_window():
+    for instrument_id in ("baritone", "euphonium-treble"):
+        profile = get_instrument_profile(instrument_id)
+        assert profile.transposition_semitones == 14
+        assert transpose_concert_to_written(46, profile) == 60
+        assert (profile.min_frequency_hz, profile.max_frequency_hz) == (55.0, 800.0)
 
 
 def test_reference_tone_fixture_has_exact_frequency_and_zero_detune():

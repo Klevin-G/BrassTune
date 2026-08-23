@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { nextDemoPitchFrame } from './demoPitch';
 import { EXERCISES } from './playAlong';
-import { MIN_RECORDING_CONFIDENCE, midiToFrequency, noteLabelToMidi, pitchFrameFromFrequency } from './music';
+import {
+  MIN_RECORDING_CONFIDENCE,
+  demoProfileDetectorFrequencyRanges,
+  demoProfilePracticalMidiRanges,
+  midiToFrequency,
+  noteLabelToMidi,
+  pitchFrameFromFrequency,
+} from './music';
 
 function stddev(values: number[]) {
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -40,6 +47,56 @@ describe('pitchFrameFromFrequency', () => {
     expect(trumpetLow.save_eligibility_reason).toBe('outside instrument range');
     expect(tubaHigh.is_valid_for_recording).toBe(false);
     expect(tubaHigh.save_eligibility_reason).toBe('outside instrument range');
+  });
+
+  it.each([430, 440, 450])('accepts practical-boundary notes within ten cents at A4 %i', (referencePitch) => {
+    const practical = demoProfilePracticalMidiRanges.trombone;
+    for (const midi of [practical.minimumMidi - 0.1, practical.maximumMidi + 0.1]) {
+      const frame = pitchFrameFromFrequency(
+        midiToFrequency(midi, referencePitch),
+        0,
+        'trombone',
+        referencePitch,
+        0,
+        MIN_RECORDING_CONFIDENCE,
+        0.1,
+      );
+      expect(frame.is_valid_for_recording).toBe(true);
+      expect(frame.save_eligibility_reason).toBe('valid for recording');
+    }
+  });
+
+  it('keeps an outside-practical but inside-detector B-flat treble frame recordable', () => {
+    const frame = pitchFrameFromFrequency(
+      midiToFrequency(37, 440),
+      0,
+      'baritone',
+      440,
+      0,
+      MIN_RECORDING_CONFIDENCE,
+      0.1,
+    );
+
+    expect(frame.frequency_hz).not.toBeNull();
+    expect(frame.nearest_midi).toBe(37);
+    expect(frame.written_note_name).toBe('Eb');
+    expect(frame.written_octave).toBe(3);
+    expect(frame.is_valid_for_recording).toBe(true);
+    expect(frame.save_eligibility_reason).toBe('valid for recording');
+  });
+
+  it('uses inclusive exact detector boundaries before rejecting the next representable frequency', () => {
+    for (const [instrumentId, range] of Object.entries(demoProfileDetectorFrequencyRanges)) {
+      for (const frequency of [range.minFrequencyHz, range.maxFrequencyHz]) {
+        const frame = pitchFrameFromFrequency(frequency, 0, instrumentId, 440, 0, MIN_RECORDING_CONFIDENCE, 0.1);
+        expect(frame.frequency_hz, `${instrumentId} ${frequency}`).toBe(frequency);
+        expect(frame.nearest_midi, `${instrumentId} ${frequency}`).not.toBeNull();
+      }
+      const below = pitchFrameFromFrequency(range.minFrequencyHz - Number.EPSILON * range.minFrequencyHz * 2, 0, instrumentId, 440, 0, MIN_RECORDING_CONFIDENCE, 0.1);
+      const above = pitchFrameFromFrequency(range.maxFrequencyHz + Number.EPSILON * range.maxFrequencyHz * 2, 0, instrumentId, 440, 0, MIN_RECORDING_CONFIDENCE, 0.1);
+      expect(below.nearest_midi, `${instrumentId} below detector minimum`).toBeNull();
+      expect(above.nearest_midi, `${instrumentId} above detector maximum`).toBeNull();
+    }
   });
 
   it('keeps high-jitter demo notes recordable while reserving no-lock for silence', () => {

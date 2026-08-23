@@ -1,4 +1,5 @@
 # Friend Tester Fixes
+Project attribution: Kelvin Guo, Arya Salem.
 
 Status: implemented locally on `arya/release-readiness-hardening`; hosted behavior must be re-smoked after deployment.
 

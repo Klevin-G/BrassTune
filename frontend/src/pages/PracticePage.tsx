@@ -78,6 +78,8 @@ export function PracticePage() {
   const recordSavedSessionRef = useRef(recordSavedSession);
   const navigationIntentRef = useRef(false);
   const blockedNavigationRef = useRef(false);
+  const passiveMicPausedForBackgroundRef = useRef(false);
+  const practiceToolRef = useRef(practiceTool);
 
   const stream = usePitchStream({
     enabled: practiceTool === 'tuner',
@@ -87,6 +89,9 @@ export function PracticePage() {
     recording: recorder.recording,
     sessionId: recorder.activeSession?.id,
     persistDemoFramesToBackend: cloudSessionEnabled,
+    // PracticePage owns pagehide order so a shared microphone remains live
+    // until MediaRecorder and the practice session finish serializing.
+    managePageLifecycle: false,
     onFrame: recorder.captureFrame,
   });
   recorderRef.current = recorder;
@@ -94,6 +99,7 @@ export function PracticePage() {
   recordSavedSessionRef.current = recordSavedSession;
   streamRef.current = stream;
   demoModeRef.current = demoMode;
+  practiceToolRef.current = practiceTool;
   if (recorder.activeSession) {
     activeSessionIdRef.current = recorder.activeSession.id;
   } else if (recorder.state === 'idle') {
@@ -187,14 +193,16 @@ export function PracticePage() {
   };
 
   const stop = async (): Promise<PracticeSession | null> => {
-    // A Drone request can arrive while microphone permission or the backend
-    // session start is still pending. Let that single start settle, then close
-    // the take. Repeated requests share whichever stop is already in flight.
-    while (takeTransitionRef.current) {
-      const currentTransition = takeTransitionRef.current;
+    // A background/pagehide event can arrive more than once, including while
+    // microphone permission or the backend session start is pending. Wait for
+    // that one transition, then re-enter so only the first caller creates the
+    // serialized stop transition; every later caller shares it.
+    const existingTransition = takeTransitionRef.current;
+    if (existingTransition) {
       const currentKind = takeTransitionKindRef.current;
-      const result = await currentTransition;
+      const result = await existingTransition;
       if (currentKind === 'stop') return result;
+      return stop();
     }
 
     const sessionId = activeSessionIdRef.current ?? recorderRef.current.activeSession?.id ?? null;
@@ -265,6 +273,45 @@ export function PracticePage() {
     || audioRecorderRef.current.status === 'recording'
     || audioRecorderRef.current.status === 'uploading',
   );
+
+  useEffect(() => {
+    const resumeForForeground = () => {
+      if (document.hidden || !passiveMicPausedForBackgroundRef.current) return;
+      // A foreground event may arrive while the recorder/upload finalization is
+      // still running. Keep the intent until that one serialized transition
+      // has released the shared stream.
+      if (hasTakeLifecycleToFinalize()) return;
+      passiveMicPausedForBackgroundRef.current = false;
+      if (practiceToolRef.current === 'tuner' && !demoModeRef.current) {
+        micRequestedRef.current = false;
+        void streamRef.current?.startMicrophone().catch(() => undefined);
+      }
+    };
+    const finalizeForBackground = () => {
+      passiveMicPausedForBackgroundRef.current = true;
+      if (hasTakeLifecycleToFinalize()) {
+        void stopRef.current().finally(() => {
+          streamRef.current?.stopMicrophone();
+          resumeForForeground();
+        });
+        return;
+      }
+      streamRef.current?.stopMicrophone();
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        finalizeForBackground();
+        return;
+      }
+      resumeForForeground();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', finalizeForBackground);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', finalizeForBackground);
+    };
+  });
 
   const navigationBlocker = useBlocker(({ currentLocation, nextLocation }) => (
     currentLocation.pathname !== nextLocation.pathname

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import metronomeCases from '../../../fixtures/metronome_cases.json';
-import { buildScheduledTicks, clampBpm, nextRampBpm, normalizeTimeSignature, secondsPerTick, tapTempoBpm, ticksPerBar, timingStats, type Subdivision } from './metronome';
+import { buildScheduledTicks, clampBpm, isAccentedMetronomeTick, nextRampBpm, normalizeTimeSignature, secondsPerTick, tapTempoBpm, ticksPerBar, timingStats, type Subdivision } from './metronome';
 
 describe('metronome timing helpers', () => {
   it('bounds tempo and time signatures', () => {
@@ -38,6 +38,18 @@ describe('metronome timing helpers', () => {
     expect(ticks).toHaveLength(14);
     expect(ticks[1].time).toBeCloseTo(0.25);
     expect(ticks[2].time).toBeCloseTo(0.5);
+  });
+
+  it('keeps compound group accents aligned for the scheduler and visual strip', () => {
+    for (const numerator of [6, 9, 12]) {
+      const signature = { numerator, denominator: 8 };
+      const ticks = buildScheduledTicks({ startTime: 0, bpm: 120, signature, subdivision: 'quarter', bars: 1 });
+      expect(ticks.filter((tick) => tick.accented).map((tick) => tick.beatIndex)).toEqual(
+        Array.from({ length: numerator / 3 }, (_, group) => group * 3),
+      );
+      expect(isAccentedMetronomeTick(signature, 0, 0, false)).toBe(false);
+      expect(isAccentedMetronomeTick(signature, 3, 0, false)).toBe(false);
+    }
   });
 
   it('derives tap tempo from recent taps', () => {

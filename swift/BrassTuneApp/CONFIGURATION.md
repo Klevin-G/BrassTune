@@ -1,4 +1,5 @@
 # Native public runtime configuration
+Project attribution: Kelvin Guo, Arya Salem.
 
 BrassTune's native account client needs an immutable production API origin and two public Supabase values:
 

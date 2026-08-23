@@ -24,6 +24,8 @@ const guestHeatmapRanges: Record<string, readonly [string, string]> = {
   horn: ['F3', 'C6'],
   trombone: ['E2', 'Bb4'],
   euphonium: ['E2', 'Bb4'],
+  baritone: ['E3', 'Bb5'],
+  'euphonium-treble': ['E3', 'Bb5'],
   tuba: ['D1', 'F4'],
 };
 

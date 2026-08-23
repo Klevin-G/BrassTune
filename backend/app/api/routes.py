@@ -47,6 +47,7 @@ from app.services.account_mutation import account_mutation_guard
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
 from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
 from app.services.usage import record_event
+from app.services.profile_avatar import MAX_UPLOAD_BYTES as MAX_AVATAR_UPLOAD_BYTES, normalize_avatar, queue_avatar_cleanup, read_avatar, remove_avatar, replace_avatar
 
 router = APIRouter(prefix="/api")
 
@@ -361,14 +362,19 @@ def _write_session_audio_to_archive(archive: zipfile.ZipFile, session: PracticeS
     budget.write_bytes(archive, archive_path, data, audio=True)
 
 
-async def _read_limited_body(request: Request, max_bytes: Optional[int] = None) -> bytes:
+async def _read_limited_body(
+    request: Request,
+    max_bytes: Optional[int] = None,
+    *,
+    too_large_detail: str = "Audio upload is too large.",
+) -> bytes:
     limit = audio_upload_limit_bytes() if max_bytes is None else min(max_bytes, audio_upload_limit_bytes())
     chunks = []
     total = 0
     async for chunk in request.stream():
         total += len(chunk)
         if total > limit:
-            raise HTTPException(status_code=413, detail="Audio upload is too large.")
+            raise HTTPException(status_code=413, detail=too_large_detail)
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -418,8 +424,11 @@ def update_user_profile(payload: UserProfileUpdate, db: Session = Depends(get_db
     if payload.primary_instrument_id:
         _validate_instrument(payload.primary_instrument_id)
         user.primary_instrument_id = payload.primary_instrument_id
-    if payload.display_name:
-        user.display_name = payload.display_name.strip()[:80]
+    if payload.display_name is not None:
+        display_name = payload.display_name
+        if not display_name:
+            raise HTTPException(status_code=422, detail="Display name cannot be blank.")
+        user.display_name = display_name
         user.name = user.display_name
     if payload.username:
         existing = db.query(User).filter(User.username == payload.username, User.id != user.id).first()
@@ -428,11 +437,50 @@ def update_user_profile(payload: UserProfileUpdate, db: Session = Depends(get_db
         user.username = payload.username
     if payload.onboarding_completed:
         user.onboarding_completed_at = user.onboarding_completed_at or dt.datetime.utcnow()
+    if (
+        not auth.is_guest
+        and payload.username is not None
+        and payload.display_name is not None
+        and user.username
+        and user.display_name
+    ):
+        user.profile_setup_completed_at = user.profile_setup_completed_at or dt.datetime.utcnow()
     user.updated_at = dt.datetime.utcnow()
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Username is already taken.") from None
     db.refresh(user)
     return user_to_dict(user)
+
+
+@router.get("/users/me/avatar")
+def get_profile_avatar(auth: AuthContext = Depends(get_auth_context)):
+    user = auth.user
+    if not user.avatar_object_key or not user.avatar_mime_type or not user.avatar_size_bytes:
+        raise HTTPException(status_code=404, detail="Profile photo is unavailable.")
+    data = read_avatar(user.avatar_object_key, user.avatar_size_bytes)
+    return Response(content=data, media_type=user.avatar_mime_type, headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.put("/users/me/avatar")
+async def put_profile_avatar(request: Request, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    data = await _read_limited_body(
+        request,
+        max_bytes=MAX_AVATAR_UPLOAD_BYTES,
+        too_large_detail="Profile photo must be 5 MB or smaller.",
+    )
+    normalized, mime_type = normalize_avatar(data, request.headers.get("content-type", ""))
+    user = replace_avatar(db, auth.user.id, normalized, mime_type)
+    return user_to_dict(user)
+
+
+@router.delete("/users/me/avatar")
+def remove_profile_avatar(db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    remove_avatar(db, auth.user.id)
+    return Response(status_code=204, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/sessions/start")
@@ -968,10 +1016,26 @@ def _account_export_zip(db: Session, auth: AuthContext):
     account["supabase_user_id"] = user.supabase_user_id
     account["created_at"] = _iso(user.created_at)
     account["updated_at"] = _iso(user.updated_at)
+    avatar_data = None
+    avatar_metadata = None
+    if user.avatar_object_key and user.avatar_mime_type and user.avatar_size_bytes:
+        # ``read_avatar`` independently enforces the 5 MiB stored-size bound
+        # and exact response length. A declared current profile photo must not
+        # be silently omitted from an export-all response.
+        avatar_data = read_avatar(user.avatar_object_key, int(user.avatar_size_bytes))
+        avatar_metadata = {
+            "filename": "avatar.jpg",
+            "mime_type": user.avatar_mime_type,
+            "size_bytes": int(user.avatar_size_bytes),
+            "updated_at": account["avatar_updated_at"],
+        }
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        budget.write_text(archive, "README.txt", "BrassTune account export for the authenticated user. Source recordings are included only for this user's sessions when available.")
+        budget.write_text(archive, "README.txt", "BrassTune account export for the authenticated user. The current profile photo and source recordings are included only when available for this account.")
         budget.write_text(archive, "account.json", json.dumps(account, indent=2))
+        if avatar_data is not None and avatar_metadata is not None:
+            budget.write_text(archive, "profile/avatar.json", json.dumps(avatar_metadata, indent=2))
+            budget.write_bytes(archive, "profile/avatar.jpg", avatar_data)
         budget.write_text(archive, "sessions.json", json.dumps([session_to_dict(session) for session in sessions], indent=2))
         budget.write_text(archive, "memberships.json", json.dumps([group_member_to_dict(member) for member in memberships], indent=2))
         budget.write_text(archive, "owned_groups.json", json.dumps([group_to_dict(group) for group in owned_groups], indent=2))
@@ -1602,11 +1666,17 @@ def _delete_my_account_locked(
     db.add(job)
     db.commit()
 
+    avatar_cleanup_job_id = None
+    if user.avatar_object_key:
+        avatar_cleanup_job_id = queue_avatar_cleanup(db, user.id, user.avatar_object_key, "account_deleted")
+        db.commit()
     try:
         for session in sessions:
             delete_audio_for_session(session)
+        if avatar_cleanup_job_id:
+            process_audio_delete_jobs(db, [avatar_cleanup_job_id])
     except Exception as exc:
-        _mark_deletion_job(job, "local_cleanup_failed", "retryable_failure", "audio_cleanup_failed")
+        _mark_deletion_job(job, "local_cleanup_failed", "retryable_failure", "private_file_cleanup_failed")
         db.add(job)
         db.commit()
         raise HTTPException(status_code=503, detail="Account deletion is queued for retry because local media cleanup is temporarily unavailable.") from exc

@@ -1,4 +1,5 @@
 # Next Work
+Project attribution: Kelvin Guo, Arya Salem.
 
 ## Completed on 2026-07-24
 

@@ -1,4 +1,5 @@
 # Score Practice Feature
+Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-06-21 UTC.
 
