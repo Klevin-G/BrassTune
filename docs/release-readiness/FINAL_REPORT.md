@@ -1,12 +1,13 @@
 # BrassTune Release Evidence
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-23. The historical report below retains its original evidence. Current live and local facts are recorded separately and do not certify physical-device audio behavior or App Review acceptance.
+Updated: 2026-08-24. The historical report below retains its original evidence.
 
-## Current local Classes MVP addendum
+## Current release candidate — `5acfa2e`
 
-The Classes feature is now implemented in the local worktree for students,
-class owners, and assistants. It is not yet a hosted or App Store feature.
+PR 32 merged implementation/archive/deployment candidate
+`5acfa2ecc6b7403d1572d7382d41357c8ccc2fb4`. A later SHA may contain this
+docs-only follow-up; it does not change the candidate identity.
 
 - Student views support joining/consenting, membership status, and a useful
   personal contribution summary.
@@ -24,24 +25,29 @@ class owners, and assistants. It is not yet a hosted or App Store feature.
   Localization, design, diff, and `npm audit` checks completed. Final
   correctness review and security re-scan are closed. These are local checks,
   not hosted evidence.
-- The linked Supabase dry-run accepted the one new Classes migration. It has
-  **not** been applied. No hosted SHA, physical class-sync proof, build-8
-  archive/upload, build selection, or resubmission is recorded.
+- Supabase migration `20260824031433` is applied and read back: all five
+  constraints validated, UUID default present, RLS enabled, and direct anon/
+  authenticated `SELECT` is false.
+- Vercel production is Ready and Render is Ready at `5acfa2e`; hosted smoke
+  passed `45` with `5` strict skips.
+- Archive/export `1.0.1 (8)` uses canonical Supabase project `yznziwe`, bundle
+  `com.aryasalem.BrassTune`, Apple Distribution team `8S79RLTSWV`,
+  `get-task-allow=false`, `beta-reports-active=true`, and a privacy manifest.
+  IPA SHA-256: `cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`;
+  app/dSYM UUID: `8378AB6E-EA6E-32B3-A26E-F781A481518D`.
+- The archive evidence root is
+  `/Users/aryasalem/Library/Application Support/BrassTune/ReleaseEvidence/AppStoreCandidate-2026-08-24-1.0.1-8`.
+  Upload succeeded, processing is Complete/Ready to Submit, build 8 is
+  selected, and metadata/review notes are updated. Submission
+  `14b8ba6a-fe40-421f-ab61-790bbe51cb08` was submitted by Arya Salem on
+  August 24 and is **Waiting for Review** with manual release.
+- Nandy’s physical Classes fixture UI passed `1/1`; it remains fixture UI
+  evidence, not live hosted multi-account synchronization evidence.
 
-App Store Connect currently has version `1.0.1` in **Developer Rejected /
-Removed** state; build 7 remains associated. A future build 8 must be a new
-archive, upload, processing/selection, and review submission after the
-unapplied migration and live class/privacy acceptance gates close.
+Build 7 is historical and removed/superseded. App Review acceptance remains
+external.
 
-The project now declares `MARKETING_VERSION 1.0.1` and
-`CURRENT_PROJECT_VERSION 8`; this configures the next candidate but is not an
-archive, upload, or App Store Connect action. The physical Classes fixture UI
-test passed `1/1`, zero failed/skipped, on Nandy’s iPhone 15 Pro Max running
-iOS 26.6.1. It verifies student/owner/assistant fixture workspaces only—not
-live hosted multi-account sync, migration application, or release-candidate
-evidence.
-
-## 2026-08-23 verified current evidence
+## Historical 2026-08-23 evidence
 
 - Apple Developer membership: **Enrolled as Individual**.
 - The public [iTunes lookup for app 6795688588](https://itunes.apple.com/lookup?id=6795688588) returns BrassTune `1.0`, `sellerName`/`artistName` `Arya Salem`, and release date `2026-08-18`.
@@ -53,14 +59,19 @@ evidence.
 - Broad physical XCUI detector findings were audited as false positives using screenshots and token-ratio checks; that audit does not substitute for unavailable attended or assistive-technology validation.
 - Vercel and Render both serve release implementation `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; the strict hosted Playwright matrix passed `50/50` across five projects.
 - Build `1.0.1 (7)` from native source `d371100` was archived and exported. The IPA has a strict valid Apple Distribution signature (`Apple Distribution: Arya Salem`, team `8S79RLTSWV`), production environment/API configuration, bundle `com.aryasalem.BrassTune`, matching app/dSYM UUID `77D84475-6D50-3D94-B842-290431F0D74D`, and SHA-256 `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`.
-- Build 7 upload succeeded, TestFlight reports **Ready to Submit**, and App Store Connect version `1.0.1` has build 7 attached. Stale review notes were replaced; the version was submitted and now reports **Waiting for Review** with manual release selected.
+- Historical build 7 upload succeeded, TestFlight reported **Ready to Submit**,
+  and the earlier version was submitted. Build 7 is now removed/superseded by
+  submitted build 8.
 - The App Privacy declaration is published for Email Address, User ID, Other User Content, Name, and Photos or Videos: each is linked to the user, used for App Functionality, and not used for tracking. Guest sign-in-required is unchecked.
 
 The individual developer-name result remains open: an individual cannot select `BrassTune`, and the existing name cannot be edited in the ordinary UI. Apple Developer Support or an eligible organization transfer is required; eligibility and legal DBA/trade-name treatment remain a human/Apple decision.
 
 ## Decision
 
-The hosted exact-release gate is closed for implementation SHA `98fd1d9`. The submitted native candidate is build `1.0.1 (7)` from `d371100`, whose signed/archive/TestFlight/App Store state is independently recorded above. It is Waiting for Review with manual release; App Review acceptance is external. Physical automation is strong for the listed runs, but unavailable attended and route-specific gates remain open.
+The current candidate is `5acfa2e` / `1.0.1 (8)`, submitted and Waiting for
+Review with manual release. App Review acceptance is external; calibration,
+accessory-route, and complete assistive-technology coverage remain separate
+boundaries.
 
 ## Verified evidence
 
@@ -79,32 +90,45 @@ The hosted exact-release gate is closed for implementation SHA `98fd1d9`. The su
 
 ## Production deployment evidence
 
-- Render deployment `dep-d9i309jh2c0s7382bc8g` is live and reports `cfaa3c59d34676d180907c78d7cdd1b9de3299f7`.
-- Vercel deployment `dpl_5TjKnoJ3cV5nwSjpiTCTmTEAPg8v` is READY in production at [brasstune.vercel.app](https://brasstune.vercel.app) and reports the same SHA.
-- The frontend SHA injection was explicit for the prebuilt deployment, so the production bundle reports the intended revision rather than an inferred build identity.
-- Hosted infrastructure smoke passed `8/8` checks.
-- The strict hosted browser matrix passed `50/50` checks across five projects.
-- Render returned no error-level or 5xx logs after the final deploy, and Vercel returned no error logs for the final production deployment in the checked window.
+- Render deployment `dep-da5su18u01pc738d2bgg` is live and `/api/version`
+  reports `5acfa2ecc6b7403d1572d7382d41357c8ccc2fb4`; `/api/ready` is fully green.
+- Vercel production deployment `dpl_3sjexExPziFZdivrwKHdak9mptud` is Ready at
+  [brasstune.vercel.app](https://brasstune.vercel.app) for the same SHA.
+- Hosted smoke passed `45/45` with `5` intentional strict-content skips across
+  Chromium, Firefox, WebKit, mobile Chromium, and mobile WebKit. It verified
+  immutable frontend identity, backend health/CORS, secure WebSocket behavior,
+  auth surfaces, deep links, and hosted URL hygiene.
+- Vercel returned no error logs for the final production deployment in the checked window.
 
 ## Security and dependency boundary
 
-`npm audit` continues to report two high-severity dependency entries: direct `react-router-dom` and its indirect `react-router` dependency. The identified React Router advisory `GHSA-qwww-vcr4-c8h2` is non-applicable to the current client-only Vite SPA because it does not use unstable React Server Components APIs. The audit findings remain tracked for dependency maintenance; this statement does not suppress the audit result.
+`npm audit --omit=dev` reports zero vulnerabilities. Independent correctness,
+security, secret, and artifact reviews closed with no remaining release blocker.
 
 ## Current product/release configuration
 
-- Vercel and Render serve implementation `98fd1d9`; strict hosted Playwright passed `50/50` across five projects.
+- Vercel and Render serve implementation `5acfa2e`; hosted Playwright passed
+  `45/45` with `5` intentional strict-content skips across five projects.
 - Apple/Google provider configuration is deployed. Configuration is not proof of every live provider lifecycle, which remains separately bounded.
-- Native local recordings remain distinct from signed-in web recordings. App Privacy is published for submitted build 7 and must be reconciled with future signed builds and live cloud behavior.
+- Native local recordings remain distinct from signed-in web recordings. App
+  Privacy is published for submitted build 8 and includes linked Other User
+  Content for signed-in practice/class functionality.
 
 ## Point-in-time Supabase configuration evidence
 
-The linked active/healthy Supabase project `yznziwewxrlwnwiynlvl` was checked with the Supabase CLI. Local and remote migration histories matched through `20260724072904`. The `session-audio` bucket was private, had a 52,428,800-byte limit, allowed `webm`, `mp4`, `mpeg`, `wav`, and `ogg`, and had zero browser-facing storage policies. Every public table had RLS enabled, and `anon` and `authenticated` had no DML grants.
+The linked active/healthy Supabase project `yznziwewxrlwnwiynlvl` was checked
+with the Supabase CLI. Local and remote migration histories match through
+`20260824031433`. The Classes migration was applied and read back: five required
+unique/check constraints are validated, `roster_row_id` has a UUID server
+default, the three affected tables have RLS enabled, and `anon` and
+`authenticated` have no direct SELECT grants.
 
 Security advisors returned two warnings: the `pg_net` extension is installed in `public`, and leaked-password protection is disabled. Supabase documentation notes that leaked-password protection requires a Pro plan. This is point-in-time live configuration evidence, not a blanket security certification or proof of application behavior.
 
 ## Remaining external gates
 
-- App Review outcome for submitted version `1.0.1` build 7; manual release remains selected.
+- App Review outcome for submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08`,
+  version `1.0.1` build 8; manual release remains selected.
 - Attended calibrated brass/acoustic accuracy; AirPlay/HomePod, Bluetooth, and wired audio routes; Files/Photos preseeded fixtures; timer/media-reset operator prerequisites; and full assistive-technology/iPad coverage.
 - Human language review and developer-name action through Apple Support/entity/transfer path.
 

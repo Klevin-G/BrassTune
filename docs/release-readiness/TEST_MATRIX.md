@@ -4,13 +4,14 @@ Project attribution: Kelvin Guo, Arya Salem.
 > Local-only evidence registry. It contains no credentials or raw identity data,
 > but user-home paths must be normalized before external publication.
 
-Updated: 2026-08-23. Historical rows below retain their original evidence and boundaries. The current snapshot records the deployed implementation, submitted native candidate, and their separate source identities.
+Updated: 2026-08-24. Historical rows below retain their original evidence and boundaries.
 
 ## Current local Classes MVP addendum
 
 | Gate | Evidence | Status / boundary |
 |---|---|---|
-| Backend Classes MVP | `356 passed, 13 skipped` | Passed locally; the new migration is not applied. |
+| Candidate identity | PR 32 merged; implementation/archive/deployment SHA `5acfa2ecc6b7403d1572d7382d41357c8ccc2fb4` | A later docs-only SHA does not change this candidate. |
+| Backend Classes MVP | `356 passed, 13 skipped` | Passed locally. |
 | Web Classes MVP | `288/288` units and production build | Passed locally. |
 | Class browser journeys | `55/55` Playwright | Passed locally; not hosted class/auth acceptance. |
 | Swift Core | `12/12` | Passed locally. |
@@ -18,8 +19,10 @@ Updated: 2026-08-23. Historical rows below retain their original evidence and bo
 | Native implementation-snapshot full UI suite | `26/26` | Passed on the implementation snapshot; simulator scope only. |
 | Final dedicated Classes UI | Student/owner/assistant `1/1` | Passed after the final fixes; simulator/local evidence only. |
 | Source quality gates | Localization, design, diff, and `npm audit` checks completed; final correctness review and security re-scan closed | Source/local evidence only. Retain any audit advisories stated in the historical matrix. |
-| Supabase migration | One Classes migration accepted by linked-project dry-run | Dry-run only; no migration application, live lifecycle acceptance, or hosted deployment recorded. |
-| Build 8 project settings | `MARKETING_VERSION 1.0.1`; `CURRENT_PROJECT_VERSION 8` | Configured locally. No build-8 archive/export/upload/processing/selection/resubmission. |
+| Supabase migration | `20260824031433` applied/read back; five constraints, UUID default, RLS, and anon/auth direct `SELECT=false` validated | Applied configuration evidence; does not replace live lifecycle acceptance. |
+| Hosted release | Vercel production Ready and Render Ready at `5acfa2e`; hosted smoke `45` passed / `5` strict skips | Exact hosted candidate evidence. |
+| Build 8 archive/export | `1.0.1 (8)`, canonical Supabase `yznziwe`, bundle `com.aryasalem.BrassTune`, Apple Distribution team `8S79RLTSWV`, `get-task-allow=false`, `beta-reports-active=true`, privacy manifest | IPA SHA-256 `cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`; app/dSYM UUID `8378AB6E-EA6E-32B3-A26E-F781A481518D`. |
+| TestFlight / App Store Connect | Upload succeeded; processing Complete/Ready to Submit; build 8 selected; metadata/notes updated; submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08` submitted Aug 24 by Arya Salem | **Waiting for Review**, manual release; not App Review approval. Build 7 is historical removed/superseded. |
 | Physical Classes fixture UI | Nandy iPhone 15 Pro Max, iOS 26.6.1, device `00008130-001A2C8C0EF8001C`: `1/1` passed, zero failed/skipped, student/owner/assistant fixture workspaces | Passed for fixture UI scope. Evidence: `/Users/aryasalem/Library/Developer/Xcode/DerivedData/BrassTuneApp-czrdyjevxbkcxbalmvargubtalrl/Logs/Test/Test-BrassTuneAppUISmoke-2026.08.23_23-49-17--0500.xcresult`. Not live hosted multi-account sync, migration, archive, or release evidence. |
 
 The tested class contract is intentionally aggregate-only: authorized owners
@@ -29,7 +32,7 @@ expose raw audio, reflection text, score content, note events, or individual
 session detail. Consent/re-consent is a required product boundary for legacy
 members before class data can participate in the new sharing flow.
 
-## 2026-08-23 current snapshot
+## Historical 2026-08-23 snapshot
 
 | Gate | Evidence | Status / boundary |
 |---|---|---|
@@ -49,7 +52,7 @@ members before class data can participate in the new sharing flow.
 | Supabase checks | `20260823164123_add_private_profile_avatars.sql` applied to the linked project; migration history, profile/avatar columns, and private `profile-avatars` bucket constraints verified; linked lint reported zero errors | Live schema/configuration evidence; signed-in lifecycle acceptance remains pending. |
 | Vercel + Render production | Both deployed at release implementation `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; strict hosted Playwright `50/50` | Exact hosted gate closed. |
 | Build 7 archive/export | `1.0.1 (7)` from `d371100`; Apple Distribution `Arya Salem`, team `8S79RLTSWV`, bundle `com.aryasalem.BrassTune`, production environment/API; strict IPA signature valid | App/dSYM UUID `77D84475-6D50-3D94-B842-290431F0D74D`; IPA SHA-256 `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`. |
-| TestFlight / App Store Connect | Upload succeeded; build 7 Ready to Submit; version `1.0.1` attached to build 7; stale review notes replaced; submitted | **Waiting for Review**, manual release selected; not App Review approval. |
+| Historical TestFlight / App Store Connect | Build 7 upload/processing/submission evidence | Superseded by build 8; do not read as current App Store state. |
 | App Privacy declaration | Email Address, User ID, Other User Content, Name, Photos or Videos; linked, App Functionality, not tracking | Published App Store Connect declaration; continue to reconcile with shipped behavior. |
 | App Store public listing | [iTunes lookup 6795688588](https://itunes.apple.com/lookup?id=6795688588) reports BrassTune `1.0`, seller/artist `Arya Salem`, release date `2026-08-18` | Public catalog evidence only. |
 | Apple membership / developer name | Membership is **Enrolled as Individual**; public developer name remains `Arya Salem` | `BrassTune` developer-name change needs an Apple account/entity path (Support and/or eligible transfer); no rename is claimed. |

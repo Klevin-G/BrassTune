@@ -12,8 +12,8 @@ with authorized class owners and assistants after consent. They do not share
 raw audio, recordings, reflection text, imported-score content, note events,
 or private session detail. Existing/legacy members must re-consent before their
 practice data participates in this revised sharing path. This is a local
-implementation statement only: the supporting migration is unapplied and the
-live privacy/lifecycle flow remains unverified.
+implementation statement with migration `20260824031433` applied/read back.
+The live privacy/lifecycle flow remains separately unverified.
 
 Project attribution: Kelvin Guo, Arya Salem. This attribution does not identify
 the legal controller; that remains subject to owner/legal review.

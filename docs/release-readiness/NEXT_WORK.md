@@ -36,20 +36,21 @@ Project attribution: Kelvin Guo, Arya Salem.
   - Acceptance criteria: beta feedback identifies whether analytics, heat map, progress, and coach recommendations are understandable and useful.
   - Verification command or evidence: beta issue tracker, release journey updates, or product decision notes.
 
-## Completed / superseded App Store setup
+## Completed current App Store setup
 
-- [x] Historical Apple signing/archive/TestFlight/App Store Connect work for
-  `1.0.1 (7)`: archive/export/upload and the earlier review submission
-  completed. It is superseded for the current replacement-candidate workflow:
-  `1.0.1` is Developer Rejected / Removed and build 7 remains associated.
+- [x] PR 32 / candidate `5acfa2e`: migration applied/read back, Vercel/Render
+  exact-SHA Ready, `1.0.1 (8)` archive/export/upload/processing/build selection
+  complete, metadata/review notes updated, and submission
+  `14b8ba6a-fe40-421f-ab61-790bbe51cb08` is Waiting for Review with manual release.
 
-## Immediate Classes / build-8 sequence
+## Completed Classes / build-8 sequence
 
-- [P0] Apply and verify the pending Classes consent/sync migration
+- [x] Apply and verify the Classes consent/sync migration
   - Owner type: provider
   - Acceptance criteria: linked migration is applied in the authorized project;
     migration history and RLS/role behavior are verified without real student data.
-  - Current boundary: dry-run only; no migration application is recorded.
+  - Evidence: `20260824031433` applied/read back; five constraints, UUID
+    default, RLS, and anon/auth direct `SELECT=false` validated.
 
 - [P0] Run live Classes privacy and role acceptance
   - Owner type: provider/product
@@ -58,17 +59,11 @@ Project attribution: Kelvin Guo, Arya Salem.
     timing/pitch participation is shared; no audio, reflections, score content,
     note events, or session detail leaks.
 
-- [P0] Produce and resubmit replacement build `1.0.1 (8)`
+- [x] Produce and resubmit replacement build `1.0.1 (8)`
   - Owner type: release
-  - Acceptance criteria: disposable hosted multi-account Classes journey,
-    exact source revision recorded, archive/export/signature checks, TestFlight processing,
-    build selection, refreshed review/privacy material, and resubmission.
-  - Current boundary: App Store Connect is Developer Rejected / Removed; build
-    7 remains associated. The project is configured as `1.0.1 (8)`, but no
-    build-8 archive/upload/selection/resubmission is recorded. The
-    implementation-snapshot full UI suite `26/26`, dedicated Classes UI `1/1`,
-    and physical Nandy iPhone fixture Classes UI `1/1` passed. The physical
-    fixture result does not cover live hosted multi-account synchronization.
+  - Evidence: archive/export/upload/processing/build selection complete;
+    submitted and Waiting for Review with manual release. The fixture result
+    does not cover live hosted multi-account synchronization.
 
 ## Must Finish Before Public/App Store Release
 
