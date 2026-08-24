@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "Informe um nome de usuário e nome de exibição válidos.",
   "auth.profileCompletionExpired": "Sua sessão expirou. Entre novamente.",
   "auth.profileCompletionAccountChanged": "A conta ativa mudou antes da conclusão do perfil."
+  ,"class.active": "Ativo",
+  "class.allActivity": "Toda a atividade",
+  "class.allInstruments": "Todos os instrumentos",
+  "class.allStatuses": "Todos os status",
+  "class.loadFailedBody": "Não foi possível carregar suas turmas. Verifique a conexão e tente novamente.",
+  "class.minutesDelta": "{count} min em relação à semana anterior",
+  "class.noRosterMatches": "Nenhum aluno corresponde a estes filtros.",
+  "class.practiceNow": "Praticar agora",
+  "class.readOnlyRoster": "Visualização somente leitura dos alunos ativos e das tendências da turma. Dados de conta e controles de gestão ficam ocultos.",
+  "class.searchRoster": "Buscar alunos",
+  "class.sharedDataTitle": "O que sua turma pode ver",
+  "class.sharedDataBody": "Prática agregada na nuvem desde {date}: tempo, número de sessões e resumos de afinação. Áudio, reflexões e detalhes das sessões permanecem privados.",
+  "class.sortBy": "Ordenar",
+  "class.sortLastPractice": "Prática recente",
+  "class.sortName": "Nome",
+  "class.sortWeeklyMinutes": "Minutos semanais",
+  "class.status": "Situação",
+  "class.weeklyTrend": "Em relação à semana anterior",
+  "class.enableSharingTitle": "Ativar compartilhamento do progresso da turma",
+  "class.enableSharingBody": "Esta associação é anterior à opção de privacidade atual. Ative o escopo agregado limitado antes de mostrar seu progresso ou as análises do assistente.",
+  "class.enableSharing": "Ativar compartilhamento",
+  "class.enablingSharing": "Ativando…",
+  "class.sharingEnabled": "O compartilhamento do progresso da turma está ativado.",
+  "class.sharingEnableError": "Não foi possível ativar o compartilhamento do progresso da turma.",
+  "class.inviteRole": "Função na turma",
+  "class.inviteRoleAssistant": "Assistente",
+  "class.assistantRoleHelp": "Assistentes veem a lista ativa sem dados de conta e as tendências, mas não podem convidar, remover, compartilhar ou trocar códigos nem gerenciar a turma."
 } satisfies MessageCatalog;
 
 export default messages;

@@ -1,6 +1,18 @@
 # Security and Privacy Data Map
 Project attribution: Kelvin Guo, Arya Salem.
 
+## Current local Classes MVP privacy addendum
+
+The local Classes MVP permits role-scoped sharing of aggregate practice
+participation and timing/pitch progress after the applicable consent flow. It
+does not share raw audio, recordings, reflection text, imported-score content,
+note events, or private per-session detail with a class owner or assistant.
+Legacy members must re-consent before their data participates in this updated
+class-sharing flow. These are source/local boundaries: the new Classes
+migration has only passed a linked-project dry-run and is not applied, so live
+consent enforcement and cross-account denial still need disposable acceptance
+testing.
+
 Updated: 2026-08-23. This document distinguishes deployed implementation `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0` from native archive source `d371100`; it does not turn remaining unattended lifecycle checks into passes.
 
 ## Current boundary

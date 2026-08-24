@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "유효한 사용자 이름과 표시 이름을 입력하세요.",
   "auth.profileCompletionExpired": "로그인 세션이 만료되었습니다. 다시 로그인하세요.",
   "auth.profileCompletionAccountChanged": "프로필 설정이 완료되기 전에 활성 계정이 변경되었습니다."
+  ,"class.active": "활동 중",
+  "class.allActivity": "모든 활동",
+  "class.allInstruments": "모든 악기",
+  "class.allStatuses": "모든 상태",
+  "class.loadFailedBody": "수업을 불러오지 못했습니다. 연결을 확인하고 다시 시도하세요.",
+  "class.minutesDelta": "지난주 대비 {count}분",
+  "class.noRosterMatches": "이 필터와 일치하는 학생이 없습니다.",
+  "class.practiceNow": "지금 연습하기",
+  "class.readOnlyRoster": "활동 중인 학생과 수업 추세를 읽기 전용으로 봅니다. 계정 정보와 관리 기능은 숨겨집니다.",
+  "class.searchRoster": "학생 검색",
+  "class.sharedDataTitle": "수업에서 볼 수 있는 내용",
+  "class.sharedDataBody": "{date} 이후의 클라우드 연습 집계: 시간, 세션 수, 음정 요약. 오디오, 돌아보기 및 개별 세션 정보는 비공개로 유지됩니다.",
+  "class.sortBy": "정렬",
+  "class.sortLastPractice": "최근 연습",
+  "class.sortName": "이름",
+  "class.sortWeeklyMinutes": "주간 연습 시간",
+  "class.status": "상태",
+  "class.weeklyTrend": "지난주 대비",
+  "class.enableSharingTitle": "수업 진행 상황 공유 켜기",
+  "class.enableSharingBody": "이 멤버십은 현재 개인정보 선택 이전에 생성되었습니다. 진행 상황이나 보조 교사 분석을 표시하기 전에 제한된 집계 범위를 켜세요.",
+  "class.enableSharing": "공유 켜기",
+  "class.enablingSharing": "켜는 중…",
+  "class.sharingEnabled": "수업 진행 상황 공유를 켰습니다.",
+  "class.sharingEnableError": "수업 진행 상황 공유를 켜지 못했습니다.",
+  "class.inviteRole": "수업 역할",
+  "class.inviteRoleAssistant": "보조 교사",
+  "class.assistantRoleHelp": "보조 교사는 활동 중인 익명 명단과 수업 추세를 볼 수 있지만 초대, 삭제, 코드 공유·교체 또는 수업 관리는 할 수 없습니다."
 } satisfies MessageCatalog;
 
 export default messages;

@@ -38,7 +38,37 @@ Project attribution: Kelvin Guo, Arya Salem.
 
 ## Completed / superseded App Store setup
 
-- [x] Apple signing, archive, TestFlight, and App Store Connect setup for `1.0.1 (7)`: archive/export/upload succeeded, TestFlight is Ready to Submit, and version `1.0.1` is Waiting for Review with manual release. This is submission evidence, not approval.
+- [x] Historical Apple signing/archive/TestFlight/App Store Connect work for
+  `1.0.1 (7)`: archive/export/upload and the earlier review submission
+  completed. It is superseded for the current replacement-candidate workflow:
+  `1.0.1` is Developer Rejected / Removed and build 7 remains associated.
+
+## Immediate Classes / build-8 sequence
+
+- [P0] Apply and verify the pending Classes consent/sync migration
+  - Owner type: provider
+  - Acceptance criteria: linked migration is applied in the authorized project;
+    migration history and RLS/role behavior are verified without real student data.
+  - Current boundary: dry-run only; no migration application is recorded.
+
+- [P0] Run live Classes privacy and role acceptance
+  - Owner type: provider/product
+  - Acceptance criteria: disposable owner, assistant, student, legacy
+    re-consent, removed-member, and non-member flows pass. Only aggregate
+    timing/pitch participation is shared; no audio, reflections, score content,
+    note events, or session detail leaks.
+
+- [P0] Produce and resubmit replacement build `1.0.1 (8)`
+  - Owner type: release
+  - Acceptance criteria: disposable hosted multi-account Classes journey,
+    exact source revision recorded, archive/export/signature checks, TestFlight processing,
+    build selection, refreshed review/privacy material, and resubmission.
+  - Current boundary: App Store Connect is Developer Rejected / Removed; build
+    7 remains associated. The project is configured as `1.0.1 (8)`, but no
+    build-8 archive/upload/selection/resubmission is recorded. The
+    implementation-snapshot full UI suite `26/26`, dedicated Classes UI `1/1`,
+    and physical Nandy iPhone fixture Classes UI `1/1` passed. The physical
+    fixture result does not cover live hosted multi-account synchronization.
 
 ## Must Finish Before Public/App Store Release
 

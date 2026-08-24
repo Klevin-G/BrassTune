@@ -71,6 +71,7 @@ struct AppRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedTab: AppTab = .practice
     @State private var practicePath = NavigationPath()
+    @State private var morePath = NavigationPath()
     @State private var practiceNavigationGeneration = UUID()
     @State private var onboardingPresented: Bool
     @State private var guestAccountPromptMode: GatewayAuthMode?
@@ -156,8 +157,14 @@ struct AppRootView: View {
                     }
                     .tag(AppTab.progress)
 
-                    practiceNavigation {
+                    practiceNavigation(path: $morePath) {
                         MoreView(onboardingPresented: $onboardingPresented)
+                            .navigationDestination(for: MoreRoute.self) { route in
+                                switch route {
+                                case .classes:
+                                    ClassesView(selectedTab: $selectedTab)
+                                }
+                            }
                     }
                     .tabItem {
                         Label(AppTab.more.title, systemImage: AppTab.more.systemImage)
@@ -254,6 +261,7 @@ struct AppRootView: View {
                 model.flushPendingPersistence()
             }
             if currentPhase == .active { resumeTunerIfReady() }
+            if currentPhase == .active { model.retryPendingClassSessionSync() }
             // A background transition also happens during normal app switching.
             // iOS has no reliable termination callback, so guest access is
             // reset on cold launch in restoreSession rather than here.
@@ -341,6 +349,8 @@ struct AppRootView: View {
         switch destination {
         case .classes:
             selectedTab = .more
+            morePath = NavigationPath()
+            morePath.append(MoreRoute.classes)
         }
     }
 

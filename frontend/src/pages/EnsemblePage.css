@@ -19,6 +19,17 @@
   outline: none;
   border-color: var(--gold);
 }
+.ec-input:focus-visible,
+.ec-select select:focus-visible,
+.ec-search input:focus-visible,
+.ec-roster-tools select:focus-visible,
+.ec-advanced-toggle:focus-visible,
+.ec-remove:focus-visible,
+.ec-class-tabs .chip-tab:focus-visible,
+.ec-join-actions button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--gold) 68%, transparent);
+  outline-offset: 2px;
+}
 .ec-select,
 .ec-field {
   display: flex;
@@ -95,6 +106,8 @@
   font-weight: 800;
   font-size: 1.02rem;
   color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .ec-badge {
   font-size: 0.68rem;
@@ -142,6 +155,8 @@
   font-weight: 700;
   color: var(--text);
   font-size: 0.94rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .ec-meta em {
   font-style: normal;
@@ -300,6 +315,7 @@
   gap: 8px;
   flex-wrap: wrap;
   flex: 1 1 auto;
+  min-width: 0;
 }
 .ec-newclass-btn {
   margin-inline-start: auto;
@@ -424,6 +440,122 @@
   font-size: 0.82rem;
   color: var(--muted);
 }
+
+.ec-role-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.ec-consent-gate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--gold) 62%, var(--line));
+  border-inline-start: 4px solid var(--gold);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--gold) 8%, var(--surface-sunken));
+}
+.ec-consent-gate > div { flex: 1 1 320px; min-width: 0; }
+.ec-consent-gate strong { color: var(--text); }
+.ec-consent-gate p { margin: 5px 0 0; overflow-wrap: anywhere; }
+.ec-consent-gate .primary-button { flex: 0 0 auto; }
+.ec-role-help { color: var(--muted); font-size: 0.74rem; line-height: 1.35; max-width: 24rem; }
+
+.ec-inline-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--amber) 60%, var(--line));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--amber) 8%, var(--surface-sunken));
+}
+.ec-inline-error p { margin: 0; flex: 1 1 240px; }
+
+.ec-roster-tools {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.5fr) repeat(4, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.ec-roster-tools label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.ec-roster-tools select,
+.ec-search input {
+  width: 100%;
+  min-height: 42px;
+  min-width: 0;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+.ec-search {
+  position: relative;
+  justify-content: flex-end;
+}
+.ec-search > svg {
+  position: absolute;
+  inset-inline-start: 11px;
+  bottom: 13px;
+  pointer-events: none;
+}
+.ec-search input { padding-inline-start: 34px; }
+
+.ec-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.ec-progress-grid article,
+.ec-class-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 14px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.ec-progress-grid span,
+.ec-class-trend span { color: var(--muted); font-size: 0.75rem; font-weight: 700; }
+.ec-progress-grid strong,
+.ec-class-trend strong { color: var(--text); font-size: 1.15rem; overflow-wrap: anywhere; }
+.ec-progress-grid small,
+.ec-class-trend small { color: var(--muted); font-size: 0.76rem; overflow-wrap: anywhere; }
+.ec-class-trend { margin-bottom: 12px; max-width: 240px; }
+.ec-privacy-scope {
+  margin-bottom: 14px;
+  padding: 14px;
+  border-inline-start: 3px solid var(--gold);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+.ec-privacy-scope p { margin: 4px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.ec-practice-now { display: inline-flex; text-decoration: none; }
+.ec-inactivity-inactive_7d,
+.ec-inactivity-no_practice_since_joining { color: var(--amber); }
 
 /* ---- section trends + focus ------------------------------------------- */
 .ec-sections {
@@ -567,6 +699,18 @@
   .ec-join-code {
     font-size: 1.6rem;
   }
+  .ec-progress-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ec-roster-tools {
+    grid-template-columns: 1fr;
+  }
+  .ec-consent-gate .primary-button { width: 100%; }
+}
+
+@media (min-width: 561px) and (max-width: 980px) {
+  .ec-roster-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ec-progress-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* ---- print: isolate the class report, drop app chrome ------------------ */

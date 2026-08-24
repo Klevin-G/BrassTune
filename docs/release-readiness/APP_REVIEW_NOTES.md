@@ -1,7 +1,30 @@
 # App Review Notes Draft
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-23. This copy replaced stale review notes for submitted version `1.0.1` build 7; it is not a claim of App Review approval.
+Updated for the local Classes MVP. Version `1.0.1` is currently **Developer
+Rejected / Removed** in App Store Connect, with build 7 still associated. This
+is a draft for a future build 8; no archive, upload, build selection, or review
+submission is claimed.
+
+## Draft build-8 Classes review path
+
+> Classes are optional and can be reviewed after creating or signing into an
+> account. A student may join and consent to the class-sharing flow. Owners can
+> use roster, invite, and aggregate participation views; assistants only see
+> the delegated role-scoped information. Classes do not provide assignments or
+> grades, and do not expose recordings, raw audio, reflection text, score
+> content, note events, or individual session detail. Aggregate timing/pitch
+> progress is shared only after consent; legacy members are prompted to
+> re-consent.
+
+Before this text can be used, apply and verify the migration in the authorized
+environment, complete disposable live consent/class acceptance, archive and
+upload build 8, wait for processing, select it for `1.0.1`, and submit again.
+The project is configured for that candidate as `1.0.1 (8)`, but no archive,
+upload, selection, or submission exists. A physical Classes fixture UI run
+passed student/owner/assistant workspaces `1/1`, zero failed/skipped, on
+Nandy’s iPhone 15 Pro Max / iOS 26.6.1. It does not establish live hosted
+multi-account sync or release-candidate behavior.
 
 ## Reviewer access
 

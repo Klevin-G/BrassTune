@@ -6,6 +6,29 @@ Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-23. Historical rows below retain their original evidence and boundaries. The current snapshot records the deployed implementation, submitted native candidate, and their separate source identities.
 
+## Current local Classes MVP addendum
+
+| Gate | Evidence | Status / boundary |
+|---|---|---|
+| Backend Classes MVP | `356 passed, 13 skipped` | Passed locally; the new migration is not applied. |
+| Web Classes MVP | `288/288` units and production build | Passed locally. |
+| Class browser journeys | `55/55` Playwright | Passed locally; not hosted class/auth acceptance. |
+| Swift Core | `12/12` | Passed locally. |
+| Native Classes MVP | `278/278` | Passed locally; simulator scope only. |
+| Native implementation-snapshot full UI suite | `26/26` | Passed on the implementation snapshot; simulator scope only. |
+| Final dedicated Classes UI | Student/owner/assistant `1/1` | Passed after the final fixes; simulator/local evidence only. |
+| Source quality gates | Localization, design, diff, and `npm audit` checks completed; final correctness review and security re-scan closed | Source/local evidence only. Retain any audit advisories stated in the historical matrix. |
+| Supabase migration | One Classes migration accepted by linked-project dry-run | Dry-run only; no migration application, live lifecycle acceptance, or hosted deployment recorded. |
+| Build 8 project settings | `MARKETING_VERSION 1.0.1`; `CURRENT_PROJECT_VERSION 8` | Configured locally. No build-8 archive/export/upload/processing/selection/resubmission. |
+| Physical Classes fixture UI | Nandy iPhone 15 Pro Max, iOS 26.6.1, device `00008130-001A2C8C0EF8001C`: `1/1` passed, zero failed/skipped, student/owner/assistant fixture workspaces | Passed for fixture UI scope. Evidence: `/Users/aryasalem/Library/Developer/Xcode/DerivedData/BrassTuneApp-czrdyjevxbkcxbalmvargubtalrl/Logs/Test/Test-BrassTuneAppUISmoke-2026.08.23_23-49-17--0500.xcresult`. Not live hosted multi-account sync, migration, archive, or release evidence. |
+
+The tested class contract is intentionally aggregate-only: authorized owners
+and assistants receive roster/role and aggregate participation signals;
+students receive their own membership/progress context. Class views do not
+expose raw audio, reflection text, score content, note events, or individual
+session detail. Consent/re-consent is a required product boundary for legacy
+members before class data can participate in the new sharing flow.
+
 ## 2026-08-23 current snapshot
 
 | Gate | Evidence | Status / boundary |

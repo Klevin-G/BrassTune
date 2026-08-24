@@ -8,7 +8,7 @@ Updated: 2026-07-24. This is an implementation inventory, not a hosted-release c
 | Tuner and focused practice | Tuner-first workspace, local-first practice paths, progress, favorites, recents, and offline packs | Local web/native tests and simulator evidence. |
 | Guided practice | Five-minute warm-up, custom Play-Along builder, named metronome presets, weekly goals/reflections, weak-transition drills, drone and interval tuning | Local feature and journey coverage. |
 | Scoring | Shared pitch-domain scoring and focused QA fixtures | No physical microphone or real brass performance claim. |
-| Classes | Create/join/invite/roster workflows and role-aware aggregate summaries | Aggregate scope intentionally excludes raw practice detail. |
+| Classes | Local MVP create/join/consent, role-aware student/owner/assistant views, roster/invite controls, and actionable aggregate participation summaries | Aggregate timing/pitch sharing intentionally excludes assignments, grades, raw audio, reflections, score content, note events, and session detail. Legacy members must re-consent; migration/hosted/physical/release acceptance remains open. |
 | Authentication | Email/password/reset plus Google and Apple affordances on web/iOS | Google live provider start is verified; Apple remains disabled live. |
 | Localization | 12 locales; web non-English catalogs are lazy-loaded | Professional linguistic review remains a human gate. |
 | Native | SwiftUI iPhone/iPad experience, auth/class/practice parity, Keychain, AVAudioEngine path | Simulator evidence only; no signing/device acceptance. |

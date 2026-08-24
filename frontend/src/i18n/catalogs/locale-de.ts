@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "Gib einen gültigen Benutzernamen und Anzeigenamen ein.",
   "auth.profileCompletionExpired": "Deine Anmeldesitzung ist abgelaufen. Bitte melde dich erneut an.",
   "auth.profileCompletionAccountChanged": "Das aktive Konto wurde vor Abschluss der Profileinrichtung geändert."
+  ,"class.active": "Aktiv",
+  "class.allActivity": "Alle Aktivitäten",
+  "class.allInstruments": "Alle Instrumente",
+  "class.allStatuses": "Alle Status",
+  "class.loadFailedBody": "Ihre Klassen konnten nicht geladen werden. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
+  "class.minutesDelta": "{count} Min. gegenüber der Vorwoche",
+  "class.noRosterMatches": "Keine Schüler entsprechen diesen Filtern.",
+  "class.practiceNow": "Jetzt üben",
+  "class.readOnlyRoster": "Schreibgeschützte Ansicht der aktiven Schüler und Klassentrends. Kontodetails und Verwaltungsfunktionen sind ausgeblendet.",
+  "class.searchRoster": "Schüler suchen",
+  "class.sharedDataTitle": "Was Ihre Klasse sehen kann",
+  "class.sharedDataBody": "Zusammengefasste Cloud-Übung seit {date}: Zeit, Sitzungsanzahl und Stimmungsübersichten. Audio, Reflexionen und Sitzungsdetails bleiben privat.",
+  "class.sortBy": "Sortieren",
+  "class.sortLastPractice": "Kürzlich geübt",
+  "class.sortName": "Schülername",
+  "class.sortWeeklyMinutes": "Wochenminuten",
+  "class.status": "Zustand",
+  "class.weeklyTrend": "Gegenüber der Vorwoche",
+  "class.enableSharingTitle": "Fortschrittsfreigabe für die Klasse aktivieren",
+  "class.enableSharingBody": "Diese Mitgliedschaft stammt aus der Zeit vor der aktuellen Datenschutzwahl. Aktivieren Sie den begrenzten Gesamtumfang, bevor Fortschritt oder Assistenzanalysen erscheinen.",
+  "class.enableSharing": "Freigabe aktivieren",
+  "class.enablingSharing": "Wird aktiviert…",
+  "class.sharingEnabled": "Die Fortschrittsfreigabe für die Klasse ist aktiviert.",
+  "class.sharingEnableError": "Die Fortschrittsfreigabe konnte nicht aktiviert werden.",
+  "class.inviteRole": "Klassenrolle",
+  "class.inviteRoleAssistant": "Assistenz",
+  "class.assistantRoleHelp": "Assistenzen sehen die aktive anonymisierte Liste und Klassentrends, können aber niemanden einladen oder entfernen, Codes teilen oder erneuern oder die Klasse verwalten."
 } satisfies MessageCatalog;
 
 export default messages;

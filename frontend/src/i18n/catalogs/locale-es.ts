@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "Ingresa un nombre de usuario y nombre para mostrar válidos.",
   "auth.profileCompletionExpired": "Tu sesión expiró. Inicia sesión de nuevo.",
   "auth.profileCompletionAccountChanged": "La cuenta activa cambió antes de terminar la configuración del perfil."
+  ,"class.active": "Activo",
+  "class.allActivity": "Toda la actividad",
+  "class.allInstruments": "Todos los instrumentos",
+  "class.allStatuses": "Todos los estados",
+  "class.loadFailedBody": "No pudimos cargar tus clases. Comprueba la conexión e inténtalo de nuevo.",
+  "class.minutesDelta": "{count} min frente a la semana anterior",
+  "class.noRosterMatches": "Ningún estudiante coincide con estos filtros.",
+  "class.practiceNow": "Practicar ahora",
+  "class.readOnlyRoster": "Vista de solo lectura de estudiantes activos y tendencias de la clase. Los datos de cuenta y los controles de gestión están ocultos.",
+  "class.searchRoster": "Buscar estudiantes",
+  "class.sharedDataTitle": "Lo que puede ver tu clase",
+  "class.sharedDataBody": "Práctica agregada en la nube desde {date}: tiempo, número de sesiones y resúmenes de afinación. El audio, las reflexiones y los detalles de cada sesión siguen siendo privados.",
+  "class.sortBy": "Ordenar",
+  "class.sortLastPractice": "Práctica reciente",
+  "class.sortName": "Nombre",
+  "class.sortWeeklyMinutes": "Minutos semanales",
+  "class.status": "Estado",
+  "class.weeklyTrend": "Frente a la semana anterior",
+  "class.enableSharingTitle": "Activar el uso compartido del progreso de la clase",
+  "class.enableSharingBody": "Esta membresía es anterior a la opción de privacidad actual. Activa el alcance agregado limitado antes de mostrar tu progreso o los análisis del asistente.",
+  "class.enableSharing": "Activar uso compartido",
+  "class.enablingSharing": "Activando…",
+  "class.sharingEnabled": "El uso compartido del progreso de la clase está activado.",
+  "class.sharingEnableError": "No se pudo activar el uso compartido del progreso de la clase.",
+  "class.inviteRole": "Rol en la clase",
+  "class.inviteRoleAssistant": "Asistente",
+  "class.assistantRoleHelp": "Los asistentes pueden ver la lista activa redactada y las tendencias, pero no pueden invitar, eliminar, compartir o rotar códigos ni administrar la clase."
 } satisfies MessageCatalog;
 
 export default messages;

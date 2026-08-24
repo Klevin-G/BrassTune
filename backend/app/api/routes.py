@@ -35,7 +35,7 @@ from app.db.database import get_db
 from app.db.readiness import public_readiness_report, readiness_report, version_payload
 from app.db.maintenance import clear_practice_data, export_all_data, repair_demo_data, reset_demo_data
 from app.models.db import AccountDeletionJob, Group, GroupMember, Invitation, MaintenanceHeartbeat, MaintenanceRequestNonce, NoteEvent, PitchSample, PracticeSession, Recommendation, UsageEvent, User
-from app.schemas.schemas import MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, UpdateGroupMemberRequest, UserProfileUpdate
+from app.schemas.schemas import CLASS_PRACTICE_AGGREGATE_SCOPE_CODE, MAX_BATCH_PITCH_FRAMES, AcceptInvitationRequest, AccountDeletionRequest, AddMemberByUsernameRequest, CreateGroupRequest, JoinByCodeRequest, PitchFrameIn, StartSessionRequest, StopSessionRequest, UpdateClassSharingConsentRequest, UpdateGroupMemberRequest, UserProfileUpdate
 from app.services.audio_storage import audio_bytes_for_export, audio_extension, audio_upload_limit_bytes, delete_audio_for_session, is_audio_available_for_playback, is_local_audio_available_for_playback, local_audio_path, process_audio_delete_jobs, queue_audio_delete, read_audio_bytes, read_supabase_audio_for_playback, replace_audio_for_session, retry_audio_storage_jobs
 from app.services.account_deletion import (
     DeletionTombstoneSecretError,
@@ -45,7 +45,7 @@ from app.services.account_deletion import (
 )
 from app.services.account_mutation import account_mutation_guard
 from app.services.serializers import event_to_dict, group_member_to_dict, group_to_dict, iso, sample_to_dict, session_to_dict, user_to_dict
-from app.services.session_service import save_pitch_frame, save_pitch_frames, start_session, stop_session
+from app.services.session_service import save_pitch_frames_detailed, start_session_with_replay, stop_session_with_replay
 from app.services.usage import record_event
 from app.services.profile_avatar import MAX_UPLOAD_BYTES as MAX_AVATAR_UPLOAD_BYTES, normalize_avatar, queue_avatar_cleanup, read_avatar, remove_avatar, replace_avatar
 
@@ -60,7 +60,6 @@ STALE_DELETION_JOB_SECONDS = 15 * 60
 DEFAULT_MAX_OWNED_CLASSES_PER_USER = 10
 DEFAULT_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER = 20
 DEFAULT_MAX_PENDING_CLASS_INVITATIONS_PER_USER = 20
-CLASS_PRACTICE_AGGREGATE_SCOPE_CODE = "cloud_practice_sessions_since_membership_v1"
 MAINTENANCE_HMAC_VERSION = "v1"
 MAINTENANCE_MAX_CLOCK_SKEW_SECONDS = 5 * 60
 MAINTENANCE_REPLAY_TTL_GRACE_SECONDS = 1
@@ -195,7 +194,37 @@ def _can_view_full_roster(db: Session, group: Group, user: User) -> bool:
     if _can_manage_group(user, group):
         return True
     membership = _viewer_membership(db, group.id, user.id)
-    return membership is not None and getattr(membership, "role_in_group", "student") in {"assistant", "director"}
+    return bool(
+        membership is not None
+        and getattr(membership, "role_in_group", "student") in {"assistant", "director"}
+        and _member_has_aggregate_sharing_consent(membership)
+    )
+
+
+def _roster_scope_for_viewer(db: Session, group: Group, user: User) -> str:
+    if _can_manage_group(user, group):
+        return "full"
+    if _can_view_full_roster(db, group, user):
+        return "active_redacted"
+    return "self"
+
+
+def _can_view_class_analytics(db: Session, group: Group, user: User) -> bool:
+    if _can_manage_group(user, group):
+        return True
+    membership = _viewer_membership(db, group.id, user.id)
+    return bool(
+        membership is not None
+        and membership.role_in_group in {"assistant", "director"}
+        and _member_has_aggregate_sharing_consent(membership)
+    )
+
+
+def _require_group_analytics_viewer(db: Session, group_id: int, auth: AuthContext) -> tuple[Group, str]:
+    group = _group_or_404(db, group_id)
+    if not _can_view_class_analytics(db, group, auth.user):
+        raise HTTPException(status_code=403, detail="You do not have access to this class analytics view.")
+    return group, _roster_scope_for_viewer(db, group, auth.user)
 
 
 def _require_group_manager(db: Session, group_id: int, auth: AuthContext) -> Group:
@@ -486,9 +515,19 @@ def remove_profile_avatar(db: Session = Depends(get_db), auth: AuthContext = Dep
 @router.post("/sessions/start")
 def start_practice_session(payload: StartSessionRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     _validate_instrument(payload.instrument_id)
-    session = start_session(db, payload.instrument_id, payload.name, payload.reference_pitch_hz, auth.user.id)
+    session, replayed = start_session_with_replay(
+        db,
+        payload.instrument_id,
+        payload.name,
+        payload.reference_pitch_hz,
+        auth.user.id,
+        client_session_id=payload.client_session_id,
+        started_at=payload.started_at,
+    )
     result = session_to_dict(session)
-    record_event(db, "session_started", auth.user.id, {"session_id": result["id"], "instrument_id": payload.instrument_id})
+    result["idempotency_replayed"] = replayed
+    if not replayed:
+        record_event(db, "session_started", auth.user.id, {"session_id": result["id"], "instrument_id": payload.instrument_id})
     return result
 
 
@@ -498,10 +537,14 @@ def add_session_sample(session_id: int, frame: PitchFrameIn, db: Session = Depen
     _validate_instrument(frame.instrument_id)
     if frame.instrument_id != session.instrument_id:
         raise HTTPException(status_code=400, detail="Pitch frame instrument must match the practice session instrument.")
-    sample = save_pitch_frame(db, session_id, _schema_dict(frame))
-    if sample is None:
-        return {"saved": False, "reason": "Frame was invalid, silent, or session was not found."}
-    return {"saved": True, "sample": sample_to_dict(sample)}
+    result = save_pitch_frames_detailed(db, session_id, [_schema_dict(frame)])
+    if not result.accepted_samples:
+        return {"saved": False, "replayed": False, "reason": "Frame was invalid, silent, or session was not found."}
+    return {
+        "saved": bool(result.saved_samples),
+        "replayed": bool(result.replayed_samples),
+        "sample": sample_to_dict(result.accepted_samples[0]),
+    }
 
 
 @router.post("/sessions/{session_id}/samples/batch")
@@ -515,19 +558,28 @@ def add_session_samples_batch(session_id: int, frames: List[PitchFrameIn], db: S
         _validate_instrument(frame.instrument_id)
         if frame.instrument_id != session.instrument_id:
             raise HTTPException(status_code=400, detail="Pitch frame instrument must match the practice session instrument.")
-    samples = save_pitch_frames(db, session_id, [_schema_dict(frame) for frame in frames])
-    return {"saved": len(samples), "rejected": max(0, len(frames) - len(samples))}
+    result = save_pitch_frames_detailed(db, session_id, [_schema_dict(frame) for frame in frames])
+    return {
+        "saved": len(result.saved_samples),
+        "replayed": len(result.replayed_samples),
+        "rejected": result.rejected,
+    }
 
 
 @router.post("/sessions/{session_id}/stop")
-def stop_practice_session(session_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+def stop_practice_session(session_id: int, payload: Optional[StopSessionRequest] = None, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     existing = _require_session_access(db, session_id, auth)
-    was_active = existing.ended_at is None
-    session = stop_session(db, session_id)
+    session, replayed = stop_session_with_replay(
+        db,
+        session_id,
+        client_session_id=payload.client_session_id if payload else None,
+        ended_at=payload.ended_at if payload else None,
+    )
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     result = session_to_dict(session)
-    if was_active:
+    result["idempotency_replayed"] = replayed
+    if not replayed:
         record_event(db, "session_completed", auth.user.id, {"session_id": session_id, "duration_seconds": result["duration_seconds"], "notes_count": result["notes_count"]})
     return result
 
@@ -1733,6 +1785,20 @@ def _member_active_since(member: GroupMember) -> dt.datetime:
     return member.active_since or member.created_at
 
 
+def _member_has_aggregate_sharing_consent(member: Optional[GroupMember]) -> bool:
+    return bool(
+        member is not None
+        and member.aggregate_sharing_consented_at is not None
+        and member.aggregate_sharing_scope_code == CLASS_PRACTICE_AGGREGATE_SCOPE_CODE
+    )
+
+
+def _utc_naive_datetime(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(dt.timezone.utc).replace(tzinfo=None)
+
+
 def _class_practice_aggregate_scope() -> dict:
     """Stable disclosure contract for director-visible class aggregates.
 
@@ -1754,27 +1820,140 @@ def _member_scoped_sessions(
     member: GroupMember,
     *,
     include_note_events: bool = False,
+    end_at: Optional[dt.datetime] = None,
 ) -> List[PracticeSession]:
+    if not _member_has_aggregate_sharing_consent(member):
+        return []
     query = db.query(PracticeSession)
     if include_note_events:
         query = query.options(joinedload(PracticeSession.note_events))
+    upper_bound = _utc_naive_datetime(end_at or dt.datetime.utcnow())
     return (
         query.filter(
             PracticeSession.user_id == member.user_id,
-            PracticeSession.started_at >= _member_active_since(member),
+            PracticeSession.started_at >= _utc_naive_datetime(_member_active_since(member)),
+            PracticeSession.started_at <= upper_bound,
         )
         .all()
     )
 
 
-def _group_scoped_sessions(db: Session, group_id: int) -> List[PracticeSession]:
+def _group_scoped_sessions(db: Session, group_id: int, *, end_at: Optional[dt.datetime] = None) -> List[PracticeSession]:
     members = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.status == "active").all()
     sessions_by_id = {}
     for member in members:
-        rows = _member_scoped_sessions(db, member, include_note_events=True)
+        rows = _member_scoped_sessions(db, member, include_note_events=True, end_at=end_at)
         for session in rows:
             sessions_by_id[session.id] = session
     return list(sessions_by_id.values())
+
+
+def _practice_window_summary(sessions: List[PracticeSession]) -> dict:
+    tuning_sessions = [session for session in sessions if int(session.notes_count or 0) > 0]
+    avg_abs_cents = duration_weighted_mean(tuning_sessions, "average_abs_cents", "duration_seconds")
+    in_tune_pct = duration_weighted_mean(tuning_sessions, "in_tune_percentage", "duration_seconds")
+    last_practice_at = max((session.started_at for session in sessions), default=None)
+    return {
+        "sessions_count": len(sessions),
+        "practice_minutes": round(sum(float(session.duration_seconds or 0) for session in sessions) / 60.0, 1),
+        "average_abs_cents": round(avg_abs_cents, 1) if avg_abs_cents is not None else None,
+        "in_tune_percentage": round(in_tune_pct, 1) if in_tune_pct is not None else None,
+        "last_practice_at": iso(last_practice_at),
+    }
+
+
+def _progress_delta(current: dict, previous: dict) -> dict:
+    payload = {
+        "sessions_count": current["sessions_count"] - previous["sessions_count"],
+        "practice_minutes": round(current["practice_minutes"] - previous["practice_minutes"], 1),
+    }
+    for key in ("average_abs_cents", "in_tune_percentage"):
+        current_value = current[key]
+        previous_value = previous[key]
+        payload[key] = (
+            round(float(current_value) - float(previous_value), 1)
+            if current_value is not None and previous_value is not None
+            else None
+        )
+    return payload
+
+
+def _inactivity_summary(last_practice_at: Optional[dt.datetime], now: dt.datetime) -> dict:
+    if last_practice_at is None:
+        return {
+            "state": "no_practice_since_joining",
+            "days_since_last_practice": None,
+            "last_practice_at": None,
+        }
+    elapsed = max(dt.timedelta(0), _utc_naive_datetime(now) - _utc_naive_datetime(last_practice_at))
+    days = int(elapsed.total_seconds() // 86_400)
+    if days == 0:
+        state = "active_today"
+    elif days < 7:
+        state = "active_this_week"
+    else:
+        state = "inactive_7d"
+    return {
+        "state": state,
+        "days_since_last_practice": days,
+        "last_practice_at": iso(last_practice_at),
+    }
+
+
+def _member_progress_payload(
+    db: Session,
+    member: GroupMember,
+    *,
+    now: Optional[dt.datetime] = None,
+) -> dict:
+    generated_at = _utc_naive_datetime(now or dt.datetime.utcnow())
+    current_start = generated_at - dt.timedelta(days=7)
+    previous_start = generated_at - dt.timedelta(days=14)
+    sessions = _member_scoped_sessions(db, member, end_at=generated_at)
+    current_sessions = [
+        session for session in sessions
+        if _utc_naive_datetime(session.started_at) >= current_start
+    ]
+    previous_sessions = [
+        session for session in sessions
+        if previous_start <= _utc_naive_datetime(session.started_at) < current_start
+    ]
+    lifetime = _practice_window_summary(sessions)
+    current = _practice_window_summary(current_sessions)
+    previous = _practice_window_summary(previous_sessions)
+    last_practice_at = max((session.started_at for session in sessions), default=None)
+    return {
+        "lifetime": lifetime,
+        "current_7d": current,
+        "previous_7d": previous,
+        "delta": _progress_delta(current, previous),
+        "inactivity": _inactivity_summary(last_practice_at, generated_at),
+        "generated_at": iso(generated_at),
+    }
+
+
+def _group_trend_payload(sessions: List[PracticeSession], now: dt.datetime) -> dict:
+    generated_at = _utc_naive_datetime(now)
+    current_start = generated_at - dt.timedelta(days=7)
+    previous_start = generated_at - dt.timedelta(days=14)
+    current = _practice_window_summary(
+        [
+            session for session in sessions
+            if current_start <= _utc_naive_datetime(session.started_at) <= generated_at
+        ]
+    )
+    previous = _practice_window_summary(
+        [
+            session for session in sessions
+            if previous_start <= _utc_naive_datetime(session.started_at) < current_start
+        ]
+    )
+    return {
+        "current_7d": current,
+        "previous_7d": previous,
+        "delta": _progress_delta(current, previous),
+        "generated_at": iso(generated_at),
+    }
 
 
 def _can_view_group(user: User, group: Group, db: Session) -> bool:
@@ -1788,7 +1967,7 @@ def _visible_group_members(db: Session, group: Group, user: User):
         members = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group.id).order_by(GroupMember.created_at.asc()).all()
         return [group_member_to_dict(member) for member in members], "full"
     membership = _viewer_membership(db, group.id, user.id)
-    if membership is not None and membership.role_in_group in {"assistant", "director"}:
+    if _can_view_full_roster(db, group, user):
         members = (
             db.query(GroupMember)
             .options(joinedload(GroupMember.user))
@@ -1799,8 +1978,11 @@ def _visible_group_members(db: Session, group: Group, user: User):
         payloads = []
         for member in members:
             payload = group_member_to_dict(member)
+            payload.pop("id", None)
             payload.pop("user_id", None)
             payload.pop("username", None)
+            payload.pop("aggregate_sharing_consented_at", None)
+            payload.pop("aggregate_sharing_scope_code", None)
             if member.user_id == user.id:
                 payload["is_current_user"] = True
             payloads.append(payload)
@@ -1838,6 +2020,10 @@ def _group_viewer_capabilities(db: Session, group: Group, user: User) -> dict:
             and not is_owner
         ),
         "viewer_can_manage": _can_manage_group(user, group),
+        "viewer_can_view_roster": _can_view_full_roster(db, group, user),
+        "viewer_can_view_class_analytics": _can_view_class_analytics(db, group, user),
+        "viewer_has_aggregate_sharing_consent": _member_has_aggregate_sharing_consent(membership),
+        "roster_scope": _roster_scope_for_viewer(db, group, user),
     }
 
 
@@ -1849,7 +2035,7 @@ def create_ensemble_group(payload: CreateGroupRequest, db: Session = Depends(get
     owned_limit = _positive_env_limit("BRASSTUNE_MAX_OWNED_CLASSES_PER_USER", DEFAULT_MAX_OWNED_CLASSES_PER_USER)
     if owned_count >= owned_limit:
         raise HTTPException(status_code=409, detail="You have reached the class ownership limit.")
-    group = Group(name=payload.name.strip(), director_user_id=auth.user.id, join_code=_generate_join_code(db))
+    group = Group(name=payload.name, director_user_id=auth.user.id, join_code=_generate_join_code(db))
     db.add(group)
     if auth.user.role == "student":
         auth.user.role = "director"
@@ -1911,7 +2097,7 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     status='invited' and must accept before they become an active member."""
     _require_group_manager(db, group_id, auth)
     _validate_optional_instrument(payload.instrument_id)
-    if payload.role_in_group not in {"student", "assistant", "director"}:
+    if payload.role_in_group not in {"student", "assistant"}:
         raise HTTPException(status_code=400, detail="Invalid role_in_group.")
     # The instrument is optional at invite time; the student sets their own when
     # they accept. Store a neutral placeholder until then.
@@ -1919,6 +2105,8 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
     user = db.query(User).filter(User.username == payload.username).first()
     if user is None:
         raise HTTPException(status_code=404, detail="That username could not be invited.")
+    if user.id == auth.user.id:
+        raise HTTPException(status_code=400, detail="You cannot invite yourself to your own class.")
     _lock_class_quota_user(db, user.id)
     existing = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
     if existing:
@@ -1939,6 +2127,8 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
         existing.status = "invited"
         existing.active_since = None
         existing.removed_at = None
+        existing.aggregate_sharing_consented_at = None
+        existing.aggregate_sharing_scope_code = None
         member = existing
     else:
         pending_count = db.query(GroupMember.id).filter(GroupMember.user_id == user.id, GroupMember.status == "invited").count()
@@ -1948,7 +2138,16 @@ def add_member_by_username(group_id: int, payload: AddMemberByUsernameRequest, d
         )
         if pending_count >= pending_limit:
             raise HTTPException(status_code=409, detail="That username could not be invited right now.")
-        member = GroupMember(group_id=group_id, user_id=user.id, instrument_id=invite_instrument, role_in_group=payload.role_in_group, status="invited", active_since=None)
+        member = GroupMember(
+            group_id=group_id,
+            user_id=user.id,
+            instrument_id=invite_instrument,
+            role_in_group=payload.role_in_group,
+            status="invited",
+            active_since=None,
+            aggregate_sharing_consented_at=None,
+            aggregate_sharing_scope_code=None,
+        )
         db.add(member)
     db.commit()
     db.refresh(member)
@@ -1993,7 +2192,7 @@ def list_my_invitations(db: Session = Depends(get_db), auth: AuthContext = Depen
 
 
 @router.post("/ensemble/invitations/{member_id}/accept")
-def accept_invitation(member_id: int, payload: Optional[AcceptInvitationRequest] = None, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+def accept_invitation(member_id: int, payload: AcceptInvitationRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     member = _my_invitation_or_404(db, member_id, auth)
     _lock_class_quota_user(db, auth.user.id)
     active_count = db.query(GroupMember.id).filter(GroupMember.user_id == auth.user.id, GroupMember.status == "active").count()
@@ -2005,17 +2204,24 @@ def accept_invitation(member_id: int, payload: Optional[AcceptInvitationRequest]
         raise HTTPException(status_code=409, detail="You have reached the active class limit.")
     # The invited student may set their own instrument when accepting, overriding
     # whatever placeholder the director used.
-    chosen_instrument = payload.instrument_id if payload else None
+    chosen_instrument = payload.instrument_id
     if chosen_instrument:
         _validate_instrument(chosen_instrument)
         member.instrument_id = chosen_instrument
+    now = dt.datetime.utcnow()
     member.status = "active"
-    member.active_since = dt.datetime.utcnow()
+    member.active_since = now
     member.removed_at = None
+    member.aggregate_sharing_consented_at = now
+    member.aggregate_sharing_scope_code = payload.sharing_consent.scope_code
     db.add(member)
     db.commit()
     record_event(db, "invitation_accepted", auth.user.id, {"group_id": member.group_id})
-    return {"accepted": True, "group_id": member.group_id}
+    return {
+        "accepted": True,
+        "group_id": member.group_id,
+        "aggregate_sharing_scope_code": member.aggregate_sharing_scope_code,
+    }
 
 
 @router.post("/ensemble/invitations/{member_id}/decline")
@@ -2060,9 +2266,20 @@ def join_ensemble_by_code(payload: JoinByCodeRequest, db: Session = Depends(get_
         # elevated role from a removed or stale membership record.
         existing.role_in_group = "student"
         existing.instrument_id = instrument
+        existing.aggregate_sharing_consented_at = now
+        existing.aggregate_sharing_scope_code = payload.sharing_consent.scope_code
         member = existing
     else:
-        member = GroupMember(group_id=group.id, user_id=auth.user.id, instrument_id=instrument, role_in_group="student", status="active", active_since=now)
+        member = GroupMember(
+            group_id=group.id,
+            user_id=auth.user.id,
+            instrument_id=instrument,
+            role_in_group="student",
+            status="active",
+            active_since=now,
+            aggregate_sharing_consented_at=now,
+            aggregate_sharing_scope_code=payload.sharing_consent.scope_code,
+        )
         db.add(member)
     try:
         db.commit()
@@ -2084,7 +2301,12 @@ def join_ensemble_by_code(payload: JoinByCodeRequest, db: Session = Depends(get_
             raise HTTPException(status_code=409, detail="You're already in this class.")
         raise
     record_event(db, "invitation_accepted", auth.user.id, {"group_id": group.id, "via": "join_code"})
-    return {"joined": True, "group_id": group.id, "group_name": group.name}
+    return {
+        "joined": True,
+        "group_id": group.id,
+        "group_name": group.name,
+        "aggregate_sharing_scope_code": member.aggregate_sharing_scope_code,
+    }
 
 
 @router.delete("/ensemble/groups/{group_id}/membership")
@@ -2110,6 +2332,35 @@ def leave_ensemble_group(group_id: int, db: Session = Depends(get_db), auth: Aut
     db.commit()
     record_event(db, "group_left", auth.user.id, {"group_id": group_id})
     return {"left": True, "group_id": group_id}
+
+
+@router.post("/ensemble/groups/{group_id}/sharing-consent")
+def update_my_group_sharing_consent(
+    group_id: int,
+    payload: UpdateClassSharingConsentRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """Opt the signed-in active member into the exact bounded aggregate scope."""
+    _group_or_404(db, group_id)
+    membership = _viewer_membership(db, group_id, auth.user.id)
+    if membership is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Only an active class member can update their sharing consent.",
+        )
+    membership.aggregate_sharing_consented_at = dt.datetime.utcnow()
+    membership.aggregate_sharing_scope_code = payload.sharing_consent.scope_code
+    db.add(membership)
+    db.commit()
+    db.refresh(membership)
+    record_event(db, "class_aggregate_sharing_consented", auth.user.id, {"group_id": group_id})
+    return {
+        "group_id": group_id,
+        "viewer_has_aggregate_sharing_consent": True,
+        "aggregate_sharing_consented_at": iso(membership.aggregate_sharing_consented_at),
+        "aggregate_sharing_scope_code": membership.aggregate_sharing_scope_code,
+    }
 
 
 @router.post("/ensemble/groups/{group_id}/join-code/rotate")
@@ -2151,7 +2402,7 @@ def update_ensemble_member(group_id: int, member_id: int, payload: UpdateGroupMe
         _validate_instrument(payload.instrument_id)
         member.instrument_id = payload.instrument_id
     if payload.role_in_group:
-        if payload.role_in_group not in {"student", "assistant", "director"}:
+        if payload.role_in_group not in {"student", "assistant"}:
             raise HTTPException(status_code=400, detail="Invalid role_in_group.")
         requested_status = payload.status or member.status
         if (
@@ -2170,6 +2421,9 @@ def update_ensemble_member(group_id: int, member_id: int, payload: UpdateGroupMe
         member.status = payload.status
         if payload.status in {"invited", "removed"} and previous_status == "active":
             member.removed_at = dt.datetime.utcnow()
+        if payload.status == "invited":
+            member.aggregate_sharing_consented_at = None
+            member.aggregate_sharing_scope_code = None
     db.add(member)
     db.commit()
     db.refresh(member)
@@ -2191,19 +2445,43 @@ def remove_ensemble_member(group_id: int, member_id: int, db: Session = Depends(
 
 @router.get("/ensemble/groups/{group_id}/summary")
 def ensemble_group_summary(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    _require_group_manager(db, group_id, auth)
-    sessions = _group_scoped_sessions(db, group_id)
+    group, roster_scope = _require_group_analytics_viewer(db, group_id, auth)
+    now = dt.datetime.utcnow()
+    sessions = _group_scoped_sessions(db, group_id, end_at=now)
     payload = calculate_ensemble_summary(group_id, sessions)
     payload["practice_aggregate_scope"] = _class_practice_aggregate_scope()
+    payload["trends"] = _group_trend_payload(sessions, now)
+    payload["roster_scope"] = roster_scope
+    payload.update(_group_viewer_capabilities(db, group, auth.user))
     return payload
 
 
 @router.get("/ensemble/groups/{group_id}/report")
 def ensemble_group_report(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    _require_group_manager(db, group_id, auth)
+    group, roster_scope = _require_group_analytics_viewer(db, group_id, auth)
     sessions = _group_scoped_sessions(db, group_id)
     payload = generate_rehearsal_report(group_id, sessions)
     payload["practice_aggregate_scope"] = _class_practice_aggregate_scope()
+    payload["roster_scope"] = roster_scope
+    payload.update(_group_viewer_capabilities(db, group, auth.user))
+    return payload
+
+
+@router.get("/ensemble/groups/{group_id}/my-progress")
+def ensemble_group_my_progress(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
+    group = _group_or_404(db, group_id)
+    member = _viewer_membership(db, group_id, auth.user.id)
+    if member is None:
+        raise HTTPException(status_code=403, detail="Only an active class member can view their class progress.")
+    payload = {
+        "group_id": group.id,
+        "group_name": group.name,
+        "instrument_id": member.instrument_id,
+        "role_in_group": "assistant" if member.role_in_group == "director" else member.role_in_group,
+        "membership_started_at": iso(_member_active_since(member)),
+        "practice_aggregate_scope": _class_practice_aggregate_scope(),
+        **_member_progress_payload(db, member),
+    }
     return payload
 
 
@@ -2219,52 +2497,56 @@ def ensemble_report(group_id: int = 1, db: Session = Depends(get_db), auth: Auth
 
 @router.get("/ensemble/groups/{group_id}/roster")
 def ensemble_group_roster(group_id: int, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
-    """Per-student practice stats for the ensemble director/admin."""
-    _require_group_manager(db, group_id, auth)
-    members = (
-        db.query(GroupMember)
-        .options(joinedload(GroupMember.user))
-        .filter(GroupMember.group_id == group_id, GroupMember.status.in_(["active", "invited"]))
-        .order_by(GroupMember.created_at.asc())
-        .all()
-    )
+    """Useful per-member progress for owners/admins and redacted assistants."""
+    group, roster_scope = _require_group_analytics_viewer(db, group_id, auth)
+    query = db.query(GroupMember).options(joinedload(GroupMember.user)).filter(GroupMember.group_id == group_id)
+    if roster_scope == "full":
+        query = query.filter(GroupMember.status.in_(["active", "invited"]))
+    else:
+        query = query.filter(GroupMember.status == "active")
+    members = query.order_by(GroupMember.created_at.asc()).all()
     students = []
     for member in members:
-        sessions = []
-        if member.status == "active":
-            sessions = _member_scoped_sessions(db, member)
-        tuning_sessions = [session for session in sessions if (session.notes_count or 0) > 0]
-        avg_abs_cents = duration_weighted_mean(
-            tuning_sessions,
-            "average_abs_cents",
-            "duration_seconds",
-        )
-        in_tune_pct = duration_weighted_mean(
-            tuning_sessions,
-            "in_tune_percentage",
-            "duration_seconds",
-        )
-        last_practice_at = max((s.started_at for s in sessions), default=None)
+        progress = _member_progress_payload(db, member) if member.status == "active" else {
+            "lifetime": _practice_window_summary([]),
+            "current_7d": _practice_window_summary([]),
+            "previous_7d": _practice_window_summary([]),
+            "delta": _progress_delta(_practice_window_summary([]), _practice_window_summary([])),
+            "inactivity": _inactivity_summary(None, dt.datetime.utcnow()),
+        }
+        for window_name in ("lifetime", "current_7d", "previous_7d"):
+            progress[window_name] = {**progress[window_name], "last_practice_at": None}
+        progress["inactivity"] = {**progress["inactivity"], "last_practice_at": None}
+        lifetime = progress["lifetime"]
         user = member.user
-        students.append({
-            "member_id": member.id,
-            "user_id": member.user_id,
+        row = {
+            "roster_row_id": member.roster_row_id,
             "username": getattr(user, "username", None),
             "display_name": getattr(user, "display_name", None) or getattr(user, "name", None),
             "instrument_id": member.instrument_id,
             "status": member.status,
-            "role_in_group": getattr(member, "role_in_group", "student"),
-            "sessions_count": len(sessions),
-            "practice_minutes": round(sum(s.duration_seconds or 0.0 for s in sessions) / 60.0, 1),
-            "average_abs_cents": round(avg_abs_cents, 1) if avg_abs_cents is not None else None,
-            "in_tune_percentage": round(in_tune_pct, 1) if in_tune_pct is not None else None,
-            "last_practice_at": iso(last_practice_at),
-        })
-    return {
+            "role_in_group": "assistant" if member.role_in_group == "director" else member.role_in_group,
+            **lifetime,
+            "current_7d": progress["current_7d"],
+            "previous_7d": progress["previous_7d"],
+            "delta": progress["delta"],
+            "inactivity": progress["inactivity"],
+        }
+        if roster_scope == "full":
+            row["member_id"] = member.id
+        if roster_scope == "active_redacted":
+            row.pop("username", None)
+            if member.user_id == auth.user.id:
+                row["is_current_user"] = True
+        students.append(row)
+    payload = {
         "group_id": group_id,
         "practice_aggregate_scope": _class_practice_aggregate_scope(),
+        "roster_scope": roster_scope,
         "students": students,
     }
+    payload.update(_group_viewer_capabilities(db, group, auth.user))
+    return payload
 
 
 @router.get("/admin/metrics")

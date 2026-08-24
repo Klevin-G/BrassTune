@@ -152,6 +152,201 @@ enum PendingAppDestination: Equatable {
     case classes
 }
 
+struct NativeClassSessionSyncState: Codable, Equatable {
+    var consentActivatedAt: Date?
+    var completedSessionIDs: Set<UUID> = []
+}
+
+private struct NativeClassAccountOperation {
+    let accountDigest: String?
+    let generation: Int
+    let mutationID: UUID
+}
+
+private struct NativeClassSyncStartResponse: Decodable {
+    let id: Int
+    let idempotencyReplayed: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case idempotencyReplayed = "idempotency_replayed"
+    }
+}
+
+private struct NativeClassSyncBatchResponse: Decodable {
+    let saved: Int
+    let replayed: Int
+    let rejected: Int
+}
+
+private struct NativeClassSyncStopResponse: Decodable {
+    let id: Int
+}
+
+private struct NativeClassSyncStartRequest: Encodable {
+    let instrumentID: String
+    let referencePitchHz: Double
+    let clientSessionID: String
+    let startedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case instrumentID = "instrument_id"
+        case referencePitchHz = "reference_pitch_hz"
+        case clientSessionID = "client_session_id"
+        case startedAt = "started_at"
+    }
+}
+
+private struct NativeClassSyncFrameRequest: Encodable {
+    let clientFrameIndex: Int
+    let timestampMs: Int
+    let frequencyHz: Double?
+    let confidence: Double
+    let rms: Double
+    let centsDeviation: Double?
+    let tuningStatus: String
+    let instrumentID: String
+    let referencePitchHz: Double
+    let isValidForRecording: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case clientFrameIndex = "client_frame_index"
+        case timestampMs = "timestamp_ms"
+        case frequencyHz = "frequency_hz"
+        case confidence, rms
+        case centsDeviation = "cents_deviation"
+        case tuningStatus = "tuning_status"
+        case instrumentID = "instrument_id"
+        case referencePitchHz = "reference_pitch_hz"
+        case isValidForRecording = "is_valid_for_recording"
+    }
+}
+
+private struct NativeClassSyncStopRequest: Encodable {
+    let clientSessionID: String
+    let endedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case clientSessionID = "client_session_id"
+        case endedAt = "ended_at"
+    }
+}
+
+/// Serializes account-session uploads and deliberately exposes only timing and
+/// pitch measurements. There is no audio endpoint or field in this type.
+@MainActor
+final class NativeClassSessionSyncCoordinator {
+    private let apiClient: APIClient
+    private let batchSize: Int
+    private var locked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(apiClient: APIClient, batchSize: Int = 200) {
+        self.apiClient = apiClient
+        self.batchSize = max(1, min(batchSize, 500))
+    }
+
+    func synchronize(
+        session: PracticeSession,
+        config: AppConfig,
+        bearerToken: String
+    ) async throws {
+        await acquire()
+        defer { release() }
+        try Task.checkCancellation()
+        guard session.completion == .completed, let endedAt = session.endedAt else {
+            throw UserVisibleError.malformedResponse
+        }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let clientSessionID = session.id.uuidString.lowercased()
+        let startBody = try encoder.encode(NativeClassSyncStartRequest(
+            instrumentID: session.instrumentId,
+            referencePitchHz: session.referencePitchHz,
+            clientSessionID: clientSessionID,
+            startedAt: session.startedAt
+        ))
+        let started = try await apiClient.request(
+            NativeClassSyncStartResponse.self,
+            path: "/api/sessions/start",
+            method: "POST",
+            body: startBody,
+            config: config,
+            bearerToken: bearerToken
+        )
+        guard started.id > 0 else { throw UserVisibleError.malformedResponse }
+
+        let orderedFrames = session.frames.enumerated().sorted { lhs, rhs in
+            lhs.element.timestampMs == rhs.element.timestampMs
+                ? lhs.offset < rhs.offset
+                : lhs.element.timestampMs < rhs.element.timestampMs
+        }
+        let payload = orderedFrames.enumerated().map { sortedIndex, item in
+            NativeClassSyncFrameRequest(
+                clientFrameIndex: sortedIndex,
+                timestampMs: item.element.timestampMs,
+                frequencyHz: item.element.frequencyHz,
+                confidence: item.element.confidence,
+                rms: item.element.rms,
+                centsDeviation: item.element.centsDeviation,
+                tuningStatus: item.element.tuningStatus.rawValue,
+                instrumentID: session.instrumentId,
+                referencePitchHz: session.referencePitchHz,
+                isValidForRecording: item.element.isValidForRecording
+            )
+        }
+        for batchStart in stride(from: 0, to: payload.count, by: batchSize) {
+            try Task.checkCancellation()
+            let batch = Array(payload[batchStart..<min(batchStart + batchSize, payload.count)])
+            let response = try await apiClient.request(
+                NativeClassSyncBatchResponse.self,
+                path: "/api/sessions/\(started.id)/samples/batch",
+                method: "POST",
+                body: try encoder.encode(batch),
+                config: config,
+                bearerToken: bearerToken
+            )
+            guard response.saved >= 0,
+                  response.replayed >= 0,
+                  response.rejected >= 0,
+                  response.saved + response.replayed + response.rejected == batch.count else {
+                throw UserVisibleError.malformedResponse
+            }
+        }
+
+        try Task.checkCancellation()
+        let stopped = try await apiClient.request(
+            NativeClassSyncStopResponse.self,
+            path: "/api/sessions/\(started.id)/stop",
+            method: "POST",
+            body: try encoder.encode(NativeClassSyncStopRequest(
+                clientSessionID: clientSessionID,
+                endedAt: endedAt
+            )),
+            config: config,
+            bearerToken: bearerToken
+        )
+        guard stopped.id == started.id else { throw UserVisibleError.malformedResponse }
+    }
+
+    private func acquire() async {
+        if !locked {
+            locked = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    private func release() {
+        if waiters.isEmpty {
+            locked = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var config: AppConfig = .fromProcessEnvironment()
@@ -206,7 +401,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedEnsembleDetail: EnsembleSummary?
     @Published private(set) var selectedEnsembleRoster: [EnsembleRosterStudent] = []
     @Published private(set) var selectedEnsembleAggregate: EnsembleAggregateSummary?
+    @Published private(set) var selectedEnsembleProgress: EnsembleMyProgress?
     @Published private(set) var ensemblesLoading = false
+    @Published private(set) var selectedEnsembleLoading = false
+    @Published private(set) var classWorkspaceError: UserVisibleError?
+    @Published private(set) var selectedEnsembleError: UserVisibleError?
     @Published private(set) var ensembleMutationInProgress = false
     @Published private(set) var ensembleStatusMessage: String?
     @Published private(set) var tutorialCompleted = false { didSet { persistLocalData() } }
@@ -273,12 +472,18 @@ final class AppModel: ObservableObject {
     private var recordingStartToken: UUID?
     private var ensembleLoadGeneration = 0
     private var activeEnsembleLoadID: UUID?
+    private var selectedEnsembleLoadGeneration = 0
+    private var classAccountGeneration = 0
+    private var activeEnsembleMutationID: UUID?
     private var persistenceWriteGeneration = 0
     private var persistedSessionIDs = Set<PracticeSession.ID>()
     private var retainedUnexpectedCaptureIDs = Set<NativeLiveCapture.ID>()
     private var guestProgressSafetyPromptHandled = false
     private let classAccessTokenProvider: (@MainActor (AppConfig) async throws -> String?)?
     private var pendingAuthenticatedSession: AuthSession?
+    private let classSessionSyncCoordinator: NativeClassSessionSyncCoordinator
+    private var classSessionSyncTask: Task<Void, Never>?
+    private var classSessionSyncState = NativeClassSessionSyncState()
 
     init(
         persistenceStore: NativePersistenceStore = .live(),
@@ -317,6 +522,7 @@ final class AppModel: ObservableObject {
             removeItem: recordingFileRemover
         )
         self.apiClient = apiClient
+        self.classSessionSyncCoordinator = NativeClassSessionSyncCoordinator(apiClient: apiClient)
         self.authService = authService
         self.audioEngine = audioEngine ?? NativeAudioEngine(audioSessionCoordinator: audioSessionCoordinator)
         self.recordingPlayer = recordingPlayer ?? NativeRecordingPlayer(audioSessionCoordinator: audioSessionCoordinator)
@@ -370,9 +576,10 @@ final class AppModel: ObservableObject {
             name: "Demo brass studio",
             directorUserID: nil,
             joinCode: nil,
-            viewerRole: "student",
+            viewerRole: .student,
             viewerCanLeave: true,
             viewerCanManage: false,
+            viewerHasAggregateSharingConsent: true,
             createdAt: nil,
             updatedAt: nil
         ),
@@ -381,9 +588,23 @@ final class AppModel: ObservableObject {
             name: "Second demo class",
             directorUserID: nil,
             joinCode: nil,
-            viewerRole: "owner",
+            viewerRole: .owner,
             viewerCanLeave: false,
             viewerCanManage: true,
+            createdAt: nil,
+            updatedAt: nil
+        ),
+        EnsembleSummary(
+            id: 3,
+            name: "Assistant demo class",
+            directorUserID: nil,
+            joinCode: nil,
+            viewerRole: .assistant,
+            viewerCanLeave: true,
+            viewerCanManage: false,
+            viewerCanViewRoster: true,
+            viewerCanViewClassAnalytics: true,
+            viewerHasAggregateSharingConsent: true,
             createdAt: nil,
             updatedAt: nil
         )
@@ -505,6 +726,9 @@ final class AppModel: ObservableObject {
         selectedEnsembleDetail = nil
         selectedEnsembleRoster = []
         selectedEnsembleAggregate = nil
+        selectedEnsembleProgress = nil
+        classWorkspaceError = nil
+        selectedEnsembleError = nil
         ensembleStatusMessage = nil
         if clearedLocalArtifacts {
             lastError = nil
@@ -540,6 +764,7 @@ final class AppModel: ObservableObject {
     }
 
     func enterGuestDemo(presentTutorial: Bool = true) {
+        invalidateNativeClassAccountOperations()
         guard activateStorageNamespace(.guest) else {
             authState = .signedOut
             return
@@ -551,6 +776,9 @@ final class AppModel: ObservableObject {
         selectedEnsembleDetail = nil
         selectedEnsembleRoster = []
         selectedEnsembleAggregate = nil
+        selectedEnsembleProgress = nil
+        classWorkspaceError = nil
+        selectedEnsembleError = nil
         ensembleStatusMessage = nil
         authNotice = nil
         authNoticeIsError = false
@@ -706,6 +934,7 @@ final class AppModel: ObservableObject {
                 authState = .signedIn(email: session.email)
                 lastError = nil
                 _ = await refreshProfile(for: session)
+                retryPendingClassSessionSync()
             }
         } catch is CancellationError {
             return
@@ -716,6 +945,7 @@ final class AppModel: ObservableObject {
                         guard activateStorageNamespace(.account(userID: session.userID)) else { return }
                         authState = .signedIn(email: session.email)
                         _ = await refreshProfile(for: session)
+                        retryPendingClassSessionSync()
                         lastError = (error as? UserVisibleError) ?? .networkUnavailable
                         authNotice = NativeLocalization.string("You're offline. BrassTune kept your unexpired sign-in for local practice; online account features may be unavailable.")
                         authNoticeIsError = true
@@ -742,6 +972,7 @@ final class AppModel: ObservableObject {
                 ensembles = Self.demoEnsembles
             }
             selectAvailableEnsemble(preferredID: selectedEnsembleID)
+            classWorkspaceError = nil
             return
         }
         let token: String
@@ -750,6 +981,7 @@ final class AppModel: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
+            classWorkspaceError = (error as? UserVisibleError) ?? .networkUnavailable
             handleClassAuthOrNetworkError(error)
             return
         }
@@ -783,23 +1015,25 @@ final class AppModel: ObservableObject {
                 selectedEnsembleDetail = nil
                 selectedEnsembleRoster = []
                 selectedEnsembleAggregate = nil
+                selectedEnsembleProgress = nil
             }
+            classWorkspaceError = nil
             ensembleStatusMessage = nil
             lastError = nil
         } catch is CancellationError {
             return
         } catch {
             guard generation == ensembleLoadGeneration else { return }
+            classWorkspaceError = (error as? UserVisibleError) ?? .networkUnavailable
             handleClassAuthOrNetworkError(error)
         }
     }
 
     func loadClassWorkspace() async {
+        classWorkspaceError = nil
         await loadEnsembles()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, classWorkspaceError == nil else { return }
         await loadEnsembleInvitations()
-        guard !Task.isCancelled, let selectedEnsembleID else { return }
-        await loadSelectedEnsembleDetails(id: selectedEnsembleID)
     }
 
     func loadEnsembleInvitations() async {
@@ -819,8 +1053,11 @@ final class AppModel: ObservableObject {
             } else {
                 ensembleInvitations = []
             }
+            classWorkspaceError = nil
             return
         }
+        let accountDigest = activeStorageNamespace.accountDigest
+        let accountGeneration = classAccountGeneration
         let token: String
         do {
             token = try await validClassAccessToken()
@@ -830,12 +1067,17 @@ final class AppModel: ObservableObject {
                 config: config,
                 bearerToken: token
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  accountGeneration == classAccountGeneration,
+                  accountDigest == activeStorageNamespace.accountDigest else { return }
             ensembleInvitations = response.invitations
             lastError = nil
         } catch is CancellationError {
             return
         } catch {
+            guard accountGeneration == classAccountGeneration,
+                  accountDigest == activeStorageNamespace.accountDigest else { return }
+            classWorkspaceError = (error as? UserVisibleError) ?? .networkUnavailable
             handleClassAuthOrNetworkError(error)
         }
     }
@@ -843,7 +1085,41 @@ final class AppModel: ObservableObject {
     func loadSelectedEnsembleDetails(id: EnsembleSummary.ID) async {
         guard selectedEnsembleID == id,
               let summary = ensembles.first(where: { $0.id == id }) else { return }
+        selectedEnsembleLoadGeneration &+= 1
+        let generation = selectedEnsembleLoadGeneration
+        let accountDigest = activeStorageNamespace.accountDigest
+        selectedEnsembleLoading = true
+        selectedEnsembleError = nil
+        defer {
+            if generation == selectedEnsembleLoadGeneration {
+                selectedEnsembleLoading = false
+            }
+        }
         if NativeAudioEngine.testFixturesEnabled {
+            let current = PracticeMetricSlice(
+                sessionsCount: 2,
+                practiceMinutes: 18,
+                averageAbsCents: 5.4,
+                inTunePercentage: 86
+            )
+            let previous = PracticeMetricSlice(
+                sessionsCount: 1,
+                practiceMinutes: 12,
+                averageAbsCents: 7.2,
+                inTunePercentage: 78
+            )
+            let lifetime = PracticeMetricSlice(
+                sessionsCount: 3,
+                practiceMinutes: 30,
+                averageAbsCents: 6.1,
+                inTunePercentage: 83
+            )
+            let scope = PracticeAggregateScope(
+                code: PracticeAggregateScope.cloudSessionsSinceMembership,
+                source: "cloud_practice_sessions",
+                window: "membership_active_since",
+                excludes: ["reflections", "audio", "session_detail"]
+            )
             let member = EnsembleMember(
                 id: 101,
                 groupID: id,
@@ -853,15 +1129,17 @@ final class AppModel: ObservableObject {
                 instrumentID: "trumpet",
                 roleInGroup: "student",
                 status: "active",
-                isCurrentUser: !summary.viewerCanManage,
-                activeSince: nil,
+                isCurrentUser: summary.viewerRole == .student,
+                activeSince: "2026-08-01T12:00:00Z",
                 createdAt: nil
             )
             var detail = summary
             detail.members = [member]
-            detail.rosterScope = summary.viewerCanManage ? "full" : "self"
+            detail.rosterScope = summary.viewerCanManage
+                ? .fullManagement
+                : (summary.viewerCanViewRoster ? .activeReadOnly : .self)
             selectedEnsembleDetail = detail
-            selectedEnsembleRoster = summary.viewerCanManage
+            selectedEnsembleRoster = summary.viewerCanViewRoster
                 ? [
                     EnsembleRosterStudent(
                         memberID: member.id,
@@ -874,11 +1152,18 @@ final class AppModel: ObservableObject {
                         practiceMinutes: 24,
                         averageAbsCents: 6.5,
                         inTunePercentage: 82,
-                        lastPracticeAt: nil
+                        lastPracticeAt: "2026-08-22T12:00:00Z",
+                        activeSince: "2026-08-01T12:00:00Z",
+                        inactivityDays: 1,
+                        inactivityBand: .recent,
+                        lifetime: lifetime,
+                        current7d: current,
+                        previous7d: previous,
+                        practiceMinutesDelta: 6
                     )
                 ]
                 : []
-            selectedEnsembleAggregate = summary.viewerCanManage
+            selectedEnsembleAggregate = summary.viewerCanViewClassAnalytics
                 ? EnsembleAggregateSummary(
                     groupID: id,
                     sessionCount: 3,
@@ -887,15 +1172,37 @@ final class AppModel: ObservableObject {
                             instrumentID: "trumpet",
                             sessionCount: 3,
                             practiceMinutes: 24,
-                            averageAbsCents: 6.5
+                            averageAbsCents: 6.5,
+                            current7d: current,
+                            previous7d: previous,
+                            practiceMinutesDelta: 6
                         )
                     ],
                     overall: EnsembleSectionSummary(
                         instrumentID: "all",
                         sessionCount: 3,
                         practiceMinutes: 24,
-                        averageAbsCents: 6.5
-                    )
+                        averageAbsCents: 6.5,
+                        current7d: current,
+                        previous7d: previous,
+                        practiceMinutesDelta: 6
+                    ),
+                    practiceAggregateScope: scope
+                )
+                : nil
+            selectedEnsembleProgress = summary.viewerRole == .student
+                ? EnsembleMyProgress(
+                    groupID: id,
+                    memberID: member.id,
+                    activeSince: "2026-08-01T12:00:00Z",
+                    lastPracticeAt: "2026-08-22T12:00:00Z",
+                    inactivityDays: 1,
+                    inactivityBand: .recent,
+                    lifetime: lifetime,
+                    current7d: current,
+                    previous7d: previous,
+                    practiceMinutesDelta: 6,
+                    practiceAggregateScope: scope
                 )
                 : nil
             return
@@ -910,33 +1217,62 @@ final class AppModel: ObservableObject {
                 config: config,
                 bearerToken: token
             )
-            guard !Task.isCancelled, selectedEnsembleID == id else { return }
-            selectedEnsembleDetail = detail
-            selectedEnsembleRoster = []
-            selectedEnsembleAggregate = nil
-            if detail.viewerCanManage {
-                async let rosterRequest = apiClient.request(
+            guard detail.id == id else { throw UserVisibleError.malformedResponse }
+            var roster: [EnsembleRosterStudent] = []
+            var aggregate: EnsembleAggregateSummary?
+            var progress: EnsembleMyProgress?
+            if detail.viewerCanViewRoster {
+                let response = try await apiClient.request(
                     EnsembleRoster.self,
                     path: "/api/ensemble/groups/\(id)/roster",
                     config: config,
                     bearerToken: token
                 )
-                async let aggregateRequest = apiClient.request(
+                guard response.groupID == id else { throw UserVisibleError.malformedResponse }
+                roster = response.students
+            }
+            if detail.viewerCanViewClassAnalytics {
+                let response = try await apiClient.request(
                     EnsembleAggregateSummary.self,
                     path: "/api/ensemble/groups/\(id)/summary",
                     config: config,
                     bearerToken: token
                 )
-                let (roster, aggregate) = try await (rosterRequest, aggregateRequest)
-                guard !Task.isCancelled, selectedEnsembleID == id else { return }
-                selectedEnsembleRoster = roster.students
-                selectedEnsembleAggregate = aggregate
+                guard response.groupID == id else { throw UserVisibleError.malformedResponse }
+                aggregate = response
             }
+            if detail.viewerRole == .student {
+                let response = try await apiClient.request(
+                    EnsembleMyProgress.self,
+                    path: "/api/ensemble/groups/\(id)/my-progress",
+                    config: config,
+                    bearerToken: token
+                )
+                guard response.groupID == id else { throw UserVisibleError.malformedResponse }
+                progress = response
+            }
+            guard !Task.isCancelled,
+                  generation == selectedEnsembleLoadGeneration,
+                  selectedEnsembleID == id,
+                  activeStorageNamespace.accountDigest == accountDigest else { return }
+            selectedEnsembleDetail = detail
+            selectedEnsembleRoster = roster
+            selectedEnsembleAggregate = aggregate
+            selectedEnsembleProgress = progress
+            let hasSupportedScope = progress?.practiceAggregateScope.isSupportedClassSharingScope == true
+                || aggregate?.practiceAggregateScope?.isSupportedClassSharingScope == true
+            if detail.canActivateNativeAggregateSync, hasSupportedScope {
+                activateClassAggregateSharingConsent()
+            }
+            selectedEnsembleError = nil
             lastError = nil
         } catch is CancellationError {
             return
         } catch {
-            guard selectedEnsembleID == id else { return }
+            guard generation == selectedEnsembleLoadGeneration,
+                  selectedEnsembleID == id,
+                  activeStorageNamespace.accountDigest == accountDigest else { return }
+            selectedEnsembleError = (error as? UserVisibleError) ?? .networkUnavailable
             handleClassAuthOrNetworkError(error)
         }
     }
@@ -958,7 +1294,7 @@ final class AppModel: ObservableObject {
                 name: normalizedName,
                 directorUserID: nil,
                 joinCode: "DEMO\(nextID)",
-                viewerRole: "owner",
+                viewerRole: .owner,
                 viewerCanLeave: false,
                 viewerCanManage: true,
                 createdAt: nil,
@@ -971,16 +1307,16 @@ final class AppModel: ObservableObject {
             await loadSelectedEnsembleDetails(id: created.id)
             return true
         }
+        guard let operation = beginNativeClassMutation() else { return false }
+        defer { finishNativeClassMutation(operation) }
         let token: String
         do {
             token = try await validClassAccessToken()
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
-        guard !ensembleMutationInProgress else { return false }
-        ensembleMutationInProgress = true
-        defer { ensembleMutationInProgress = false }
+        guard nativeClassOperationIsCurrent(operation) else { return false }
         do {
             let body = try JSONSerialization.data(withJSONObject: ["name": normalizedName])
             let response = try await apiClient.request(
@@ -991,15 +1327,17 @@ final class AppModel: ObservableObject {
                 config: config,
                 bearerToken: token
             )
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             selectedEnsembleID = response.id
             await loadClassWorkspace()
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             ensembleStatusMessage = NativeLocalization.format("Created %@.", response.name)
             lastError = nil
             return true
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
     }
@@ -1008,7 +1346,8 @@ final class AppModel: ObservableObject {
     func inviteEnsembleMember(
         groupID: EnsembleSummary.ID,
         username: String,
-        instrumentID: String?
+        instrumentID: String?,
+        role: EnsembleInvitationRole = .student
     ) async -> Bool {
         let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789_-")
@@ -1024,26 +1363,26 @@ final class AppModel: ObservableObject {
             ensembleStatusMessage = NativeLocalization.format("Invitation sent to %@.", "@\(normalizedUsername)")
             return true
         }
+        guard let operation = beginNativeClassMutation() else { return false }
+        defer { finishNativeClassMutation(operation) }
         let token: String
         do {
             token = try await validClassAccessToken()
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
-        guard !ensembleMutationInProgress else { return false }
-        ensembleMutationInProgress = true
-        defer { ensembleMutationInProgress = false }
+        guard nativeClassOperationIsCurrent(operation) else { return false }
         do {
             var payload: [String: Any] = [
                 "username": normalizedUsername,
-                "role_in_group": "student",
+                "role_in_group": role.rawValue,
             ]
             if let instrumentID, !instrumentID.isEmpty {
                 payload["instrument_id"] = instrumentID
             }
             let body = try JSONSerialization.data(withJSONObject: payload)
-            _ = try await apiClient.request(
+            let response = try await apiClient.request(
                 EnsembleMember.self,
                 path: "/api/ensemble/groups/\(groupID)/members/by-username",
                 method: "POST",
@@ -1051,14 +1390,20 @@ final class AppModel: ObservableObject {
                 config: config,
                 bearerToken: token
             )
+            guard response.groupID == groupID,
+                  response.status == "invited" else {
+                throw UserVisibleError.malformedResponse
+            }
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             await loadSelectedEnsembleDetails(id: groupID)
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             ensembleStatusMessage = NativeLocalization.format("Invitation sent to %@.", "@\(normalizedUsername)")
             lastError = nil
             return true
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
     }
@@ -1071,16 +1416,16 @@ final class AppModel: ObservableObject {
             ensembleStatusMessage = NativeLocalization.string("A new class code is ready. The previous code no longer works.")
             return true
         }
+        guard let operation = beginNativeClassMutation() else { return false }
+        defer { finishNativeClassMutation(operation) }
         let token: String
         do {
             token = try await validClassAccessToken()
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
-        guard !ensembleMutationInProgress else { return false }
-        ensembleMutationInProgress = true
-        defer { ensembleMutationInProgress = false }
+        guard nativeClassOperationIsCurrent(operation) else { return false }
         do {
             let response = try await apiClient.request(
                 EnsembleJoinCodeResponse.self,
@@ -1089,14 +1434,18 @@ final class AppModel: ObservableObject {
                 config: config,
                 bearerToken: token
             )
-            updateEnsembleJoinCode(id: response.groupID, code: response.joinCode)
+            guard response.groupID == id, !response.joinCode.isEmpty else {
+                throw UserVisibleError.malformedResponse
+            }
+            guard nativeClassOperationIsCurrent(operation) else { return false }
+            updateEnsembleJoinCode(id: id, code: response.joinCode)
             ensembleStatusMessage = NativeLocalization.string("A new class code is ready. The previous code no longer works.")
             lastError = nil
             return true
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
     }
@@ -1123,7 +1472,7 @@ final class AppModel: ObservableObject {
                     name: invitation.groupName,
                     directorUserID: nil,
                     joinCode: nil,
-                    viewerRole: "student",
+                    viewerRole: .student,
                     viewerCanLeave: true,
                     viewerCanManage: false,
                     createdAt: nil,
@@ -1138,24 +1487,30 @@ final class AppModel: ObservableObject {
             }
             return true
         }
+        guard let operation = beginNativeClassMutation() else { return false }
+        defer { finishNativeClassMutation(operation) }
         let token: String
         do {
             token = try await validClassAccessToken()
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
-        guard !ensembleMutationInProgress else { return false }
-        ensembleMutationInProgress = true
-        defer { ensembleMutationInProgress = false }
+        guard nativeClassOperationIsCurrent(operation) else { return false }
         do {
             let path = accept
                 ? "/api/ensemble/invitations/\(memberID)/accept"
                 : "/api/ensemble/invitations/\(memberID)/decline"
             let body = accept
-                ? try JSONSerialization.data(withJSONObject: ["instrument_id": instrumentID ?? selectedInstrumentId])
+                ? try JSONSerialization.data(withJSONObject: [
+                    "instrument_id": instrumentID ?? selectedInstrumentId,
+                    "sharing_consent": [
+                        "scope_code": PracticeAggregateScope.cloudSessionsSinceMembership,
+                        "acknowledged": true,
+                    ],
+                ])
                 : nil
-            _ = try await apiClient.request(
+            let response = try await apiClient.request(
                 EnsembleInvitationDecisionResponse.self,
                 path: path,
                 method: "POST",
@@ -1163,10 +1518,18 @@ final class AppModel: ObservableObject {
                 config: config,
                 bearerToken: token
             )
+            guard response.groupID == invitation.groupID,
+                  (accept
+                    ? response.accepted == true && response.declined != true
+                    : response.declined == true && response.accepted != true) else {
+                throw UserVisibleError.malformedResponse
+            }
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             ensembleInvitations.removeAll { $0.memberID == memberID }
             if accept {
                 selectedEnsembleID = invitation.groupID
                 await loadClassWorkspace()
+                guard nativeClassOperationIsCurrent(operation) else { return false }
                 ensembleStatusMessage = NativeLocalization.format("Joined %@.", invitation.groupName)
             } else {
                 ensembleStatusMessage = NativeLocalization.format("Declined the invitation to %@.", invitation.groupName)
@@ -1176,7 +1539,7 @@ final class AppModel: ObservableObject {
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
     }
@@ -1189,16 +1552,16 @@ final class AppModel: ObservableObject {
             ensembleStatusMessage = NativeLocalization.string("Member removed.")
             return true
         }
+        guard let operation = beginNativeClassMutation() else { return false }
+        defer { finishNativeClassMutation(operation) }
         let token: String
         do {
             token = try await validClassAccessToken()
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
-        guard !ensembleMutationInProgress else { return false }
-        ensembleMutationInProgress = true
-        defer { ensembleMutationInProgress = false }
+        guard nativeClassOperationIsCurrent(operation) else { return false }
         do {
             let response = try await apiClient.request(
                 EnsembleMemberRemovalResponse.self,
@@ -1208,14 +1571,16 @@ final class AppModel: ObservableObject {
                 bearerToken: token
             )
             guard response.removed else { throw UserVisibleError.malformedResponse }
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             await loadSelectedEnsembleDetails(id: groupID)
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             ensembleStatusMessage = NativeLocalization.string("Member removed.")
             lastError = nil
             return true
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
     }
@@ -1238,22 +1603,26 @@ final class AppModel: ObservableObject {
             lastError = .apiRequestFailed(statusCode: 422, message: NativeLocalization.string("Enter the 4-16 character class code from your teacher."))
             return false
         }
+        guard let operation = beginNativeClassMutation() else { return false }
+        defer { finishNativeClassMutation(operation) }
         let token: String
         do {
             token = try await validClassAccessToken()
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
-        guard !ensembleMutationInProgress else { return false }
-        ensembleMutationInProgress = true
-        defer { ensembleMutationInProgress = false }
+        guard nativeClassOperationIsCurrent(operation) else { return false }
         do {
             let body = try JSONSerialization.data(withJSONObject: [
                 "code": normalizedCode,
                 "instrument_id": selectedInstrumentId,
+                "sharing_consent": [
+                    "scope_code": PracticeAggregateScope.cloudSessionsSinceMembership,
+                    "acknowledged": true,
+                ],
             ])
             let response = try await apiClient.request(
                 EnsembleJoinResponse.self,
@@ -1263,6 +1632,10 @@ final class AppModel: ObservableObject {
                 config: config,
                 bearerToken: token
             )
+            guard response.joined, response.groupID > 0, !response.groupName.isEmpty else {
+                throw UserVisibleError.malformedResponse
+            }
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             selectedEnsembleID = response.groupID
             ensembleLoadGeneration += 1
             if !ensembles.contains(where: { $0.id == response.groupID }) {
@@ -1272,7 +1645,7 @@ final class AppModel: ObservableObject {
                         name: response.groupName,
                         directorUserID: nil,
                         joinCode: nil,
-                        viewerRole: "student",
+                        viewerRole: .student,
                         viewerCanLeave: true,
                         viewerCanManage: false,
                         createdAt: nil,
@@ -1282,13 +1655,14 @@ final class AppModel: ObservableObject {
                 ensembles.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             }
             await loadEnsembles()
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             ensembleStatusMessage = NativeLocalization.format("Joined %@.", response.groupName)
             lastError = nil
             return true
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
     }
@@ -1306,18 +1680,18 @@ final class AppModel: ObservableObject {
             )
             return false
         }
+        guard let operation = beginNativeClassMutation() else { return false }
+        defer { finishNativeClassMutation(operation) }
         let token: String
         do {
             token = try await validClassAccessToken()
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
-        guard !ensembleMutationInProgress else { return false }
-        ensembleMutationInProgress = true
-        defer { ensembleMutationInProgress = false }
+        guard nativeClassOperationIsCurrent(operation) else { return false }
         do {
             let response = try await apiClient.request(
                 EnsembleLeaveResponse.self,
@@ -1329,6 +1703,7 @@ final class AppModel: ObservableObject {
             guard response.left, response.groupID == id else {
                 throw UserVisibleError.malformedResponse
             }
+            guard nativeClassOperationIsCurrent(operation) else { return false }
             ensembleLoadGeneration += 1
             ensembles.removeAll { $0.id == id }
             selectAvailableEnsemble(preferredID: selectedEnsembleID == id ? nil : selectedEnsembleID)
@@ -1343,7 +1718,68 @@ final class AppModel: ObservableObject {
         } catch is CancellationError {
             return false
         } catch {
-            handleClassAuthOrNetworkError(error)
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
+            return false
+        }
+    }
+
+    @discardableResult
+    func enableEnsembleAggregateSharing(id: EnsembleSummary.ID) async -> Bool {
+        guard let target = ensembles.first(where: { $0.id == id }),
+              [.student, .assistant].contains(target.viewerRole),
+              !target.viewerHasAggregateSharingConsent else { return false }
+        if NativeAudioEngine.testFixturesEnabled {
+            if let index = ensembles.firstIndex(where: { $0.id == id }) {
+                ensembles[index].viewerHasAggregateSharingConsent = true
+            }
+            if selectedEnsembleDetail?.id == id {
+                selectedEnsembleDetail?.viewerHasAggregateSharingConsent = true
+            }
+            ensembleStatusMessage = NativeLocalization.string("Ready")
+            return true
+        }
+        guard let operation = beginNativeClassMutation() else { return false }
+        defer { finishNativeClassMutation(operation) }
+        let token: String
+        do {
+            token = try await validClassAccessToken()
+        } catch {
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
+            return false
+        }
+        guard nativeClassOperationIsCurrent(operation) else { return false }
+        do {
+            let body = try JSONSerialization.data(withJSONObject: [
+                "sharing_consent": [
+                    "scope_code": PracticeAggregateScope.cloudSessionsSinceMembership,
+                    "acknowledged": true,
+                ],
+            ])
+            let response = try await apiClient.request(
+                EnsembleSharingConsentResponse.self,
+                path: "/api/ensemble/groups/\(id)/sharing-consent",
+                method: "POST",
+                body: body,
+                config: config,
+                bearerToken: token
+            )
+            guard response.enabled,
+                  response.groupID == id,
+                  response.aggregateSharingScopeCode == PracticeAggregateScope.cloudSessionsSinceMembership else {
+                throw UserVisibleError.malformedResponse
+            }
+            guard nativeClassOperationIsCurrent(operation) else { return false }
+            await loadEnsembles()
+            guard nativeClassOperationIsCurrent(operation), selectedEnsembleID == id else { return false }
+            await loadSelectedEnsembleDetails(id: id)
+            guard nativeClassOperationIsCurrent(operation) else { return false }
+            ensembleStatusMessage = NativeLocalization.string("Ready")
+            lastError = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            if nativeClassOperationIsCurrent(operation) { handleClassAuthOrNetworkError(error) }
             return false
         }
     }
@@ -1362,6 +1798,100 @@ final class AppModel: ObservableObject {
             throw UserVisibleError.apiRequestFailed(statusCode: 401, message: NativeLocalization.string("Sign in before using classes."))
         }
         return token
+    }
+
+    private func beginNativeClassMutation() -> NativeClassAccountOperation? {
+        guard activeEnsembleMutationID == nil else { return nil }
+        let mutationID = UUID()
+        activeEnsembleMutationID = mutationID
+        ensembleMutationInProgress = true
+        return NativeClassAccountOperation(
+            accountDigest: activeStorageNamespace.accountDigest,
+            generation: classAccountGeneration,
+            mutationID: mutationID
+        )
+    }
+
+    private func nativeClassOperationIsCurrent(_ operation: NativeClassAccountOperation) -> Bool {
+        operation.generation == classAccountGeneration
+            && operation.accountDigest == activeStorageNamespace.accountDigest
+            && operation.mutationID == activeEnsembleMutationID
+    }
+
+    private func finishNativeClassMutation(_ operation: NativeClassAccountOperation) {
+        guard operation.mutationID == activeEnsembleMutationID else { return }
+        activeEnsembleMutationID = nil
+        ensembleMutationInProgress = false
+    }
+
+    private func invalidateNativeClassAccountOperations() {
+        classAccountGeneration &+= 1
+        ensembleLoadGeneration &+= 1
+        selectedEnsembleLoadGeneration &+= 1
+        activeEnsembleLoadID = nil
+        activeEnsembleMutationID = nil
+        ensemblesLoading = false
+        selectedEnsembleLoading = false
+        ensembleMutationInProgress = false
+    }
+
+    func retryPendingClassSessionSync() {
+        guard classSessionSyncTask == nil,
+              authState.usesRemoteAccount,
+              activeStorageNamespace.accountDigest != nil,
+              classSessionSyncState.consentActivatedAt != nil else { return }
+        classSessionSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.classSessionSyncTask = nil }
+            await self.drainPendingClassSessionSync()
+        }
+    }
+
+    private func activateClassAggregateSharingConsent(now: Date = Date()) {
+        guard authState.usesRemoteAccount || classAccessTokenProvider != nil else { return }
+        if classSessionSyncState.consentActivatedAt == nil {
+            classSessionSyncState.consentActivatedAt = now
+            persistLocalData()
+        }
+        retryPendingClassSessionSync()
+    }
+
+    private func drainPendingClassSessionSync() async {
+        while !Task.isCancelled,
+              authState.usesRemoteAccount || classAccessTokenProvider != nil,
+              let consentAt = classSessionSyncState.consentActivatedAt {
+            let pending = sessions
+                .filter {
+                    $0.source != .sample
+                        && $0.completion == .completed
+                        && $0.endedAt != nil
+                        && $0.startedAt >= consentAt
+                        && !classSessionSyncState.completedSessionIDs.contains($0.id)
+                }
+                .sorted {
+                    $0.startedAt == $1.startedAt
+                        ? $0.id.uuidString < $1.id.uuidString
+                        : $0.startedAt < $1.startedAt
+                }
+            guard let session = pending.first else { return }
+            do {
+                let token = try await validClassAccessToken()
+                try await classSessionSyncCoordinator.synchronize(
+                    session: session,
+                    config: config,
+                    bearerToken: token
+                )
+                guard !Task.isCancelled, authState.usesRemoteAccount || classAccessTokenProvider != nil else { return }
+                classSessionSyncState.completedSessionIDs.insert(session.id)
+                persistLocalData()
+            } catch is CancellationError {
+                return
+            } catch {
+                // Keep the durable local session pending. Foreground, auth, and
+                // explicit retry events restart the same idempotent sequence.
+                return
+            }
+        }
     }
 
     private func handleClassAuthOrNetworkError(_ error: Error) {
@@ -1851,6 +2381,7 @@ final class AppModel: ObservableObject {
             gatewayCompleted = true
             lastError = nil
             setAuthNotice(NativeLocalization.string("Signed in. Guest practice was merged without replacing existing account data."))
+            retryPendingClassSessionSync()
         }
     }
 
@@ -1919,6 +2450,7 @@ final class AppModel: ObservableObject {
         gatewayCompleted = true
         lastError = nil
         setAuthNotice(NativeLocalization.string(notice))
+        retryPendingClassSessionSync()
         // Namespace activation loads the account-local completion flag. Never
         // replay onboarding for a returning account that already completed it
         // on this device, even if a provider requests its new-user flow.
@@ -2770,13 +3302,14 @@ final class AppModel: ObservableObject {
             metronome: metronome,
             metronomeDefaultsVersion: 2,
             tutorialCompleted: tutorialCompleted,
-            snapshotVersion: 5,
+            snapshotVersion: 6,
             practiceFeatures: practiceFeatures,
             gatewayCompleted: gatewayCompleted,
             appLanguage: appLanguage,
             successHapticsEnabled: successHapticsEnabled,
             guestProgressSafetyPromptHandled: guestProgressSafetyPromptHandled,
-            microphoneRationaleSeen: microphoneRationaleSeen
+            microphoneRationaleSeen: microphoneRationaleSeen,
+            classSessionSyncState: classSessionSyncState
         )
     }
 
@@ -2838,6 +3371,7 @@ final class AppModel: ObservableObject {
             id: completion.activityInstanceID,
             name: score?.title ?? "Score-guided practice",
             instrumentId: completion.configuration.instrumentID,
+            referencePitchHz: referencePitchHz,
             startedAt: completion.completedAt.addingTimeInterval(-duration),
             endedAt: completion.completedAt,
             frames: [],
@@ -3234,6 +3768,7 @@ final class AppModel: ObservableObject {
             id: completion.activityInstanceID,
             name: scaleName,
             instrumentId: configuration.instrumentID,
+            referencePitchHz: referencePitchHz,
             startedAt: completion.startedAt,
             endedAt: completion.completedAt,
             frames: [],
@@ -3276,6 +3811,7 @@ final class AppModel: ObservableObject {
             id: UUID(),
             name: preferredName ?? (matchingSourceCount == 1 ? source.sessionTitle : "\(source.sessionTitle) \(matchingSourceCount)"),
             instrumentId: selectedInstrumentId,
+            referencePitchHz: referencePitchHz,
             startedAt: startedAt,
             endedAt: endedAt,
             frames: frames,
@@ -3352,6 +3888,7 @@ final class AppModel: ObservableObject {
             id: UUID(),
             name: preferredName ?? (matchingSourceCount == 1 ? source.sessionTitle : "\(source.sessionTitle) \(matchingSourceCount)"),
             instrumentId: selectedInstrumentId,
+            referencePitchHz: referencePitchHz,
             startedAt: capture.startedAt,
             endedAt: capture.endedAt,
             frames: capture.frames,
@@ -3584,6 +4121,7 @@ final class AppModel: ObservableObject {
         successHapticsEnabled = snapshot.successHapticsEnabled ?? true
         guestProgressSafetyPromptHandled = snapshot.guestProgressSafetyPromptHandled ?? false
         microphoneRationaleSeen = snapshot.microphoneRationaleSeen ?? false
+        classSessionSyncState = snapshot.classSessionSyncState ?? NativeClassSessionSyncState()
         guestProgressSafetyPromptEligible = false
         persistedSessionIDs = Set(sessions.map(\.id))
         isRestoringLocalState = false
@@ -3596,7 +4134,7 @@ final class AppModel: ObservableObject {
             || hadRunningWarmupCheckpoint
             || hadRunningWorkspaceCheckpoint
             || snapshot.metronomeDefaultsVersion != 2
-            || snapshot.snapshotVersion != 5
+            || snapshot.snapshotVersion != 6
     }
 
     private func persistLocalData() {
@@ -3645,6 +4183,7 @@ final class AppModel: ObservableObject {
             persistedSessionIDs = snapshotSessionIDs
             guard !newlyPersistedSessionIDs.isEmpty else { return }
             persistedPracticeSuccessSequence &+= 1
+            retryPendingClassSessionSync()
             if activeStorageNamespace == .guest,
                !guestProgressSafetyPromptHandled {
                 guestProgressSafetyPromptEligible = true
@@ -3660,6 +4199,10 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     private func prepareStorageNamespace(_ namespace: NativeStorageNamespace) -> Bool {
+        invalidateNativeClassAccountOperations()
+        classSessionSyncTask?.cancel()
+        classSessionSyncTask = nil
+        classSessionSyncState = NativeClassSessionSyncState()
         persistenceWriter.flush()
         persistenceWriteGeneration &+= 1
         pendingRestoredSnapshotWriteback = false
@@ -3724,6 +4267,10 @@ final class AppModel: ObservableObject {
     }
 
     private func transitionToUnauthenticated(_ state: AuthState) {
+        invalidateNativeClassAccountOperations()
+        classSessionSyncTask?.cancel()
+        classSessionSyncTask = nil
+        classSessionSyncState = NativeClassSessionSyncState()
         persistenceWriter.flush()
         persistenceWriteGeneration &+= 1
         persistenceAccessState = .lockedSignedOut
@@ -3757,6 +4304,9 @@ final class AppModel: ObservableObject {
         selectedEnsembleDetail = nil
         selectedEnsembleRoster = []
         selectedEnsembleAggregate = nil
+        selectedEnsembleProgress = nil
+        classWorkspaceError = nil
+        selectedEnsembleError = nil
         ensembleStatusMessage = nil
         isRestoringLocalState = false
         authState = state
@@ -3792,6 +4342,18 @@ private struct EnsembleLeaveResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case left
         case groupID = "group_id"
+    }
+}
+
+private struct EnsembleSharingConsentResponse: Decodable {
+    let enabled: Bool
+    let groupID: Int
+    let aggregateSharingScopeCode: String
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case groupID = "group_id"
+        case aggregateSharingScopeCode = "aggregate_sharing_scope_code"
     }
 }
 
@@ -4004,6 +4566,7 @@ struct NativeLocalSnapshot: Codable, Equatable {
     var successHapticsEnabled: Bool? = nil
     var guestProgressSafetyPromptHandled: Bool? = nil
     var microphoneRationaleSeen: Bool? = nil
+    var classSessionSyncState: NativeClassSessionSyncState? = nil
 }
 
 struct NativeScoreImportService {

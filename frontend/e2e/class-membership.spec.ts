@@ -5,9 +5,13 @@ type Group = {
   name: string;
   join_code?: string | null;
   director_user_id?: number | null;
-  viewer_role: string;
-  viewer_can_leave?: boolean;
-  viewer_can_manage?: boolean;
+  viewer_role: 'owner' | 'assistant' | 'student' | 'admin_observer';
+  viewer_can_leave: boolean;
+  viewer_can_manage: boolean;
+  viewer_can_view_roster: boolean;
+  viewer_can_view_class_analytics: boolean;
+  viewer_has_aggregate_sharing_consent: boolean;
+  roster_scope: 'full' | 'active_redacted' | 'self';
 };
 
 type Invitation = {
@@ -21,6 +25,7 @@ type Invitation = {
 };
 
 type RosterStudent = {
+  roster_row_id: string;
   member_id: number;
   user_id: number;
   username: string;
@@ -34,6 +39,23 @@ type RosterStudent = {
   in_tune_percentage: number | null;
   last_practice_at: string | null;
   last_active_at: string | null;
+  lifetime: PracticeWindow;
+  current_7d: PracticeWindow;
+  previous_7d: PracticeWindow;
+  delta: Omit<PracticeWindow, 'last_practice_at'>;
+  inactivity: {
+    state: 'active_today' | 'active_this_week' | 'inactive_7d' | 'no_practice_since_joining';
+    days_since_last_practice: number | null;
+    last_practice_at: string | null;
+  };
+};
+
+type PracticeWindow = {
+  sessions_count: number;
+  practice_minutes: number;
+  average_abs_cents: number | null;
+  in_tune_percentage: number | null;
+  last_practice_at: string | null;
 };
 
 type FixtureOptions = {
@@ -63,6 +85,33 @@ const hornProfile = {
 };
 
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const practiceAggregateScope = {
+  code: 'cloud_practice_sessions_since_membership_v1',
+  source: 'cloud_practice_sessions',
+  window: 'membership_active_since',
+  excludes: ['reflections', 'audio', 'session_detail'],
+};
+
+const emptyPracticeWindow = (): PracticeWindow => ({
+  sessions_count: 0,
+  practice_minutes: 0,
+  average_abs_cents: null,
+  in_tune_percentage: null,
+  last_practice_at: null,
+});
+
+function classCapabilities(group: Group) {
+  return {
+    viewer_role: group.viewer_role,
+    viewer_can_leave: group.viewer_can_leave,
+    viewer_can_manage: group.viewer_can_manage,
+    viewer_can_view_roster: group.viewer_can_view_roster,
+    viewer_can_view_class_analytics: group.viewer_can_view_class_analytics,
+    viewer_has_aggregate_sharing_consent: group.viewer_has_aggregate_sharing_consent,
+    roster_scope: group.roster_scope,
+  };
+}
 
 const fakeAuthModule = `
 const session = { access_token: 'signed-in-e2e-token', user: { id: 'class-user' } };
@@ -109,16 +158,17 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
     ? '2026-07-16T12:00:00Z'
     : options.onboardingCompletedAt;
   let groups: Group[] = options.initialGroups ? [...options.initialGroups] : [
-    { id: 1, name: 'Concert Band', director_user_id: 12, viewer_role: 'student' },
-    { id: 2, name: 'Jazz Band', viewer_role: 'assistant', viewer_can_leave: true, viewer_can_manage: false },
-    { id: 3, name: 'Student-led Brass', join_code: null, viewer_role: 'owner', viewer_can_leave: false, viewer_can_manage: true },
-    { id: 4, name: 'Legacy-owned Brass', join_code: 'LEGACY99', director_user_id: 99, viewer_role: 'owner' },
+    { id: 1, name: 'Concert Band', director_user_id: 12, viewer_role: 'student', viewer_can_leave: true, viewer_can_manage: false, viewer_can_view_roster: false, viewer_can_view_class_analytics: false, viewer_has_aggregate_sharing_consent: true, roster_scope: 'self' },
+    { id: 2, name: 'Jazz Band', viewer_role: 'assistant', viewer_can_leave: true, viewer_can_manage: false, viewer_can_view_roster: true, viewer_can_view_class_analytics: true, viewer_has_aggregate_sharing_consent: true, roster_scope: 'active_redacted' },
+    { id: 3, name: 'Student-led Brass', join_code: null, viewer_role: 'owner', viewer_can_leave: false, viewer_can_manage: true, viewer_can_view_roster: true, viewer_can_view_class_analytics: true, viewer_has_aggregate_sharing_consent: false, roster_scope: 'full' },
+    { id: 4, name: 'Legacy-owned Brass', join_code: 'LEGACY99', director_user_id: 99, viewer_role: 'owner', viewer_can_leave: false, viewer_can_manage: true, viewer_can_view_roster: true, viewer_can_view_class_analytics: true, viewer_has_aggregate_sharing_consent: false, roster_scope: 'full' },
   ];
   let invitations = [...(options.invitations ?? [])];
   let roster = [...(options.initialRoster ?? [])];
   const counters = {
     creates: 0,
     memberInvites: 0,
+    sharingEnables: 0,
     accepts: 0,
     declines: 0,
     joins: 0,
@@ -129,7 +179,9 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
     releaseProfileFailure: () => {
       profileFailureReleased = true;
     },
-    joinPayload: null as { code?: string; instrument_id?: string } | null,
+    joinPayload: null as { code?: string; instrument_id?: string; sharing_consent?: { scope_code?: string; acknowledged?: boolean } } | null,
+    memberInvitePayload: null as { username?: string; instrument_id?: string; role_in_group?: string } | null,
+    sharingConsentPayload: null as { sharing_consent?: { scope_code?: string; acknowledged?: boolean } } | null,
   };
 
   await page.route('**/src/lib/supabase.ts*', async (route) => {
@@ -191,6 +243,10 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
         viewer_role: 'student',
         viewer_can_leave: true,
         viewer_can_manage: false,
+        viewer_can_view_roster: false,
+        viewer_can_view_class_analytics: false,
+        viewer_has_aggregate_sharing_consent: true,
+        roster_scope: 'self',
       };
       groups = [...groups, group];
       return respond({ joined: true, group_id: group.id, group_name: group.name });
@@ -208,6 +264,10 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
         viewer_role: 'owner',
         viewer_can_leave: false,
         viewer_can_manage: true,
+        viewer_can_view_roster: true,
+        viewer_can_view_class_analytics: true,
+        viewer_has_aggregate_sharing_consent: false,
+        roster_scope: 'full',
       };
       groups = [...groups, group];
       return respond(group);
@@ -230,6 +290,7 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
     const memberInviteMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/members\/by-username$/);
     if (memberInviteMatch && request.method() === 'POST') {
       counters.memberInvites += 1;
+      counters.memberInvitePayload = request.postDataJSON() as { username?: string; instrument_id?: string; role_in_group?: string };
       if (options.mutationDelayMs) await delay(options.mutationDelayMs);
       return respond({ id: 901, group_id: Number(memberInviteMatch[1]), status: 'invited' });
     }
@@ -259,6 +320,22 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
       return respond({ removed: true });
     }
 
+    const sharingConsentMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/sharing-consent$/);
+    if (sharingConsentMatch && request.method() === 'POST') {
+      counters.sharingEnables += 1;
+      counters.sharingConsentPayload = request.postDataJSON() as { sharing_consent?: { scope_code?: string; acknowledged?: boolean } };
+      const groupID = Number(sharingConsentMatch[1]);
+      groups = groups.map((group) => group.id === groupID
+        ? { ...group, viewer_has_aggregate_sharing_consent: true }
+        : group);
+      return respond({
+        group_id: groupID,
+        viewer_has_aggregate_sharing_consent: true,
+        aggregate_sharing_consented_at: '2026-08-24T12:00:00Z',
+        aggregate_sharing_scope_code: 'cloud_practice_sessions_since_membership_v1',
+      });
+    }
+
     const groupMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)$/);
     if (groupMatch && request.method() === 'GET') {
       const groupID = Number(groupMatch[1]);
@@ -266,15 +343,13 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
       if (groupDelay) await delay(groupDelay);
       const group = groups.find((candidate) => candidate.id === groupID);
       if (!group) return respond({ detail: 'Group not found' }, 404);
-      const canManage = group.viewer_can_manage ?? group.director_user_id === 99;
       return respond({
         ...group,
-        roster_scope: canManage ? 'full' : 'self',
-        members: canManage ? [] : [{
+        members: group.viewer_can_manage ? [] : [{
           id: group.id * 10,
           group_id: group.id,
           instrument_id: 'horn',
-          role_in_group: group.viewer_role,
+          role_in_group: group.viewer_role === 'assistant' ? 'assistant' : 'student',
           status: 'active',
           display_name: 'You',
           is_current_user: true,
@@ -282,9 +357,72 @@ async function installSignedInClassFixture(page: Page, options: FixtureOptions =
       });
     }
 
-    if (/^\/api\/ensemble\/groups\/\d+\/roster$/.test(path)) return respond({ students: roster });
-    if (path === '/api/ensemble/summary') return respond({ sections: [] });
-    if (path === '/api/ensemble/report') return respond({});
+    const rosterMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/roster$/);
+    if (rosterMatch) {
+      const group = groups.find((candidate) => candidate.id === Number(rosterMatch[1]));
+      if (!group) return respond({ detail: 'Group not found' }, 404);
+      const students = group.roster_scope === 'active_redacted'
+        ? roster.filter((student) => student.status === 'active').map(({ member_id: _memberId, user_id: _userId, username: _username, ...student }) => student)
+        : roster;
+      return respond({
+        group_id: group.id,
+        practice_aggregate_scope: practiceAggregateScope,
+        students,
+        ...classCapabilities(group),
+      });
+    }
+    const summaryMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/summary$/);
+    if (summaryMatch) {
+      const group = groups.find((candidate) => candidate.id === Number(summaryMatch[1]));
+      if (!group) return respond({ detail: 'Group not found' }, 404);
+      const current = emptyPracticeWindow();
+      return respond({
+        group_id: group.id,
+        session_count: 0,
+        sections: [],
+        overall: { instrument_id: 'all', session_count: 0, practice_minutes: 0, average_abs_cents: null, in_tune_percentage: null, top_problem_notes: [] },
+        trends: { current_7d: current, previous_7d: current, delta: { sessions_count: 0, practice_minutes: 0, average_abs_cents: null, in_tune_percentage: null }, generated_at: '2026-08-24T12:00:00Z' },
+        practice_aggregate_scope: practiceAggregateScope,
+        ...classCapabilities(group),
+      });
+    }
+    const reportMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/report$/);
+    if (reportMatch) {
+      const group = groups.find((candidate) => candidate.id === Number(reportMatch[1]));
+      if (!group) return respond({ detail: 'Group not found' }, 404);
+      return respond({
+        group_id: group.id,
+        date_range: 'all available ensemble sessions',
+        instrument_section: 'all brass',
+        top_problem_notes: [],
+        average_tuning_error: null,
+        recommended_rehearsal_focus: '',
+        suggested_long_tone_sequence: [],
+        sections: [],
+        practice_aggregate_scope: practiceAggregateScope,
+        ...classCapabilities(group),
+      });
+    }
+    const progressMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/my-progress$/);
+    if (progressMatch) {
+      const group = groups.find((candidate) => candidate.id === Number(progressMatch[1]));
+      if (!group) return respond({ detail: 'Group not found' }, 404);
+      const lifetime = emptyPracticeWindow();
+      return respond({
+        group_id: group.id,
+        group_name: group.name,
+        instrument_id: 'horn',
+        role_in_group: 'student',
+        membership_started_at: '2026-08-01T12:00:00Z',
+        practice_aggregate_scope: practiceAggregateScope,
+        lifetime,
+        current_7d: lifetime,
+        previous_7d: lifetime,
+        delta: { sessions_count: 0, practice_minutes: 0, average_abs_cents: null, in_tune_percentage: null },
+        inactivity: { state: 'no_practice_since_joining', days_since_last_practice: null, last_practice_at: null },
+        generated_at: '2026-08-24T12:00:00Z',
+      });
+    }
     return respond({ detail: 'Unexpected class fixture request' }, 500);
   });
 
@@ -391,6 +529,10 @@ async function installAccountSwitchFixture(
         viewer_role: 'student',
         viewer_can_leave: true,
         viewer_can_manage: false,
+        viewer_can_view_roster: false,
+        viewer_can_view_class_analytics: false,
+        viewer_has_aggregate_sharing_consent: true,
+        roster_scope: 'self',
       }]);
     }
     const groupMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)$/);
@@ -403,7 +545,30 @@ async function installAccountSwitchFixture(
         viewer_role: 'student',
         viewer_can_leave: true,
         viewer_can_manage: false,
+        viewer_can_view_roster: false,
+        viewer_can_view_class_analytics: false,
+        viewer_has_aggregate_sharing_consent: true,
+        roster_scope: 'self',
         members: [],
+      });
+    }
+    const progressMatch = path.match(/^\/api\/ensemble\/groups\/(\d+)\/my-progress$/);
+    if (progressMatch) {
+      const isAccountB = token === 'token-b';
+      const isAccountC = token === 'token-c';
+      const lifetime = emptyPracticeWindow();
+      return respond({
+        group_id: Number(progressMatch[1]),
+        group_name: isAccountC ? 'Account C Class' : isAccountB ? 'Account B Class' : 'Account A Class',
+        instrument_id: 'trumpet',
+        role_in_group: 'student',
+        membership_started_at: '2026-08-01T12:00:00Z',
+        practice_aggregate_scope: practiceAggregateScope,
+        lifetime,
+        current_7d: lifetime,
+        previous_7d: lifetime,
+        delta: { sessions_count: 0, practice_minutes: 0, average_abs_cents: null, in_tune_percentage: null },
+        inactivity: { state: 'no_practice_since_joining', days_since_last_practice: null, last_practice_at: null },
       });
     }
     return respond({ detail: 'Unexpected account-switch fixture request.' }, 500);
@@ -602,11 +767,11 @@ test('class UI stays stable across switching and leaving one of several classes'
   await expect(page.getByRole('heading', { name: 'Join another class' })).toBeVisible();
   await joinAnother.click();
   await expect(page.getByRole('heading', { name: 'Join another class' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Concert Band' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Jazz Band' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Concert Band' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Jazz Band' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Leave class' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Jazz Band' }).click();
+  await page.getByRole('tab', { name: 'Jazz Band' }).click();
   await expect(page.getByRole('heading', { name: 'Jazz Band' })).toBeVisible();
 
   const leaveTrigger = page.getByRole('button', { name: 'Leave class' });
@@ -626,12 +791,12 @@ test('class UI stays stable across switching and leaving one of several classes'
   dialog = page.getByRole('dialog', { name: 'Leave Jazz Band?' });
   await dialog.getByRole('button', { name: 'Leave class' }).click();
   await expect(page.getByText(/You left.*Jazz Band/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Jazz Band' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Concert Band' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Jazz Band' })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'Concert Band' })).toBeVisible();
   await expect(joinAnother).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Join another class' })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Student-led Brass' }).click();
+  await page.getByRole('tab', { name: 'Student-led Brass' }).click();
   await expect(page.getByText('Unavailable', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy code' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Share link' })).toBeDisabled();
@@ -640,7 +805,7 @@ test('class UI stays stable across switching and leaving one of several classes'
   await expect(page.getByText('ABCD2345', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Rotate code' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Legacy-owned Brass' }).click();
+  await page.getByRole('tab', { name: 'Legacy-owned Brass' }).click();
   await expect(page.getByText('LEGACY99', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Leave class' })).toHaveCount(0);
 
@@ -661,8 +826,8 @@ test('the latest class selection wins when detail responses arrive out of order'
   await page.goto('/ensemble');
   await expect(page.getByRole('heading', { name: 'Concert Band' })).toBeVisible();
 
-  const concertTab = page.getByRole('button', { name: 'Concert Band' });
-  const jazzTab = page.getByRole('button', { name: 'Jazz Band' });
+  const concertTab = page.getByRole('tab', { name: 'Concert Band' });
+  const jazzTab = page.getByRole('tab', { name: 'Jazz Band' });
   await jazzTab.click();
   await concertTab.click();
 
@@ -689,12 +854,16 @@ test('joins a second class and keeps prior memberships available', async ({ page
 
   await expect(page.getByText(/You joined.*Chamber Winds/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Chamber Winds' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Chamber Winds' })).toHaveClass(/active/);
-  await expect(page.getByRole('button', { name: 'Concert Band' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Jazz Band' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Chamber Winds' })).toHaveClass(/active/);
+  await expect(page.getByRole('tab', { name: 'Concert Band' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Jazz Band' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Join another class' })).toHaveCount(0);
   expect(counters.joins).toBe(1);
-  expect(counters.joinPayload).toEqual({ code: 'CHAMBER7', instrument_id: 'tuba' });
+  expect(counters.joinPayload).toEqual({
+    code: 'CHAMBER7',
+    instrument_id: 'tuba',
+    sharing_consent: { scope_code: 'cloud_practice_sessions_since_membership_v1', acknowledged: true },
+  });
 });
 
 test('a managing member can leave once while a slow request is in flight', async ({ page }) => {
@@ -708,6 +877,10 @@ test('a managing member can leave once while a slow request is in flight', async
       viewer_role: 'admin_observer',
       viewer_can_leave: true,
       viewer_can_manage: true,
+      viewer_can_view_roster: true,
+      viewer_can_view_class_analytics: true,
+      viewer_has_aggregate_sharing_consent: false,
+      roster_scope: 'full',
     }],
   });
   await page.goto('/ensemble');
@@ -741,8 +914,13 @@ test('remove-member confirmation is keyboard contained and submits once', async 
       viewer_role: 'owner',
       viewer_can_leave: false,
       viewer_can_manage: true,
+      viewer_can_view_roster: true,
+      viewer_can_view_class_analytics: true,
+      viewer_has_aggregate_sharing_consent: false,
+      roster_scope: 'full',
     }],
     initialRoster: [{
+      roster_row_id: 'roster-row-801',
       member_id: 801,
       user_id: 801,
       username: 'student-one',
@@ -756,6 +934,11 @@ test('remove-member confirmation is keyboard contained and submits once', async 
       in_tune_percentage: 82,
       last_practice_at: '2026-07-16T12:00:00Z',
       last_active_at: '2026-07-16T12:00:00Z',
+      lifetime: { sessions_count: 2, practice_minutes: 18, average_abs_cents: 7, in_tune_percentage: 82, last_practice_at: '2026-07-16T12:00:00Z' },
+      current_7d: { sessions_count: 1, practice_minutes: 8, average_abs_cents: 6, in_tune_percentage: 85, last_practice_at: '2026-07-16T12:00:00Z' },
+      previous_7d: { sessions_count: 1, practice_minutes: 10, average_abs_cents: 8, in_tune_percentage: 79, last_practice_at: '2026-07-09T12:00:00Z' },
+      delta: { sessions_count: 0, practice_minutes: -2, average_abs_cents: -2, in_tune_percentage: 6 },
+      inactivity: { state: 'inactive_7d', days_since_last_practice: 39, last_practice_at: '2026-07-16T12:00:00Z' },
     }],
   });
   await page.goto('/ensemble');

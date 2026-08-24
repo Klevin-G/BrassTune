@@ -142,7 +142,13 @@ final class BrassTuneAppUITests: XCTestCase {
 
         openTab("More", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["screen.more"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.descendants(matching: .any)["more.classes"].exists)
+        let classes = app.descendants(matching: .any)["more.classes"]
+        XCTAssertTrue(classes.waitForExistence(timeout: 5))
+        XCTAssertTrue(classes.isHittable)
+        classes.tap()
+        let classScreen = app.descendants(matching: .any)["screen.classes"]
+        XCTAssertTrue(classScreen.waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
         XCTAssertFalse(app.buttons["Offline practice packs"].exists)
 
         // Selection changes must replace the destination surface instead of overlaying it.
@@ -163,6 +169,39 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Any level · no microphone required"].exists)
         XCTAssertTrue(app.staticTexts["Complete five guided steps"].exists)
         XCTAssertFalse(app.buttons["Downloaded practice routines"].exists)
+    }
+
+    @MainActor
+    func testClassesExposeUsefulStudentOwnerAndAssistantWorkspaces() throws {
+        let app = launchFixtureApp(extraArguments: ["UITEST_CLASS_FLOWS"])
+        openTab("More", in: app)
+        let classesEntry = app.descendants(matching: .any)["more.classes"]
+        XCTAssertTrue(classesEntry.waitForExistence(timeout: 5))
+        classesEntry.tap()
+        let classScreen = app.scrollViews["screen.classes"].firstMatch
+        XCTAssertTrue(classScreen.waitForExistence(timeout: 5))
+
+        XCTAssertTrue(app.descendants(matching: .any)["classes.invitationPrivacy"].waitForExistence(timeout: 5))
+        let progressCard = app.descendants(matching: .any)["classes.student.progress"].firstMatch
+        XCTAssertTrue(progressCard.waitForExistence(timeout: 5))
+
+        let picker = app.descendants(matching: .any)["classes.activePicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
+        let ownerClass = app.buttons["Second demo class"]
+        XCTAssertTrue(ownerClass.waitForExistence(timeout: 5))
+        ownerClass.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["classes.director.inviteRole"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["classes.director.roster"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["classes.director.summary"].waitForExistence(timeout: 5))
+
+        picker.tap()
+        let assistantClass = app.buttons["Assistant demo class"]
+        XCTAssertTrue(assistantClass.waitForExistence(timeout: 5))
+        assistantClass.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["classes.assistant.readOnly"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["classes.director.roster"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "classes.director.remove.")).count, 0)
     }
 
     /// Exercises the orientations declared by the shipping target without

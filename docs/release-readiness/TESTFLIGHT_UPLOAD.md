@@ -3,6 +3,27 @@ Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-23 UTC.
 
+## Current replacement-candidate status
+
+Version `1.0.1` is now **Developer Rejected / Removed** and build 7 remains
+associated. The local Classes MVP requires a new build 8 candidate. No build 8
+archive, export, upload, TestFlight processing, build selection, or
+resubmission has occurred. Do not describe build 7 as Waiting for Review.
+
+The project settings now declare `MARKETING_VERSION 1.0.1` and
+`CURRENT_PROJECT_VERSION 8`. This is configuration only, not candidate
+evidence. Nandy’s iPhone 15 Pro Max / iOS 26.6.1 completed the physical
+student/owner/assistant fixture UI workspaces `1/1`, zero failed/skipped. This
+is not live hosted multi-account sync, migration, archive, or release evidence.
+
+Before creating build 8, apply and verify the pending Classes migration in the
+authorized environment, complete disposable live consent/class/privacy checks,
+and preserve the completed implementation-snapshot `26/26` UI evidence plus
+the final dedicated Classes `1/1` UI evidence. The build number is already
+configured as `8`; record the exact source revision and archive
+evidence, upload through Xcode, wait for processing, select build 8 for
+version `1.0.1`, refresh review notes/privacy answers as needed, then submit.
+
 This document describes submitted candidate `1.0.1 (7)`, archived from native
 source `d371100` on `arya/final-physical-release-20260823`. That source is
 distinct from deployed web/backend implementation `98fd1d9e7b85add63537e2e3dfe6d0`.

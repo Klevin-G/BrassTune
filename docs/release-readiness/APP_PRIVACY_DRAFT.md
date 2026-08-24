@@ -5,6 +5,16 @@ Updated: 2026-08-23 UTC.
 
 This draft is for owner/legal review. It is not a final App Store privacy nutrition-label answer.
 
+## Current local Classes MVP amendment
+
+Classes may share role-scoped aggregate participation and timing/pitch progress
+with authorized class owners and assistants after consent. They do not share
+raw audio, recordings, reflection text, imported-score content, note events,
+or private session detail. Existing/legacy members must re-consent before their
+practice data participates in this revised sharing path. This is a local
+implementation statement only: the supporting migration is unapplied and the
+live privacy/lifecycle flow remains unverified.
+
 Project attribution: Kelvin Guo, Arya Salem. This attribution does not identify
 the legal controller; that remains subject to owner/legal review.
 

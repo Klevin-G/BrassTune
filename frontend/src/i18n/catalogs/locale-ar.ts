@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "أدخل اسم مستخدم واسم عرض صالحين.",
   "auth.profileCompletionExpired": "انتهت جلسة تسجيل الدخول. سجّل الدخول مرة أخرى.",
   "auth.profileCompletionAccountChanged": "تغير الحساب النشط قبل اكتمال إعداد الملف الشخصي."
+  ,"class.active": "نشط",
+  "class.allActivity": "كل النشاط",
+  "class.allInstruments": "كل الآلات",
+  "class.allStatuses": "كل الحالات",
+  "class.loadFailedBody": "تعذّر تحميل صفوفك. تحقّق من الاتصال وحاول مرة أخرى.",
+  "class.minutesDelta": "{count} دقيقة مقارنة بالأسبوع السابق",
+  "class.noRosterMatches": "لا يوجد طلاب يطابقون عوامل التصفية هذه.",
+  "class.practiceNow": "تدرّب الآن",
+  "class.readOnlyRoster": "عرض للقراءة فقط للطلاب النشطين واتجاهات الصف. تفاصيل الحساب وأدوات الإدارة مخفية.",
+  "class.searchRoster": "ابحث عن الطلاب",
+  "class.sharedDataTitle": "ما يمكن لصفك رؤيته",
+  "class.sharedDataBody": "إجمالي التدريب السحابي منذ {date}: الوقت وعدد الجلسات وملخصات الضبط. يبقى الصوت ونص المراجعات وتفاصيل الجلسات خاصة.",
+  "class.sortBy": "ترتيب",
+  "class.sortLastPractice": "أحدث تدريب",
+  "class.sortName": "الاسم",
+  "class.sortWeeklyMinutes": "دقائق الأسبوع",
+  "class.status": "الحالة",
+  "class.weeklyTrend": "مقارنة بالأسبوع السابق",
+  "class.enableSharingTitle": "تفعيل مشاركة التقدم مع الصف",
+  "class.enableSharingBody": "تسبق هذه العضوية خيار الخصوصية الحالي. فعّل النطاق الإجمالي المحدود قبل ظهور تقدمك أو تحليلات المساعد.",
+  "class.enableSharing": "تفعيل المشاركة",
+  "class.enablingSharing": "جارٍ التفعيل…",
+  "class.sharingEnabled": "تم تفعيل مشاركة التقدم مع الصف.",
+  "class.sharingEnableError": "تعذّر تفعيل مشاركة التقدم مع الصف.",
+  "class.inviteRole": "الدور في الصف",
+  "class.inviteRoleAssistant": "مساعد",
+  "class.assistantRoleHelp": "يمكن للمساعدين رؤية القائمة النشطة منزوعة بيانات الحساب واتجاهات الصف، لكن لا يمكنهم الدعوة أو الإزالة أو مشاركة الرموز أو تدويرها أو إدارة الصف."
 } satisfies MessageCatalog;
 
 export default messages;

@@ -3972,7 +3972,7 @@ final class BrassTuneAppTests: XCTestCase {
             from: Data(contentsOf: stateURL)
         )
         XCTAssertEqual(migratedOnDisk.metronomeDefaultsVersion, 2)
-        XCTAssertEqual(migratedOnDisk.snapshotVersion, 5)
+        XCTAssertEqual(migratedOnDisk.snapshotVersion, 6)
         XCTAssertFalse(migratedOnDisk.metronome.muted)
         XCTAssertFalse(migratedOnDisk.metronome.visualOnly)
         XCTAssertEqual(migratedOnDisk.metronome.volume, 0.6, accuracy: 0.001)
@@ -4099,7 +4099,7 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertTrue(quarantinedOnDisk.sessions.isEmpty)
         XCTAssertTrue(quarantinedOnDisk.scores.isEmpty)
         XCTAssertNil(quarantinedOnDisk.activeScoreID)
-        XCTAssertEqual(quarantinedOnDisk.snapshotVersion, 5)
+        XCTAssertEqual(quarantinedOnDisk.snapshotVersion, 6)
 
         let secondRelaunch = AppModel(persistenceStore: store)
         secondRelaunch.enterGuestDemo(presentTutorial: false)
@@ -4990,9 +4990,12 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(post.path, "/api/ensemble/join")
         XCTAssertEqual(post.authorization, "Bearer fresh-token")
         let body = try XCTUnwrap(post.body)
-        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
-        XCTAssertEqual(payload["code"], "ABCD")
-        XCTAssertEqual(payload["instrument_id"], "trumpet")
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(payload["code"] as? String, "ABCD")
+        XCTAssertEqual(payload["instrument_id"] as? String, "trumpet")
+        let consent = try XCTUnwrap(payload["sharing_consent"] as? [String: Any])
+        XCTAssertEqual(consent["scope_code"] as? String, PracticeAggregateScope.cloudSessionsSinceMembership)
+        XCTAssertEqual(consent["acknowledged"] as? Bool, true)
         let delete = try XCTUnwrap(capturedRequests.first { $0.method == "DELETE" })
         XCTAssertEqual(delete.path, "/api/ensemble/groups/7/membership")
         XCTAssertEqual(delete.authorization, "Bearer fresh-token")
@@ -5041,11 +5044,11 @@ final class BrassTuneAppTests: XCTestCase {
             case ("GET", "/api/ensemble/invitations"):
                 data = Data(#"{"invitations":[{"member_id":901,"group_id":8,"group_name":"Studio One","instrument_id":"unassigned","role_in_group":"student","director_name":"Rivera"},{"member_id":902,"group_id":9,"group_name":"Studio Two","instrument_id":"unassigned","role_in_group":"student","director_name":"Chen"}]}"#.utf8)
             case ("GET", "/api/ensemble/groups/7"):
-                data = Data(#"{"id":7,"name":"Wind Ensemble","director_user_id":42,"join_code":"OLD7","viewer_role":"owner","viewer_can_leave":false,"viewer_can_manage":true,"roster_scope":"full","members":[{"id":101,"group_id":7,"user_id":501,"username":"student_one","display_name":"Student One","instrument_id":"trumpet","role_in_group":"student","status":"active"}]}"#.utf8)
+                data = Data(#"{"id":7,"name":"Wind Ensemble","director_user_id":42,"join_code":"OLD7","viewer_role":"owner","viewer_can_leave":false,"viewer_can_manage":true,"viewer_can_view_roster":true,"viewer_can_view_class_analytics":true,"roster_scope":"full_management","members":[{"id":101,"group_id":7,"user_id":501,"username":"student_one","display_name":"Student One","instrument_id":"trumpet","role_in_group":"student","status":"active"}]}"#.utf8)
             case ("GET", "/api/ensemble/groups/7/roster"):
-                data = Data(#"{"group_id":7,"practice_aggregate_scope":"membership_interval","students":[{"member_id":101,"user_id":501,"username":"student_one","display_name":"Student One","instrument_id":"trumpet","status":"active","role_in_group":"student","sessions_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"in_tune_percentage":82.0}]}"#.utf8)
+                data = Data(#"{"group_id":7,"practice_aggregate_scope":{"code":"cloud_practice_sessions_since_membership_v1","source":"cloud_practice_sessions","window":"membership_active_since","excludes":["reflections","audio","session_detail"]},"students":[{"member_id":101,"user_id":501,"username":"student_one","display_name":"Student One","instrument_id":"trumpet","status":"active","role_in_group":"student","sessions_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"in_tune_percentage":82.0}]}"#.utf8)
             case ("GET", "/api/ensemble/groups/7/summary"):
-                data = Data(#"{"group_id":7,"session_count":3,"sections":[{"instrument_id":"trumpet","session_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"top_problem_notes":[]}],"overall":{"instrument_id":"all","session_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"top_problem_notes":[]},"practice_aggregate_scope":"membership_interval"}"#.utf8)
+                data = Data(#"{"group_id":7,"session_count":3,"sections":[{"instrument_id":"trumpet","session_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"top_problem_notes":[]}],"overall":{"instrument_id":"all","session_count":3,"practice_minutes":24.0,"average_abs_cents":6.5,"top_problem_notes":[]},"practice_aggregate_scope":{"code":"cloud_practice_sessions_since_membership_v1","source":"cloud_practice_sessions","window":"membership_active_since","excludes":["reflections","audio","session_detail"]}}"#.utf8)
             case ("POST", "/api/ensemble/groups/7/members/by-username"):
                 data = Data(#"{"id":102,"group_id":7,"user_id":502,"username":"new_student","display_name":"New Student","instrument_id":"horn","role_in_group":"student","status":"invited"}"#.utf8)
             case ("POST", "/api/ensemble/groups/7/join-code/rotate"):
@@ -5053,7 +5056,7 @@ final class BrassTuneAppTests: XCTestCase {
             case ("DELETE", "/api/ensemble/groups/7/members/101"):
                 data = Data(#"{"removed":true}"#.utf8)
             case ("POST", "/api/ensemble/invitations/901/decline"):
-                data = Data(#"{"declined":true}"#.utf8)
+                data = Data(#"{"declined":true,"group_id":8}"#.utf8)
             case ("POST", "/api/ensemble/invitations/902/accept"):
                 data = Data(#"{"accepted":true,"group_id":9}"#.utf8)
             default:
@@ -5068,6 +5071,7 @@ final class BrassTuneAppTests: XCTestCase {
 
         let created = await model.createEnsemble(name: " Wind Ensemble ")
         XCTAssertTrue(created)
+        await model.loadSelectedEnsembleDetails(id: 7)
         XCTAssertEqual(model.selectedEnsembleRoster.map(\.memberID), [101])
         XCTAssertEqual(model.selectedEnsembleAggregate?.sessionCount, 3)
 
@@ -5077,6 +5081,13 @@ final class BrassTuneAppTests: XCTestCase {
             instrumentID: "horn"
         )
         XCTAssertTrue(invited)
+        let assistantInvited = await model.inviteEnsembleMember(
+            groupID: 7,
+            username: "assistant_user",
+            instrumentID: nil,
+            role: .assistant
+        )
+        XCTAssertTrue(assistantInvited)
         let rotated = await model.rotateEnsembleJoinCode(id: 7)
         XCTAssertTrue(rotated)
         XCTAssertEqual(model.ensembles.first?.joinCode, "NEW7")
@@ -5097,18 +5108,34 @@ final class BrassTuneAppTests: XCTestCase {
             $0.method == "POST" && $0.path == "/api/ensemble/groups/7/members/by-username"
         })
         let invitePayload = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: try XCTUnwrap(invite.body)) as? [String: String]
+            JSONSerialization.jsonObject(with: try XCTUnwrap(invite.body)) as? [String: Any]
         )
-        XCTAssertEqual(invitePayload["username"], "new_student")
-        XCTAssertEqual(invitePayload["role_in_group"], "student")
-        XCTAssertEqual(invitePayload["instrument_id"], "horn")
+        XCTAssertEqual(invitePayload["username"] as? String, "new_student")
+        XCTAssertEqual(invitePayload["role_in_group"] as? String, "student")
+        XCTAssertEqual(invitePayload["instrument_id"] as? String, "horn")
+        let assistantInvite = try XCTUnwrap(capturedRequests.first { request in
+            guard request.method == "POST",
+                  request.path == "/api/ensemble/groups/7/members/by-username",
+                  let body = request.body,
+                  let payload = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+                return false
+            }
+            return payload["username"] as? String == "assistant_user"
+        })
+        let assistantPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(assistantInvite.body)) as? [String: Any]
+        )
+        XCTAssertEqual(assistantPayload["role_in_group"] as? String, "assistant")
         let accept = try XCTUnwrap(capturedRequests.first {
             $0.method == "POST" && $0.path == "/api/ensemble/invitations/902/accept"
         })
         let acceptPayload = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: try XCTUnwrap(accept.body)) as? [String: String]
+            JSONSerialization.jsonObject(with: try XCTUnwrap(accept.body)) as? [String: Any]
         )
-        XCTAssertEqual(acceptPayload["instrument_id"], "trombone")
+        XCTAssertEqual(acceptPayload["instrument_id"] as? String, "trombone")
+        let acceptConsent = try XCTUnwrap(acceptPayload["sharing_consent"] as? [String: Any])
+        XCTAssertEqual(acceptConsent["scope_code"] as? String, PracticeAggregateScope.cloudSessionsSinceMembership)
+        XCTAssertEqual(acceptConsent["acknowledged"] as? Bool, true)
     }
 
     func testClassAggregateDTOsIgnoreRecordingAndReflectionFields() throws {
@@ -5127,6 +5154,204 @@ final class BrassTuneAppTests: XCTestCase {
         let student = try XCTUnwrap(students.first)
         XCTAssertNil(student["recording_url"])
         XCTAssertNil(student["reflection"])
+    }
+
+    func testBackendNestedClassPayloadsNormalizeScopesTrendsInactivityAndStableRosterIDs() throws {
+        let decoder = JSONDecoder()
+        let progress = try decoder.decode(
+            EnsembleMyProgress.self,
+            from: Data(#"{"group_id":7,"group_name":"Studio","instrument_id":"trumpet","role_in_group":"student","membership_started_at":"2026-08-01T00:00:00Z","lifetime":{"sessions_count":4,"practice_minutes":40,"average_abs_cents":6.5,"in_tune_percentage":82,"last_practice_at":"2026-08-10T00:00:00Z"},"current_7d":{"sessions_count":1,"practice_minutes":8,"average_abs_cents":5,"in_tune_percentage":88,"last_practice_at":"2026-08-10T00:00:00Z"},"previous_7d":{"sessions_count":2,"practice_minutes":15,"average_abs_cents":7,"in_tune_percentage":76,"last_practice_at":"2026-08-03T00:00:00Z"},"delta":{"sessions_count":-1,"practice_minutes":-7,"average_abs_cents":-2,"in_tune_percentage":12},"inactivity":{"state":"inactive_7d","days_since_last_practice":8,"last_practice_at":"2026-08-10T00:00:00Z"},"generated_at":"2026-08-18T00:00:00Z","practice_aggregate_scope":{"code":"cloud_practice_sessions_since_membership_v1","source":"cloud_practice_sessions","window":"membership_active_since","excludes":["reflections","audio","session_detail"]}}"#.utf8)
+        )
+        XCTAssertEqual(progress.memberID, -7)
+        XCTAssertEqual(progress.activeSince, "2026-08-01T00:00:00Z")
+        XCTAssertEqual(progress.lastPracticeAt, "2026-08-10T00:00:00Z")
+        XCTAssertEqual(progress.inactivityDays, 8)
+        XCTAssertEqual(progress.inactivityBand, .inactive)
+        XCTAssertEqual(progress.practiceMinutesDelta, -7)
+
+        let roster = try decoder.decode(
+            EnsembleRoster.self,
+            from: Data(#"{"group_id":7,"roster_scope":"active_redacted","students":[{"roster_row_id":"redacted-a","display_name":"Student","instrument_id":"trumpet","status":"active","role_in_group":"student","sessions_count":1,"practice_minutes":10,"average_abs_cents":null,"in_tune_percentage":null,"last_practice_at":"2026-08-18T00:00:00Z","current_7d":{"sessions_count":1,"practice_minutes":10,"average_abs_cents":null,"in_tune_percentage":null},"previous_7d":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"delta":{"sessions_count":1,"practice_minutes":10,"average_abs_cents":null,"in_tune_percentage":null},"inactivity":{"state":"active_today","days_since_last_practice":0,"last_practice_at":"2026-08-18T00:00:00Z"}},{"roster_row_id":"redacted-b","display_name":"Student","instrument_id":"trumpet","status":"active","role_in_group":"student","sessions_count":1,"practice_minutes":9,"average_abs_cents":null,"in_tune_percentage":null,"last_practice_at":"2026-08-15T00:00:00Z","current_7d":{"sessions_count":1,"practice_minutes":9,"average_abs_cents":null,"in_tune_percentage":null},"previous_7d":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"delta":{"sessions_count":1,"practice_minutes":9,"average_abs_cents":null,"in_tune_percentage":null},"inactivity":{"state":"active_this_week","days_since_last_practice":3,"last_practice_at":"2026-08-15T00:00:00Z"}},{"roster_row_id":"redacted-c","display_name":"Student","instrument_id":"trumpet","status":"active","role_in_group":"student","sessions_count":1,"practice_minutes":5,"average_abs_cents":null,"in_tune_percentage":null,"last_practice_at":"2026-08-01T00:00:00Z","current_7d":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"previous_7d":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"delta":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"inactivity":{"state":"inactive_7d","days_since_last_practice":17,"last_practice_at":"2026-08-01T00:00:00Z"}},{"roster_row_id":"redacted-d","display_name":"Student","instrument_id":"trumpet","status":"active","role_in_group":"student","sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null,"last_practice_at":null,"current_7d":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"previous_7d":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"delta":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"inactivity":{"state":"no_practice_since_joining","days_since_last_practice":null,"last_practice_at":null}}],"practice_aggregate_scope":{"code":"cloud_practice_sessions_since_membership_v1","source":"cloud_practice_sessions","window":"membership_active_since","excludes":["reflections","audio","session_detail"]}}"#.utf8)
+        )
+        XCTAssertEqual(roster.students.map(\.rosterRowID), ["redacted-a", "redacted-b", "redacted-c", "redacted-d"])
+        XCTAssertEqual(Set(roster.students.map(\.id)).count, 4)
+        XCTAssertTrue(roster.students.allSatisfy { $0.memberID == nil })
+        XCTAssertEqual(roster.students.map(\.inactivityBand), [.recent, .recent, .inactive, .noPractice])
+        XCTAssertEqual(roster.students.map(\.practiceMinutesDelta), [10, 9, 0, 0])
+
+        let owner = try decoder.decode(
+            EnsembleSummary.self,
+            from: Data(#"{"id":1,"name":"Owner","viewer_role":"owner","viewer_can_leave":false,"viewer_can_manage":true,"viewer_can_view_roster":true,"viewer_can_view_class_analytics":true,"viewer_has_aggregate_sharing_consent":true,"roster_scope":"full"}"#.utf8)
+        )
+        let assistant = try decoder.decode(
+            EnsembleSummary.self,
+            from: Data(#"{"id":2,"name":"Assistant","viewer_role":"assistant","viewer_can_leave":true,"viewer_can_manage":false,"viewer_can_view_roster":true,"viewer_can_view_class_analytics":true,"viewer_has_aggregate_sharing_consent":true,"roster_scope":"active_redacted"}"#.utf8)
+        )
+        let studentWithoutConsent = try decoder.decode(
+            EnsembleSummary.self,
+            from: Data(#"{"id":3,"name":"Student","viewer_role":"student","viewer_can_leave":true,"viewer_can_manage":false,"viewer_can_view_roster":false,"viewer_can_view_class_analytics":false,"viewer_has_aggregate_sharing_consent":false,"roster_scope":"self"}"#.utf8)
+        )
+        XCTAssertEqual(owner.rosterScope, .fullManagement)
+        XCTAssertEqual(assistant.rosterScope, .activeReadOnly)
+        XCTAssertFalse(owner.canActivateNativeAggregateSync)
+        XCTAssertTrue(assistant.canActivateNativeAggregateSync)
+        XCTAssertFalse(studentWithoutConsent.canActivateNativeAggregateSync)
+    }
+
+    func testBackendEmptyAggregateSummaryDecodesNullMetricsAndTopLevelTrends() throws {
+        let summary = try JSONDecoder().decode(
+            EnsembleAggregateSummary.self,
+            from: Data(#"{"group_id":9,"session_count":0,"sections":[{"instrument_id":"manual","session_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null,"top_problem_notes":[]}],"overall":{"instrument_id":"all","session_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null,"top_problem_notes":[]},"trends":{"current_7d":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null,"last_practice_at":null},"previous_7d":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null,"last_practice_at":null},"delta":{"sessions_count":0,"practice_minutes":0,"average_abs_cents":null,"in_tune_percentage":null},"generated_at":"2026-08-23T00:00:00Z"},"practice_aggregate_scope":{"code":"cloud_practice_sessions_since_membership_v1","source":"cloud_practice_sessions","window":"membership_active_since","excludes":["reflections","audio","session_detail"]}}"#.utf8)
+        )
+        XCTAssertNil(summary.overall.averageAbsCents)
+        XCTAssertNil(summary.sections.first?.averageAbsCents)
+        XCTAssertEqual(summary.trends?.current7d.practiceMinutes, 0)
+        XCTAssertEqual(summary.trends?.practiceMinutesDelta, 0)
+        XCTAssertEqual(summary.trends?.generatedAt, "2026-08-23T00:00:00Z")
+    }
+
+    @MainActor
+    func testClassCapabilitiesLoadStudentProgressAndAssistantReadOnlyResources() async throws {
+        let client = APIClient(session: makeStubSession())
+        let stateURL = FileManager.default.temporaryDirectory.appendingPathComponent("BrassTune-classes-\(UUID().uuidString).json")
+        defer {
+            StubURLProtocol.handler = nil
+            try? FileManager.default.removeItem(at: stateURL)
+        }
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: stateURL),
+            apiClient: client,
+            classAccessTokenProvider: { _ in "fresh-token" }
+        )
+        model.config = AppConfig(
+            environment: .staging,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
+            supabaseURL: nil,
+            supabasePublishableKey: nil
+        )
+        nonisolated(unsafe) var paths: [String] = []
+        let scope = #"{"code":"cloud_practice_sessions_since_membership_v1","source":"cloud_practice_sessions","window":"membership_active_since","excludes":["reflections","audio","session_detail"]}"#
+        StubURLProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            let data: Data
+            switch path {
+            case "/api/ensemble/groups":
+                data = Data(#"[{"id":1,"name":"Student Class","viewer_role":"student","viewer_can_leave":true,"viewer_can_manage":false,"viewer_can_view_roster":false,"viewer_can_view_class_analytics":false,"roster_scope":"self"},{"id":2,"name":"Assistant Class","viewer_role":"assistant","viewer_can_leave":true,"viewer_can_manage":false,"viewer_can_view_roster":true,"viewer_can_view_class_analytics":true,"roster_scope":"active_read_only"}]"#.utf8)
+            case "/api/ensemble/groups/1":
+                data = Data(#"{"id":1,"name":"Student Class","viewer_role":"student","viewer_can_leave":true,"viewer_can_manage":false,"viewer_can_view_roster":false,"viewer_can_view_class_analytics":false,"roster_scope":"self","members":[]}"#.utf8)
+            case "/api/ensemble/groups/1/my-progress":
+                data = Data("{\"group_id\":1,\"member_id\":11,\"active_since\":\"2026-08-01T00:00:00Z\",\"last_practice_at\":null,\"inactivity_days\":null,\"inactivity_band\":\"no_practice\",\"lifetime\":{\"sessions_count\":0,\"practice_minutes\":0,\"average_abs_cents\":null,\"in_tune_percentage\":null},\"current_7d\":{\"sessions_count\":0,\"practice_minutes\":0,\"average_abs_cents\":null,\"in_tune_percentage\":null},\"previous_7d\":{\"sessions_count\":0,\"practice_minutes\":0,\"average_abs_cents\":null,\"in_tune_percentage\":null},\"practice_minutes_delta\":0,\"practice_aggregate_scope\":\(scope)}".utf8)
+            case "/api/ensemble/groups/2":
+                data = Data(#"{"id":2,"name":"Assistant Class","viewer_role":"assistant","viewer_can_leave":true,"viewer_can_manage":false,"viewer_can_view_roster":true,"viewer_can_view_class_analytics":true,"roster_scope":"active_read_only","members":[]}"#.utf8)
+            case "/api/ensemble/groups/2/roster":
+                data = Data("{\"group_id\":2,\"students\":[],\"practice_aggregate_scope\":\(scope)}".utf8)
+            case "/api/ensemble/groups/2/summary":
+                data = Data("{\"group_id\":2,\"session_count\":0,\"sections\":[],\"overall\":{\"instrument_id\":\"all\",\"session_count\":0,\"practice_minutes\":0,\"average_abs_cents\":0},\"practice_aggregate_scope\":\(scope)}".utf8)
+            default:
+                XCTFail("Unexpected capability request: \(path)")
+                data = Data()
+            }
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: data
+            )
+        }
+
+        await model.loadEnsembles()
+        await model.loadSelectedEnsembleDetails(id: 1)
+        XCTAssertEqual(model.selectedEnsembleProgress?.groupID, 1)
+        XCTAssertFalse(paths.contains("/api/ensemble/groups/1/roster"))
+        XCTAssertFalse(paths.contains("/api/ensemble/groups/1/summary"))
+
+        model.selectedEnsembleID = 2
+        await model.loadSelectedEnsembleDetails(id: 2)
+        XCTAssertNil(model.selectedEnsembleProgress)
+        XCTAssertNotNil(model.selectedEnsembleAggregate)
+        XCTAssertTrue(paths.contains("/api/ensemble/groups/2/roster"))
+        XCTAssertTrue(paths.contains("/api/ensemble/groups/2/summary"))
+    }
+
+    @MainActor
+    func testNativeClassSessionSyncUsesStableIDsOrderedBatchesAndNeverAudio() async throws {
+        let client = APIClient(session: makeStubSession())
+        let config = AppConfig(
+            environment: .staging,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
+            supabaseURL: nil,
+            supabasePublishableKey: nil
+        )
+        let coordinator = NativeClassSessionSyncCoordinator(apiClient: client, batchSize: 2)
+        nonisolated(unsafe) var captured: [CapturedRequest] = []
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let body = requestBodyData(request)
+            captured.append(CapturedRequest(
+                method: request.httpMethod ?? "GET",
+                path: request.url?.path ?? "",
+                authorization: request.value(forHTTPHeaderField: "Authorization"),
+                body: body
+            ))
+            let path = request.url?.path ?? ""
+            let data: Data
+            if path == "/api/sessions/start" {
+                data = Data(#"{"id":44,"idempotency_replayed":true}"#.utf8)
+            } else if path.hasSuffix("/samples/batch") {
+                let frames = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(body)) as? [[String: Any]])
+                data = try JSONSerialization.data(withJSONObject: [
+                    "saved": 0,
+                    "replayed": frames.count,
+                    "rejected": 0,
+                ])
+            } else if path == "/api/sessions/44/stop" {
+                data = Data(#"{"id":44}"#.utf8)
+            } else {
+                XCTFail("Unexpected sync request: \(path)")
+                data = Data()
+            }
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: data
+            )
+        }
+        let sessionID = UUID()
+        var session = PracticeSession(
+            id: sessionID,
+            name: "Private session title",
+            instrumentId: "trumpet",
+            referencePitchHz: 442,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_010),
+            frames: [PitchFrame.fixture(index: 2), PitchFrame.fixture(index: 0), PitchFrame.fixture(index: 1)],
+            retainedRecordingURL: URL(fileURLWithPath: "/tmp/private-audio.caf"),
+            attachedScoreID: UUID(),
+            practiceNotes: "Private reflection and score note"
+        )
+        session.frames = [session.frames[0], session.frames[1], session.frames[2]]
+
+        try await coordinator.synchronize(session: session, config: config, bearerToken: "fresh-token")
+
+        XCTAssertEqual(captured.map(\.path), [
+            "/api/sessions/start",
+            "/api/sessions/44/samples/batch",
+            "/api/sessions/44/samples/batch",
+            "/api/sessions/44/stop",
+        ])
+        XCTAssertTrue(captured.allSatisfy { $0.authorization == "Bearer fresh-token" })
+        XCTAssertFalse(captured.contains { $0.path.contains("/audio") })
+        let start = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(captured[0].body)) as? [String: Any])
+        XCTAssertEqual(start["client_session_id"] as? String, sessionID.uuidString.lowercased())
+        XCTAssertEqual(start["reference_pitch_hz"] as? Double, 442)
+        XCTAssertNil(start["name"])
+        let firstBatch = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(captured[1].body)) as? [[String: Any]])
+        let secondBatch = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(captured[2].body)) as? [[String: Any]])
+        XCTAssertEqual((firstBatch + secondBatch).compactMap { $0["client_frame_index"] as? Int }, [0, 1, 2])
+        XCTAssertEqual((firstBatch + secondBatch).compactMap { $0["timestamp_ms"] as? Int }, [0, 110, 220])
+        let allBodies = captured.compactMap(\.body).compactMap { String(data: $0, encoding: .utf8) }.joined()
+        XCTAssertFalse(allBodies.contains("Private"))
+        XCTAssertFalse(allBodies.contains("private-audio"))
+        XCTAssertFalse(allBodies.contains("attachedScore"))
+        XCTAssertFalse(allBodies.contains("practiceNotes"))
     }
 
     @MainActor
@@ -5235,6 +5460,126 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(model.ensembles.map(\.id), [2])
         XCTAssertEqual(model.selectedEnsembleID, 2)
         StubURLProtocol.handler = nil
+    }
+
+    @MainActor
+    func testAccountTransitionDuringJoinCannotMutateReloadOrSetStatusForNewAccount() async throws {
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("class-account-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            classAccessTokenProvider: { _ in "account-a-token" }
+        )
+        model.config = AppConfig(
+            environment: .staging,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
+            supabaseURL: nil,
+            supabasePublishableKey: nil
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        nonisolated(unsafe) var paths: [String] = []
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"joined":true,"group_id":11,"group_name":"Account A Class"}"#.utf8),
+                delayNanoseconds: 180_000_000
+            )
+        }
+
+        let joinTask = Task { await model.joinEnsemble(code: "ABCD") }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        model.enterGuestDemo(presentTutorial: false)
+        model.ensembles = [EnsembleSummary(
+            id: 22,
+            name: "Account B Class",
+            directorUserID: nil,
+            joinCode: nil,
+            viewerRole: .student,
+            viewerCanLeave: true,
+            viewerCanManage: false,
+            createdAt: nil,
+            updatedAt: nil
+        )]
+        model.selectedEnsembleID = 22
+
+        let joined = await joinTask.value
+        XCTAssertFalse(joined)
+        XCTAssertEqual(model.ensembles.map(\.id), [22])
+        XCTAssertEqual(model.selectedEnsembleID, 22)
+        XCTAssertNil(model.ensembleStatusMessage)
+        XCTAssertFalse(model.ensembleMutationInProgress)
+        XCTAssertEqual(paths, ["/api/ensemble/join"])
+        XCTAssertFalse(paths.contains { $0.contains("/sessions/") })
+    }
+
+    @MainActor
+    func testAccountTransitionDuringSharingConsentCannotActivateSyncOrReloadNewAccount() async throws {
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("class-consent-account-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()),
+            classAccessTokenProvider: { _ in "account-a-token" }
+        )
+        model.config = AppConfig(
+            environment: .staging,
+            apiBaseURL: AppConfig.approvedProductionAPIOrigin,
+            supabaseURL: nil,
+            supabasePublishableKey: nil
+        )
+        model.enterGuestDemo(presentTutorial: false)
+        model.ensembles = [EnsembleSummary(
+            id: 11,
+            name: "Account A Class",
+            directorUserID: nil,
+            joinCode: nil,
+            viewerRole: .student,
+            viewerCanLeave: true,
+            viewerCanManage: false,
+            viewerHasAggregateSharingConsent: false,
+            createdAt: nil,
+            updatedAt: nil
+        )]
+        model.selectedEnsembleID = 11
+        nonisolated(unsafe) var paths: [String] = []
+        nonisolated(unsafe) var consentBody: Data?
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            paths.append(request.url?.path ?? "")
+            consentBody = requestBodyData(request)
+            return .init(
+                response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data(#"{"enabled":true,"group_id":11,"aggregate_sharing_scope_code":"cloud_practice_sessions_since_membership_v1"}"#.utf8),
+                delayNanoseconds: 180_000_000
+            )
+        }
+
+        let consentTask = Task { await model.enableEnsembleAggregateSharing(id: 11) }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        model.enterGuestDemo(presentTutorial: false)
+        model.ensembles = [EnsembleSummary(
+            id: 22,
+            name: "Account B Owner Class",
+            directorUserID: nil,
+            joinCode: "B-CODE",
+            viewerRole: .owner,
+            viewerCanLeave: false,
+            viewerCanManage: true,
+            createdAt: nil,
+            updatedAt: nil
+        )]
+        model.selectedEnsembleID = 22
+
+        let enabled = await consentTask.value
+        XCTAssertFalse(enabled)
+        XCTAssertEqual(model.ensembles.map(\.id), [22])
+        XCTAssertEqual(model.selectedEnsembleID, 22)
+        XCTAssertNil(model.ensembleStatusMessage)
+        XCTAssertEqual(paths, ["/api/ensemble/groups/11/sharing-consent"])
+        XCTAssertFalse(paths.contains { $0.contains("/sessions/") })
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(consentBody)) as? [String: Any])
+        let consent = try XCTUnwrap(payload["sharing_consent"] as? [String: Any])
+        XCTAssertEqual(consent["scope_code"] as? String, PracticeAggregateScope.cloudSessionsSinceMembership)
+        XCTAssertEqual(consent["acknowledged"] as? Bool, true)
     }
 
     func testPlayAlongAdvancesAfterSustainedCorrectWrittenPitchClass() {
@@ -7602,7 +7947,7 @@ final class BrassTuneAppTests: XCTestCase {
             from: Data(contentsOf: stateURL)
         )
         XCTAssertNil(repairedOnDisk.sessions.first?.retainedRecordingURL)
-        XCTAssertEqual(repairedOnDisk.snapshotVersion, 5)
+        XCTAssertEqual(repairedOnDisk.snapshotVersion, 6)
 
         let secondRelaunch = AppModel(persistenceStore: store, recordingStorageDirectory: recordingDirectory)
         secondRelaunch.enterGuestDemo(presentTutorial: false)

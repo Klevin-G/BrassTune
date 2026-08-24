@@ -70546,6 +70546,83 @@
         }
       }
     },
+    "Your practice timing and pitch measurements sync to your account. Class owners and accepted assistants receive aggregate practice minutes, session counts, and tuning summaries only. Recordings, reflections, and session details are not shared." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تتم مزامنة توقيت تدريبك وقياسات طبقة الصوت مع حسابك. يتلقى مالكو الصف والمساعدون المقبولون إجماليات دقائق التدريب وعدد الجلسات وملخصات الضبط فقط. لا تتم مشاركة التسجيلات أو التأملات أو تفاصيل الجلسات."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Übungszeiten und Tonhöhenmessungen werden mit deinem Konto synchronisiert. Kursinhaber und angenommene Assistenten erhalten nur zusammengefasste Übungsminuten, Sitzungszahlen und Stimmübersichten. Aufnahmen, Reflexionen und Sitzungsdetails werden nicht geteilt."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your practice timing and pitch measurements sync to your account. Class owners and accepted assistants receive aggregate practice minutes, session counts, and tuning summaries only. Recordings, reflections, and session details are not shared."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El tiempo de práctica y las mediciones de afinación se sincronizan con tu cuenta. Los propietarios de la clase y los asistentes aceptados solo reciben minutos de práctica, cantidad de sesiones y resúmenes de afinación agregados. No se comparten grabaciones, reflexiones ni detalles de sesiones."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La durée de pratique et les mesures de hauteur se synchronisent avec votre compte. Les responsables de classe et assistants acceptés ne reçoivent que les minutes de pratique, nombres de séances et résumés d’accordage agrégés. Les enregistrements, réflexions et détails des séances ne sont pas partagés."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "練習時間と音高測定値はアカウントに同期されます。クラス所有者と承認されたアシスタントには、練習時間、セッション数、チューニング概要の集計だけが共有されます。録音、振り返り、セッションの詳細は共有されません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연습 시간과 음정 측정값이 계정에 동기화됩니다. 클래스 소유자와 수락된 보조자는 집계된 연습 시간, 세션 수, 튜닝 요약만 받습니다. 녹음, 회고 및 세션 세부 정보는 공유되지 않습니다."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O tempo de prática e as medições de afinação são sincronizados com sua conta. Proprietários da turma e assistentes aceitos recebem apenas minutos de prática, contagens de sessões e resumos de afinação agregados. Gravações, reflexões e detalhes das sessões não são compartilhados."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Время занятий и измерения высоты звука синхронизируются с вашей учетной записью. Владельцы класса и принятые ассистенты получают только сводные минуты занятий, число сессий и итоги настройки. Записи, заметки и подробности сессий не передаются."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thời gian luyện tập và số đo cao độ được đồng bộ với tài khoản của bạn. Chủ lớp và trợ giảng đã chấp nhận chỉ nhận số phút luyện tập, số buổi và tóm tắt chỉnh dây tổng hợp. Bản ghi âm, phần tự đánh giá và chi tiết buổi tập không được chia sẻ."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的练习时间和音高测量会同步到帐户。班级所有者和已接受的助教只能收到汇总练习分钟数、练习次数和调音摘要。录音、反思和练习详情不会共享。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的練習時間和音高測量會同步到帳戶。班級擁有者和已接受的助教只能收到彙總練習分鐘數、練習次數和調音摘要。錄音、反思和練習詳細資料不會分享。"
+          }
+        }
+      }
+    },
     "Your practice details are safe." : {
       "extractionState" : "stale",
       "localizations" : {

@@ -1,4 +1,5 @@
 import os
+import uuid
 from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
@@ -184,6 +185,73 @@ def _ensure_sqlite_deletion_tombstone_enforcement_phase() -> None:
         )
 
 
+def _sqlite_unique_column_sets(table_name: str) -> set[tuple[str, ...]]:
+    unique_columns = set()
+    with engine.connect() as connection:
+        for row in connection.execute(text("pragma index_list(%s)" % table_name)).fetchall():
+            if not bool(row[2]):
+                continue
+            index_name = str(row[1]).replace("'", "''")
+            columns = tuple(
+                str(column[2])
+                for column in connection.execute(
+                    text("pragma index_info('%s')" % index_name)
+                ).fetchall()
+            )
+            unique_columns.add(columns)
+    return unique_columns
+
+
+def _ensure_sqlite_class_sync_contract() -> None:
+    group_columns = _sqlite_columns("group_members")
+    if {"id", "roster_row_id"}.issubset(group_columns):
+        with engine.begin() as connection:
+            missing_ids = connection.execute(
+                text(
+                    "select id from group_members "
+                    "where roster_row_id is null or trim(roster_row_id) = ''"
+                )
+            ).scalars().all()
+            for member_id in missing_ids:
+                connection.execute(
+                    text(
+                        "update group_members set roster_row_id = :roster_row_id "
+                        "where id = :member_id"
+                    ),
+                    {"roster_row_id": str(uuid.uuid4()), "member_id": member_id},
+                )
+
+    unique_indexes = (
+        (
+            "practice_sessions",
+            "uq_practice_sessions_user_client_session",
+            ("user_id", "client_session_id"),
+        ),
+        (
+            "pitch_samples",
+            "uq_pitch_samples_session_client_frame",
+            ("session_id", "client_frame_index"),
+        ),
+        (
+            "group_members",
+            "uq_group_members_roster_row_id",
+            ("roster_row_id",),
+        ),
+    )
+    for table_name, index_name, columns in unique_indexes:
+        if not set(columns).issubset(_sqlite_columns(table_name)):
+            continue
+        if columns in _sqlite_unique_column_sets(table_name):
+            continue
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "create unique index %s on %s (%s)"
+                    % (index_name, table_name, ", ".join(columns))
+                )
+            )
+
+
 def ensure_additive_columns() -> None:
     # Tests and maintenance callers may supply a scoped engine. Inspect the
     # engine that will actually be mutated instead of the import-time URL.
@@ -206,12 +274,16 @@ def ensure_additive_columns() -> None:
             "updated_at": "DATETIME",
         },
         "practice_sessions": {
+            "client_session_id": "VARCHAR",
             "audio_storage_provider": "VARCHAR",
             "audio_object_key": "VARCHAR",
             "audio_mime_type": "VARCHAR",
             "audio_duration_seconds": "FLOAT",
             "audio_size_bytes": "INTEGER",
             "audio_uploaded_at": "DATETIME",
+        },
+        "pitch_samples": {
+            "client_frame_index": "INTEGER",
         },
         "groups": {
             "updated_at": "DATETIME",
@@ -222,6 +294,9 @@ def ensure_additive_columns() -> None:
             "status": "VARCHAR DEFAULT 'active'",
             "active_since": "DATETIME",
             "removed_at": "DATETIME",
+            "aggregate_sharing_consented_at": "DATETIME",
+            "aggregate_sharing_scope_code": "VARCHAR",
+            "roster_row_id": "VARCHAR",
         },
     }
     for table_name, columns in additions.items():
@@ -233,6 +308,7 @@ def ensure_additive_columns() -> None:
                 _add_sqlite_column(table_name, column_name, definition)
     _ensure_sqlite_account_deletion_user_id_nullable()
     _ensure_sqlite_deletion_tombstone_enforcement_phase()
+    _ensure_sqlite_class_sync_contract()
     user_columns = _sqlite_columns("users")
     if {
         "profile_setup_completed_at",

@@ -3,6 +3,44 @@ Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-23. The historical report below retains its original evidence. Current live and local facts are recorded separately and do not certify physical-device audio behavior or App Review acceptance.
 
+## Current local Classes MVP addendum
+
+The Classes feature is now implemented in the local worktree for students,
+class owners, and assistants. It is not yet a hosted or App Store feature.
+
+- Student views support joining/consenting, membership status, and a useful
+  personal contribution summary.
+- Owner views support a roster, invite/join controls, role-aware aggregate
+  progress, and actionable participation follow-up; assistant views support
+  the delegated roster/reporting surfaces allowed by their role.
+- The deliberately narrow, benchmark-inspired classroom boundary is aggregate
+  practice participation and timing/pitch progress. It excludes assignments,
+  grading, raw audio, reflection text, score content, note events, and
+  per-session detail.
+- Local evidence: backend `356 passed, 13 skipped`; web `288/288` plus
+  production build; class Playwright `55/55`; Swift Core `12/12`; native
+  `278/278`; the implementation-snapshot full native UI suite `26/26`; and a
+  dedicated final Classes student/owner/assistant UI check `1/1`.
+  Localization, design, diff, and `npm audit` checks completed. Final
+  correctness review and security re-scan are closed. These are local checks,
+  not hosted evidence.
+- The linked Supabase dry-run accepted the one new Classes migration. It has
+  **not** been applied. No hosted SHA, physical class-sync proof, build-8
+  archive/upload, build selection, or resubmission is recorded.
+
+App Store Connect currently has version `1.0.1` in **Developer Rejected /
+Removed** state; build 7 remains associated. A future build 8 must be a new
+archive, upload, processing/selection, and review submission after the
+unapplied migration and live class/privacy acceptance gates close.
+
+The project now declares `MARKETING_VERSION 1.0.1` and
+`CURRENT_PROJECT_VERSION 8`; this configures the next candidate but is not an
+archive, upload, or App Store Connect action. The physical Classes fixture UI
+test passed `1/1`, zero failed/skipped, on Nandy’s iPhone 15 Pro Max running
+iOS 26.6.1. It verifies student/owner/assistant fixture workspaces only—not
+live hosted multi-account sync, migration application, or release-candidate
+evidence.
+
 ## 2026-08-23 verified current evidence
 
 - Apple Developer membership: **Enrolled as Individual**.
