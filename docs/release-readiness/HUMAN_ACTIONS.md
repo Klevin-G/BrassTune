@@ -3,7 +3,7 @@ Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-23. These are real external gates, not missing local implementation work.
 
-1. Resolve the replacement-candidate sequence for `1.0.1`: it is **Developer Rejected / Removed** and build 7 remains associated. Apply/verify the Classes migration, complete live acceptance, archive/upload/process/select build 8, then resubmit. No build-8 step is complete yet.
+1. Monitor App Review submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08` for candidate `1.0.1 (8)`. It is **Waiting for Review** with manual release; approval/rejection remains external.
 2. Run unavailable attended checks: calibrated brass/acoustic accuracy; AirPlay/HomePod, Bluetooth, and wired routes; Files/Photos preseeded fixtures; timer/media-reset operator prerequisites; and full assistive-technology/iPad coverage.
 3. Perform disposable live account/avatar/export/delete/storage/class/OAuth acceptance checks. The Supabase avatar migration is applied and verified, but configuration evidence does not replace lifecycle acceptance.
 4. Decide the Apple developer-name path: public name remains `Arya Salem`; a `BrassTune` rename needs Apple Support and/or an eligible organization/entity transfer path.

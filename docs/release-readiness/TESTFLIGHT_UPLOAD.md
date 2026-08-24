@@ -1,45 +1,32 @@
 # TestFlight upload — current archive/export procedure
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-23 UTC.
+Updated: 2026-08-24 UTC.
 
-## Current replacement-candidate status
+## Current submitted candidate
 
-Version `1.0.1` is now **Developer Rejected / Removed** and build 7 remains
-associated. The local Classes MVP requires a new build 8 candidate. No build 8
-archive, export, upload, TestFlight processing, build selection, or
-resubmission has occurred. Do not describe build 7 as Waiting for Review.
+Candidate `1.0.1 (8)` is implementation/archive/deployment SHA
+`5acfa2ecc6b7403d1572d7382d41357c8ccc2fb4` (PR 32 merged). A later SHA may
+contain docs-only changes and does not change candidate identity. The archive
+uses canonical Supabase `yznziwe`, bundle `com.aryasalem.BrassTune`, Apple
+Distribution team `8S79RLTSWV`, `get-task-allow=false`,
+`beta-reports-active=true`, and a privacy manifest. IPA SHA-256 is
+`cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`; matching
+app/dSYM UUID is `8378AB6E-EA6E-32B3-A26E-F781A481518D`.
 
-The project settings now declare `MARKETING_VERSION 1.0.1` and
-`CURRENT_PROJECT_VERSION 8`. This is configuration only, not candidate
-evidence. Nandy’s iPhone 15 Pro Max / iOS 26.6.1 completed the physical
-student/owner/assistant fixture UI workspaces `1/1`, zero failed/skipped. This
-is not live hosted multi-account sync, migration, archive, or release evidence.
-
-Before creating build 8, apply and verify the pending Classes migration in the
-authorized environment, complete disposable live consent/class/privacy checks,
-and preserve the completed implementation-snapshot `26/26` UI evidence plus
-the final dedicated Classes `1/1` UI evidence. The build number is already
-configured as `8`; record the exact source revision and archive
-evidence, upload through Xcode, wait for processing, select build 8 for
-version `1.0.1`, refresh review notes/privacy answers as needed, then submit.
-
-This document describes submitted candidate `1.0.1 (7)`, archived from native
-source `d371100` on `arya/final-physical-release-20260823`. That source is
-distinct from deployed web/backend implementation `98fd1d9e7b85add63537e2e3dfe6d0`.
-Archive/export and upload succeeded; TestFlight reports build 7 **Ready to
-Submit**. Version `1.0.1` has build 7 attached and is **Waiting for Review**
-with manual release selected. These facts do not prove App Review approval.
+Archive/export evidence is under
+`/Users/aryasalem/Library/Application Support/BrassTune/ReleaseEvidence/AppStoreCandidate-2026-08-24-1.0.1-8`.
+Upload succeeded; processing is Complete/Ready to Submit; build 8 is selected;
+metadata and review notes are updated. Submission
+`14b8ba6a-fe40-421f-ab61-790bbe51cb08` was submitted by Arya Salem on August
+24 and is **Waiting for Review** with manual release. This is not approval.
+Build 7 is historical removed/superseded.
 
 ## Candidate-version rule
 
-The archive/export script uses the version and build already declared by the
-Xcode project. Its export options set
-`manageAppVersionAndBuildNumber=false`, so it does not replace the candidate
-version or build number. Keep build `7` bound to the exact reviewed candidate.
-If a replacement archive is required, manually increment the project build
-number before archiving and treat the replacement as a new candidate; do not
-reuse or let the export tool auto-manage build `7`.
+The archive/export script uses the version and build declared by the Xcode
+project. Its export options set `manageAppVersionAndBuildNumber=false`; do not
+allow a later archive to overwrite or be represented as this build-8 candidate.
 
 ## Archive and export
 
@@ -59,17 +46,13 @@ scripts/ios/build-testflight.sh
 
 The output directory must be a dedicated release-evidence directory. Preserve
 the resulting archive, IPA, export diagnostics, and dSYM evidence together with
-the exact source revision and the `1.0.1 (7)` version/build inspection. The
-final IPA SHA-256 is `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`;
-the matching app/dSYM UUID is `77D84475-6D50-3D94-B842-290431F0D74D`.
+the exact source revision and the `1.0.1 (8)` version/build inspection.
 
 ## Upload and candidate closure
 
 The generated IPA was uploaded through Xcode and completed TestFlight processing.
-Its strict distribution signature is valid for `Apple Distribution: Arya Salem`
-(team `8S79RLTSWV`), bundle `com.aryasalem.BrassTune`, and production
-environment/API configuration. The review notes were replaced, and version
-`1.0.1` with build 7 was submitted. Do not use a simulator, a build-only
+The review notes were updated and version `1.0.1` with build 8 was submitted.
+Do not use a simulator, a build-only
 archive, or an earlier TestFlight build as a substitute for unavailable
 attended acoustic, accessory-route, or full accessibility validation.
 
@@ -80,7 +63,5 @@ against the final candidate before acting.
 
 ## Historical record
 
-The former `0.1.0 (1)` instructions and references to `1.0.0 (2)` or
-`1.0.1 (6)` were
-superseded. They are not valid upload instructions for this candidate and must
-not be used to select, replace, or describe build `7`.
+Build 7 and earlier references are historical only and must not be used to
+describe, select, or replace build 8.

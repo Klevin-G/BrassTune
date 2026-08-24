@@ -1,12 +1,12 @@
 # App Review Notes Draft
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated for the local Classes MVP. Version `1.0.1` is currently **Developer
-Rejected / Removed** in App Store Connect, with build 7 still associated. This
-is a draft for a future build 8; no archive, upload, build selection, or review
-submission is claimed.
+Updated: 2026-08-24. Candidate `1.0.1 (8)` from implementation/archive SHA
+`5acfa2ecc6b7403d1572d7382d41357c8ccc2fb4` is uploaded, processed, selected,
+and submitted as `14b8ba6a-fe40-421f-ab61-790bbe51cb08`. It is **Waiting for
+Review** with manual release. Build 7 is historical removed/superseded.
 
-## Draft build-8 Classes review path
+## Submitted build-8 Classes review path
 
 > Classes are optional and can be reviewed after creating or signing into an
 > account. A student may join and consent to the class-sharing flow. Owners can
@@ -17,11 +17,8 @@ submission is claimed.
 > progress is shared only after consent; legacy members are prompted to
 > re-consent.
 
-Before this text can be used, apply and verify the migration in the authorized
-environment, complete disposable live consent/class acceptance, archive and
-upload build 8, wait for processing, select it for `1.0.1`, and submit again.
-The project is configured for that candidate as `1.0.1 (8)`, but no archive,
-upload, selection, or submission exists. A physical Classes fixture UI run
+The supporting migration is applied and read back with its constraints/RLS
+boundaries verified. A physical Classes fixture UI run
 passed student/owner/assistant workspaces `1/1`, zero failed/skipped, on
 Nandy’s iPhone 15 Pro Max / iOS 26.6.1. It does not establish live hosted
 multi-account sync or release-candidate behavior.
@@ -68,12 +65,12 @@ multi-account sync or release-candidate behavior.
 
 ## Submitted-candidate boundary
 
-- Candidate `1.0.1 (7)` was archived/exported from `d371100`, uploaded, and is
-  TestFlight **Ready to Submit**. Its IPA has a strict valid distribution
-  signature, matching app/dSYM UUID `77D84475-6D50-3D94-B842-290431F0D74D`, and
-  SHA-256 `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`.
-- Version `1.0.1` build 7 is submitted and **Waiting for Review** with manual
-  release selected. This is not approval or release evidence.
+- Candidate `1.0.1 (8)` is archived/exported/uploaded and Complete/Ready to
+  Submit. Its IPA SHA-256 is
+  `cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`; matching
+  app/dSYM UUID is `8378AB6E-EA6E-32B3-A26E-F781A481518D`.
+- Submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08` is **Waiting for Review**
+  with manual release; this is not approval or release evidence.
 - Automated physical runs cover the listed UI/audio matrices, but calibrated
   acoustic accuracy, accessory routes, Files/Photos fixtures, timer/media-reset
   prerequisites, and full assistive-technology/iPad validation remain unavailable.

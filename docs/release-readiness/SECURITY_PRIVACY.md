@@ -9,9 +9,9 @@ does not share raw audio, recordings, reflection text, imported-score content,
 note events, or private per-session detail with a class owner or assistant.
 Legacy members must re-consent before their data participates in this updated
 class-sharing flow. These are source/local boundaries: the new Classes
-migration has only passed a linked-project dry-run and is not applied, so live
-consent enforcement and cross-account denial still need disposable acceptance
-testing.
+migration `20260824031433` is applied/read back with its five constraints, UUID
+default, RLS, and anon/auth direct-SELECT boundary validated. Live consent
+enforcement and cross-account denial still need disposable acceptance testing.
 
 Updated: 2026-08-23. This document distinguishes deployed implementation `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0` from native archive source `d371100`; it does not turn remaining unattended lifecycle checks into passes.
 
