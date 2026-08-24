@@ -1597,6 +1597,9 @@ struct PracticeSession: Codable, Equatable, Identifiable {
     let id: UUID
     var name: String
     var instrumentId: String
+    /// Persist the calibration used for this take so a later idempotent cloud
+    /// replay cannot change immutable metadata after the user adjusts tuning.
+    var referencePitchHz: Double = NativeReferencePitch.defaultHz
     var startedAt: Date
     var endedAt: Date?
     var frames: [PitchFrame]
@@ -1621,6 +1624,7 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         id: UUID,
         name: String,
         instrumentId: String,
+        referencePitchHz: Double = NativeReferencePitch.defaultHz,
         startedAt: Date,
         endedAt: Date?,
         frames: [PitchFrame],
@@ -1637,6 +1641,7 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         self.id = id
         self.name = name
         self.instrumentId = instrumentId
+        self.referencePitchHz = NativeReferencePitch.sanitized(referencePitchHz)
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.frames = frames
@@ -1655,6 +1660,7 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         case id
         case name
         case instrumentId
+        case referencePitchHz
         case startedAt
         case endedAt
         case frames
@@ -1674,6 +1680,10 @@ struct PracticeSession: Codable, Equatable, Identifiable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         instrumentId = try container.decode(String.self, forKey: .instrumentId)
+        referencePitchHz = NativeReferencePitch.sanitized(
+            try container.decodeIfPresent(Double.self, forKey: .referencePitchHz)
+                ?? NativeReferencePitch.defaultHz
+        )
         startedAt = try container.decode(Date.self, forKey: .startedAt)
         endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
         frames = try container.decode([PitchFrame].self, forKey: .frames)
@@ -1883,16 +1893,238 @@ struct NativePracticeHistoryExport: Codable, Equatable {
     }
 }
 
+enum EnsembleViewerRole: String, Codable, CaseIterable {
+    case owner
+    case assistant
+    case student
+    case adminObserver = "admin_observer"
+}
+
+enum EnsembleInvitationRole: String, Codable, CaseIterable, Identifiable {
+    case student
+    case assistant
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .student: return NativeLocalization.string("Student")
+        case .assistant: return NativeLocalization.string("Assistant")
+        }
+    }
+}
+
+enum EnsembleRosterScope: String, Codable {
+    case fullManagement = "full_management"
+    case activeReadOnly = "active_read_only"
+    case `self`
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch value {
+        case Self.fullManagement.rawValue, "full": self = .fullManagement
+        case Self.activeReadOnly.rawValue, "active_redacted": self = .activeReadOnly
+        case "self": self = .self
+        default:
+            throw DecodingError.dataCorruptedError(
+                in: try decoder.singleValueContainer(),
+                debugDescription: "Unsupported class roster scope: \(value)"
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+struct PracticeAggregateScope: Codable, Equatable {
+    static let cloudSessionsSinceMembership = "cloud_practice_sessions_since_membership_v1"
+
+    let code: String
+    let source: String
+    let window: String
+    let excludes: [String]
+
+    var isSupportedClassSharingScope: Bool {
+        code == Self.cloudSessionsSinceMembership
+            && source == "cloud_practice_sessions"
+            && window == "membership_active_since"
+            && Set(excludes).isSuperset(of: ["reflections", "audio", "session_detail"])
+    }
+}
+
+struct PracticeMetricSlice: Codable, Equatable {
+    let sessionsCount: Int
+    let practiceMinutes: Double
+    let averageAbsCents: Double?
+    let inTunePercentage: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionsCount = "sessions_count"
+        case practiceMinutes = "practice_minutes"
+        case averageAbsCents = "average_abs_cents"
+        case inTunePercentage = "in_tune_percentage"
+    }
+}
+
+enum PracticeInactivityBand: String, Codable {
+    case recent
+    case watch
+    case inactive
+    case noPractice = "no_practice"
+
+    fileprivate static func backendState(_ value: String?) -> Self {
+        switch value {
+        case "active_today", "active_this_week": return .recent
+        case "inactive_7d": return .inactive
+        case "no_practice_since_joining": return .noPractice
+        default: return .watch
+        }
+    }
+}
+
+private struct PracticeMetricDeltaDTO: Decodable {
+    let practiceMinutes: Double
+
+    enum CodingKeys: String, CodingKey {
+        case practiceMinutes = "practice_minutes"
+    }
+}
+
+private struct PracticeInactivityDTO: Decodable {
+    let state: String
+    let daysSinceLastPractice: Int?
+    let lastPracticeAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case daysSinceLastPractice = "days_since_last_practice"
+        case lastPracticeAt = "last_practice_at"
+    }
+}
+
+struct EnsembleMyProgress: Codable, Equatable {
+    let groupID: Int
+    let memberID: Int
+    let activeSince: String
+    let lastPracticeAt: String?
+    let inactivityDays: Int?
+    let inactivityBand: PracticeInactivityBand
+    let lifetime: PracticeMetricSlice
+    let current7d: PracticeMetricSlice
+    let previous7d: PracticeMetricSlice
+    let practiceMinutesDelta: Double
+    let practiceAggregateScope: PracticeAggregateScope
+
+    enum CodingKeys: String, CodingKey {
+        case groupID = "group_id"
+        case memberID = "member_id"
+        case activeSince = "active_since"
+        case lastPracticeAt = "last_practice_at"
+        case inactivityDays = "inactivity_days"
+        case inactivityBand = "inactivity_band"
+        case lifetime
+        case current7d = "current_7d"
+        case previous7d = "previous_7d"
+        case practiceMinutesDelta = "practice_minutes_delta"
+        case practiceAggregateScope = "practice_aggregate_scope"
+        case membershipStartedAt = "membership_started_at"
+        case delta
+        case inactivity
+    }
+
+    init(
+        groupID: Int,
+        memberID: Int,
+        activeSince: String,
+        lastPracticeAt: String?,
+        inactivityDays: Int?,
+        inactivityBand: PracticeInactivityBand,
+        lifetime: PracticeMetricSlice,
+        current7d: PracticeMetricSlice,
+        previous7d: PracticeMetricSlice,
+        practiceMinutesDelta: Double,
+        practiceAggregateScope: PracticeAggregateScope
+    ) {
+        self.groupID = groupID
+        self.memberID = memberID
+        self.activeSince = activeSince
+        self.lastPracticeAt = lastPracticeAt
+        self.inactivityDays = inactivityDays
+        self.inactivityBand = inactivityBand
+        self.lifetime = lifetime
+        self.current7d = current7d
+        self.previous7d = previous7d
+        self.practiceMinutesDelta = practiceMinutesDelta
+        self.practiceAggregateScope = practiceAggregateScope
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        groupID = try container.decode(Int.self, forKey: .groupID)
+        memberID = try container.decodeIfPresent(Int.self, forKey: .memberID) ?? -groupID
+        activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)
+            ?? container.decode(String.self, forKey: .membershipStartedAt)
+        let nestedInactivity = try container.decodeIfPresent(PracticeInactivityDTO.self, forKey: .inactivity)
+        lastPracticeAt = try container.decodeIfPresent(String.self, forKey: .lastPracticeAt)
+            ?? nestedInactivity?.lastPracticeAt
+        inactivityDays = try container.decodeIfPresent(Int.self, forKey: .inactivityDays)
+            ?? nestedInactivity?.daysSinceLastPractice
+        inactivityBand = try container.decodeIfPresent(PracticeInactivityBand.self, forKey: .inactivityBand)
+            ?? .backendState(nestedInactivity?.state)
+        lifetime = try container.decode(PracticeMetricSlice.self, forKey: .lifetime)
+        current7d = try container.decode(PracticeMetricSlice.self, forKey: .current7d)
+        previous7d = try container.decode(PracticeMetricSlice.self, forKey: .previous7d)
+        practiceMinutesDelta = try container.decodeIfPresent(Double.self, forKey: .practiceMinutesDelta)
+            ?? container.decode(PracticeMetricDeltaDTO.self, forKey: .delta).practiceMinutes
+        practiceAggregateScope = try container.decode(PracticeAggregateScope.self, forKey: .practiceAggregateScope)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(groupID, forKey: .groupID)
+        try container.encode(memberID, forKey: .memberID)
+        try container.encode(activeSince, forKey: .activeSince)
+        try container.encodeIfPresent(lastPracticeAt, forKey: .lastPracticeAt)
+        try container.encodeIfPresent(inactivityDays, forKey: .inactivityDays)
+        try container.encode(inactivityBand, forKey: .inactivityBand)
+        try container.encode(lifetime, forKey: .lifetime)
+        try container.encode(current7d, forKey: .current7d)
+        try container.encode(previous7d, forKey: .previous7d)
+        try container.encode(practiceMinutesDelta, forKey: .practiceMinutesDelta)
+        try container.encode(practiceAggregateScope, forKey: .practiceAggregateScope)
+    }
+}
+
+struct ClassAggregateSharingConsent: Codable, Equatable {
+    static let required = ClassAggregateSharingConsent(
+        scopeCode: PracticeAggregateScope.cloudSessionsSinceMembership,
+        acknowledged: true
+    )
+
+    let scopeCode: String
+    let acknowledged: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case scopeCode = "scope_code"
+        case acknowledged
+    }
+}
+
 struct EnsembleSummary: Codable, Equatable, Identifiable {
     let id: Int
     var name: String
     var directorUserID: Int?
     var joinCode: String?
-    var viewerRole: String
+    var viewerRole: EnsembleViewerRole
     var viewerCanLeave: Bool
     var viewerCanManage: Bool
+    var viewerCanViewRoster: Bool
+    var viewerCanViewClassAnalytics: Bool
+    var viewerHasAggregateSharingConsent: Bool
     var members: [EnsembleMember]? = nil
-    var rosterScope: String? = nil
+    var rosterScope: EnsembleRosterScope? = nil
     // Backend timestamps are informational here and may include fractional
     // seconds without a timezone, so retain them without fragile date parsing.
     var createdAt: String?
@@ -1906,20 +2138,82 @@ struct EnsembleSummary: Codable, Equatable, Identifiable {
         case viewerRole = "viewer_role"
         case viewerCanLeave = "viewer_can_leave"
         case viewerCanManage = "viewer_can_manage"
+        case viewerCanViewRoster = "viewer_can_view_roster"
+        case viewerCanViewClassAnalytics = "viewer_can_view_class_analytics"
+        case viewerHasAggregateSharingConsent = "viewer_has_aggregate_sharing_consent"
         case members
         case rosterScope = "roster_scope"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
 
+    init(
+        id: Int,
+        name: String,
+        directorUserID: Int?,
+        joinCode: String?,
+        viewerRole: EnsembleViewerRole,
+        viewerCanLeave: Bool,
+        viewerCanManage: Bool,
+        viewerCanViewRoster: Bool? = nil,
+        viewerCanViewClassAnalytics: Bool? = nil,
+        viewerHasAggregateSharingConsent: Bool = false,
+        members: [EnsembleMember]? = nil,
+        rosterScope: EnsembleRosterScope? = nil,
+        createdAt: String?,
+        updatedAt: String?
+    ) {
+        self.id = id
+        self.name = name
+        self.directorUserID = directorUserID
+        self.joinCode = joinCode
+        self.viewerRole = viewerRole
+        self.viewerCanLeave = viewerCanLeave
+        self.viewerCanManage = viewerCanManage
+        self.viewerCanViewRoster = viewerCanViewRoster ?? viewerCanManage
+        self.viewerCanViewClassAnalytics = viewerCanViewClassAnalytics ?? viewerCanManage
+        self.viewerHasAggregateSharingConsent = viewerHasAggregateSharingConsent
+        self.members = members
+        self.rosterScope = rosterScope
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        directorUserID = try container.decodeIfPresent(Int.self, forKey: .directorUserID)
+        joinCode = try container.decodeIfPresent(String.self, forKey: .joinCode)
+        viewerRole = try container.decode(EnsembleViewerRole.self, forKey: .viewerRole)
+        viewerCanLeave = try container.decode(Bool.self, forKey: .viewerCanLeave)
+        viewerCanManage = try container.decode(Bool.self, forKey: .viewerCanManage)
+        viewerCanViewRoster = try container.decodeIfPresent(Bool.self, forKey: .viewerCanViewRoster)
+            ?? viewerCanManage
+        viewerCanViewClassAnalytics = try container.decodeIfPresent(Bool.self, forKey: .viewerCanViewClassAnalytics)
+            ?? viewerCanManage
+        viewerHasAggregateSharingConsent = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .viewerHasAggregateSharingConsent
+        ) ?? false
+        members = try container.decodeIfPresent([EnsembleMember].self, forKey: .members)
+        rosterScope = try container.decodeIfPresent(EnsembleRosterScope.self, forKey: .rosterScope)
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+    }
+
     var canLeave: Bool { viewerCanLeave }
+
+    var canActivateNativeAggregateSync: Bool {
+        [.student, .assistant].contains(viewerRole) && viewerHasAggregateSharingConsent
+    }
 
     var viewerRoleLabel: String {
         switch viewerRole {
-        case "owner": return NativeLocalization.string("Class owner")
-        case "assistant": return NativeLocalization.string("Assistant")
-        case "admin_observer": return NativeLocalization.string("Administrator observer")
-        default: return NativeLocalization.string("Student")
+        case .owner: return NativeLocalization.string("Class owner")
+        case .assistant: return NativeLocalization.string("Assistant")
+        case .adminObserver: return NativeLocalization.string("Administrator observer")
+        case .student: return NativeLocalization.string("Student")
         }
     }
 }
@@ -1987,16 +2281,29 @@ struct EnsembleInvitation: Codable, Equatable, Identifiable {
 struct EnsembleRoster: Codable, Equatable {
     let groupID: Int
     let students: [EnsembleRosterStudent]
+    let practiceAggregateScope: PracticeAggregateScope?
 
     enum CodingKeys: String, CodingKey {
         case groupID = "group_id"
         case students
+        case practiceAggregateScope = "practice_aggregate_scope"
+    }
+
+    init(
+        groupID: Int,
+        students: [EnsembleRosterStudent],
+        practiceAggregateScope: PracticeAggregateScope? = nil
+    ) {
+        self.groupID = groupID
+        self.students = students
+        self.practiceAggregateScope = practiceAggregateScope
     }
 }
 
 struct EnsembleRosterStudent: Codable, Equatable, Identifiable {
-    var id: Int { memberID }
-    let memberID: Int
+    var id: String { rosterRowID }
+    let rosterRowID: String
+    let memberID: Int?
     let username: String?
     let displayName: String?
     let instrumentID: String
@@ -2007,8 +2314,16 @@ struct EnsembleRosterStudent: Codable, Equatable, Identifiable {
     let averageAbsCents: Double?
     let inTunePercentage: Double?
     let lastPracticeAt: String?
+    let activeSince: String?
+    let inactivityDays: Int?
+    let inactivityBand: PracticeInactivityBand?
+    let lifetime: PracticeMetricSlice?
+    let current7d: PracticeMetricSlice?
+    let previous7d: PracticeMetricSlice?
+    let practiceMinutesDelta: Double?
 
     enum CodingKeys: String, CodingKey {
+        case rosterRowID = "roster_row_id"
         case memberID = "member_id"
         case username
         case displayName = "display_name"
@@ -2020,6 +2335,138 @@ struct EnsembleRosterStudent: Codable, Equatable, Identifiable {
         case averageAbsCents = "average_abs_cents"
         case inTunePercentage = "in_tune_percentage"
         case lastPracticeAt = "last_practice_at"
+        case activeSince = "active_since"
+        case inactivityDays = "inactivity_days"
+        case inactivityBand = "inactivity_band"
+        case lifetime
+        case current7d = "current_7d"
+        case previous7d = "previous_7d"
+        case practiceMinutesDelta = "practice_minutes_delta"
+        case delta
+        case inactivity
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        username = try container.decodeIfPresent(String.self, forKey: .username)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        instrumentID = try container.decode(String.self, forKey: .instrumentID)
+        status = try container.decode(String.self, forKey: .status)
+        roleInGroup = try container.decode(String.self, forKey: .roleInGroup)
+        sessionsCount = try container.decode(Int.self, forKey: .sessionsCount)
+        practiceMinutes = try container.decode(Double.self, forKey: .practiceMinutes)
+        averageAbsCents = try container.decodeIfPresent(Double.self, forKey: .averageAbsCents)
+        inTunePercentage = try container.decodeIfPresent(Double.self, forKey: .inTunePercentage)
+        activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)
+        let nestedInactivity = try container.decodeIfPresent(PracticeInactivityDTO.self, forKey: .inactivity)
+        lastPracticeAt = try container.decodeIfPresent(String.self, forKey: .lastPracticeAt)
+            ?? nestedInactivity?.lastPracticeAt
+        inactivityDays = try container.decodeIfPresent(Int.self, forKey: .inactivityDays)
+            ?? nestedInactivity?.daysSinceLastPractice
+        inactivityBand = try container.decodeIfPresent(PracticeInactivityBand.self, forKey: .inactivityBand)
+            ?? .backendState(nestedInactivity?.state)
+        current7d = try container.decodeIfPresent(PracticeMetricSlice.self, forKey: .current7d)
+        previous7d = try container.decodeIfPresent(PracticeMetricSlice.self, forKey: .previous7d)
+        lifetime = try container.decodeIfPresent(PracticeMetricSlice.self, forKey: .lifetime)
+            ?? PracticeMetricSlice(
+                sessionsCount: sessionsCount,
+                practiceMinutes: practiceMinutes,
+                averageAbsCents: averageAbsCents,
+                inTunePercentage: inTunePercentage
+            )
+        practiceMinutesDelta = try container.decodeIfPresent(Double.self, forKey: .practiceMinutesDelta)
+            ?? container.decodeIfPresent(PracticeMetricDeltaDTO.self, forKey: .delta)?.practiceMinutes
+        memberID = try container.decodeIfPresent(Int.self, forKey: .memberID)
+        rosterRowID = try container.decodeIfPresent(String.self, forKey: .rosterRowID)
+            ?? memberID.map { "member-\($0)" }
+            ?? Self.syntheticRosterRowID(
+                displayName: displayName,
+                instrumentID: instrumentID,
+                roleInGroup: roleInGroup
+            )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(rosterRowID, forKey: .rosterRowID)
+        try container.encodeIfPresent(memberID, forKey: .memberID)
+        try container.encodeIfPresent(username, forKey: .username)
+        try container.encodeIfPresent(displayName, forKey: .displayName)
+        try container.encode(instrumentID, forKey: .instrumentID)
+        try container.encode(status, forKey: .status)
+        try container.encode(roleInGroup, forKey: .roleInGroup)
+        try container.encode(sessionsCount, forKey: .sessionsCount)
+        try container.encode(practiceMinutes, forKey: .practiceMinutes)
+        try container.encodeIfPresent(averageAbsCents, forKey: .averageAbsCents)
+        try container.encodeIfPresent(inTunePercentage, forKey: .inTunePercentage)
+        try container.encodeIfPresent(lastPracticeAt, forKey: .lastPracticeAt)
+        try container.encodeIfPresent(activeSince, forKey: .activeSince)
+        try container.encodeIfPresent(inactivityDays, forKey: .inactivityDays)
+        try container.encodeIfPresent(inactivityBand, forKey: .inactivityBand)
+        try container.encodeIfPresent(lifetime, forKey: .lifetime)
+        try container.encodeIfPresent(current7d, forKey: .current7d)
+        try container.encodeIfPresent(previous7d, forKey: .previous7d)
+        try container.encodeIfPresent(practiceMinutesDelta, forKey: .practiceMinutesDelta)
+    }
+
+    private static func syntheticRosterRowID(
+        displayName: String?,
+        instrumentID: String,
+        roleInGroup: String
+    ) -> String {
+        let identity = "\(displayName ?? "")|\(instrumentID)|\(roleInGroup)"
+        let hash = identity.utf8.reduce(5381) { partial, byte in
+            (partial &* 33 &+ Int(byte)) % 2_000_000_000
+        }
+        return "legacy-redacted-" + String(hash)
+    }
+
+    init(
+        memberID: Int?,
+        rosterRowID: String? = nil,
+        username: String?,
+        displayName: String?,
+        instrumentID: String,
+        status: String,
+        roleInGroup: String,
+        sessionsCount: Int,
+        practiceMinutes: Double,
+        averageAbsCents: Double?,
+        inTunePercentage: Double?,
+        lastPracticeAt: String?,
+        activeSince: String? = nil,
+        inactivityDays: Int? = nil,
+        inactivityBand: PracticeInactivityBand? = nil,
+        lifetime: PracticeMetricSlice? = nil,
+        current7d: PracticeMetricSlice? = nil,
+        previous7d: PracticeMetricSlice? = nil,
+        practiceMinutesDelta: Double? = nil
+    ) {
+        self.memberID = memberID
+        self.rosterRowID = rosterRowID
+            ?? memberID.map { "member-\($0)" }
+            ?? Self.syntheticRosterRowID(
+                displayName: displayName,
+                instrumentID: instrumentID,
+                roleInGroup: roleInGroup
+            )
+        self.username = username
+        self.displayName = displayName
+        self.instrumentID = instrumentID
+        self.status = status
+        self.roleInGroup = roleInGroup
+        self.sessionsCount = sessionsCount
+        self.practiceMinutes = practiceMinutes
+        self.averageAbsCents = averageAbsCents
+        self.inTunePercentage = inTunePercentage
+        self.lastPracticeAt = lastPracticeAt
+        self.activeSince = activeSince
+        self.inactivityDays = inactivityDays
+        self.inactivityBand = inactivityBand
+        self.lifetime = lifetime
+        self.current7d = current7d
+        self.previous7d = previous7d
+        self.practiceMinutesDelta = practiceMinutesDelta
     }
 
     var displayLabel: String {
@@ -2029,16 +2476,80 @@ struct EnsembleRosterStudent: Codable, Equatable, Identifiable {
     }
 }
 
+struct EnsembleAggregateTrends: Codable, Equatable {
+    let current7d: PracticeMetricSlice
+    let previous7d: PracticeMetricSlice
+    let practiceMinutesDelta: Double
+    let generatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case current7d = "current_7d"
+        case previous7d = "previous_7d"
+        case practiceMinutesDelta = "practice_minutes_delta"
+        case generatedAt = "generated_at"
+        case delta
+    }
+
+    init(
+        current7d: PracticeMetricSlice,
+        previous7d: PracticeMetricSlice,
+        practiceMinutesDelta: Double,
+        generatedAt: String? = nil
+    ) {
+        self.current7d = current7d
+        self.previous7d = previous7d
+        self.practiceMinutesDelta = practiceMinutesDelta
+        self.generatedAt = generatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        current7d = try container.decode(PracticeMetricSlice.self, forKey: .current7d)
+        previous7d = try container.decode(PracticeMetricSlice.self, forKey: .previous7d)
+        practiceMinutesDelta = try container.decodeIfPresent(Double.self, forKey: .practiceMinutesDelta)
+            ?? container.decode(PracticeMetricDeltaDTO.self, forKey: .delta).practiceMinutes
+        generatedAt = try container.decodeIfPresent(String.self, forKey: .generatedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(current7d, forKey: .current7d)
+        try container.encode(previous7d, forKey: .previous7d)
+        try container.encode(practiceMinutesDelta, forKey: .practiceMinutesDelta)
+        try container.encodeIfPresent(generatedAt, forKey: .generatedAt)
+    }
+}
+
 struct EnsembleAggregateSummary: Codable, Equatable {
     let groupID: Int
     let sessionCount: Int
     let sections: [EnsembleSectionSummary]
     let overall: EnsembleSectionSummary
+    let practiceAggregateScope: PracticeAggregateScope?
+    let trends: EnsembleAggregateTrends?
 
     enum CodingKeys: String, CodingKey {
         case groupID = "group_id"
         case sessionCount = "session_count"
         case sections, overall
+        case practiceAggregateScope = "practice_aggregate_scope"
+        case trends
+    }
+
+    init(
+        groupID: Int,
+        sessionCount: Int,
+        sections: [EnsembleSectionSummary],
+        overall: EnsembleSectionSummary,
+        practiceAggregateScope: PracticeAggregateScope? = nil,
+        trends: EnsembleAggregateTrends? = nil
+    ) {
+        self.groupID = groupID
+        self.sessionCount = sessionCount
+        self.sections = sections
+        self.overall = overall
+        self.practiceAggregateScope = practiceAggregateScope
+        self.trends = trends
     }
 }
 
@@ -2047,13 +2558,37 @@ struct EnsembleSectionSummary: Codable, Equatable, Identifiable {
     let instrumentID: String
     let sessionCount: Int
     let practiceMinutes: Double
-    let averageAbsCents: Double
+    let averageAbsCents: Double?
+    let current7d: PracticeMetricSlice?
+    let previous7d: PracticeMetricSlice?
+    let practiceMinutesDelta: Double?
 
     enum CodingKeys: String, CodingKey {
         case instrumentID = "instrument_id"
         case sessionCount = "session_count"
         case practiceMinutes = "practice_minutes"
         case averageAbsCents = "average_abs_cents"
+        case current7d = "current_7d"
+        case previous7d = "previous_7d"
+        case practiceMinutesDelta = "practice_minutes_delta"
+    }
+
+    init(
+        instrumentID: String,
+        sessionCount: Int,
+        practiceMinutes: Double,
+        averageAbsCents: Double?,
+        current7d: PracticeMetricSlice? = nil,
+        previous7d: PracticeMetricSlice? = nil,
+        practiceMinutesDelta: Double? = nil
+    ) {
+        self.instrumentID = instrumentID
+        self.sessionCount = sessionCount
+        self.practiceMinutes = practiceMinutes
+        self.averageAbsCents = averageAbsCents
+        self.current7d = current7d
+        self.previous7d = previous7d
+        self.practiceMinutesDelta = practiceMinutesDelta
     }
 }
 
@@ -2205,7 +2740,7 @@ enum UserVisibleError: LocalizedError, Equatable {
 }
 
 enum NativeReleaseFeatureFlags {
-    static let classes = false
+    static let classes = true
     static let offlinePacks = false
     static let cloudBackup = false
 }

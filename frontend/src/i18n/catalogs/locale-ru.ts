@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "Введите допустимые имя пользователя и отображаемое имя.",
   "auth.profileCompletionExpired": "Срок действия сеанса истёк. Войдите снова.",
   "auth.profileCompletionAccountChanged": "Активный аккаунт изменился до завершения настройки профиля."
+  ,"class.active": "Активен",
+  "class.allActivity": "Вся активность",
+  "class.allInstruments": "Все инструменты",
+  "class.allStatuses": "Все статусы",
+  "class.loadFailedBody": "Не удалось загрузить ваши классы. Проверьте подключение и повторите попытку.",
+  "class.minutesDelta": "{count} мин по сравнению с прошлой неделей",
+  "class.noRosterMatches": "Нет учеников, соответствующих этим фильтрам.",
+  "class.practiceNow": "Начать заниматься",
+  "class.readOnlyRoster": "Режим только для чтения: активные ученики и тенденции класса. Данные учётных записей и элементы управления скрыты.",
+  "class.searchRoster": "Искать учеников",
+  "class.sharedDataTitle": "Что видит ваш класс",
+  "class.sharedDataBody": "Сводные облачные данные о занятиях с {date}: время, число сессий и итоги настройки. Аудио, рефлексии и подробности сессий остаются закрытыми.",
+  "class.sortBy": "Сортировка",
+  "class.sortLastPractice": "Недавние занятия",
+  "class.sortName": "Имя",
+  "class.sortWeeklyMinutes": "Минуты за неделю",
+  "class.status": "Статус",
+  "class.weeklyTrend": "По сравнению с прошлой неделей",
+  "class.enableSharingTitle": "Включить передачу прогресса классу",
+  "class.enableSharingBody": "Это участие создано до текущего выбора конфиденциальности. Включите ограниченную передачу сводных данных, прежде чем показывать прогресс или аналитику помощника.",
+  "class.enableSharing": "Включить передачу",
+  "class.enablingSharing": "Включение…",
+  "class.sharingEnabled": "Передача прогресса классу включена.",
+  "class.sharingEnableError": "Не удалось включить передачу прогресса классу.",
+  "class.inviteRole": "Роль в классе",
+  "class.inviteRoleAssistant": "Помощник",
+  "class.assistantRoleHelp": "Помощники видят активный обезличенный список и тенденции, но не могут приглашать, удалять, передавать или менять коды и управлять классом."
 } satisfies MessageCatalog;
 
 export default messages;

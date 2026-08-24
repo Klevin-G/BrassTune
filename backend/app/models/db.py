@@ -1,4 +1,5 @@
 import datetime as dt
+import uuid
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
@@ -50,9 +51,13 @@ class InstrumentProfileModel(Base):
 
 class PracticeSession(Base):
     __tablename__ = "practice_sessions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_session_id", name="uq_practice_sessions_user_client_session"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    client_session_id = Column(String(128), nullable=True)
     instrument_id = Column(String, nullable=False, index=True)
     name = Column(String, nullable=False)
     started_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
@@ -78,9 +83,13 @@ class PracticeSession(Base):
 
 class PitchSample(Base):
     __tablename__ = "pitch_samples"
+    __table_args__ = (
+        UniqueConstraint("session_id", "client_frame_index", name="uq_pitch_samples_session_client_frame"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("practice_sessions.id"), nullable=False, index=True)
+    client_frame_index = Column(Integer, nullable=True)
     timestamp_ms = Column(Integer, nullable=False)
     frequency_hz = Column(Float, nullable=False)
     confidence = Column(Float, nullable=False)
@@ -148,6 +157,7 @@ class GroupMember(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
+    roster_row_id = Column(String(36), nullable=False, unique=True, default=lambda: str(uuid.uuid4()))
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     instrument_id = Column(String, nullable=False)
@@ -155,6 +165,8 @@ class GroupMember(Base):
     status = Column(String, nullable=False, default="active")
     active_since = Column(DateTime, nullable=True)
     removed_at = Column(DateTime, nullable=True)
+    aggregate_sharing_consented_at = Column(DateTime, nullable=True)
+    aggregate_sharing_scope_code = Column(String(80), nullable=True)
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
 
     group = relationship("Group", back_populates="members")

@@ -44,6 +44,7 @@ REQUIRED_TABLE_COLUMNS = {
     "practice_sessions": {
         "id",
         "user_id",
+        "client_session_id",
         "audio_storage_provider",
         "audio_object_key",
         "audio_mime_type",
@@ -51,7 +52,18 @@ REQUIRED_TABLE_COLUMNS = {
         "audio_size_bytes",
         "audio_uploaded_at",
     },
-    "group_members": {"id", "group_id", "user_id", "active_since", "removed_at", "status"},
+    "pitch_samples": {"id", "session_id", "client_frame_index"},
+    "group_members": {
+        "id",
+        "group_id",
+        "user_id",
+        "active_since",
+        "removed_at",
+        "status",
+        "aggregate_sharing_consented_at",
+        "aggregate_sharing_scope_code",
+        "roster_row_id",
+    },
     "invitations": {"id", "group_id", "invited_user_id", "invited_by_user_id", "status"},
     "account_deletion_jobs": {
         "id",
@@ -116,9 +128,18 @@ REQUIRED_INDEX_COLUMN_SETS = {
 }
 
 REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS = {
-    "group_members": {("group_id", "user_id")},
+    "practice_sessions": {("user_id", "client_session_id")},
+    "pitch_samples": {("session_id", "client_frame_index")},
+    "group_members": {("group_id", "user_id"), ("roster_row_id",)},
     "deleted_identity_tombstones": {("subject_digest",)},
     "maintenance_request_nonces": {("nonce_digest",)},
+}
+
+REQUIRED_POSTGRES_VALIDATED_CHECK_CONSTRAINTS = {
+    "group_members": {
+        "group_members_aggregate_sharing_scope_check",
+        "group_members_aggregate_sharing_pair_check",
+    },
 }
 
 REQUIRED_POSTGRES_COLUMN_TYPES = {
@@ -131,9 +152,19 @@ REQUIRED_POSTGRES_COLUMN_TYPES = {
 }
 
 REQUIRED_POSTGRES_COLUMN_NULLABILITY = {
+    "practice_sessions": {"client_session_id": True},
+    "pitch_samples": {"client_frame_index": True},
+    "group_members": {
+        "aggregate_sharing_consented_at": True,
+        "aggregate_sharing_scope_code": True,
+    },
     # Terminal rows are immediately stripped of account/session identifiers.
     "account_deletion_jobs": {"user_id": True},
     "audio_storage_jobs": {"user_id": True, "session_id": True},
+}
+
+REQUIRED_POSTGRES_COLUMN_DEFAULT_FRAGMENTS = {
+    "group_members": {"roster_row_id": "gen_random_uuid()"},
 }
 
 BACKEND_APPLICATION_TABLES = {
@@ -459,6 +490,19 @@ def _postgres_column_nullability_issues(table_name: str, columns: list[dict]) ->
         if actual_nullable is not expected_nullable:
             expectation = "nullable" if expected_nullable else "not nullable"
             issues.append("Column %s.%s must be %s." % (table_name, column_name, expectation))
+    return issues
+
+
+def _postgres_column_default_issues(table_name: str, columns: list[dict]) -> list[str]:
+    columns_by_name = {column["name"]: column for column in columns}
+    issues = []
+    for column_name, required_fragment in REQUIRED_POSTGRES_COLUMN_DEFAULT_FRAGMENTS.get(table_name, {}).items():
+        actual_default = str(columns_by_name.get(column_name, {}).get("default") or "").lower()
+        if required_fragment.lower() not in actual_default:
+            issues.append(
+                "Column %s.%s must have a server default containing %s."
+                % (table_name, column_name, required_fragment)
+            )
     return issues
 
 
@@ -904,6 +948,27 @@ def _postgres_unique_key_issues(table_name: str, unique_constraints: list[dict],
     return issues
 
 
+def _postgres_required_check_constraint_issues(
+    constraint_rows: Iterable[dict],
+    table_names: set[str],
+) -> list[str]:
+    states = {
+        (str(row.get("table_name")), str(row.get("constraint_name"))): row.get("validated") is True
+        for row in constraint_rows
+    }
+    issues = []
+    for table_name, constraint_names in REQUIRED_POSTGRES_VALIDATED_CHECK_CONSTRAINTS.items():
+        if table_name not in table_names:
+            continue
+        for constraint_name in sorted(constraint_names):
+            state = states.get((table_name, constraint_name))
+            if state is None:
+                issues.append("Missing required check constraint %s on %s." % (constraint_name, table_name))
+            elif state is not True:
+                issues.append("Required check constraint %s on %s must be validated." % (constraint_name, table_name))
+    return issues
+
+
 def database_readiness_issues() -> list[str]:
     issues: list[str] = []
     try:
@@ -933,6 +998,7 @@ def database_readiness_issues() -> list[str]:
                 if database_backend(url) == "postgresql":
                     issues.extend(_postgres_column_type_issues(table_name, columns))
                     issues.extend(_postgres_column_nullability_issues(table_name, columns))
+                    issues.extend(_postgres_column_default_issues(table_name, columns))
                 required_index_columns = REQUIRED_INDEX_COLUMN_SETS.get(table_name, set()) if database_backend(url) == "postgresql" else set()
                 required_unique_columns = REQUIRED_POSTGRES_UNIQUE_COLUMN_SETS.get(table_name, set()) if database_backend(url) == "postgresql" else set()
                 indexes = None
@@ -969,6 +1035,28 @@ def database_readiness_issues() -> list[str]:
                     else:
                         issues.append("Could not verify unique constraint or index on %s." % table_name)
             if database_backend(url) == "postgresql":
+                required_check_tables = sorted(
+                    set(REQUIRED_POSTGRES_VALIDATED_CHECK_CONSTRAINTS) & table_names
+                )
+                constraint_rows = []
+                if required_check_tables:
+                    constraint_rows = list(
+                        connection.execute(
+                            text(
+                                "select c.relname as table_name, p.conname as constraint_name, "
+                                "p.convalidated as validated "
+                                "from pg_constraint p "
+                                "join pg_class c on c.oid = p.conrelid "
+                                "join pg_namespace n on n.oid = c.relnamespace "
+                                "where n.nspname = 'public' and p.contype = 'c' "
+                                "and c.relname = any(:table_names)"
+                            ),
+                            {"table_names": required_check_tables},
+                        ).mappings()
+                    )
+                issues.extend(
+                    _postgres_required_check_constraint_issues(constraint_rows, table_names)
+                )
                 issues.extend(_postgres_application_security_issues(connection, table_names))
                 if "audio_storage_jobs" in table_names:
                     issues.extend(_postgres_audio_job_security_issues(connection))

@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "Nhập tên người dùng và tên hiển thị hợp lệ.",
   "auth.profileCompletionExpired": "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
   "auth.profileCompletionAccountChanged": "Tài khoản đang hoạt động đã thay đổi trước khi thiết lập hồ sơ hoàn tất."
+  ,"class.active": "Đang hoạt động",
+  "class.allActivity": "Mọi hoạt động",
+  "class.allInstruments": "Tất cả nhạc cụ",
+  "class.allStatuses": "Tất cả trạng thái",
+  "class.loadFailedBody": "Không thể tải các lớp của bạn. Hãy kiểm tra kết nối rồi thử lại.",
+  "class.minutesDelta": "{count} phút so với tuần trước",
+  "class.noRosterMatches": "Không có học sinh nào khớp với các bộ lọc này.",
+  "class.practiceNow": "Luyện tập ngay",
+  "class.readOnlyRoster": "Chế độ chỉ đọc cho học sinh đang hoạt động và xu hướng của lớp. Thông tin tài khoản và điều khiển quản lý được ẩn.",
+  "class.searchRoster": "Tìm học sinh",
+  "class.sharedDataTitle": "Những gì lớp của bạn có thể xem",
+  "class.sharedDataBody": "Dữ liệu luyện tập đám mây tổng hợp từ {date}: thời gian, số buổi và tóm tắt cao độ. Âm thanh, phần tự nhận xét và chi tiết buổi tập vẫn riêng tư.",
+  "class.sortBy": "Sắp xếp",
+  "class.sortLastPractice": "Luyện tập gần đây",
+  "class.sortName": "Tên",
+  "class.sortWeeklyMinutes": "Số phút hằng tuần",
+  "class.status": "Trạng thái",
+  "class.weeklyTrend": "So với tuần trước",
+  "class.enableSharingTitle": "Bật chia sẻ tiến độ với lớp",
+  "class.enableSharingBody": "Tư cách thành viên này có trước lựa chọn quyền riêng tư hiện tại. Hãy bật phạm vi tổng hợp giới hạn trước khi hiện tiến độ hoặc phân tích cho trợ giảng.",
+  "class.enableSharing": "Bật chia sẻ",
+  "class.enablingSharing": "Đang bật…",
+  "class.sharingEnabled": "Đã bật chia sẻ tiến độ với lớp.",
+  "class.sharingEnableError": "Không thể bật chia sẻ tiến độ với lớp.",
+  "class.inviteRole": "Vai trò trong lớp",
+  "class.inviteRoleAssistant": "Trợ giảng",
+  "class.assistantRoleHelp": "Trợ giảng có thể xem danh sách đang hoạt động đã ẩn thông tin và xu hướng, nhưng không thể mời, xóa, chia sẻ hay đổi mã hoặc quản lý lớp."
 } satisfies MessageCatalog;
 
 export default messages;

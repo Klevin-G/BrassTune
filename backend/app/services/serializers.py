@@ -42,6 +42,7 @@ def session_to_dict(session) -> Dict[str, Any]:
     return {
         "id": session.id,
         "user_id": session.user_id,
+        "client_session_id": getattr(session, "client_session_id", None),
         "instrument_id": session.instrument_id,
         "name": session.name,
         "started_at": iso(session.started_at),
@@ -98,14 +99,19 @@ def group_to_dict(group, members=None, include_director_identity: bool = True) -
 
 def group_member_to_dict(member, include_identity: bool = True) -> Dict[str, Any]:
     user = getattr(member, "user", None)
+    raw_role = getattr(member, "role_in_group", "student")
+    public_role = "assistant" if raw_role == "director" else raw_role
     payload = {
         "id": member.id,
+        "roster_row_id": getattr(member, "roster_row_id", None),
         "group_id": member.group_id,
         "instrument_id": member.instrument_id,
-        "role_in_group": getattr(member, "role_in_group", "student"),
+        "role_in_group": public_role,
         "status": getattr(member, "status", "active"),
         "active_since": iso(getattr(member, "active_since", None)),
         "removed_at": iso(getattr(member, "removed_at", None)),
+        "aggregate_sharing_consented_at": iso(getattr(member, "aggregate_sharing_consented_at", None)),
+        "aggregate_sharing_scope_code": getattr(member, "aggregate_sharing_scope_code", None),
         "created_at": iso(member.created_at),
     }
     if include_identity:
@@ -126,6 +132,7 @@ def sample_to_dict(sample) -> Dict[str, Any]:
     return {
         "id": sample.id,
         "session_id": sample.session_id,
+        "client_frame_index": getattr(sample, "client_frame_index", None),
         "timestamp_ms": sample.timestamp_ms,
         "frequency_hz": sample.frequency_hz,
         "confidence": sample.confidence,
@@ -146,6 +153,7 @@ def sample_to_dict(sample) -> Dict[str, Any]:
 
 def sample_to_frame_dict(sample) -> Dict[str, Any]:
     return {
+        "client_frame_index": getattr(sample, "client_frame_index", None),
         "timestamp_ms": sample.timestamp_ms,
         "frequency_hz": sample.frequency_hz,
         "confidence": sample.confidence,

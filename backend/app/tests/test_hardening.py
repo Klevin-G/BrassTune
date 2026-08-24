@@ -97,6 +97,10 @@ WEBM_AUDIO_BYTES = base64.b64decode(
     "/W/yX7bl3dhabfKvb3ZEySAnynB9xyyxAtPeZPVSo7fInvzIf04A+eUn9Jtq1Rsu7KLsDaC8obOBAHkAeK2crTDAHUp5LKqRb+9tVBa9VkvXS0pskt2oFZde"
     "l9wXBTRZpCL60tY6AJ7gZo51ooQAzf5gHFO7a5G7j7OBALeK94EB8YIBwfCBAw=="
 )
+SHARING_CONSENT = {
+    "scope_code": "cloud_practice_sessions_since_membership_v1",
+    "acknowledged": True,
+}
 
 
 def _test_db():
@@ -1067,13 +1071,19 @@ def test_postgres_readiness_accepts_exact_membership_unique_constraint_or_index(
 
     assert _postgres_unique_key_issues(
         "group_members",
-        [{"name": "uq_group_members_group_user", "column_names": ["group_id", "user_id"]}],
+        [
+            {"name": "uq_group_members_group_user", "column_names": ["group_id", "user_id"]},
+            {"name": "uq_group_members_roster_row_id", "column_names": ["roster_row_id"]},
+        ],
         [],
     ) == []
     assert _postgres_unique_key_issues(
         "group_members",
         [],
-        [{"name": "group_members_group_user_key", "column_names": ["group_id", "user_id"], "unique": True}],
+        [
+            {"name": "group_members_group_user_key", "column_names": ["group_id", "user_id"], "unique": True},
+            {"name": "group_members_roster_row_id_key", "column_names": ["roster_row_id"], "unique": True},
+        ],
     ) == []
 
 
@@ -1083,12 +1093,12 @@ def test_postgres_readiness_rejects_nonunique_partial_or_inexact_membership_inde
     expected = ["Missing unique constraint or index on group_members(group_id, user_id)."]
     assert _postgres_unique_key_issues(
         "group_members",
-        [],
+        [{"column_names": ["roster_row_id"]}],
         [{"column_names": ["group_id", "user_id"], "unique": False}],
     ) == expected
     assert _postgres_unique_key_issues(
         "group_members",
-        [],
+        [{"column_names": ["roster_row_id"]}],
         [{
             "column_names": ["group_id", "user_id"],
             "unique": True,
@@ -1097,7 +1107,10 @@ def test_postgres_readiness_rejects_nonunique_partial_or_inexact_membership_inde
     ) == expected
     assert _postgres_unique_key_issues(
         "group_members",
-        [{"column_names": ["user_id", "group_id"]}],
+        [
+            {"column_names": ["user_id", "group_id"]},
+            {"column_names": ["roster_row_id"]},
+        ],
         [{"column_names": ["group_id", "user_id", "status"], "unique": True}],
     ) == expected
 
@@ -2275,7 +2288,7 @@ def test_full_json_export_rejects_too_many_total_rows(monkeypatch):
     assert "too many rows" in response.json()["detail"].lower()
 
 
-def test_director_can_add_member_by_username_but_student_cannot():
+def test_director_invitation_requires_management_and_blocks_self_invite():
     with TestClient(app) as client:
         student_response = client.post(
             "/api/ensemble/groups/1/members/by-username",
@@ -2283,12 +2296,13 @@ def test_director_can_add_member_by_username_but_student_cannot():
             json={"username": "maya", "instrument_id": "horn"},
         )
         assert student_response.status_code == 403
-        director_response = client.post(
+        self_invite = client.post(
             "/api/ensemble/groups/1/members/by-username",
             headers={"Authorization": "Bearer dev-user-2"},
             json={"username": "jordan", "instrument_id": "trombone"},
         )
-        assert director_response.status_code == 200
+        assert self_invite.status_code == 400
+        assert "yourself" in self_invite.json()["detail"].lower()
         missing_response = client.post(
             "/api/ensemble/groups/1/members/by-username",
             headers={"Authorization": "Bearer dev-user-2"},
@@ -2686,6 +2700,8 @@ def test_ensemble_roster_uses_session_duration_for_tuning_averages():
             role_in_group="student",
             status="active",
             active_since=dt.datetime(2026, 7, 1),
+            aggregate_sharing_consented_at=dt.datetime(2026, 7, 1),
+            aggregate_sharing_scope_code="cloud_practice_sessions_since_membership_v1",
         )
         db.add_all([director, student, group, membership])
         db.commit()
@@ -2783,6 +2799,8 @@ def test_ensemble_aggregate_reports_exclude_pre_membership_sessions():
             role_in_group="student",
             status="active",
             created_at=dt.datetime(2026, 6, 10),
+            aggregate_sharing_consented_at=dt.datetime(2026, 6, 10),
+            aggregate_sharing_scope_code="cloud_practice_sessions_since_membership_v1",
         )
         db.add(member)
         db.commit()
@@ -2865,6 +2883,8 @@ def test_multi_class_rosters_isolate_membership_admin_data_and_apply_each_member
             role_in_group="student",
             status="active",
             active_since=dt.datetime(2026, 7, 1),
+            aggregate_sharing_consented_at=dt.datetime(2026, 7, 1),
+            aggregate_sharing_scope_code="cloud_practice_sessions_since_membership_v1",
         )
         second_membership = GroupMember(
             group_id=second_group.id,
@@ -2873,6 +2893,8 @@ def test_multi_class_rosters_isolate_membership_admin_data_and_apply_each_member
             role_in_group="assistant",
             status="active",
             active_since=dt.datetime(2026, 7, 10),
+            aggregate_sharing_consented_at=dt.datetime(2026, 7, 10),
+            aggregate_sharing_scope_code="cloud_practice_sessions_since_membership_v1",
         )
         second_only_membership = GroupMember(
             group_id=second_group.id,
@@ -2881,6 +2903,8 @@ def test_multi_class_rosters_isolate_membership_admin_data_and_apply_each_member
             role_in_group="student",
             status="active",
             active_since=dt.datetime(2026, 7, 1),
+            aggregate_sharing_consented_at=dt.datetime(2026, 7, 1),
+            aggregate_sharing_scope_code="cloud_practice_sessions_since_membership_v1",
         )
         db.add_all([first_membership, second_membership, second_only_membership])
         db.commit()
@@ -2917,19 +2941,19 @@ def test_multi_class_rosters_isolate_membership_admin_data_and_apply_each_member
         )
 
         first_row = first_roster["students"][0]
-        second_shared_row = next(row for row in second_roster["students"] if row["user_id"] == shared_student.id)
+        second_shared_row = next(row for row in second_roster["students"] if row["username"] == shared_student.username)
         assert first_roster["group_id"] == first_group.id
         assert first_row["instrument_id"] == "horn"
         assert first_row["role_in_group"] == "student"
         assert first_row["sessions_count"] == 2
-        assert {row["user_id"] for row in first_roster["students"]} == {shared_student.id}
+        assert {row["username"] for row in first_roster["students"]} == {shared_student.username}
         assert second_roster["group_id"] == second_group.id
         assert second_shared_row["instrument_id"] == "tuba"
         assert second_shared_row["role_in_group"] == "assistant"
         assert second_shared_row["sessions_count"] == 1
-        assert {row["user_id"] for row in second_roster["students"]} == {
-            shared_student.id,
-            second_class_only_student.id,
+        assert {row["username"] for row in second_roster["students"]} == {
+            shared_student.username,
+            second_class_only_student.username,
         }
         assert "last_active_at" not in first_row
         assert "last_active_at" not in second_shared_row
@@ -2973,6 +2997,8 @@ def test_ensemble_reactivation_excludes_sessions_from_removed_interval():
             created_at=dt.datetime(2026, 6, 5),
             active_since=dt.datetime(2026, 7, 1),
             removed_at=None,
+            aggregate_sharing_consented_at=dt.datetime(2026, 7, 1),
+            aggregate_sharing_scope_code="cloud_practice_sessions_since_membership_v1",
         )
         db.add(member)
         db.commit()
@@ -4684,7 +4710,7 @@ def test_invited_student_sets_own_instrument_on_accept():
         accepted = client.post(
             f"/api/ensemble/invitations/{member_id}/accept",
             headers={"Authorization": "Bearer dev-user-3"},
-            json={"instrument_id": "tuba"},
+            json={"instrument_id": "tuba", "sharing_consent": SHARING_CONSENT},
         )
         assert accepted.status_code == 200, accepted.text
         roster = client.get(f"/api/ensemble/groups/{gid}/roster", headers={"Authorization": "Bearer dev-user-1"}).json()
@@ -4700,17 +4726,17 @@ def test_self_join_by_class_code():
         code = group["join_code"]
         assert code and len(code) >= 4
         # A user not in the class joins with the code and picks their instrument.
-        joined = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-3"}, json={"code": code, "instrument_id": "trumpet"})
+        joined = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-3"}, json={"code": code, "instrument_id": "trumpet", "sharing_consent": SHARING_CONSENT})
         assert joined.status_code == 200, joined.text
         assert joined.json()["group_id"] == gid
         # Joining again is a no-op conflict.
-        again = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-3"}, json={"code": code})
+        again = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-3"}, json={"code": code, "sharing_consent": SHARING_CONSENT})
         assert again.status_code == 409
         # A wrong code is rejected.
-        bad = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-4"}, json={"code": "ZZZZZZ"})
+        bad = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-4"}, json={"code": "ZZZZZZ", "sharing_consent": SHARING_CONSENT})
         assert bad.status_code == 404
         # The director cannot join their own class.
-        own = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-1"}, json={"code": code})
+        own = client.post("/api/ensemble/join", headers={"Authorization": "Bearer dev-user-1"}, json={"code": code, "sharing_consent": SHARING_CONSENT})
         assert own.status_code == 400
         # The joined student now appears on the roster.
         roster = client.get(f"/api/ensemble/groups/{gid}/roster", headers={"Authorization": "Bearer dev-user-1"}).json()
@@ -4726,7 +4752,7 @@ def test_member_can_join_multiple_classes_and_leave_only_one():
             joined = client.post(
                 "/api/ensemble/join",
                 headers=headers,
-                json={"code": group["join_code"], "instrument_id": "trombone"},
+                json={"code": group["join_code"], "instrument_id": "trombone", "sharing_consent": SHARING_CONSENT},
             )
             assert joined.status_code == 200, joined.text
 
@@ -4751,7 +4777,7 @@ def test_leave_is_self_scoped_and_class_owner_cannot_leave():
         joined = client.post(
             "/api/ensemble/join",
             headers=member_headers,
-            json={"code": group["join_code"]},
+            json={"code": group["join_code"], "sharing_consent": SHARING_CONSENT},
         )
         assert joined.status_code == 200, joined.text
 
@@ -4783,7 +4809,7 @@ def test_join_code_rejoin_resets_removed_elevated_role_and_timestamps():
         accepted = client.post(
             f"/api/ensemble/invitations/{member_id}/accept",
             headers={"Authorization": "Bearer dev-user-4"},
-            json={"instrument_id": "trombone"},
+            json={"instrument_id": "trombone", "sharing_consent": SHARING_CONSENT},
         )
         assert accepted.status_code == 200, accepted.text
         assistant_details = client.get(
@@ -4793,12 +4819,9 @@ def test_join_code_rejoin_resets_removed_elevated_role_and_timestamps():
         assert assistant_details["roster_scope"] == "active_redacted"
         assert "join_code" not in assistant_details
         assert "director_user_id" not in assistant_details
-        assert all("user_id" not in member and "username" not in member for member in assistant_details["members"])
-        first_active_since = next(
-            member["active_since"]
-            for member in assistant_details["members"]
-            if member["id"] == member_id
-        )
+        assert all("id" not in member and "user_id" not in member and "username" not in member for member in assistant_details["members"])
+        assert assistant_details["members"][0]["roster_row_id"] == invited.json()["roster_row_id"]
+        first_active_since = assistant_details["members"][0]["active_since"]
 
         removed = client.delete(
             f"/api/ensemble/groups/{group['id']}/members/{member_id}",
@@ -4808,7 +4831,7 @@ def test_join_code_rejoin_resets_removed_elevated_role_and_timestamps():
         rejoined = client.post(
             "/api/ensemble/join",
             headers={"Authorization": "Bearer dev-user-4"},
-            json={"code": group["join_code"], "instrument_id": "tuba"},
+            json={"code": group["join_code"], "instrument_id": "tuba", "sharing_consent": SHARING_CONSENT},
         )
         assert rejoined.status_code == 200, rejoined.text
 
@@ -4833,7 +4856,7 @@ def test_global_director_role_does_not_reveal_other_class_management_fields():
         joined = client.post(
             "/api/ensemble/join",
             headers={"Authorization": "Bearer dev-user-1"},
-            json={"code": foreign["join_code"]},
+            json={"code": foreign["join_code"], "sharing_consent": SHARING_CONSENT},
         )
         assert joined.status_code == 200, joined.text
 
@@ -4915,7 +4938,7 @@ def test_concurrent_join_integrity_error_is_only_translated_for_verified_active_
             self.rolled_back = True
 
     auth = SimpleNamespace(user=SimpleNamespace(id=403, primary_instrument_id="horn"))
-    payload = JoinByCodeRequest(code="RACE42")
+    payload = JoinByCodeRequest(code="RACE42", sharing_consent=SHARING_CONSENT)
 
     winning_db = FakeDB(concurrent)
     with pytest.raises(HTTPException) as conflict:
@@ -4936,7 +4959,7 @@ def test_manager_cannot_reactivate_member_after_join_and_leave():
         joined = client.post(
             "/api/ensemble/join",
             headers={"Authorization": "Bearer dev-user-3"},
-            json={"code": group["join_code"], "instrument_id": "horn"},
+            json={"code": group["join_code"], "instrument_id": "horn", "sharing_consent": SHARING_CONSENT},
         )
         assert joined.status_code == 200, joined.text
         owner_view = client.get(
@@ -4987,7 +5010,7 @@ def test_class_ownership_active_membership_and_pending_invitation_quotas(monkeyp
         db.commit()
         monkeypatch.setenv("BRASSTUNE_MAX_ACTIVE_CLASS_MEMBERSHIPS_PER_USER", "1")
         with pytest.raises(HTTPException) as membership_limit:
-            join_ensemble_by_code(JoinByCodeRequest(code=second_group.join_code), db=db, auth=AuthContext(user=student))
+            join_ensemble_by_code(JoinByCodeRequest(code=second_group.join_code, sharing_consent=SHARING_CONSENT), db=db, auth=AuthContext(user=student))
         assert membership_limit.value.status_code == 409
         assert "active class limit" in membership_limit.value.detail
 
@@ -5037,7 +5060,7 @@ def test_invitation_acceptance_respects_active_membership_quota(monkeypatch):
         with pytest.raises(HTTPException) as limit:
             accept_invitation(
                 invitation.id,
-                AcceptInvitationRequest(instrument_id="horn"),
+                AcceptInvitationRequest(instrument_id="horn", sharing_consent=SHARING_CONSENT),
                 db=db,
                 auth=AuthContext(user=student),
             )
@@ -5124,7 +5147,7 @@ def test_active_member_elevation_requires_fresh_invitation_and_acceptance():
         assert invited["role_in_group"] == "assistant"
         accepted = accept_invitation(
             member.id,
-            AcceptInvitationRequest(instrument_id="horn"),
+            AcceptInvitationRequest(instrument_id="horn", sharing_consent=SHARING_CONSENT),
             db=db,
             auth=AuthContext(user=student),
         )
@@ -5249,7 +5272,7 @@ def test_group_list_detail_capabilities_and_assistant_roster_privacy_are_isolate
         db.refresh(group)
         db.add_all([
             GroupMember(group_id=group.id, user_id=631, instrument_id="horn", role_in_group="student", status="active"),
-            GroupMember(group_id=group.id, user_id=632, instrument_id="trombone", role_in_group="assistant", status="active"),
+            GroupMember(group_id=group.id, user_id=632, instrument_id="trombone", role_in_group="assistant", status="active", aggregate_sharing_consented_at=dt.datetime.utcnow(), aggregate_sharing_scope_code="cloud_practice_sessions_since_membership_v1"),
             GroupMember(group_id=group.id, user_id=634, instrument_id="horn", role_in_group="assistant", status="active"),
             User(id=635, username="removed635", name="Removed", role="student", primary_instrument_id="tuba"),
             User(id=636, username="invited636", name="Invited", role="student", primary_instrument_id="trumpet"),

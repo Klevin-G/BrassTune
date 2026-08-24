@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "Saisissez un nom d’utilisateur et un nom d’affichage valides.",
   "auth.profileCompletionExpired": "Votre session a expiré. Connectez-vous à nouveau.",
   "auth.profileCompletionAccountChanged": "Le compte actif a changé avant la fin de la configuration du profil."
+  ,"class.active": "Actif",
+  "class.allActivity": "Toute l’activité",
+  "class.allInstruments": "Tous les instruments",
+  "class.allStatuses": "Tous les statuts",
+  "class.loadFailedBody": "Impossible de charger vos classes. Vérifiez votre connexion et réessayez.",
+  "class.minutesDelta": "{count} min par rapport à la semaine précédente",
+  "class.noRosterMatches": "Aucun élève ne correspond à ces filtres.",
+  "class.practiceNow": "S’entraîner maintenant",
+  "class.readOnlyRoster": "Vue en lecture seule des élèves actifs et des tendances de la classe. Les informations de compte et les commandes de gestion sont masquées.",
+  "class.searchRoster": "Rechercher des élèves",
+  "class.sharedDataTitle": "Ce que votre classe peut voir",
+  "class.sharedDataBody": "Pratique cloud agrégée depuis le {date} : durée, nombre de séances et résumés d’accord. L’audio, les réflexions et le détail des séances restent privés.",
+  "class.sortBy": "Trier",
+  "class.sortLastPractice": "Pratique récente",
+  "class.sortName": "Nom",
+  "class.sortWeeklyMinutes": "Minutes hebdomadaires",
+  "class.status": "Statut",
+  "class.weeklyTrend": "Par rapport à la semaine précédente",
+  "class.enableSharingTitle": "Activer le partage de progression de la classe",
+  "class.enableSharingBody": "Cette adhésion précède le choix de confidentialité actuel. Activez la portée agrégée limitée avant d’afficher votre progression ou les analyses d’un assistant.",
+  "class.enableSharing": "Activer le partage",
+  "class.enablingSharing": "Activation…",
+  "class.sharingEnabled": "Le partage de progression de la classe est activé.",
+  "class.sharingEnableError": "Impossible d’activer le partage de progression de la classe.",
+  "class.inviteRole": "Rôle dans la classe",
+  "class.inviteRoleAssistant": "Assistant pédagogique",
+  "class.assistantRoleHelp": "Les assistants voient la liste active expurgée et les tendances, mais ne peuvent ni inviter, ni retirer, ni partager ou renouveler les codes, ni gérer la classe."
 } satisfies MessageCatalog;
 
 export default messages;

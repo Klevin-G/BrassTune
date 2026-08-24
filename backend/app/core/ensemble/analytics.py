@@ -1,6 +1,6 @@
 from typing import Dict, Iterable, List, Optional
 
-from app.core.analytics.stats import calculate_note_stats
+from app.core.analytics.stats import calculate_note_stats, duration_weighted_mean
 from app.core.recommendations.rules import generate_practice_plan
 from app.core.instruments.profiles import get_instrument_profile
 
@@ -19,12 +19,15 @@ def calculate_section_summary(group_sessions: Iterable[object], instrument_id: O
         events.extend(getattr(session, "note_events", []))
     note_stats = calculate_note_stats(events)
     total_seconds = sum(float(getattr(session, "duration_seconds", 0) or 0) for session in sessions)
-    avg_abs = sum(float(getattr(session, "average_abs_cents", 0) or 0) for session in sessions) / len(sessions) if sessions else 0
+    tuning_sessions = [session for session in sessions if int(getattr(session, "notes_count", 0) or 0) > 0]
+    avg_abs = duration_weighted_mean(tuning_sessions, "average_abs_cents", "duration_seconds")
+    in_tune = duration_weighted_mean(tuning_sessions, "in_tune_percentage", "duration_seconds")
     return {
         "instrument_id": instrument_id or "all",
         "session_count": len(sessions),
         "practice_minutes": round(total_seconds / 60.0, 2),
-        "average_abs_cents": avg_abs,
+        "average_abs_cents": round(avg_abs, 2) if avg_abs is not None else None,
+        "in_tune_percentage": round(in_tune, 2) if in_tune is not None else None,
         "top_problem_notes": sorted(note_stats, key=lambda row: float(row.get("problem_severity", 0)), reverse=True)[:5],
     }
 

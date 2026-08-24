@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "請輸入有效的使用者名稱和顯示名稱。",
   "auth.profileCompletionExpired": "您的登入工作階段已過期。請重新登入。",
   "auth.profileCompletionAccountChanged": "個人資料設定完成前，目前帳戶已變更。"
+  ,"class.active": "活躍",
+  "class.allActivity": "全部活動",
+  "class.allInstruments": "全部樂器",
+  "class.allStatuses": "全部狀態",
+  "class.loadFailedBody": "無法載入你的課堂。請檢查網路連線後再試一次。",
+  "class.minutesDelta": "比上週{count}分鐘",
+  "class.noRosterMatches": "沒有符合這些篩選條件的學生。",
+  "class.practiceNow": "立即練習",
+  "class.readOnlyRoster": "唯讀檢視活躍學生和課堂趨勢。學生帳戶資料與管理控制項已隱藏。",
+  "class.searchRoster": "搜尋學生",
+  "class.sharedDataTitle": "課堂可以看到的內容",
+  "class.sharedDataBody": "自{date}起的雲端練習彙總：時間、練習次數和音準摘要。音訊、反思和單次練習詳情保持私密。",
+  "class.sortBy": "排序",
+  "class.sortLastPractice": "最近練習",
+  "class.sortName": "姓名",
+  "class.sortWeeklyMinutes": "每週分鐘數",
+  "class.status": "狀態",
+  "class.weeklyTrend": "與上週相比",
+  "class.enableSharingTitle": "啟用課堂進度分享",
+  "class.enableSharingBody": "此成員資格早於目前的隱私選擇。請先啟用受限的彙總範圍，再顯示你的進度或助教分析。",
+  "class.enableSharing": "啟用分享",
+  "class.enablingSharing": "正在啟用…",
+  "class.sharingEnabled": "已啟用課堂進度分享。",
+  "class.sharingEnableError": "無法啟用課堂進度分享。",
+  "class.inviteRole": "課堂角色",
+  "class.inviteRoleAssistant": "助教",
+  "class.assistantRoleHelp": "助教可以查看活躍的去識別名單和課堂趨勢，但不能邀請、移除、分享或輪換代碼，也不能管理課堂。"
 } satisfies MessageCatalog;
 
 export default messages;

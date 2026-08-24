@@ -728,6 +728,10 @@ private func scaleDirectionTitle(_ direction: ScaleDirection) -> String {
     }
 }
 
+enum MoreRoute: Hashable {
+    case classes
+}
+
 struct MoreView: View {
     @Binding var onboardingPresented: Bool
 
@@ -741,6 +745,20 @@ struct MoreView: View {
 
             BTCard {
                 BTSectionHeader(title: "Account and app", subtitle: "Settings, privacy, and help in one place.")
+                if NativeReleaseFeatureFlags.classes {
+                    NavigationLink(value: MoreRoute.classes) {
+                        MoreActionRow(
+                            title: "Classes",
+                            detail: "Membership and aggregate practice activity.",
+                            systemImage: "person.3"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("more.classes")
+
+                    Divider()
+                }
+
                 NavigationLink { SettingsView(onboardingPresented: $onboardingPresented) } label: {
                     MoreActionRow(title: "Settings", detail: "Account, instrument, audio, and appearance", systemImage: "gearshape")
                 }

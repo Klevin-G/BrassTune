@@ -466,18 +466,44 @@ struct NativeGoogleSignInButton: View {
     }
 }
 
+private enum RosterSort: String, CaseIterable, Identifiable {
+    case name
+    case lastPractice
+    case weeklyMinutes
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .name: return NativeLocalization.string("Name")
+        case .lastPractice: return NativeLocalization.string("Recent practice")
+        case .weeklyMinutes: return NativeLocalization.string("Weekly practice minutes")
+        }
+    }
+}
+
 struct ClassesView: View {
     @EnvironmentObject private var model: AppModel
+    @Binding private var selectedTab: AppTab
     @State private var joinCode = ""
     @State private var newClassName = ""
     @State private var inviteUsername = ""
     @State private var inviteInstrumentID = ""
+    @State private var inviteRole: EnsembleInvitationRole = .student
     @State private var invitationInstruments: [EnsembleInvitation.ID: String] = [:]
     @State private var createExpanded = false
     @State private var pendingLeave: EnsembleSummary?
     @State private var pendingMemberRemoval: EnsembleMember?
     @State private var pendingCodeRotation = false
     @State private var authMode: GatewayAuthMode?
+    @State private var rosterSearch = ""
+    @State private var rosterSort: RosterSort = .name
+    @State private var rosterStatusFilter = ""
+    @State private var rosterInstrumentFilter = ""
+    @State private var rosterInactivityFilter: PracticeInactivityBand?
+
+    init(selectedTab: Binding<AppTab> = .constant(.more)) {
+        _selectedTab = selectedTab
+    }
 
     var body: some View {
         BTScreen {
@@ -519,12 +545,17 @@ struct ClassesView: View {
             }
 
             if (model.testFixturesEnabled || model.authState.usesRemoteAccount),
-               let error = model.lastError {
+               let error = model.classWorkspaceError {
                 BTCard {
                     Text(verbatim: error.localizedDescription)
                         .font(.footnote)
                         .foregroundStyle(BTTheme.danger)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button("Try again") {
+                        Task { await model.loadClassWorkspace() }
+                    }
+                    .buttonStyle(BTPrimaryButtonStyle())
+                    .accessibilityIdentifier("classes.retry")
                 }
                 .accessibilityIdentifier("classes.error")
             }
@@ -597,6 +628,10 @@ struct ClassesView: View {
             guard UIAccessibility.isVoiceOverRunning, let message else { return }
             UIAccessibility.post(notification: .announcement, argument: message)
         }
+        .onChange(of: model.selectedEnsembleError) { _, error in
+            guard UIAccessibility.isVoiceOverRunning, let error else { return }
+            UIAccessibility.post(notification: .announcement, argument: error.localizedDescription)
+        }
     }
 
     @ViewBuilder
@@ -607,15 +642,7 @@ struct ClassesView: View {
                     title: "Class invitations",
                     subtitle: "You choose whether to join. Pick your own instrument before accepting."
                 )
-                Text(verbatim: NativeLocalization.string(
-                    "Only class-level and student aggregate practice minutes, session counts, and tuning summaries are shared."
-                ))
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(verbatim: NativeLocalization.string(
-                    "Recordings, live microphone audio, imported sheet music, and private reflections are never shown here."
-                ))
+                Text(verbatim: sharingDisclosure)
                     .font(.footnote)
                     .foregroundStyle(BTTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -696,15 +723,7 @@ struct ClassesView: View {
     private var joinCard: some View {
         BTCard {
             BTSectionHeader(title: "Join another class", subtitle: "Enter the code your teacher shared.")
-            Text(verbatim: NativeLocalization.string(
-                "Only class-level and student aggregate practice minutes, session counts, and tuning summaries are shared."
-            ))
-                .font(.footnote)
-                .foregroundStyle(BTTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(verbatim: NativeLocalization.string(
-                "Recordings, live microphone audio, imported sheet music, and private reflections are never shown here."
-            ))
+            Text(verbatim: sharingDisclosure)
                 .font(.footnote)
                 .foregroundStyle(BTTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -808,10 +827,35 @@ struct ClassesView: View {
 
             if let selected = model.ensembles.first(where: { $0.id == model.selectedEnsembleID }) {
                 selectedClassCard(selected)
-                if selected.viewerCanManage {
+                if [.student, .assistant].contains(selected.viewerRole),
+                   !selected.viewerHasAggregateSharingConsent {
+                    sharingConsentCard(selected)
+                }
+                if model.selectedEnsembleLoading {
+                    BTCard {
+                        ProgressView("Loading roster…")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .accessibilityIdentifier("classes.selected.loading")
+                } else if let error = model.selectedEnsembleError {
+                    BTCard {
+                        Text(verbatim: error.localizedDescription)
+                            .foregroundStyle(BTTheme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Try again") {
+                            Task { await model.loadSelectedEnsembleDetails(id: selected.id) }
+                        }
+                        .buttonStyle(BTPrimaryButtonStyle())
+                        .accessibilityIdentifier("classes.selected.retry")
+                    }
+                    .accessibilityIdentifier("classes.selected.error")
+                } else if selected.viewerCanManage {
                     directorTools(for: selected)
+                } else if selected.viewerCanViewRoster || selected.viewerCanViewClassAnalytics {
+                    assistantWorkspace
                 } else {
                     memberRoster
+                    studentProgress
                 }
             }
         }
@@ -846,6 +890,25 @@ struct ClassesView: View {
         }
     }
 
+    private func sharingConsentCard(_ ensemble: EnsembleSummary) -> some View {
+        BTCard(tint: BTTheme.surfaceWarm) {
+            BTSectionHeader(
+                title: "Your practice details are safe.",
+                subtitle: .verbatim(sharingDisclosure)
+            )
+            Button {
+                Task { _ = await model.enableEnsembleAggregateSharing(id: ensemble.id) }
+            } label: {
+                Label("Share", systemImage: "checkmark.shield")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTPrimaryButtonStyle())
+            .disabled(model.ensembleMutationInProgress)
+            .accessibilityIdentifier("classes.sharingConsent.enable")
+        }
+        .accessibilityIdentifier("classes.sharingConsent")
+    }
+
     private func directorTools(for ensemble: EnsembleSummary) -> some View {
         VStack(alignment: .leading, spacing: BTSpacing.lg) {
             BTCard {
@@ -877,6 +940,13 @@ struct ClassesView: View {
                 }
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("classes.director.inviteInstrument")
+                Picker("Membership", selection: $inviteRole) {
+                    ForEach(EnsembleInvitationRole.allCases) { role in
+                        Text(verbatim: role.label).tag(role)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("classes.director.inviteRole")
                 TextField("Student username", text: $inviteUsername)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -887,10 +957,12 @@ struct ClassesView: View {
                         if await model.inviteEnsembleMember(
                             groupID: ensemble.id,
                             username: inviteUsername,
-                            instrumentID: inviteInstrumentID.isEmpty ? nil : inviteInstrumentID
+                            instrumentID: inviteInstrumentID.isEmpty ? nil : inviteInstrumentID,
+                            role: inviteRole
                         ) {
                             inviteUsername = ""
                             inviteInstrumentID = ""
+                            inviteRole = .student
                         }
                     }
                 } label: {
@@ -910,18 +982,109 @@ struct ClassesView: View {
             BTCard(tint: BTTheme.surfaceWarm) {
                 BTSectionHeader(
                     title: "What the director can see",
-                    subtitle: "Only class-level and student aggregate practice minutes, session counts, and tuning summaries are shared."
+                    subtitle: .verbatim(sharingDisclosure)
                 )
-                Text("Recordings, live microphone audio, imported sheet music, and private reflections are never shown here.")
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityIdentifier("classes.director.privacy")
 
             directorRoster
             directorSummary
         }
+    }
+
+    private var assistantWorkspace: some View {
+        VStack(alignment: .leading, spacing: BTSpacing.lg) {
+            BTCard(tint: BTTheme.surfaceWarm) {
+                BTSectionHeader(
+                    title: "Assistant",
+                    subtitle: "Only the roster details permitted for your role are shown."
+                )
+                Text(verbatim: sharingDisclosure)
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityIdentifier("classes.assistant.readOnly")
+            directorRoster
+            directorSummary
+        }
+    }
+
+    @ViewBuilder
+    private var studentProgress: some View {
+        if let progress = model.selectedEnsembleProgress {
+            BTCard {
+                BTSectionHeader(title: "Your progress", subtitle: "Last 7 days")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: BTSpacing.sm) { studentProgressMetrics(progress) }
+                    VStack(spacing: BTSpacing.sm) { studentProgressMetrics(progress) }
+                }
+                Text(verbatim: practiceTrendText(progress.practiceMinutesDelta))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BTTheme.muted)
+                    .accessibilityIdentifier("classes.student.trend")
+                if let lastPracticeAt = progress.lastPracticeAt {
+                    Text(verbatim: NativeLocalization.string("Recent practice") + ": " + formatClassDate(lastPracticeAt))
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                } else {
+                    Text("No practice")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: BTSpacing.sm) { studentActionButtons }
+                    VStack(spacing: BTSpacing.sm) { studentActionButtons }
+                }
+            }
+            .accessibilityIdentifier("classes.student.progress")
+        }
+    }
+
+    @ViewBuilder
+    private func studentProgressMetrics(_ progress: EnsembleMyProgress) -> some View {
+        BTMetricTile(
+            title: "Practice time",
+            value: .verbatim(NativeLocalization.format(
+                "%@ minutes",
+                formatClassNumber(progress.current7d.practiceMinutes)
+            )),
+            detail: "This week"
+        )
+        BTMetricTile(
+            title: "Sessions",
+            value: .verbatim(NativeLocalization.isolate(String(progress.current7d.sessionsCount))),
+            detail: "This week",
+            tint: BTTheme.secondaryAccent
+        )
+        if let inTune = progress.current7d.inTunePercentage {
+            BTMetricTile(
+                title: "In tune",
+                value: .verbatim(NativeLocalization.format("%@%% in tune", formatClassNumber(inTune))),
+                detail: "This week",
+                tint: BTTheme.success
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var studentActionButtons: some View {
+        Button {
+            selectedTab = .practice
+        } label: {
+            Label("Practice", systemImage: "sun.max")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BTPrimaryButtonStyle())
+        .accessibilityIdentifier("classes.student.practice")
+        Button {
+            selectedTab = .scales
+        } label: {
+            Label("Scales", systemImage: "music.note.list")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(BTSecondaryButtonStyle())
+        .accessibilityIdentifier("classes.student.scales")
     }
 
     private func shareCodeButton(ensemble: EnsembleSummary, code: String) -> some View {
@@ -955,13 +1118,25 @@ struct ClassesView: View {
     private var directorRoster: some View {
         BTCard {
             BTSectionHeader(title: "Student roster", subtitle: "Membership and aggregate practice activity.")
+            TextField("Student username", text: $rosterSearch)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("classes.roster.search")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: BTSpacing.sm) { rosterFilterControls }
+                VStack(spacing: BTSpacing.sm) { rosterFilterControls }
+            }
             if model.ensemblesLoading && model.selectedEnsembleRoster.isEmpty {
                 ProgressView("Loading roster…")
             } else if model.selectedEnsembleRoster.isEmpty {
                 Text("No students yet.")
                     .foregroundStyle(BTTheme.muted)
+            } else if filteredRoster.isEmpty {
+                Text("No students yet.")
+                    .foregroundStyle(BTTheme.muted)
             } else {
-                ForEach(model.selectedEnsembleRoster) { student in
+                ForEach(filteredRoster) { student in
                     VStack(alignment: .leading, spacing: BTSpacing.sm) {
                         HStack(alignment: .firstTextBaseline) {
                             Text(verbatim: student.displayLabel)
@@ -974,6 +1149,10 @@ struct ClassesView: View {
                         Text(verbatim: instrumentDisplayName(student.instrumentID))
                             .font(.subheadline)
                             .foregroundStyle(BTTheme.muted)
+                        Text(verbatim: rosterActivityText(student))
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(BTTheme.muted)
+                            .accessibilityIdentifier("classes.roster.activity.\(student.rosterRowID)")
                         if student.status == "active" {
                             ViewThatFits(in: .horizontal) {
                                 HStack(spacing: BTSpacing.sm) {
@@ -984,16 +1163,19 @@ struct ClassesView: View {
                                 }
                             }
                         }
-                        Button(role: .destructive) {
-                            if let member = model.selectedEnsembleDetail?.members?.first(where: { $0.id == student.memberID }) {
-                                pendingMemberRemoval = member
+                        if model.selectedEnsembleDetail?.viewerCanManage == true,
+                           let memberID = student.memberID {
+                            Button(role: .destructive) {
+                                if let member = model.selectedEnsembleDetail?.members?.first(where: { $0.id == memberID }) {
+                                    pendingMemberRemoval = member
+                                }
+                            } label: {
+                                Text("Remove member")
                             }
-                        } label: {
-                            Text("Remove member")
+                            .buttonStyle(.bordered)
+                            .disabled(model.ensembleMutationInProgress)
+                            .accessibilityIdentifier("classes.director.remove.\(memberID)")
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(model.ensembleMutationInProgress)
-                        .accessibilityIdentifier("classes.director.remove.\(student.memberID)")
                     }
                     .padding(.vertical, BTSpacing.sm)
                     .accessibilityElement(children: .contain)
@@ -1001,6 +1183,67 @@ struct ClassesView: View {
             }
         }
         .accessibilityIdentifier("classes.director.roster")
+    }
+
+    @ViewBuilder
+    private var rosterFilterControls: some View {
+        Picker("Recent practice", selection: $rosterSort) {
+            ForEach(RosterSort.allCases) { option in
+                Text(verbatim: option.label).tag(option)
+            }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("classes.roster.sort")
+        Picker("Active", selection: $rosterStatusFilter) {
+            Text("Student roster").tag("")
+            Text("Active").tag("active")
+            Text("Invited").tag("invited")
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("classes.roster.statusFilter")
+        Picker("Your instrument", selection: $rosterInstrumentFilter) {
+            Text("Student chooses").tag("")
+            ForEach(Array(Set(model.selectedEnsembleRoster.map(\.instrumentID))).sorted(), id: \.self) { id in
+                Text(verbatim: instrumentDisplayName(id)).tag(id)
+            }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("classes.roster.instrumentFilter")
+        Picker("No practice", selection: $rosterInactivityFilter) {
+            Text("Student roster").tag(PracticeInactivityBand?.none)
+            Text("Recent practice").tag(PracticeInactivityBand?.some(.recent))
+            Text("No practice").tag(PracticeInactivityBand?.some(.noPractice))
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("classes.roster.inactivityFilter")
+    }
+
+    private var filteredRoster: [EnsembleRosterStudent] {
+        let query = rosterSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.selectedEnsembleRoster
+            .filter { student in
+                (query.isEmpty || student.displayLabel.localizedCaseInsensitiveContains(query))
+                    && (rosterStatusFilter.isEmpty || student.status == rosterStatusFilter)
+                    && (rosterInstrumentFilter.isEmpty || student.instrumentID == rosterInstrumentFilter)
+                    && (rosterInactivityFilter == nil || student.inactivityBand == rosterInactivityFilter)
+            }
+            .sorted { lhs, rhs in
+                switch rosterSort {
+                case .name:
+                    return lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel) == .orderedAscending
+                case .lastPractice:
+                    return (lhs.lastPracticeAt ?? "") > (rhs.lastPracticeAt ?? "")
+                case .weeklyMinutes:
+                    return (lhs.current7d?.practiceMinutes ?? 0) > (rhs.current7d?.practiceMinutes ?? 0)
+                }
+            }
+    }
+
+    private func rosterActivityText(_ student: EnsembleRosterStudent) -> String {
+        if let last = student.lastPracticeAt {
+            return NativeLocalization.string("Recent practice") + ": " + formatClassDate(last)
+        }
+        return NativeLocalization.string("No practice")
     }
 
     @ViewBuilder
@@ -1025,7 +1268,7 @@ struct ClassesView: View {
                 )),
                 detail: "aggregate"
             )
-            .accessibilityIdentifier("classes.director.averageDistance.\(student.memberID)")
+            .accessibilityIdentifier("classes.director.averageDistance.\(student.rosterRowID)")
         }
         if let inTunePercentage = student.inTunePercentage {
             BTMetricTile(
@@ -1037,7 +1280,7 @@ struct ClassesView: View {
                 detail: "aggregate",
                 tint: BTTheme.success
             )
-            .accessibilityIdentifier("classes.director.inTune.\(student.memberID)")
+            .accessibilityIdentifier("classes.director.inTune.\(student.rosterRowID)")
         }
     }
 
@@ -1058,6 +1301,41 @@ struct ClassesView: View {
                         aggregateMetrics(aggregate)
                     }
                 }
+                if let trends = aggregate.trends {
+                    Divider()
+                    BTSectionHeader(title: "Weekly trend", subtitle: "Last 7 days")
+                    Text(verbatim: NativeLocalization.format(
+                        "%@ minutes",
+                        formatClassNumber(trends.current7d.practiceMinutes)
+                    ))
+                        .font(.headline.monospacedDigit())
+                    Text(verbatim: practiceTrendText(trends.practiceMinutesDelta))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(BTTheme.muted)
+                    .accessibilityIdentifier("classes.summary.trends")
+                }
+                ForEach(aggregate.sections) { section in
+                    Divider()
+                    VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                        Text(verbatim: instrumentDisplayName(section.instrumentID))
+                            .font(.headline)
+                        Text(verbatim: NativeLocalization.format(
+                            "%@ minutes",
+                            formatClassNumber(section.practiceMinutes)
+                        ))
+                            .font(.footnote)
+                            .foregroundStyle(BTTheme.muted)
+                        if let average = section.averageAbsCents {
+                            Text(verbatim: NativeLocalization.format(
+                                "%@ cents",
+                                formatClassNumber(average)
+                            ))
+                                .font(.footnote)
+                                .foregroundStyle(BTTheme.muted)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("classes.sections.summary")
             }
         }
     }
@@ -1078,15 +1356,17 @@ struct ClassesView: View {
             detail: "all students",
             tint: BTTheme.secondaryAccent
         )
-        BTMetricTile(
-            title: "Average distance",
-            value: .verbatim(NativeLocalization.format(
-                "%@ cents",
-                formatClassNumber(aggregate.overall.averageAbsCents)
-            )),
-            detail: "all students"
-        )
-        .accessibilityIdentifier("classes.director.averageDistance.overall")
+        if let average = aggregate.overall.averageAbsCents {
+            BTMetricTile(
+                title: "Average distance",
+                value: .verbatim(NativeLocalization.format(
+                    "%@ cents",
+                    formatClassNumber(average)
+                )),
+                detail: "all students"
+            )
+            .accessibilityIdentifier("classes.director.averageDistance.overall")
+        }
     }
 
     @ViewBuilder
@@ -1122,6 +1402,32 @@ struct ClassesView: View {
             return NativeLocalization.isolate(String(Int(value)))
         }
         return NativeLocalization.isolate(String(format: "%.1f", value))
+    }
+
+    private func formatClassDate(_ value: String) -> String {
+        guard let date = ISO8601DateFormatter().date(from: value) else {
+            return NativeLocalization.preserve(value)
+        }
+        return date.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .omitted)
+                .locale(NativeLocalization.language.locale)
+        )
+    }
+
+    private func practiceTrendText(_ delta: Double) -> String {
+        let direction = delta > 0
+            ? NativeLocalization.string("Up")
+            : (delta < 0 ? NativeLocalization.string("Down") : NativeLocalization.string("Ready"))
+        return direction + " " + NativeLocalization.format(
+            "%@ minutes",
+            formatClassNumber(abs(delta))
+        )
+    }
+
+    private var sharingDisclosure: String {
+        NativeLocalization.string(
+            "Your practice timing and pitch measurements sync to your account. Class owners and accepted assistants receive aggregate practice minutes, session counts, and tuning summaries only. Recordings, reflections, and session details are not shared."
+        )
     }
 }
 

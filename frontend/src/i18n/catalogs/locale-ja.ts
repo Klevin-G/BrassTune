@@ -1009,6 +1009,33 @@ const messages = {
   "auth.profileCompletionInvalid": "有効なユーザー名と表示名を入力してください。",
   "auth.profileCompletionExpired": "サインインのセッションが期限切れです。もう一度サインインしてください。",
   "auth.profileCompletionAccountChanged": "プロフィール設定の完了前に、アクティブなアカウントが変更されました。"
+  ,"class.active": "活動中",
+  "class.allActivity": "すべての活動",
+  "class.allInstruments": "すべての楽器",
+  "class.allStatuses": "すべての状態",
+  "class.loadFailedBody": "クラスを読み込めませんでした。接続を確認して、もう一度お試しください。",
+  "class.minutesDelta": "前週比 {count} 分",
+  "class.noRosterMatches": "この絞り込みに一致する生徒はいません。",
+  "class.practiceNow": "今すぐ練習",
+  "class.readOnlyRoster": "活動中の生徒とクラス傾向の閲覧専用表示です。アカウント情報と管理操作は非表示です。",
+  "class.searchRoster": "生徒を検索",
+  "class.sharedDataTitle": "クラスに共有される内容",
+  "class.sharedDataBody": "{date}以降のクラウド練習の集計：時間、セッション数、音程の概要。音声、振り返り、各セッションの詳細は非公開です。",
+  "class.sortBy": "並べ替え",
+  "class.sortLastPractice": "最近の練習",
+  "class.sortName": "名前",
+  "class.sortWeeklyMinutes": "週の練習時間",
+  "class.status": "状態",
+  "class.weeklyTrend": "前週との比較",
+  "class.enableSharingTitle": "クラスへの進捗共有を有効にする",
+  "class.enableSharingBody": "このメンバー登録は現在のプライバシー選択より前のものです。進捗やアシスタント分析を表示する前に、限定された集計範囲を有効にしてください。",
+  "class.enableSharing": "共有を有効にする",
+  "class.enablingSharing": "有効化中…",
+  "class.sharingEnabled": "クラスへの進捗共有を有効にしました。",
+  "class.sharingEnableError": "クラスへの進捗共有を有効にできませんでした。",
+  "class.inviteRole": "クラスでの役割",
+  "class.inviteRoleAssistant": "アシスタント",
+  "class.assistantRoleHelp": "アシスタントは活動中の匿名化名簿とクラス傾向を閲覧できますが、招待、削除、コードの共有・更新、クラス管理はできません。"
 } satisfies MessageCatalog;
 
 export default messages;

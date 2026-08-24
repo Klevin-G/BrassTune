@@ -188,6 +188,64 @@ describe('API client runtime URLs', () => {
     expect(headers.get('authorization')).toBe('Bearer signed-in-token');
   });
 
+  it('sends the explicit aggregate-sharing consent when joining or accepting a class', async () => {
+    const { acceptEnsembleInvitation, joinEnsembleByCode } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ joined: true, accepted: true, group_id: 42, group_name: 'Brass', aggregate_sharing_scope_code: 'cloud_practice_sessions_since_membership_v1' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await joinEnsembleByCode('BRASS42', 'horn');
+    await acceptEnsembleInvitation(77, 'trumpet');
+
+    const payloads = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init.body)));
+    expect(payloads).toEqual([
+      {
+        code: 'BRASS42',
+        instrument_id: 'horn',
+        sharing_consent: { scope_code: 'cloud_practice_sessions_since_membership_v1', acknowledged: true },
+      },
+      {
+        instrument_id: 'trumpet',
+        sharing_consent: { scope_code: 'cloud_practice_sessions_since_membership_v1', acknowledged: true },
+      },
+    ]);
+  });
+
+  it('loads class analytics and self progress from group-scoped endpoints', async () => {
+    const { getEnsembleMyProgress, getEnsembleReport, getEnsembleSummary } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ group_id: 42 }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await Promise.all([getEnsembleSummary(42), getEnsembleReport(42), getEnsembleMyProgress(42)]);
+
+    expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([
+      'https://api.example.test/api/ensemble/groups/42/my-progress',
+      'https://api.example.test/api/ensemble/groups/42/report',
+      'https://api.example.test/api/ensemble/groups/42/summary',
+    ]);
+  });
+
+  it('enables the exact bounded sharing scope for the signed-in class member', async () => {
+    const { enableEnsembleSharingConsent } = await loadClient('', 'https://api.example.test');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ group_id: 42, viewer_has_aggregate_sharing_consent: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await enableEnsembleSharingConsent(42);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/ensemble/groups/42/sharing-consent',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+      sharing_consent: { scope_code: 'cloud_practice_sessions_since_membership_v1', acknowledged: true },
+    });
+  });
+
   it('splits pitch frame saves into backend-safe batches', async () => {
     const { recordPitchFramesInBatches } = await loadClient('', 'https://api.example.test');
     const fetchMock = vi.fn().mockImplementation(async (_url, init) => ({

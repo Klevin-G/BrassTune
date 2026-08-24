@@ -25,6 +25,16 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const body = options?.body;
   const isFormBody = typeof FormData !== 'undefined' && body instanceof FormData;
@@ -40,7 +50,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(friendlyRequestError(message, response.status));
+    throw new ApiRequestError(friendlyRequestError(message, response.status), response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -295,36 +305,165 @@ export function getPracticePlan(instrumentId: string) {
   return request<PracticePlan>(`/api/practice-plan?instrument_id=${instrumentId}`);
 }
 
-export function getEnsembleSummary(groupId?: number) {
-  const params = queryString({ group_id: groupId });
-  return request<any>(`/api/ensemble/summary${params}`);
+export const CLASS_PRACTICE_AGGREGATE_SCOPE_CODE = 'cloud_practice_sessions_since_membership_v1' as const;
+
+export type ClassViewerRole = 'owner' | 'assistant' | 'student' | 'admin_observer';
+export type ClassRosterScope = 'full' | 'active_redacted' | 'self';
+
+export interface ClassSharingConsent {
+  scope_code: typeof CLASS_PRACTICE_AGGREGATE_SCOPE_CODE;
+  acknowledged: true;
 }
 
-export function getEnsembleReport(groupId?: number) {
-  const params = queryString({ group_id: groupId });
-  return request<any>(`/api/ensemble/report${params}`);
+export interface ClassViewerCapabilities {
+  viewer_role: ClassViewerRole;
+  viewer_can_leave: boolean;
+  viewer_can_manage: boolean;
+  viewer_can_view_roster: boolean;
+  viewer_can_view_class_analytics: boolean;
+  viewer_has_aggregate_sharing_consent: boolean;
+  roster_scope: ClassRosterScope;
+}
+
+export interface ClassPracticeAggregateScope {
+  code: typeof CLASS_PRACTICE_AGGREGATE_SCOPE_CODE;
+  source: 'cloud_practice_sessions';
+  window: 'membership_active_since';
+  excludes: Array<'reflections' | 'audio' | 'session_detail'>;
+}
+
+export interface EnsembleGroupMember {
+  id: number;
+  group_id: number;
+  user_id?: number;
+  username?: string | null;
+  display_name: string | null;
+  instrument_id: string;
+  role_in_group: 'student' | 'assistant';
+  status: 'active' | 'invited' | 'removed';
+  active_since: string | null;
+  aggregate_sharing_consented_at?: string | null;
+  aggregate_sharing_scope_code?: typeof CLASS_PRACTICE_AGGREGATE_SCOPE_CODE | null;
+  is_current_user?: boolean;
+}
+
+export interface EnsembleGroup extends ClassViewerCapabilities {
+  id: number;
+  name: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  director_user_id?: number;
+  join_code?: string | null;
+  members?: EnsembleGroupMember[];
+}
+
+export interface ClassPracticeWindow {
+  sessions_count: number;
+  practice_minutes: number;
+  average_abs_cents: number | null;
+  in_tune_percentage: number | null;
+  last_practice_at: string | null;
+}
+
+export interface ClassProgressDelta {
+  sessions_count: number;
+  practice_minutes: number;
+  average_abs_cents: number | null;
+  in_tune_percentage: number | null;
+}
+
+export interface ClassInactivity {
+  state: 'active_today' | 'active_this_week' | 'inactive_7d' | 'no_practice_since_joining';
+  days_since_last_practice: number | null;
+  last_practice_at: string | null;
+}
+
+export interface ClassMemberProgress {
+  lifetime: ClassPracticeWindow;
+  current_7d: ClassPracticeWindow;
+  previous_7d: ClassPracticeWindow;
+  delta: ClassProgressDelta;
+  inactivity: ClassInactivity;
+  generated_at?: string;
+}
+
+export interface EnsembleMyProgress extends ClassMemberProgress {
+  group_id: number;
+  group_name: string;
+  instrument_id: string;
+  role_in_group: 'student' | 'assistant';
+  membership_started_at: string | null;
+  practice_aggregate_scope: ClassPracticeAggregateScope;
+}
+
+export interface EnsembleSectionSummary {
+  instrument_id: string;
+  session_count: number;
+  practice_minutes: number;
+  average_abs_cents: number | null;
+  in_tune_percentage: number | null;
+  top_problem_notes: NoteStats[];
+}
+
+export interface EnsembleSummary extends ClassViewerCapabilities {
+  group_id: number;
+  session_count: number;
+  sections: EnsembleSectionSummary[];
+  overall: EnsembleSectionSummary;
+  trends: {
+    current_7d: ClassPracticeWindow;
+    previous_7d: ClassPracticeWindow;
+    delta: ClassProgressDelta;
+    generated_at: string;
+  };
+  practice_aggregate_scope: ClassPracticeAggregateScope;
+}
+
+export interface EnsembleReport extends ClassViewerCapabilities {
+  group_id: number;
+  date_range: string;
+  instrument_section: string;
+  top_problem_notes: NoteStats[];
+  average_tuning_error: number | null;
+  recommended_rehearsal_focus: string;
+  suggested_long_tone_sequence: string[];
+  sections: EnsembleSectionSummary[];
+  practice_aggregate_scope: ClassPracticeAggregateScope;
+}
+
+const classSharingConsent = (): ClassSharingConsent => ({
+  scope_code: CLASS_PRACTICE_AGGREGATE_SCOPE_CODE,
+  acknowledged: true,
+});
+
+export function getEnsembleSummary(groupId: number) {
+  return request<EnsembleSummary>(`/api/ensemble/groups/${groupId}/summary`);
+}
+
+export function getEnsembleReport(groupId: number) {
+  return request<EnsembleReport>(`/api/ensemble/groups/${groupId}/report`);
 }
 
 export function getEnsembleGroups() {
-  return request<any[]>('/api/ensemble/groups');
+  return request<EnsembleGroup[]>('/api/ensemble/groups');
 }
 
 export function createEnsembleGroup(name: string) {
-  return request<any>('/api/ensemble/groups', { method: 'POST', body: JSON.stringify({ name }) });
+  return request<Pick<EnsembleGroup, 'id' | 'name' | 'join_code'>>('/api/ensemble/groups', { method: 'POST', body: JSON.stringify({ name }) });
 }
 
 export function getEnsembleGroup(groupId: number) {
-  return request<any>(`/api/ensemble/groups/${groupId}`);
+  return request<EnsembleGroup>(`/api/ensemble/groups/${groupId}`);
 }
 
-export function addEnsembleMemberByUsername(groupId: number, payload: { username: string; instrument_id?: string; role_in_group?: string }) {
-  return request<any>(`/api/ensemble/groups/${groupId}/members/by-username`, { method: 'POST', body: JSON.stringify(payload) });
+export function addEnsembleMemberByUsername(groupId: number, payload: { username: string; instrument_id?: string; role_in_group?: 'student' | 'assistant' }) {
+  return request<EnsembleGroupMember>(`/api/ensemble/groups/${groupId}/members/by-username`, { method: 'POST', body: JSON.stringify(payload) });
 }
 
 export function joinEnsembleByCode(code: string, instrumentId?: string) {
-  return request<{ joined: boolean; group_id: number; group_name: string }>(`/api/ensemble/join`, {
+  return request<{ joined: boolean; group_id: number; group_name: string; aggregate_sharing_scope_code: string }>(`/api/ensemble/join`, {
     method: 'POST',
-    body: JSON.stringify({ code, instrument_id: instrumentId }),
+    body: JSON.stringify({ code, instrument_id: instrumentId, sharing_consent: classSharingConsent() }),
   });
 }
 
@@ -333,7 +472,7 @@ export function leaveEnsembleGroup(groupId: number) {
 }
 
 export function updateEnsembleMember(groupId: number, memberId: number, payload: { instrument_id?: string; role_in_group?: string; status?: string }) {
-  return request<any>(`/api/ensemble/groups/${groupId}/members/${memberId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  return request<EnsembleGroupMember>(`/api/ensemble/groups/${groupId}/members/${memberId}`, { method: 'PATCH', body: JSON.stringify(payload) });
 }
 
 export function removeEnsembleMember(groupId: number, memberId: number) {
@@ -359,9 +498,9 @@ export function getEnsembleInvitations() {
 }
 
 export function acceptEnsembleInvitation(memberId: number, instrumentId?: string) {
-  return request<{ accepted: boolean; group_id: number }>(`/api/ensemble/invitations/${memberId}/accept`, {
+  return request<{ accepted: boolean; group_id: number; aggregate_sharing_scope_code: string }>(`/api/ensemble/invitations/${memberId}/accept`, {
     method: 'POST',
-    body: JSON.stringify({ instrument_id: instrumentId }),
+    body: JSON.stringify({ instrument_id: instrumentId, sharing_consent: classSharingConsent() }),
   });
 }
 
@@ -369,24 +508,41 @@ export function declineEnsembleInvitation(memberId: number) {
   return request<{ declined: boolean }>(`/api/ensemble/invitations/${memberId}/decline`, { method: 'POST' });
 }
 
-export interface EnsembleRosterStudent {
-  member_id: number;
-  user_id: number;
-  username: string | null;
+export interface EnsembleRosterStudent extends ClassMemberProgress {
+  roster_row_id: string;
+  member_id?: number;
+  user_id?: number;
+  username?: string | null;
   display_name: string | null;
   instrument_id: string;
-  status: string;
-  role_in_group: string;
+  status: 'active' | 'invited';
+  role_in_group: 'student' | 'assistant';
+  is_current_user?: boolean;
   sessions_count: number;
   practice_minutes: number;
   average_abs_cents: number | null;
   in_tune_percentage: number | null;
   last_practice_at: string | null;
-  last_active_at: string | null;
 }
 
 export function getEnsembleRoster(groupId: number) {
-  return request<{ group_id: number; students: EnsembleRosterStudent[] }>(`/api/ensemble/groups/${groupId}/roster`);
+  return request<{ group_id: number; practice_aggregate_scope: ClassPracticeAggregateScope; roster_scope: ClassRosterScope; students: EnsembleRosterStudent[] } & ClassViewerCapabilities>(`/api/ensemble/groups/${groupId}/roster`);
+}
+
+export function getEnsembleMyProgress(groupId: number) {
+  return request<EnsembleMyProgress>(`/api/ensemble/groups/${groupId}/my-progress`);
+}
+
+export function enableEnsembleSharingConsent(groupId: number) {
+  return request<{
+    group_id: number;
+    viewer_has_aggregate_sharing_consent: true;
+    aggregate_sharing_consented_at: string;
+    aggregate_sharing_scope_code: typeof CLASS_PRACTICE_AGGREGATE_SCOPE_CODE;
+  }>(`/api/ensemble/groups/${groupId}/sharing-consent`, {
+    method: 'POST',
+    body: JSON.stringify({ sharing_consent: classSharingConsent() }),
+  });
 }
 
 export interface AdminMetrics {
