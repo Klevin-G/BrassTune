@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -97,9 +98,11 @@ def _validate_optional_instrument(instrument_id: Optional[str]) -> None:
         _validate_instrument(instrument_id)
 
 
-# Unambiguous alphabet for class join codes (no 0/O/1/I/L confusion).
-_JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-_JOIN_CODE_LENGTH = 8
+# New class codes are numeric so they are easy to relay verbally. Existing
+# non-numeric codes remain joinable until a class owner rotates them.
+_JOIN_CODE_SPACE = 1_000_000
+_JOIN_CODE_GENERATION_ATTEMPTS = 12
+_JOIN_CODE_COMMIT_ATTEMPTS = 4
 
 
 def _positive_env_limit(name: str, default: int) -> int:
@@ -123,13 +126,17 @@ def _lock_class_quota_user(db: Session, user_id: int) -> None:
 
 
 def _generate_join_code(db: Session) -> str:
-    import secrets
-
-    for _ in range(12):
-        code = "".join(secrets.choice(_JOIN_CODE_ALPHABET) for _ in range(_JOIN_CODE_LENGTH))
+    for _ in range(_JOIN_CODE_GENERATION_ATTEMPTS):
+        # Formatting retains leading zeroes and restricts output to ASCII digits.
+        code = f"{secrets.randbelow(_JOIN_CODE_SPACE):06d}"
         if db.query(Group.id).filter(Group.join_code == code).first() is None:
             return code
     raise HTTPException(status_code=503, detail="A class code could not be created. Try again.")
+
+
+def _is_join_code_collision(db: Session, code: str) -> bool:
+    """Recognize the generated-code race without hiding other DB failures."""
+    return db.query(Group.id).filter(Group.join_code == code).first() is not None
 
 
 def _parse_date_start(value: Optional[str], field_name: str) -> Optional[dt.datetime]:
@@ -2030,17 +2037,30 @@ def _group_viewer_capabilities(db: Session, group: Group, user: User) -> dict:
 @router.post("/ensemble/groups")
 def create_ensemble_group(payload: CreateGroupRequest, db: Session = Depends(get_db), auth: AuthContext = Depends(get_auth_context)):
     # Self-serve: any signed-in user can start an ensemble and becomes its director.
-    _lock_class_quota_user(db, auth.user.id)
-    owned_count = db.query(Group.id).filter(Group.director_user_id == auth.user.id).count()
     owned_limit = _positive_env_limit("BRASSTUNE_MAX_OWNED_CLASSES_PER_USER", DEFAULT_MAX_OWNED_CLASSES_PER_USER)
-    if owned_count >= owned_limit:
-        raise HTTPException(status_code=409, detail="You have reached the class ownership limit.")
-    group = Group(name=payload.name, director_user_id=auth.user.id, join_code=_generate_join_code(db))
-    db.add(group)
-    if auth.user.role == "student":
-        auth.user.role = "director"
-        db.add(auth.user)
-    db.commit()
+    for _ in range(_JOIN_CODE_COMMIT_ATTEMPTS):
+        # A code-collision rollback releases PostgreSQL's row lock, so each
+        # retry must lock and recount before another insert is attempted.
+        _lock_class_quota_user(db, auth.user.id)
+        owned_count = db.query(Group.id).filter(Group.director_user_id == auth.user.id).count()
+        if owned_count >= owned_limit:
+            raise HTTPException(status_code=409, detail="You have reached the class ownership limit.")
+        code = _generate_join_code(db)
+        group = Group(name=payload.name, director_user_id=auth.user.id, join_code=code)
+        db.add(group)
+        if auth.user.role == "student":
+            auth.user.role = "director"
+            db.add(auth.user)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            if not _is_join_code_collision(db, code):
+                raise
+        else:
+            break
+    else:
+        raise HTTPException(status_code=503, detail="A class code could not be created. Try again.")
     db.refresh(group)
     record_event(db, "group_created", auth.user.id, {"group_id": group.id})
     return group_to_dict(group)
@@ -2368,19 +2388,23 @@ def rotate_ensemble_join_code(group_id: int, db: Session = Depends(get_db), auth
     """Invalidate the previous class code and return a fresh management-only code."""
     group = _require_group_manager(db, group_id, auth)
     previous_code = group.join_code
-    for _ in range(4):
-        group.join_code = _generate_join_code(db)
-        if group.join_code == previous_code:
+    for _ in range(_JOIN_CODE_COMMIT_ATTEMPTS):
+        code = _generate_join_code(db)
+        if code == previous_code:
             continue
+        group.join_code = code
         db.add(group)
         try:
             db.commit()
+        except IntegrityError:
+            db.rollback()
+            if not _is_join_code_collision(db, code):
+                raise
+            group = _require_group_manager(db, group_id, auth)
+        else:
             db.refresh(group)
             record_event(db, "group_join_code_rotated", auth.user.id, {"group_id": group.id})
             return {"group_id": group.id, "join_code": group.join_code}
-        except IntegrityError:
-            db.rollback()
-            group = _require_group_manager(db, group_id, auth)
     raise HTTPException(status_code=503, detail="A new class code could not be created. Try again.")
 
 

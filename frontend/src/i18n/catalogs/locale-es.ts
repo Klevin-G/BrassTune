@@ -517,7 +517,7 @@ const messages = {
   "class.joinYourClass": "Únete a tu clase",
   "class.forStudents": "Para estudiantes",
   "class.enterCode": "Ingresa el código de clase que te dio tu maestro.",
-  "class.codeExample": "por ejemplo BXK4QD",
+  "class.codeExample": "por ejemplo 012345",
   "class.code": "código de clase",
   "class.joining": "Uniéndose a la clase...",
   "class.join": "Unirse",

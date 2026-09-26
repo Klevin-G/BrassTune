@@ -517,7 +517,7 @@ const messages = {
   "class.joinYourClass": "クラスに参加してください",
   "class.forStudents": "学生向け",
   "class.enterCode": "先生から教えてもらったクラスコードを入力してください。",
-  "class.codeExample": "たとえば、BXK4QD",
+  "class.codeExample": "たとえば、012345",
   "class.code": "クラスコード",
   "class.joining": "クラスに参加中…",
   "class.join": "参加する",

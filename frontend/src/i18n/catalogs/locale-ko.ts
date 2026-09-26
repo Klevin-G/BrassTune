@@ -517,7 +517,7 @@ const messages = {
   "class.joinYourClass": "수업에 참여하세요",
   "class.forStudents": "학생용",
   "class.enterCode": "선생님이 알려준 수업 코드를 입력하세요.",
-  "class.codeExample": "예를 들어 BXK4QD",
+  "class.codeExample": "예를 들어 012345",
   "class.code": "수업 코드",
   "class.joining": "수업에 참여하는 중…",
   "class.join": "가입하다",
