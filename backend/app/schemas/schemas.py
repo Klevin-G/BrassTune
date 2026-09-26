@@ -10,6 +10,9 @@ MAX_PCM_SAMPLES = 16384
 MAX_BATCH_PITCH_FRAMES = 1000
 CLASS_PRACTICE_AGGREGATE_SCOPE_CODE = "cloud_practice_sessions_since_membership_v1"
 _CLIENT_SYNC_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_NUMERIC_JOIN_CODE_PATTERN = re.compile(r"^[0-9]{6}$")
+# Existing deployed codes remain valid until class owners rotate them.
+_LEGACY_JOIN_CODE_PATTERN = re.compile(r"^[A-Z0-9]{4,16}$")
 
 
 def _normalize_client_sync_id(value):
@@ -178,7 +181,10 @@ class JoinByCodeRequest(BaseModel):
     @field_validator("code")
     @classmethod
     def normalize_code(cls, value):
-        return value.strip().upper().replace(" ", "")
+        normalized = value.strip().upper().replace(" ", "")
+        if not (_NUMERIC_JOIN_CODE_PATTERN.fullmatch(normalized) or _LEGACY_JOIN_CODE_PATTERN.fullmatch(normalized)):
+            raise ValueError("Class code must be six digits or a valid legacy code.")
+        return normalized
 
 
 class UpdateGroupMemberRequest(BaseModel):

@@ -517,7 +517,7 @@ const messages = {
   "class.joinYourClass": "انضم إلى صفك",
   "class.forStudents": "للطلاب",
   "class.enterCode": "أدخل رمز الفصل الذي أعطاه لك معلمك.",
-  "class.codeExample": "على سبيل المثال BXK4QD",
+  "class.codeExample": "على سبيل المثال 012345",
   "class.code": "رمز الفصل",
   "class.joining": "الانضمام إلى الصف…",
   "class.join": "ينضم",

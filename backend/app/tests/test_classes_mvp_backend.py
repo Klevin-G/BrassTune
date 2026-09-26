@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.auth import AuthContext
 from app.api.routes import (
+    _generate_join_code,
     ensemble_group_my_progress,
     ensemble_group_report,
     ensemble_group_roster,
@@ -77,8 +78,27 @@ def test_consent_and_class_name_contracts_are_strict_and_normalized():
     with pytest.raises(ValidationError):
         JoinByCodeRequest(code="ABCD")
     with pytest.raises(ValidationError):
+        JoinByCodeRequest(code="１２３４５６", sharing_consent=CONSENT)
+    with pytest.raises(ValidationError):
         AcceptInvitationRequest(instrument_id="horn")
     assert JoinByCodeRequest(code="abcd", sharing_consent=CONSENT).code == "ABCD"
+    assert JoinByCodeRequest(code="  000123  ", sharing_consent=CONSENT).code == "000123"
+
+
+def test_numeric_join_code_generation_preserves_leading_zeroes_and_retries_collisions(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    try:
+        director = _user(8998, "code-director", role="director")
+        db.add_all([director, Group(name="Taken", director_user_id=director.id, join_code="000001")])
+        db.commit()
+        values = iter((1, 2))
+        monkeypatch.setattr("app.api.routes.secrets.randbelow", lambda _: next(values))
+        assert _generate_join_code(db) == "000002"
+    finally:
+        db.close()
+        engine.dispose()
 
 
 def test_start_batch_and_stop_replays_are_idempotent_and_conflicts_fail_closed():

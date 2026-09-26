@@ -5093,7 +5093,8 @@ def test_legacy_director_membership_can_leave_and_owner_admin_can_rotate_code():
         db.commit()
 
         first_rotation = rotate_ensemble_join_code(group.id, db=db, auth=AuthContext(user=owner))
-        assert len(first_rotation["join_code"]) == 8
+        assert first_rotation["join_code"].isdigit()
+        assert len(first_rotation["join_code"]) == 6
         assert first_rotation["join_code"] != "LEGACY"
         second_rotation = rotate_ensemble_join_code(group.id, db=db, auth=AuthContext(user=admin))
         assert second_rotation["join_code"] != first_rotation["join_code"]
@@ -5106,6 +5107,75 @@ def test_legacy_director_membership_can_leave_and_owner_admin_can_rotate_code():
         db.refresh(membership)
         assert membership.status == "removed"
         assert membership.removed_at is not None
+    finally:
+        db.close()
+
+
+def test_group_code_creation_and_rotation_retry_database_collisions(monkeypatch):
+    db = _test_db()
+    try:
+        owner = User(id=6160, username="numeric-owner", name="Numeric Owner", role="student", primary_instrument_id="trumpet")
+        other_owner = User(id=6161, username="numeric-other", name="Numeric Other", role="director", primary_instrument_id="horn")
+        db.add_all([owner, other_owner, Group(name="Taken", director_user_id=other_owner.id, join_code="000001")])
+        db.commit()
+
+        generated = iter(("000001", "000002"))
+        monkeypatch.setattr("app.api.routes._generate_join_code", lambda _: next(generated))
+        created = create_ensemble_group(CreateGroupRequest(name="New Numeric Class"), db=db, auth=AuthContext(user=owner))
+        assert created["join_code"] == "000002"
+
+        target = Group(name="Rotate Me", director_user_id=other_owner.id, join_code="LEGACY01")
+        db.add(target)
+        db.commit()
+        generated = iter(("000001", "000003"))
+        monkeypatch.setattr("app.api.routes._generate_join_code", lambda _: next(generated))
+        rotated = rotate_ensemble_join_code(target.id, db=db, auth=AuthContext(user=other_owner))
+        assert rotated["join_code"] == "000003"
+    finally:
+        db.close()
+
+
+def test_group_code_collision_retry_rechecks_the_ownership_quota(monkeypatch):
+    db = _test_db()
+    try:
+        owner = User(id=6164, username="quota-owner", name="Quota Owner", role="student", primary_instrument_id="trumpet")
+        other_owner = User(id=6165, username="quota-other", name="Quota Other", role="director", primary_instrument_id="horn")
+        db.add_all([owner, other_owner, Group(name="Taken", director_user_id=other_owner.id, join_code="000001")])
+        db.commit()
+        monkeypatch.setenv("BRASSTUNE_MAX_OWNED_CLASSES_PER_USER", "1")
+        monkeypatch.setattr("app.api.routes._generate_join_code", lambda _: "000001")
+
+        def collision_after_another_create(session, code):
+            session.add(Group(name="Intervening", director_user_id=owner.id, join_code="000002"))
+            session.commit()
+            return True
+
+        monkeypatch.setattr("app.api.routes._is_join_code_collision", collision_after_another_create)
+        with pytest.raises(HTTPException) as denied:
+            create_ensemble_group(CreateGroupRequest(name="Must Not Exceed Quota"), db=db, auth=AuthContext(user=owner))
+        assert denied.value.status_code == 409
+        assert db.query(Group).filter(Group.director_user_id == owner.id).count() == 1
+    finally:
+        db.close()
+
+
+def test_legacy_code_join_remains_available_without_disclosing_the_code_to_students():
+    db = _test_db()
+    try:
+        owner = User(id=6162, username="legacy-owner", name="Legacy Owner", role="director", primary_instrument_id="trumpet")
+        student = User(id=6163, username="legacy-student", name="Legacy Student", role="student", primary_instrument_id="horn")
+        group = Group(name="Legacy Join", director_user_id=owner.id, join_code="LEGACY01")
+        db.add_all([owner, student, group])
+        db.commit()
+
+        joined = join_ensemble_by_code(
+            JoinByCodeRequest(code="legacy01", sharing_consent=SHARING_CONSENT),
+            db=db,
+            auth=AuthContext(user=student),
+        )
+        assert joined["group_id"] == group.id
+        detail = get_ensemble_group(group.id, db=db, auth=AuthContext(user=student))
+        assert "join_code" not in detail
     finally:
         db.close()
 

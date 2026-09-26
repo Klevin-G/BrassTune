@@ -517,7 +517,7 @@ const messages = {
   "class.joinYourClass": "加入你的班级",
   "class.forStudents": "对于学生",
   "class.enterCode": "输入老师给您的班级代码。",
-  "class.codeExample": "例如BXK4QD",
+  "class.codeExample": "例如012345",
   "class.code": "类别代码",
   "class.joining": "正在加入班级…",
   "class.join": "加入",

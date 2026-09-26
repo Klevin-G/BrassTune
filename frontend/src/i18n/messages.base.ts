@@ -535,7 +535,7 @@ export const englishMessages = {
   'class.joinYourClass': 'Join your class',
   'class.forStudents': 'For students',
   'class.enterCode': 'Enter the class code your teacher gave you.',
-  'class.codeExample': 'for example BXK4QD',
+  'class.codeExample': 'for example 012345',
   'class.code': 'Class code',
   'class.joining': 'Joining class…',
   'class.join': 'Join',

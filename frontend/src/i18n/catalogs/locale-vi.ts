@@ -517,7 +517,7 @@ const messages = {
   "class.joinYourClass": "Tham gia lớp học của bạn",
   "class.forStudents": "Dành cho sinh viên",
   "class.enterCode": "Nhập mã lớp mà giáo viên đã đưa cho bạn.",
-  "class.codeExample": "ví dụ BXK4QD",
+  "class.codeExample": "ví dụ 012345",
   "class.code": "Mã lớp",
   "class.joining": "Đang tham gia lớp học…",
   "class.join": "Tham gia",
