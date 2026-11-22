@@ -788,6 +788,569 @@ struct WeeklyGoalCard: View {
     }
 }
 
+struct PracticeGoalListView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var presentedSheet: PracticeGoalSheet?
+    @State private var goalPendingDeletion: PracticeGoal?
+    let focusedGoalID: PracticeGoal.ID?
+
+    init(focusedGoalID: PracticeGoal.ID? = nil) {
+        self.focusedGoalID = focusedGoalID
+    }
+
+    var body: some View {
+        BTScreen {
+            BTPageHeader(
+                eyebrow: "Goal practice",
+                title: "Measurable goals",
+                subtitle: "Log your own assessment after each attempt. BrassTune does not automatically verify outcomes."
+            )
+
+            if model.practiceFeatures.measurableGoals.isEmpty {
+                BTCard(tint: BTTheme.surfaceWarm) {
+                    Label("Start with one observable target", systemImage: "target")
+                        .font(.headline)
+                    Text("Choose a passage, skill, criterion, and strategy. Then note what happened and what you will change next time.")
+                        .font(.subheadline)
+                        .foregroundStyle(BTTheme.muted)
+                    Button("Create a practice goal") { presentedSheet = .create }
+                        .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                        .accessibilityIdentifier("practiceGoals.create")
+                }
+            } else {
+                ForEach(displayedGoals) { goal in
+                    PracticeGoalCard(
+                        goal: goal,
+                        logAttempt: { presentedSheet = .attempt(goal) },
+                        edit: { presentedSheet = .edit(goal) },
+                        completeOrReopen: {
+                            if goal.isCompleted {
+                                model.reopenPracticeGoal(id: goal.id)
+                            } else {
+                                model.completePracticeGoal(id: goal.id)
+                            }
+                        },
+                        delete: { goalPendingDeletion = goal }
+                    )
+                }
+                if model.practiceFeatures.measurableGoals.count < PracticeGoal.maximumGoals {
+                    Button("Create another goal") { presentedSheet = .create }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("practiceGoals.create")
+                } else {
+                    Text(verbatim: NativeLocalization.format(
+                        "You have %@ preserved goals. This device supports creating up to 24 new goals; export your local data, then delete a goal if you need room for another.",
+                        model.practiceFeatures.measurableGoals.count.formatted(.number.locale(NativeLocalization.language.locale))
+                    ))
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                }
+            }
+        }
+        .navigationTitle("Practice goals")
+        .accessibilityIdentifier("screen.practiceGoals")
+        .sheet(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .create:
+                PracticeGoalEditor()
+            case .edit(let goal):
+                PracticeGoalEditor(goal: goal)
+            case .attempt(let goal):
+                PracticeGoalAttemptEditor(goal: goal)
+            }
+        }
+        .confirmationDialog(
+            "Delete this practice goal?",
+            isPresented: Binding(
+                get: { goalPendingDeletion != nil },
+                set: { if !$0 { goalPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete goal", role: .destructive) {
+                if let goalPendingDeletion {
+                    model.deletePracticeGoal(id: goalPendingDeletion.id)
+                }
+                goalPendingDeletion = nil
+            }
+        } message: {
+            Text("Its self-reported attempts will also be removed from this device account.")
+        }
+    }
+
+    private var displayedGoals: [PracticeGoal] {
+        PracticeGoal.reviewPriority(in: model.practiceFeatures.measurableGoals, focusedGoalID: focusedGoalID)
+    }
+}
+
+private enum PracticeGoalSheet: Identifiable {
+    case create
+    case edit(PracticeGoal)
+    case attempt(PracticeGoal)
+
+    var id: String {
+        switch self {
+        case .create: return "create"
+        case .edit(let goal): return "edit-" + goal.id.uuidString
+        case .attempt(let goal): return "attempt-" + goal.id.uuidString
+        }
+    }
+}
+
+private struct PracticeGoalCard: View {
+    @EnvironmentObject private var model: AppModel
+    let goal: PracticeGoal
+    let logAttempt: () -> Void
+    let edit: () -> Void
+    let completeOrReopen: () -> Void
+    let delete: () -> Void
+    @State private var attemptHistoryExpanded = false
+    @State private var metronomePresented = false
+
+    var body: some View {
+        BTCard(tint: goal.isCompleted ? BTTheme.surfaceWarm : BTTheme.surface) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                    Text(verbatim: goal.passage)
+                        .font(.headline)
+                    Text(verbatim: "\(goal.skill.title) · \(goal.criterion.summary)")
+                        .font(.subheadline)
+                        .foregroundStyle(BTTheme.muted)
+                    Text(verbatim: NativeLocalization.format("Strategy: %@", goal.strategy.title))
+                        .font(.caption)
+                        .foregroundStyle(BTTheme.muted)
+                    Text(verbatim: goal.isDueForReview()
+                        ? NativeLocalization.string("Due for your self-assessment")
+                        : NativeLocalization.format(
+                            "Review on %@",
+                            goal.nextReviewAt.formatted(date: .abbreviated, time: .omitted)
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(BTTheme.muted)
+                }
+                Spacer()
+                if goal.isCompleted {
+                    Label("Completed manually", systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BTTheme.success)
+                        .accessibilityLabel("Completed manually")
+                }
+            }
+
+            if let attempt = goal.attempts.first {
+                Divider()
+                PracticeGoalAttemptSummary(attempt: attempt, isLatest: true)
+                if goal.attempts.count > 1 {
+                    DisclosureGroup("Attempt history", isExpanded: $attemptHistoryExpanded) {
+                        ForEach(goal.attempts.dropFirst()) { historicalAttempt in
+                            Divider()
+                            PracticeGoalAttemptSummary(attempt: historicalAttempt, isLatest: false)
+                        }
+                    }
+                    .font(.subheadline)
+                    .accessibilityIdentifier("practiceGoals.attemptHistory.\(goal.id.uuidString)")
+                }
+            } else {
+                Text("No self-assessed attempts logged yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(BTTheme.muted)
+            }
+
+            HStack {
+                Button("Log attempt", action: logAttempt)
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("practiceGoals.logAttempt.\(goal.id.uuidString)")
+                Button(goal.isCompleted ? "Reopen" : "Complete", action: completeOrReopen)
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("practiceGoals.complete.\(goal.id.uuidString)")
+            }
+            if goal.supportsMetronomePractice {
+                Button {
+                    model.stopMetronomeTuner()
+                    model.stopMetronome()
+                    var settings = model.metronome
+                    settings.bpm = goal.recommendedMetronomeTempoBPM
+                    model.metronome = settings
+                    metronomePresented = true
+                } label: {
+                    Label { Text(verbatim: practiceTempoLabel) } icon: { Image(systemName: "metronome") }
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityHint("Opens the metronome at this tempo. The metronome stays stopped until you start it.")
+                .accessibilityIdentifier("practiceGoals.practiceTempo.\(goal.id.uuidString)")
+                .navigationDestination(isPresented: $metronomePresented) { MetronomeView() }
+                DisclosureGroup("Tempo ladder") {
+                    PracticeTempoLadderView(goal: goal)
+                        .id("\(goal.id.uuidString)-\(goal.criterion.targetTempoBPM)-\(goal.mostRecentRecordedTempoBPM ?? -1)")
+                }
+                .accessibilityIdentifier("practiceGoals.ladderDisclosure.\(goal.id.uuidString)")
+            }
+            HStack {
+                Button("Edit", action: edit)
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Delete", role: .destructive, action: delete)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var practiceTempoLabel: String {
+        let tempo = goal.recommendedMetronomeTempoBPM.formatted(.number.locale(NativeLocalization.language.locale))
+        if goal.mostRecentRecordedTempoBPM != nil {
+            return NativeLocalization.format("Practice at %@ BPM", tempo)
+        }
+        return NativeLocalization.format("Practice at target %@ BPM", tempo)
+    }
+}
+
+private struct PracticeTempoLadderView: View {
+    @EnvironmentObject private var model: AppModel
+    let goal: PracticeGoal
+    @State private var ladder: PracticeTempoLadder
+    @State private var metronomePresented = false
+
+    init(goal: PracticeGoal) {
+        self.goal = goal
+        _ladder = State(initialValue: PracticeTempoLadder(
+            startBPM: PracticeTempoLadder.suggestedStart(targetBPM: goal.criterion.targetTempoBPM, recordedBPM: goal.mostRecentRecordedTempoBPM),
+            targetBPM: goal.criterion.targetTempoBPM
+        ))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BTSpacing.sm) {
+            if let adjustment = goal.attempts.first?.nextAdjustment, !adjustment.isEmpty {
+                Text(verbatim: NativeLocalization.format("Next adjustment: %@", adjustment))
+                    .font(.caption).foregroundStyle(BTTheme.muted)
+            }
+            Stepper(value: Binding(get: { ladder.startBPM }, set: { ladder.setStart($0) }),
+                    in: PracticeGoalCriterion.tempoRange.lowerBound...ladder.targetBPM) {
+                Text(verbatim: NativeLocalization.format("Starting tempo: %@ BPM", ladder.startBPM.formatted(.number.locale(NativeLocalization.language.locale))))
+            }
+            .accessibilityIdentifier("practiceGoals.ladderStart")
+            Stepper(value: Binding(get: { ladder.stepBPM }, set: { ladder.setStep($0) }), in: 1...20) {
+                Text(verbatim: NativeLocalization.format("Tempo step: %@ BPM", ladder.stepBPM.formatted(.number.locale(NativeLocalization.language.locale))))
+            }
+            .accessibilityIdentifier("practiceGoals.ladderStep")
+            Text(verbatim: NativeLocalization.format("Current: %@ BPM · Target: %@ BPM", ladder.currentBPM.formatted(.number.locale(NativeLocalization.language.locale)), ladder.targetBPM.formatted(.number.locale(NativeLocalization.language.locale))))
+                .font(.subheadline)
+            HStack {
+                Button("Step back") { ladder.stepBack() }
+                    .disabled(ladder.currentBPM == ladder.startBPM)
+                    .accessibilityIdentifier("practiceGoals.ladderBack")
+                Spacer()
+                Button("Next tempo") { ladder.advance() }
+                    .disabled(ladder.currentBPM == ladder.targetBPM)
+                    .accessibilityIdentifier("practiceGoals.ladderNext")
+            }
+            .buttonStyle(BTSecondaryButtonStyle())
+            Button {
+                model.stopMetronomeTuner()
+                model.stopMetronome()
+                var settings = model.metronome
+                settings.bpm = ladder.currentBPM
+                model.metronome = settings
+                metronomePresented = true
+            } label: {
+                Label {
+                    Text(verbatim: NativeLocalization.format("Practice at %@ BPM", ladder.currentBPM.formatted(.number.locale(NativeLocalization.language.locale))))
+                } icon: { Image(systemName: "metronome") }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(BTSecondaryButtonStyle())
+            .accessibilityHint("Opens the metronome at this tempo. The metronome stays stopped until you start it.")
+            .accessibilityIdentifier("practiceGoals.ladderPractice.\(goal.id.uuidString)")
+            .navigationDestination(isPresented: $metronomePresented) { MetronomeView() }
+            Text("Repeat a tempo or move when you are ready; this does not record an outcome.")
+                .font(.footnote).foregroundStyle(BTTheme.muted)
+        }
+    }
+}
+
+struct PracticeGoalAttemptSummary: View {
+    let attempt: PracticeGoalAttempt
+    let isLatest: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BTSpacing.xs) {
+            if isLatest {
+                Text(verbatim: NativeLocalization.format("Latest self-assessment: %@", attempt.outcome.title))
+                    .font(.subheadline.weight(.semibold))
+            } else {
+                Text(verbatim: attempt.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption.weight(.semibold))
+                Text(verbatim: attempt.outcome.title)
+                    .font(.subheadline.weight(.semibold))
+            }
+            achievedValues
+            if let criterionSnapshot = attempt.criterionSnapshot {
+                Text(verbatim: criterionSnapshot.summary)
+                    .font(.caption)
+                    .foregroundStyle(BTTheme.muted)
+            }
+            if let strategySnapshot = attempt.strategySnapshot {
+                Text(verbatim: NativeLocalization.format("Strategy: %@", strategySnapshot.title))
+                    .font(.caption)
+                    .foregroundStyle(BTTheme.muted)
+            }
+            Text(verbatim: NativeLocalization.format("Reflection: %@", attempt.reflection))
+                .font(.caption)
+            Text(verbatim: NativeLocalization.format("Next adjustment: %@", attempt.nextAdjustment))
+                .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private var achievedValues: some View {
+        if let achievedTempoBPM = attempt.achievedTempoBPM,
+           let achievedCleanRepetitions = attempt.achievedCleanRepetitions {
+            Text(verbatim: NativeLocalization.format(
+                "Self-reported: %@ repetitions at %@ BPM",
+                achievedCleanRepetitions.formatted(.number.locale(NativeLocalization.language.locale)),
+                achievedTempoBPM.formatted(.number.locale(NativeLocalization.language.locale))
+            ))
+                .font(.caption)
+        } else if let achievedCleanRepetitions = attempt.achievedCleanRepetitions {
+            Text(verbatim: NativeLocalization.format(
+                "Self-reported: %@ repetitions",
+                achievedCleanRepetitions.formatted(.number.locale(NativeLocalization.language.locale))
+            ))
+                .font(.caption)
+        } else if let achievedSustainSeconds = attempt.achievedSustainSeconds {
+            Text(verbatim: NativeLocalization.format(
+                "Self-reported: sustained %@ seconds",
+                achievedSustainSeconds.formatted(.number.locale(NativeLocalization.language.locale))
+            ))
+                .font(.caption)
+        }
+    }
+}
+
+struct PracticeGoalEditor: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let existingGoal: PracticeGoal?
+    @State private var passage = ""
+    @State private var skill: PracticeGoalSkill = .articulation
+    @State private var strategy: PracticeGoalStrategy = .slowPractice
+    @State private var criterionKind: PracticeGoalCriterionKind = .cleanRepetitions
+    @State private var tempo = 80
+    @State private var repetitions = 3
+    @State private var sustainSeconds = 8
+    @State private var nextReviewAt = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+
+    init(goal: PracticeGoal? = nil, initialPassage: String = "", initialTempo: Int = 80) {
+        existingGoal = goal
+        _passage = State(initialValue: initialPassage)
+        _tempo = State(initialValue: min(PracticeGoalCriterion.tempoRange.upperBound, max(PracticeGoalCriterion.tempoRange.lowerBound, initialTempo)))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Focus") {
+                    TextField("Passage or exercise", text: $passage, axis: .vertical)
+                        .lineLimit(1...3)
+                        .accessibilityIdentifier("practiceGoals.passage")
+                    Picker("Skill", selection: $skill) {
+                        ForEach(PracticeGoalSkill.allCases) { skill in
+                            Text(verbatim: skill.title).tag(skill)
+                        }
+                    }
+                }
+                Section("Observable criterion") {
+                    Picker("Criterion", selection: $criterionKind) {
+                        ForEach(PracticeGoalCriterionKind.allCases) { kind in
+                            Text(verbatim: kind.title).tag(kind)
+                        }
+                    }
+                    if criterionKind == .cleanRepetitions {
+                        Stepper(value: $tempo, in: PracticeGoalCriterion.tempoRange) {
+                            Text(verbatim: NativeLocalization.format("Tempo: %@ BPM", tempo.formatted(.number.locale(NativeLocalization.language.locale))))
+                        }
+                        Stepper(value: $repetitions, in: PracticeGoalCriterion.repetitionRange) {
+                            Text(verbatim: NativeLocalization.format("Clean repetitions: %@", repetitions.formatted(.number.locale(NativeLocalization.language.locale))))
+                        }
+                    } else {
+                        Stepper(value: $sustainSeconds, in: PracticeGoalCriterion.sustainSecondsRange) {
+                            Text(verbatim: NativeLocalization.format("Sustain: %@ seconds", sustainSeconds.formatted(.number.locale(NativeLocalization.language.locale))))
+                        }
+                    }
+                }
+                Section("Strategy") {
+                    Picker("Use", selection: $strategy) {
+                        ForEach(PracticeGoalStrategy.allCases) { strategy in
+                            Text(verbatim: strategy.title).tag(strategy)
+                        }
+                    }
+                    Text("Use this as your next practice approach; it is not an automatic assessment.")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                }
+                Section("Revisit") {
+                    DatePicker("Review this goal", selection: $nextReviewAt, displayedComponents: .date)
+                    Text("Choose when you plan to revisit this target; it is a reminder for your own practice plan.")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                }
+            }
+            .navigationTitle(existingGoal == nil ? "New goal" : "Edit goal")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        model.savePracticeGoal(
+                            id: existingGoal?.id,
+                            passage: passage,
+                            skill: skill,
+                            criterion: PracticeGoalCriterion(
+                                kind: criterionKind,
+                                targetTempoBPM: tempo,
+                                targetCleanRepetitions: repetitions,
+                                targetSustainSeconds: sustainSeconds
+                            ),
+                            strategy: strategy,
+                            nextReviewAt: nextReviewAt
+                        )
+                        dismiss()
+                    }
+                    .disabled(passage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear {
+                guard let existingGoal else { return }
+                passage = existingGoal.passage
+                skill = existingGoal.skill
+                strategy = existingGoal.strategy
+                criterionKind = existingGoal.criterion.kind
+                tempo = existingGoal.criterion.targetTempoBPM
+                repetitions = existingGoal.criterion.targetCleanRepetitions
+                sustainSeconds = existingGoal.criterion.targetSustainSeconds
+                nextReviewAt = existingGoal.nextReviewAt
+            }
+        }
+    }
+}
+
+private struct PracticeGoalAttemptEditor: View {
+    private enum Field: Hashable { case reflection, nextAdjustment }
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusedField: Field?
+    let goal: PracticeGoal
+    @State private var outcome: PracticeGoalAttemptOutcome?
+    @State private var reflection = ""
+    @State private var nextAdjustment = ""
+    @State private var recordMeasurements = false
+    @State private var recordTempo = false
+    @State private var achievedTempo = PracticeGoalCriterion.tempoRange.lowerBound
+    @State private var achievedRepetitions = 0
+    @State private var achievedSustainSeconds = 0
+    @State private var nextReviewAt = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var limitReached = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(verbatim: goal.passage)
+                    Text(verbatim: goal.criterion.summary)
+                        .foregroundStyle(BTTheme.muted)
+                } header: {
+                    Text("Self-assessed attempt")
+                } footer: {
+                    Text("Choose the outcome yourself. This goal is not automatically detected by BrassTune.")
+                }
+                Picker("Outcome", selection: $outcome) {
+                    Text("Choose outcome").tag(PracticeGoalAttemptOutcome?.none)
+                    ForEach(PracticeGoalAttemptOutcome.allCases) { outcome in
+                        Text(verbatim: outcome.title).tag(Optional(outcome))
+                    }
+                }
+                .accessibilityIdentifier("practiceGoals.outcome")
+                Section("What you achieved") {
+                    Toggle("Record measurements", isOn: $recordMeasurements)
+                        .accessibilityIdentifier("practiceGoals.recordMeasurements")
+                    if recordMeasurements {
+                        if goal.criterion.kind == .cleanRepetitions {
+                            Toggle("Record tempo", isOn: $recordTempo)
+                                .accessibilityIdentifier("practiceGoals.recordTempo")
+                            if recordTempo {
+                                Stepper(value: $achievedTempo, in: PracticeGoalCriterion.tempoRange, step: 2) {
+                                    Text(verbatim: NativeLocalization.format("Tempo: %@ BPM", achievedTempo.formatted(.number.locale(NativeLocalization.language.locale))))
+                                }
+                            }
+                            Stepper(value: $achievedRepetitions, in: PracticeGoalAttempt.repetitionRange) {
+                                Text(verbatim: NativeLocalization.format("Clean repetitions: %@", achievedRepetitions.formatted(.number.locale(NativeLocalization.language.locale))))
+                            }
+                        } else {
+                            Stepper(value: $achievedSustainSeconds, in: PracticeGoalAttempt.sustainSecondsRange) {
+                                Text(verbatim: NativeLocalization.format("Sustain: %@ seconds", achievedSustainSeconds.formatted(.number.locale(NativeLocalization.language.locale))))
+                            }
+                        }
+                    }
+                    Text(verbatim: NativeLocalization.string(recordMeasurements ? "Enter your own observation. BrassTune does not measure or verify this result automatically." : "Measurements are optional. Add only the values you observed yourself."))
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                }
+                Section("Revisit") {
+                    DatePicker("Review this goal", selection: $nextReviewAt, displayedComponents: .date)
+                        .accessibilityIdentifier("practiceGoals.nextReview")
+                }
+                Section("Reflection") {
+                    TextEditor(text: $reflection)
+                        .frame(minHeight: 90)
+                        .focused($focusedField, equals: .reflection)
+                        .accessibilityLabel("Reflection")
+                        .accessibilityIdentifier("practiceGoals.reflection")
+                }
+                Section("Next adjustment") {
+                    TextEditor(text: $nextAdjustment)
+                        .frame(minHeight: 90)
+                        .focused($focusedField, equals: .nextAdjustment)
+                        .accessibilityLabel("Next adjustment")
+                        .accessibilityIdentifier("practiceGoals.nextAdjustment")
+                }
+            }
+            .navigationTitle("Log attempt")
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedField = nil }
+                        .accessibilityIdentifier("practiceGoals.dismissKeyboard")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        guard let outcome else { return }
+                        let saved = model.logPracticeGoalAttempt(
+                            goalID: goal.id,
+                            outcome: outcome,
+                            reflection: reflection,
+                            nextAdjustment: nextAdjustment,
+                            achievedTempoBPM: recordMeasurements && recordTempo && goal.criterion.kind == .cleanRepetitions ? achievedTempo : nil,
+                            achievedCleanRepetitions: recordMeasurements && goal.criterion.kind == .cleanRepetitions ? achievedRepetitions : nil,
+                            achievedSustainSeconds: recordMeasurements && goal.criterion.kind == .sustainedTone ? achievedSustainSeconds : nil,
+                            nextReviewAt: nextReviewAt
+                        )
+                        if saved { dismiss() } else { limitReached = true }
+                    }
+                    .disabled(outcome == nil || reflection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAdjustment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .alert("Attempt limit reached", isPresented: $limitReached) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("This goal already has 50 saved self-assessments. Its history is preserved; create another goal to continue logging, or export your local data before deleting this one.")
+            }
+        }
+    }
+}
+
 private struct WeeklyGoalEditor: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -806,10 +1369,19 @@ private struct WeeklyGoalEditor: View {
                     Text(verbatim: NativeLocalization.format("Goal: %@ minutes", String(minutes)))
                 }
                     .accessibilityIdentifier("progress.goalMinutes")
-                Stepper(value: $sessions, in: 1...21) {
-                    Text(verbatim: NativeLocalization.format("Goal: %@ sessions", String(sessions)))
-                }
+                Section {
+                    Stepper(value: $sessions, in: 1...WeeklyPracticeGoal.maximumTargetSessions) {
+                        Text(verbatim: NativeLocalization.format("Goal: %@ sessions", String(sessions)))
+                    }
+                    .accessibilityLabel(NativeLocalization.string("Weekly session goal"))
+                    .accessibilityValue(NativeLocalization.format("%@ completed practice sessions", String(sessions)))
+                    .accessibilityHint(NativeLocalization.string("Choose from 1 to 168 completed practice sessions for this week."))
                     .accessibilityIdentifier("progress.goalSessions")
+                } header: {
+                    Text(verbatim: NativeLocalization.string("Weekly session target"))
+                } footer: {
+                    Text(verbatim: NativeLocalization.string("Only completed sessions with recorded practice time count toward this target."))
+                }
             }
             .navigationTitle("Weekly goal")
             .toolbar {
@@ -922,34 +1494,24 @@ struct DroneIntervalView: View {
 
     var body: some View {
         let settings = model.practiceFeatures.droneSettings
-        let targetMIDI = settings.writtenMIDINote + settings.interval.rawValue
-        let baseLabel = PracticePitchMath.noteLabel(writtenMIDI: settings.writtenMIDINote)
-        let upperLabel = PracticePitchMath.noteLabel(writtenMIDI: targetMIDI)
+        let writtenMIDIs = PracticePitchMath.writtenMIDIs(
+            writtenMIDI: settings.writtenMIDINote,
+            interval: settings.interval,
+            voicing: settings.voicing
+        )
+        let notesLabel = writtenMIDIs
+            .map(PracticePitchMath.noteLabel(writtenMIDI:))
+            .joined(separator: " + ")
+        VStack(spacing: 0) {
         BTScreen {
-            BTPageHeader(
-                eyebrow: "Tuner",
-                title: "Drone and intervals",
-                subtitle: "Listen first, then match the reference gently. Headphones help keep the speaker tone out of the microphone.",
-                trailing: audioEngine.tonePlaying ? "Playing" : "Ready"
-            )
-
             BTCard(tint: BTTheme.surfaceWarm) {
-                Text(verbatim: NativeLocalization.preserve(settings.interval == .unison ? baseLabel : "\(baseLabel) + \(upperLabel)"))
+                Text(verbatim: NativeLocalization.preserve(notesLabel))
                     .font(.system(size: 58, weight: .bold, design: .rounded))
                     .frame(maxWidth: .infinity)
                     .minimumScaleFactor(0.55)
-                    .accessibilityLabel(Text(verbatim: settings.interval == .unison
-                        ? NativeLocalization.format("Written note: %@", baseLabel)
-                        : NativeLocalization.format("Written notes %@ and %@", baseLabel, upperLabel)))
+                    .accessibilityLabel(Text(verbatim: NativeLocalization.format("Written notes: %@", notesLabel)))
                     .accessibilityIdentifier("drone.targetNote")
-                Text(verbatim: NativeLocalization.string(
-                    settings.interval == .unison
-                        ? "Match the reference note"
-                        : "Hear both written notes together, correctly transposed to concert pitch"
-                ))
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
+
             }
 
             BTCard {
@@ -970,20 +1532,70 @@ struct DroneIntervalView: View {
                 }
                 .accessibilityIdentifier("drone.noteStepper")
 
-                Picker("Interval", selection: Binding(
-                    get: { model.practiceFeatures.droneSettings.interval },
-                    set: { value in
-                        var updated = model.practiceFeatures.droneSettings
-                        updated.interval = value
-                        model.updateDroneSettings(updated)
+                Menu {
+                    ForEach(DroneVoicing.allCases) { voicing in
+                        Button(voicing.title) {
+                            var updated = model.practiceFeatures.droneSettings
+                            updated.voicing = voicing
+                            model.updateDroneSettings(updated)
+                        }
                     }
-                )) {
-                    ForEach(TuningInterval.allCases) { interval in
-                        Text(verbatim: interval.title).tag(interval)
-                    }
+                } label: {
+                    droneSelectionLabel(title: "Voicing", selected: settings.voicing.title)
                 }
-                .accessibilityIdentifier("drone.interval")
+                .btMinimumInteractiveSize(alignment: .leading)
+                .accessibilityLabel("Voicing")
+                .accessibilityValue(settings.voicing.title)
+                .accessibilityIdentifier("drone.voicing")
 
+                if settings.voicing == .interval {
+                    Menu {
+                        ForEach(TuningInterval.allCases) { interval in
+                            Button(interval.title) {
+                            var updated = model.practiceFeatures.droneSettings
+                                updated.interval = interval
+                                model.updateDroneSettings(updated)
+                            }
+                        }
+                    } label: {
+                        droneSelectionLabel(title: "Interval", selected: settings.interval.title)
+                    }
+                    .btMinimumInteractiveSize(alignment: .leading)
+                    .accessibilityLabel("Interval")
+                    .accessibilityValue(settings.interval.title)
+                    .accessibilityIdentifier("drone.interval")
+                }
+
+                Menu {
+                    ForEach(DroneTemperament.allCases) { temperament in
+                        Button(temperament.title) {
+                            var updated = model.practiceFeatures.droneSettings
+                            updated.temperament = temperament
+                            model.updateDroneSettings(updated)
+                        }
+                    }
+                } label: {
+                    droneSelectionLabel(title: "Temperament", selected: settings.temperament.title)
+                }
+                .btMinimumInteractiveSize(alignment: .leading)
+                .accessibilityLabel("Temperament")
+                .accessibilityValue(settings.temperament.title)
+                .accessibilityIdentifier("drone.temperament")
+
+                VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                    Text(verbatim: NativeLocalization.string("How the tuning references differ"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(verbatim: NativeLocalization.string("Equal temperament spaces an octave into 12 equal semitone steps. Just intonation uses simple ratios from the selected root, so an interval or chord can differ slightly from equal temperament."))
+                    Text(verbatim: NativeLocalization.string("Your tuner cents use equal temperament, so a just third or fifth can show a non-zero value."))
+                    Text(verbatim: NativeLocalization.string("Use the drone to hear beat speed and color, then adjust for the musical setting. It is a listening reference, not an absolute in-tune verdict."))
+                }
+                .font(.footnote)
+                .foregroundStyle(BTTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("drone.temperamentExplanation")
+
+                Text("Volume").font(.subheadline.weight(.semibold))
                 Slider(value: Binding(
                     get: { model.practiceFeatures.droneSettings.volume },
                     set: { value in
@@ -991,16 +1603,68 @@ struct DroneIntervalView: View {
                         updated.volume = value
                         model.updateDroneSettings(updated)
                     }
-                ), in: 0.05...0.5)
-                .accessibilityLabel("Reference tone volume")
+                ), in: NativeToneOutputPolicy.minimumUserVolume...NativeToneOutputPolicy.maximumUserVolume)
+                .accessibilityLabel("Volume")
                 .accessibilityIdentifier("drone.volume")
             }
+
+            BTCard(tint: BTTheme.surfaceWarm) {
+                Label("Compare intervals by ear", systemImage: "ear")
+                    .font(.headline)
+                Text("Choose an interval, then press Play. Listen to the two notes, switch temperament, and listen again. Try singing or playing the upper note with the root.")
+                    .font(.subheadline)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    ForEach([TuningInterval.majorThird, .perfectFifth]) { interval in
+                        Button(interval.title) {
+                            model.stopDrone()
+                            var updated = model.practiceFeatures.droneSettings
+                            updated.voicing = .interval
+                            updated.interval = interval
+                            model.updateDroneSettings(updated, restartIfPlaying: false)
+                        }
+                        .buttonStyle(BTSecondaryButtonStyle())
+                        .accessibilityIdentifier("drone.exercise.\(interval.rawValue)")
+                    }
+                }
+                if settings.voicing == .interval,
+                   settings.interval == .majorThird || settings.interval == .perfectFifth {
+                    Text(verbatim: NativeLocalization.format(
+                        "Just interval: %@ cents relative to equal temperament.",
+                        DroneListeningExercise.justOffsetLabel(for: settings.interval)
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.muted)
+                    .accessibilityIdentifier("drone.exercise.offset")
+                }
+            }
+            .accessibilityIdentifier("drone.listeningExercise")
+
+            BTCard(tint: BTTheme.surfaceWarm) {
+                Label("First drone exercise", systemImage: "ear")
+                    .font(.headline)
+                Text("Choose one comfortable note, listen for two calm breaths, then match it softly. Adjust by listening for a steadier sound; the drone does not score your pitch.")
+                    .font(.subheadline)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityIdentifier("drone.firstExercise")
 
             Label("Start quietly. Stop if the sound feels uncomfortable, and prefer headphones for microphone practice.", systemImage: "headphones")
                 .font(.footnote)
                 .foregroundStyle(BTTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
 
+
+            if let notice = audioEngine.audioNotice {
+                Text(verbatim: notice)
+                    .font(.footnote)
+                    .foregroundStyle(BTTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             Button {
                 audioEngine.tonePlaying ? model.stopDrone() : model.startDrone()
             } label: {
@@ -1013,17 +1677,41 @@ struct DroneIntervalView: View {
             }
             .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
             .accessibilityIdentifier("drone.toggle")
-
-            if let notice = audioEngine.audioNotice {
-                Text(verbatim: notice)
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                .padding(.horizontal, BTSpacing.lg)
+                .padding(.vertical, BTSpacing.sm)
+                .background(.bar)
+        }
         }
         .navigationTitle("Drone and intervals")
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("screen.droneInterval")
         .onDisappear { model.stopDrone() }
+    }
+
+    private func droneSelectionLabel(title: String, selected: String) -> some View {
+        HStack(spacing: BTSpacing.sm) {
+            Text(verbatim: title)
+                .font(.headline)
+            Spacer()
+            Text(verbatim: selected)
+                .foregroundStyle(BTTheme.muted)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BTTheme.muted)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+enum DroneListeningExercise {
+    static func justOffsetCents(for interval: TuningInterval) -> Double {
+        1200 * log2(interval.justIntonationRatio) - Double(interval.rawValue) * 100
+    }
+
+    static func justOffsetLabel(for interval: TuningInterval) -> String {
+        let rounded = Int(justOffsetCents(for: interval).rounded())
+        return rounded > 0 ? "+\(rounded)" : "\(rounded)"
     }
 }
 

@@ -1,26 +1,28 @@
 # Apple App Store Checklist
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-23. This is the native iOS submission checklist. It separates
+Updated: 2026-08-24. This is the native iOS submission checklist. It separates
 current-source simulator checks, signed build evidence, historical physical
 evidence, and remaining hosted/physical/App Review gates.
 
-## Current 2026-08-23 submission state
+## Current 2026-08-24 submission state
 
-- Vercel and Render serve release implementation
-  `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; strict hosted Playwright passed
-  `50/50` across five projects. The native candidate source is distinct:
-  `d371100` on `arya/final-physical-release-20260823`. A future merge SHA must
-  not be substituted for either identifier.
-- Build `1.0.1 (7)` was archived/exported from `d371100`, with a strict valid
-  Apple Distribution signature (`Apple Distribution: Arya Salem`, team
-  `8S79RLTSWV`), production environment/API, bundle
-  `com.aryasalem.BrassTune`, matching app/dSYM UUID
-  `77D84475-6D50-3D94-B842-290431F0D74D`, and IPA SHA-256
-  `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`.
-- Build 7 upload succeeded and TestFlight is **Ready to Submit**. Version
-  `1.0.1` has build 7 attached; stale review notes were replaced and the
-  version was submitted. It is now **Waiting for Review** with manual release.
+- Vercel and Render serve implementation/archive/deployment candidate
+  `5acfa2ecc6b7403d1572d7382d41357c8ccc2fb4`; hosted smoke passed `45` with
+  `5` strict skips.
+- Build `1.0.1 (8)` was archived/exported from `5acfa2e`, with a strict valid
+  Apple Distribution signature (team `8S79RLTSWV`), production environment/API,
+  bundle `com.aryasalem.BrassTune`, matching app/dSYM UUID
+  `8378AB6E-EA6E-32B3-A26E-F781A481518D`, and IPA SHA-256
+  `cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`.
+- Build 8 upload and processing succeeded and TestFlight is **Ready to Submit**.
+  Version `1.0.1` has build 8 attached, build-8 review notes are saved, and
+  submission `308027b4-96ad-4171-bc83-faee57539cb6` was approved and manually
+  released on August 24. App Store Connect reports **Ready for Distribution**.
+  The product description and copyright credit `Kelvin Guo, Arya Salem`; Apple
+  seller identity remains the individual account name. The first public lookup
+  after release still returned version `1.0`, so storefront propagation was
+  pending at that check.
   Guest sign-in-required is unchecked. App Privacy is published for Email
   Address, User ID, Other User Content, Name, and Photos or Videos; all are
   linked, for App Functionality, and not used for tracking.
@@ -109,8 +111,9 @@ App Store Connect audit are in
 
 ## Current decision
 
-**Submitted; Waiting for Review.** Manual release remains selected. App Review
-acceptance is not implied. Unavailable attended gates remain: calibrated
+**Approved, manually released, and Ready for Distribution in App Store
+Connect.** Public storefront propagation was still pending at the first check.
+Unavailable attended gates remain: calibrated
 brass/acoustic accuracy; AirPlay/HomePod, Bluetooth, and wired routes;
 Files/Photos preseeded fixtures; timer/media-reset operator prerequisites; and
 full assistive-technology/iPad coverage.

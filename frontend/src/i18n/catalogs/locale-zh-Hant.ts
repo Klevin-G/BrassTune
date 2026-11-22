@@ -1,6 +1,12 @@
 import type { MessageCatalog } from '../messages.base';
 
 const messages = {
+  "auth.frontHeading": "拿起你的樂器。",
+  "auth.frontBody": "校準一個音，設定節拍，或選擇一段來練習。",
+  "auth.accountOptions": "帳戶選項",
+  "auth.practiceGoals": "練習目標",
+  "legal.photoCredit": "照片署名",
+  "legal.photoCrop": "以自適應裁切方式顯示。",
   "meta.title": "BrassTune — 銅管調音器與練習",
   "meta.description": "BrassTune 在您演奏時聆聽，即時顯示音高回饋，並幫助您建立專注的練習程序。",
   "loading.session": "正在恢復會話",
@@ -517,7 +523,7 @@ const messages = {
   "class.joinYourClass": "加入你的班級",
   "class.forStudents": "對於學生",
   "class.enterCode": "輸入老師給您的班級代碼。",
-  "class.codeExample": "例如BXK4QD",
+  "class.codeExample": "例如012345",
   "class.code": "類別代碼",
   "class.joining": "正在加入班級…",
   "class.join": "加入",

@@ -8,6 +8,7 @@ import { AppSettingsProvider } from './state/AppSettingsContext';
 import { PracticeLibraryProvider } from './state/PracticeLibraryContext';
 import { ThemeProvider } from './state/ThemeContext';
 import { registerOfflineShell } from './registerOfflineShell';
+import { initializeNativePlatform, isNativeAndroidPlatform } from './platform/native';
 import './styles.css';
 import { LocaleProvider } from './i18n/LocaleContext';
 
@@ -40,4 +41,5 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   </React.StrictMode>,
 );
 
-registerOfflineShell();
+registerOfflineShell({ nativeRuntime: isNativeAndroidPlatform() });
+void initializeNativePlatform();

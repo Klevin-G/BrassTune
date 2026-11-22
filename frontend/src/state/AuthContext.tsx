@@ -5,6 +5,14 @@ import { apiBase } from '../api/runtimeConfig';
 import { authProviders, supabase, supabaseConfigured } from '../lib/supabase';
 import { clearAccountPracticeState } from '../domain/practiceLibrary';
 import { oauthCallbackRedirectURL, passwordResetRedirectURL } from '../domain/authNavigation';
+import {
+  isNativeAndroidPlatform,
+  nativeAndroidAccountFeaturesEnabled,
+  nativeAccountWebOrigin,
+  nativeAndroidOAuthCallbackURL,
+  nativeAndroidOAuthEnabled,
+  openNativeOAuthBrowser,
+} from '../platform/native';
 
 export interface BackendProfile {
   id: number;
@@ -268,24 +276,35 @@ interface OAuthClient {
       redirectTo: string;
       scopes?: string;
       queryParams?: Record<string, string>;
+      skipBrowserRedirect?: boolean;
     };
-  }) => Promise<{ error: unknown }>;
+  }) => Promise<{ data?: { url?: string | null }; error: unknown }>;
 }
 
 export async function startOAuthProviderSignIn(
   authClient: OAuthClient,
   provider: OAuthProvider,
   origin = window.location.origin,
+  nativeAndroid = isNativeAndroidPlatform(),
 ): Promise<void> {
+  const useNativeBrowser = nativeAndroid && nativeAndroidOAuthEnabled();
   const options = provider === 'google'
     ? {
-      redirectTo: oauthCallbackRedirectURL(origin),
+      redirectTo: useNativeBrowser ? nativeAndroidOAuthCallbackURL() : oauthCallbackRedirectURL(origin),
       scopes: 'openid email profile',
       queryParams: { prompt: 'select_account' },
+      ...(useNativeBrowser ? { skipBrowserRedirect: true } : {}),
     }
-    : { redirectTo: oauthCallbackRedirectURL(origin) };
-  const { error } = await authClient.signInWithOAuth({ provider, options });
+    : {
+      redirectTo: useNativeBrowser ? nativeAndroidOAuthCallbackURL() : oauthCallbackRedirectURL(origin),
+      ...(useNativeBrowser ? { skipBrowserRedirect: true } : {}),
+    };
+  const { data, error } = await authClient.signInWithOAuth({ provider, options });
   if (error) throw error;
+  if (useNativeBrowser) {
+    if (!data?.url) throw new Error('Android OAuth did not return an authorization URL.');
+    await openNativeOAuthBrowser(data.url);
+  }
 }
 
 /**
@@ -347,6 +366,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // request is pending. Keep completion attempts session-scoped so those
   // events do not issue duplicate PATCHes or silently retry a failed one.
   const profileCompletionStateRef = useRef(new Map<string, 'in-flight' | 'failed' | 'complete'>());
+  const accountFeaturesEnabled = useMemo(
+    () => !isNativeAndroidPlatform() || nativeAndroidAccountFeaturesEnabled(),
+    [],
+  );
+  const providers = useMemo(() => {
+    if (!isNativeAndroidPlatform()) return authProviders;
+    // Apple OAuth is not available in the Android package. Google remains
+    // hidden until its custom-scheme callback is explicitly configured.
+    return {
+      google: accountFeaturesEnabled && authProviders.google && nativeAndroidOAuthEnabled(),
+      apple: false,
+    };
+  }, [accountFeaturesEnabled]);
 
   const clearProfileState = useCallback((clearError = true) => {
     profileRef.current = null;
@@ -540,11 +572,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setAuthTokenProvider(async () => {
-      if (!supabase) return null;
+      if (!supabase || !accountFeaturesEnabled) return null;
       const { data } = await supabase.auth.getSession();
       return data.session?.access_token ?? null;
     });
-    if (!supabase) {
+    if (!supabase || !accountFeaturesEnabled) {
       loadProfile(null).finally(() => setLoading(false));
       return () => setAuthTokenProvider(null);
     }
@@ -566,10 +598,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.subscription.unsubscribe();
       setAuthTokenProvider(null);
     };
-  }, [adoptSession, loadProfile, resetAccountState]);
+  }, [accountFeaturesEnabled, adoptSession, loadProfile, resetAccountState]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!supabase) throw new Error(accountsDisabledMessage);
+    if (!supabase || !accountFeaturesEnabled) throw new Error(accountsDisabledMessage);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -585,10 +617,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetAccountState();
       throwFriendlyAuthError(error);
     }
-  }, [adoptSession, loadProfile, resetAccountState]);
+  }, [accountFeaturesEnabled, adoptSession, loadProfile, resetAccountState]);
 
   const signUp = useCallback(async (payload: SignUpPayload) => {
-    if (!supabase) throw new Error(accountsDisabledMessage);
+    if (!supabase || !accountFeaturesEnabled) throw new Error(accountsDisabledMessage);
     if (!isValidProfileUsername(payload.username)) {
       throw new Error('auth.usernameFormat');
     }
@@ -623,49 +655,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resetAccountState();
       throwFriendlyAuthError(error);
     }
-  }, [adoptSession, loadProfile, resetAccountState]);
+  }, [accountFeaturesEnabled, adoptSession, loadProfile, resetAccountState]);
 
   const signInWithApple = useCallback(async () => {
-    if (!supabase) throw new Error(accountsDisabledMessage);
-    if (!authProviders.apple) throw new Error('Apple sign-in is not available in this release.');
+    if (!supabase || !accountFeaturesEnabled) throw new Error(accountsDisabledMessage);
+    if (!providers.apple) throw new Error('Apple sign-in is not available in this release.');
     try {
       await startOAuthProviderSignIn(supabase.auth, 'apple');
     } catch (error) {
       throwFriendlyAuthError(error);
     }
-  }, []);
+  }, [accountFeaturesEnabled, providers.apple]);
 
   const signInWithGoogle = useCallback(async () => {
-    if (!supabase) throw new Error(accountsDisabledMessage);
-    if (!authProviders.google) throw new Error('Google sign-in is not available in this release.');
+    if (!supabase || !accountFeaturesEnabled) throw new Error(accountsDisabledMessage);
+    if (!providers.google) throw new Error('Google sign-in is not available in this release.');
     try {
       await startOAuthProviderSignIn(supabase.auth, 'google');
     } catch (error) {
       throwFriendlyAuthError(error);
     }
-  }, []);
+  }, [accountFeaturesEnabled, providers.google]);
 
   const requestPasswordReset = useCallback(async (email: string, next = '/home') => {
-    if (!supabase) throw new Error(accountsDisabledMessage);
+    if (!supabase || !accountFeaturesEnabled) throw new Error(accountsDisabledMessage);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: passwordResetRedirectURL(next, window.location.origin),
+        redirectTo: passwordResetRedirectURL(next, nativeAccountWebOrigin() ?? window.location.origin),
       });
       if (error) throw error;
     } catch (error) {
       throwFriendlyAuthError(error);
     }
-  }, []);
+  }, [accountFeaturesEnabled]);
 
   const updatePassword = useCallback(async (password: string) => {
-    if (!supabase) throw new Error(accountsDisabledMessage);
+    if (!supabase || !accountFeaturesEnabled) throw new Error(accountsDisabledMessage);
     try {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
     } catch (error) {
       throwFriendlyAuthError(error);
     }
-  }, []);
+  }, [accountFeaturesEnabled]);
 
   const signOut = useCallback(async () => {
     try {
@@ -735,7 +767,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthState>(
     () => ({
-      configured: supabaseConfigured,
+      configured: supabaseConfigured && accountFeaturesEnabled,
       loading,
       session,
       user,
@@ -750,7 +782,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         : null,
       guestMode,
       guestEntrySequence,
-      providers: authProviders,
+      providers,
       continueAsGuest,
       exitGuest,
       signIn,
@@ -765,7 +797,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       retryProfileCompletion,
       completeProfile,
     }),
-    [completeProfile, continueAsGuest, deleteAccount, exitGuest, guestEntrySequence, guestMode, loading, localPracticeOwnerId, profile, profileCompletionError, profileError, refreshProfile, requestPasswordReset, retryProfileCompletion, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
+    [accountFeaturesEnabled, completeProfile, continueAsGuest, deleteAccount, exitGuest, guestEntrySequence, guestMode, loading, localPracticeOwnerId, profile, profileCompletionError, profileError, providers, refreshProfile, requestPasswordReset, retryProfileCompletion, session, signIn, signInWithApple, signInWithGoogle, signOut, signUp, updatePassword, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

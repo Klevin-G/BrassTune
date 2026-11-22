@@ -1,9 +1,9 @@
-import { ArrowRight, CheckCircle2, ChevronDown, KeyRound, LogIn, Mail, Music2, UserPlus } from 'lucide-react';
+import { ArrowRight, ChevronDown, KeyRound, LogIn, Mail, Music2, UserPlus } from 'lucide-react';
 import { appleSignInLogo } from '../assets/appleSignInLogo';
 import { GoogleIcon } from '../components/GoogleIcon';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { EmptyActionState, ScreenContainer, SectionCard } from '../components/ui/AppPrimitives';
+import { EmptyActionState, ScreenContainer } from '../components/ui/AppPrimitives';
 import { useAuth } from '../state/AuthContext';
 import { clearPendingAuthReturn, readPendingAuthReturn, rememberPendingAuthReturn, safeReturnPath } from '../domain/authNavigation';
 import { useI18n } from '../i18n/LocaleContext';
@@ -105,18 +105,21 @@ export function AuthGatewayPage() {
               <strong>BrassTune</strong>
             </span>
           </div>
-          <h1>{t('auth.heading')}</h1>
+          <img
+            alt=""
+            aria-hidden="true"
+            className="ag-instrument-image"
+            src="/welcome-brass-instrument.jpg"
+          />
+          <h1>{t('auth.frontHeading')}</h1>
           <p className="ag-lead">
-            {t('auth.lead')}
+            {t('auth.frontBody')}
           </p>
-          <span className="ag-noaccount">
-            <CheckCircle2 size={16} />
-            {t('auth.noAccount')}
-          </span>
+          <p className="ag-tools">{t('nav.tuner')} <span aria-hidden="true">·</span> {t('practice.metronome')} <span aria-hidden="true">·</span> {t('auth.practiceGoals')}</p>
         </section>
 
         <div className="gateway-stack">
-          <SectionCard>
+          <section className="ag-actions" aria-label={t('auth.accountOptions')}>
             {auth.loading && <p className="muted-copy" role="status">{t('auth.restore')}</p>}
 
             {!auth.loading && !auth.configured && (
@@ -140,6 +143,18 @@ export function AuthGatewayPage() {
                   {t('auth.createFree')}
                 </Link>
                 <p className="ag-account-benefit">{t('auth.accountBenefit')}</p>
+                <Link className="ghost-button ag-block ag-sign-in" to={`/auth/sign-in?next=${encodeURIComponent(next)}`}>
+                  <LogIn size={18} />
+                  {t('nav.signIn')}
+                </Link>
+                <div className="ag-guest-zone">
+                  <button className="ghost-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
+                    {t('auth.continueGuest')}
+                    <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
+                  </button>
+                  <p className="ag-nudge">{t('auth.lead')}</p>
+                </div>
+                <div className="auth-divider" aria-hidden="true"><span>{t('auth.or')}</span></div>
                 <div className="ag-providers">
                   <button
                     className="google-button ag-block"
@@ -164,14 +179,6 @@ export function AuthGatewayPage() {
                       : auth.providers.apple ? t('auth.apple') : t('auth.appleUnavailable')}
                   </button>
                 </div>
-                <div className="auth-divider" aria-hidden="true"><span>{t('auth.or')}</span></div>
-
-                <button className="ghost-button ag-block ag-guest" disabled={busy} type="button" onClick={() => void continueAsGuest()}>
-                  {t('auth.continueGuest')}
-                  <ArrowRight size={18} style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : undefined }} />
-                </button>
-                <p className="ag-nudge">{t('auth.newHere')}</p>
-
                 <button
                   type="button"
                   className="ghost-button ag-block ag-email-toggle"
@@ -214,6 +221,7 @@ export function AuthGatewayPage() {
                     </div>
                   </div>
                 )}
+
               </>
             )}
             {(message || auth.profileError) && (
@@ -221,7 +229,7 @@ export function AuthGatewayPage() {
                 {message ?? localizeAuthError(auth.profileError, 'auth.failure')}
               </div>
             )}
-          </SectionCard>
+          </section>
         </div>
       </div>
 

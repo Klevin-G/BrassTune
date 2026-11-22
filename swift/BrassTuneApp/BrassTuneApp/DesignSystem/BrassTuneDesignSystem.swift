@@ -36,6 +36,41 @@ enum BTSpacing {
     static let xxl: CGFloat = 32
 }
 
+enum BTColorTheme: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    static let storageKey = "brassTune.colorTheme"
+
+    /// A missing or legacy preference should open BrassTune in its bright,
+    /// high-contrast practice workspace. Explicit System and Dark selections
+    /// are still honored by the app root.
+    static let defaultTheme: Self = .light
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return NativeLocalization.string("System")
+        case .light: return NativeLocalization.string("Light")
+        case .dark: return NativeLocalization.string("Dark")
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
+    static func resolve(_ rawValue: String) -> Self {
+        Self(rawValue: rawValue) ?? defaultTheme
+    }
+}
+
 private struct BTReadableForeground: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     func body(content: Content) -> some View {
@@ -94,6 +129,14 @@ enum BTTheme {
         dark: UIColor(red: 0.08, green: 0.07, blue: 0.05, alpha: 1)
     )
     static let secondaryAccent = Color(uiColor: .systemTeal)
+    static let rose = adaptive(
+        light: UIColor(red: 0.760, green: 0.235, blue: 0.365, alpha: 1),
+        dark: UIColor(red: 1.000, green: 0.540, blue: 0.625, alpha: 1)
+    )
+    static let sky = adaptive(
+        light: UIColor(red: 0.055, green: 0.420, blue: 0.710, alpha: 1),
+        dark: UIColor(red: 0.420, green: 0.720, blue: 1.000, alpha: 1)
+    )
     static let success = Color(uiColor: .systemGreen)
     static let warning = Color(uiColor: .systemOrange)
     static let danger = Color(uiColor: .systemRed)

@@ -157,6 +157,10 @@ jobs:
           if (failed) process.exit(1);
           console.log('Verified required Vercel Production frontend variables without exposing values.');
           NODE
+      - name: Verify static marketing website before deployment
+        run: node frontend/scripts/build-marketing.mjs && node frontend/scripts/test-marketing.mjs
+      - name: Require the deployed account recovery service
+        run: node frontend/scripts/check-recovery-service.mjs
       - name: Build frontend
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}

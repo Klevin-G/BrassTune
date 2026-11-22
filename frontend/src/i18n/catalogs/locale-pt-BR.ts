@@ -1,6 +1,12 @@
 import type { MessageCatalog } from '../messages.base';
 
 const messages = {
+  "auth.frontHeading": "Pegue seu instrumento.",
+  "auth.frontBody": "Afine uma nota, defina uma pulsação ou escolha uma passagem para praticar.",
+  "auth.accountOptions": "Opções da conta",
+  "auth.practiceGoals": "Metas de prática",
+  "legal.photoCredit": "Crédito da foto",
+  "legal.photoCrop": "Exibida com um recorte responsivo.",
   "meta.title": "BrassTune – afinador de metais e prática",
   "meta.description": "O BrassTune escuta enquanto você toca, mostra o feedback do tom em tempo real e ajuda você a construir uma rotina de prática focada.",
   "loading.session": "Restaurando sessão",
@@ -517,7 +523,7 @@ const messages = {
   "class.joinYourClass": "Participe da sua aula",
   "class.forStudents": "Para estudantes",
   "class.enterCode": "Digite o código da turma que seu professor lhe deu.",
-  "class.codeExample": "por exemplo BXK4QD",
+  "class.codeExample": "por exemplo 012345",
   "class.code": "Código da turma",
   "class.joining": "Entrando na aula…",
   "class.join": "Juntar",

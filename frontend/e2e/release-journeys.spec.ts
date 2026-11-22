@@ -528,9 +528,16 @@ test('server-side ensemble authorization rejects forbidden writes', async ({ req
 
   const allowed = await request.post(`${apiBaseURL}/api/ensemble/groups/1/members/by-username`, {
     headers: { Authorization: 'Bearer dev-user-2' },
-    data: { username: 'jordan', instrument_id: 'trombone' },
+    data: { username: 'maya', instrument_id: 'horn' },
   });
   expect([200, 409]).toContain(allowed.status());
+
+  const selfInvitation = await request.post(`${apiBaseURL}/api/ensemble/groups/1/members/by-username`, {
+    headers: { Authorization: 'Bearer dev-user-2' },
+    data: { username: 'jordan', instrument_id: 'trombone' },
+  });
+  expect(selfInvitation.status()).toBe(400);
+  expect(await selfInvitation.json()).toMatchObject({ detail: 'You cannot invite yourself to your own class.' });
 });
 
 test('a manager cannot force-activate an invited student (consent gate)', async ({ request }) => {

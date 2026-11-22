@@ -1,6 +1,12 @@
 import type { MessageCatalog } from '../messages.base';
 
 const messages = {
+  "auth.frontHeading": "Nimm dein Instrument zur Hand.",
+  "auth.frontBody": "Stimme einen Ton, stelle einen Puls ein oder wähle eine Passage zum Üben.",
+  "auth.accountOptions": "Kontooptionen",
+  "auth.practiceGoals": "Übeziele",
+  "legal.photoCredit": "Bildnachweis",
+  "legal.photoCrop": "Wird mit einem responsiven Bildausschnitt angezeigt.",
   "meta.title": "BrassTune – Blechbläserstimmer und -praxis",
   "meta.description": "BrassTune hört zu, während Sie spielen, zeigt Tonhöhen-Feedback in Echtzeit und hilft Ihnen beim Aufbau einer gezielten Übungsroutine.",
   "loading.session": "Sitzung wird wiederhergestellt",
@@ -517,7 +523,7 @@ const messages = {
   "class.joinYourClass": "Treten Sie Ihrer Klasse bei",
   "class.forStudents": "Für Studenten",
   "class.enterCode": "Geben Sie den Klassencode ein, den Ihnen Ihr Lehrer gegeben hat.",
-  "class.codeExample": "zum Beispiel BXK4QD",
+  "class.codeExample": "zum Beispiel 012345",
   "class.code": "Klassencode",
   "class.joining": "Am Unterricht teilnehmen…",
   "class.join": "Verbinden",

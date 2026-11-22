@@ -102,6 +102,11 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' | 'support' | 'c
         <SectionCard title="BrassTune">
           <p>{t('legal.creditsCreatedBy')}</p>
         </SectionCard>
+        <SectionCard title={t('legal.photoCredit')}>
+          <p><a href="https://commons.wikimedia.org/wiki/File:Trumpet_001.jpg">Trumpet 001 — mark.drummer</a></p>
+          <p><a href="https://creativecommons.org/licenses/by/2.0/">CC BY 2.0</a></p>
+          <p>{t('legal.photoCrop')}</p>
+        </SectionCard>
       </ScreenContainer>
     );
   }

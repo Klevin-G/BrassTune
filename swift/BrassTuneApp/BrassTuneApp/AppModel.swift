@@ -347,10 +347,239 @@ final class NativeClassSessionSyncCoordinator {
     }
 }
 
+struct MetronomeTunerReadoutGate {
+    private var clickWindows: [ClosedRange<TimeInterval>] = []
+    private var candidate: PitchFrame?
+    private var candidateAt: TimeInterval = -.infinity
+    private var trusted: PitchFrame?
+    private var trustedAt: TimeInterval = -.infinity
+
+    mutating func recordClick(at time: TimeInterval, settlingDuration: TimeInterval) {
+        clickWindows.removeAll { $0.upperBound < time - 1 }
+        clickWindows.append((time - 0.02)...(time + max(0.12, settlingDuration)))
+        if clickWindows.count > 128 { clickWindows.removeFirst(clickWindows.count - 128) }
+    }
+
+    mutating func consume(_ frame: PitchFrame, at time: TimeInterval, captureStart: TimeInterval? = nil) -> PitchFrame? {
+        if time - trustedAt > 0.6 { trusted = nil }
+        if time - candidateAt > 0.6 { candidate = nil }
+        let start = min(captureStart ?? time, time)
+        let capturedInterval = start...time
+        clickWindows.removeAll { $0.upperBound < start }
+        // Both corroborating frames must be clean; a rejected transient never
+        // becomes a candidate. They may straddle a click at subdivision tempos.
+        guard !clickWindows.contains(where: { $0.overlaps(capturedInterval) }) else { return trusted }
+        guard frame.isValidForRecording, frame.confidence >= 0.85,
+              let frequency = frame.frequencyHz, frequency.isFinite, frequency > 0 else {
+            candidate = nil
+            return trusted
+        }
+        if let prior = candidate, let priorFrequency = prior.frequencyHz,
+           abs(1200 * log2(frequency / priorFrequency)) <= 35 {
+            trusted = frame
+            trustedAt = time
+        }
+        candidate = frame
+        candidateAt = time
+        return trusted
+    }
+}
+
+/// Describes settings where each audible click's protected interval leaves no
+/// room for a complete passive-tuner capture. The tuner continues rejecting
+/// those intervals rather than presenting an unreliable reading.
+struct MetronomeTunerAudibleCaptureCompatibility {
+    static let captureDuration: TimeInterval = 4096.0 / 48_000.0
+    static let clickProtectedDuration: TimeInterval = 0.02 + 0.12
+
+    static func audibleClicksLeaveNoCleanCapture(
+        for settings: MetronomeSettings,
+        captureDuration: TimeInterval? = nil
+    ) -> Bool {
+        guard !settings.visualOnly, !settings.muted, settings.volume > 0 else { return false }
+        // A gap pattern intentionally provides one or more complete silent
+        // measures, so dense audible subdivisions do not eliminate every
+        // clean tuner-capture opportunity.
+        guard !settings.gapModeEnabled else { return false }
+        let duration = captureDuration ?? self.captureDuration
+        guard duration.isFinite, duration > 0 else { return false }
+        return settings.intervalSeconds <= duration + clickProtectedDuration
+    }
+}
+
+struct MetronomeVisualPulseToken: Equatable {
+    let runGeneration: UInt64
+    let sequence: UInt64
+}
+
+/// Keeps delayed visual-release work scoped to the metronome run that created
+/// it. Pulse sequence alone is insufficient because a stop/start deliberately
+/// begins again at zero and may reach the same sequence before an old Task
+/// wakes up.
+struct MetronomeVisualPulseState {
+    private(set) var runGeneration: UInt64 = 0
+    private(set) var sequence: UInt64 = 0
+
+    mutating func beginRun() {
+        runGeneration &+= 1
+        sequence = 0
+    }
+
+    mutating func invalidatePendingReleases() {
+        runGeneration &+= 1
+    }
+
+    mutating func recordPulse() -> MetronomeVisualPulseToken {
+        sequence &+= 1
+        return MetronomeVisualPulseToken(runGeneration: runGeneration, sequence: sequence)
+    }
+
+    func acceptsRelease(for token: MetronomeVisualPulseToken) -> Bool {
+        token.runGeneration == runGeneration && token.sequence == sequence
+    }
+}
+
+struct MetronomeGapSequence: Equatable {
+    private(set) var phase: MetronomeGapPhase = .inactive
+
+    mutating func start(settings: MetronomeSettings, hasCountIn: Bool) {
+        guard settings.gapModeEnabled else {
+            phase = .inactive
+            return
+        }
+        phase = hasCountIn
+            ? .countIn
+            : .audible(bar: 1, total: settings.gapAudibleBars)
+    }
+
+    mutating func countInDidAdvance(settings: MetronomeSettings, ticksRemaining: Int) {
+        guard settings.gapModeEnabled, ticksRemaining == 0 else { return }
+        phase = .audible(bar: 1, total: settings.gapAudibleBars)
+    }
+
+    mutating func measureDidComplete(settings: MetronomeSettings) {
+        guard settings.gapModeEnabled else {
+            phase = .inactive
+            return
+        }
+        switch phase {
+        case .audible(let bar, let total) where bar < total:
+            phase = .audible(bar: bar + 1, total: total)
+        case .audible:
+            phase = .silent(bar: 1, total: settings.gapSilentBars)
+        case .silent(let bar, let total) where bar < total:
+            phase = .silent(bar: bar + 1, total: total)
+        case .silent:
+            phase = .audible(bar: 1, total: settings.gapAudibleBars)
+        case .countIn, .inactive:
+            phase = .audible(bar: 1, total: settings.gapAudibleBars)
+        }
+    }
+
+    mutating func reset() {
+        phase = .inactive
+    }
+}
+
+struct MetronomeRuntimePulsePosition: Equatable {
+    let isCountIn: Bool
+    let measureTick: Int
+    let gapPhase: MetronomeGapPhase
+    let isAudible: Bool
+}
+
+struct MetronomeAbsolutePulseTimeline {
+    static func position(
+        settings: MetronomeSettings,
+        countInGridTicks: Int,
+        pulseIndex: UInt64
+    ) -> MetronomeRuntimePulsePosition {
+        let countInTicks = UInt64(max(0, countInGridTicks))
+        if pulseIndex < countInTicks {
+            return MetronomeRuntimePulsePosition(
+                isCountIn: true,
+                measureTick: 0,
+                gapPhase: settings.gapModeEnabled ? .countIn : .inactive,
+                isAudible: true
+            )
+        }
+        let ticksPerMeasure = max(1, settings.beatsPerMeasure * settings.subdivision.ticksPerBeat)
+        let regularIndex = pulseIndex - countInTicks
+        let measureTick = Int(regularIndex % UInt64(ticksPerMeasure))
+        guard settings.gapModeEnabled else {
+            return MetronomeRuntimePulsePosition(
+                isCountIn: false,
+                measureTick: measureTick,
+                gapPhase: .inactive,
+                isAudible: true
+            )
+        }
+        let audibleBars = min(4, max(1, settings.gapAudibleBars))
+        let silentBars = min(4, max(1, settings.gapSilentBars))
+        let cycleBars = audibleBars + silentBars
+        let absoluteBar = regularIndex / UInt64(ticksPerMeasure)
+        let cycleBar = Int(absoluteBar % UInt64(cycleBars))
+        if cycleBar < audibleBars {
+            return MetronomeRuntimePulsePosition(
+                isCountIn: false,
+                measureTick: measureTick,
+                gapPhase: .audible(bar: cycleBar + 1, total: audibleBars),
+                isAudible: true
+            )
+        }
+        return MetronomeRuntimePulsePosition(
+            isCountIn: false,
+            measureTick: measureTick,
+            gapPhase: .silent(
+                bar: cycleBar - audibleBars + 1,
+                total: silentBars
+            ),
+            isAudible: false
+        )
+    }
+
+    static func recentUnregisteredIndices(
+        after lastIndex: UInt64?,
+        through currentIndex: UInt64,
+        maximumCount: Int
+    ) -> ClosedRange<UInt64>? {
+        guard maximumCount > 0 else { return nil }
+        let firstUnregistered = lastIndex.map { $0 &+ 1 } ?? currentIndex
+        guard currentIndex >= firstUnregistered else { return nil }
+        let boundedFirst = currentIndex >= UInt64(maximumCount - 1)
+            ? max(firstUnregistered, currentIndex - UInt64(maximumCount - 1))
+            : firstUnregistered
+        return boundedFirst...currentIndex
+    }
+}
+
+struct MetronomeAudioHandoffState: Equatable {
+    private(set) var token: UUID?
+
+    var blocksTunerFrames: Bool { token != nil }
+
+    mutating func begin() -> UUID {
+        let next = UUID()
+        token = next
+        return next
+    }
+
+    @discardableResult
+    mutating func finish(token candidate: UUID) -> Bool {
+        guard token == candidate else { return false }
+        token = nil
+        return true
+    }
+
+    mutating func reset() {
+        token = nil
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var config: AppConfig = .fromProcessEnvironment()
-    @Published var authState: AuthState = .signedOut
+    @Published var authState: AuthState = .signedOut { didSet { authSessionGeneration &+= 1 } }
     @Published private(set) var persistenceAccessState: PersistenceAccessState = .restoringIdentity
     @Published var selectedInstrumentId = "trumpet" { didSet { persistLocalData() } }
     @Published var referencePitchHz = NativeReferencePitch.defaultHz {
@@ -367,7 +596,13 @@ final class AppModel: ObservableObject {
     @Published var scores: [ImportedScore] = [] { didSet { persistLocalData() } }
     @Published var activeScoreID: ImportedScore.ID? { didSet { persistLocalData() } }
     @Published var recordingSource: PracticeSessionSource = NativeAudioEngine.defaultRecordingSource
-    @Published var metronome = MetronomeSettings() { didSet { persistLocalData(); restartMetronomeIfNeeded() } }
+    @Published var metronome = MetronomeSettings() {
+        didSet {
+            guard metronome != oldValue else { return }
+            persistLocalData()
+            queueMetronomeSettingsUpdate()
+        }
+    }
     @Published var practiceFeatures = AppModel.freshPracticeFeatureState() { didSet { persistLocalData() } }
     @Published var successHapticsEnabled = true { didSet { persistLocalData() } }
     @Published var appLanguage: AppLanguage = .system {
@@ -377,6 +612,12 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var gatewayCompleted = false { didSet { persistLocalData() } }
+    @Published private(set) var metronomeTunerEnabled = false
+    @Published private(set) var metronomeTunerFrame: PitchFrame?
+    @Published private var metronomeTunerCaptureDuration: TimeInterval?
+    private var metronomeTunerReadoutGate = MetronomeTunerReadoutGate()
+    private var metronomeTunerStartGeneration = UUID()
+    private var metronomeTunerResumeBeat = false
     @Published private(set) var metronomeRunning = false
     @Published private(set) var metronomeTick = 0
     /// Monotonic even when two adjacent pulses have the same beat index (for
@@ -388,6 +629,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var metronomePulseScale: CGFloat = 1
     @Published private(set) var metronomeCountInRemaining = 0
     @Published private(set) var metronomeLastPulseWasAccented = false
+    @Published private(set) var metronomeGapPhase: MetronomeGapPhase = .inactive
     @Published private(set) var recordingStartInProgress = false
     @Published private(set) var tunerTakeSaveInProgress = false
     @Published var selectedPlayAlongExerciseID = PlayAlongExercise.defaultExercise.id
@@ -458,12 +700,24 @@ final class AppModel: ObservableObject {
     /// Tracks the generation that consumed the deferred migration token. A
     /// failed current write re-arms the token, but never retries by itself.
     private var restoredSnapshotWritebackGeneration: Int?
+    private var authSessionGeneration: UInt64 = 0
+    private var metronomeSettingsUpdateTask: Task<Void, Never>?
+    private var metronomeVisualPulseState = MetronomeVisualPulseState()
+    private var metronomeGapSequence = MetronomeGapSequence()
     private let metronomeClock = NativeMetronomeClock()
     private var metronomeClockGeneration = UUID()
     private var metronomeCountInGridTick = 0
     private var metronomeCountInGridTicksRemaining = 0
+    private var metronomeCountInBoundaryPending = false
+    private var metronomeMeasureBoundaryPending = false
+    private var metronomeRunCountInGridTicks = 0
+    private var metronomeLastTimelinePulseIndex: UInt64?
+    private var metronomeRuntimeSettings: MetronomeSettings?
+    private var metronomeRuntimeGeneration = UUID()
+    private var metronomeAudioHandoffState = MetronomeAudioHandoffState()
     private var tapTempoEvents: [Date] = []
     private var audioFrameCancellable: AnyCancellable?
+    private var timedAudioFrameCancellable: AnyCancellable?
     private var audioRecordingCancellable: AnyCancellable?
     private var playAlongFixtureTask: Task<Void, Never>?
     private let playAlongFixturesEnabled: Bool
@@ -620,7 +874,7 @@ final class AppModel: ObservableObject {
         switch audioEngine.audioState {
         case .permissionDenied, .permissionRestrictedOrUnavailable:
             return .guidedWarmup
-        case .permissionGranted(.recoverableError), .permissionGranted(.fatalError):
+        case .permissionGranted(.inputUnavailable), .permissionGranted(.recoverableError), .permissionGranted(.fatalError):
             return .practicePlan
         case .permissionNotDetermined, .permissionRequesting, .permissionGranted:
             return .tuning
@@ -641,7 +895,19 @@ final class AppModel: ObservableObject {
     }
 
     var metronomeTemporarilyMutedForRecording: Bool {
-        audioEngine.recording && audioEngine.activeSource == .live
+        audioEngine.recording && audioEngine.activeSource == .live && !metronomeAllowsAudibleCapture
+    }
+
+    var metronomeTunerNeedsQuietClickWarning: Bool {
+        metronomeTunerEnabled
+            && MetronomeTunerAudibleCaptureCompatibility.audibleClicksLeaveNoCleanCapture(
+                for: metronomeRunning ? activeMetronomeSettings : metronome,
+                captureDuration: metronomeTunerCaptureDuration
+            )
+    }
+
+    var metronomeTunerFramesBlockedForHandoff: Bool {
+        metronomeAudioHandoffState.blocksTunerFrames
     }
 
     var testFixturesEnabled: Bool {
@@ -712,6 +978,10 @@ final class AppModel: ObservableObject {
             )
         }
         practiceFeatures = Self.freshPracticeFeatureState()
+        if NativeAudioEngine.testFixturesEnabled,
+           ProcessInfo.processInfo.arguments.contains("UITEST_INTONATION_HISTORY") {
+            sessions = IntonationHistory.uiTestSessions()
+        }
         successHapticsEnabled = true
         microphoneRationaleSeen = !ProcessInfo.processInfo.arguments.contains("UITEST_MIC_RATIONALE")
         guestProgressSafetyPromptHandled = false
@@ -743,6 +1013,22 @@ final class AppModel: ObservableObject {
     /// Isolated UI-test fixture for the required-profile gate. It never
     /// manufactures credentials or calls the profile service; production
     /// profile completion remains server-authoritative.
+    func configureGuestUpgradeForUITesting() {
+        guard NativeAudioEngine.testFixturesEnabled,
+              ProcessInfo.processInfo.arguments.contains("UITEST_GUEST_UPGRADE") else { return }
+        authState = .guest
+        pendingAuthenticatedSession = AuthSession(
+            userID: "guest-upgrade-fixture", accessToken: "fixture-token", refreshToken: nil,
+            email: "guest-upgrade@brasstune.test", expiresAt: Date().addingTimeInterval(3600)
+        )
+        guestAccountUpgradePrompt = GuestAccountUpgradePrompt(
+            email: "guest-upgrade@brasstune.test", canMerge: true, containsFileBackedData: false
+        )
+        profileEditorRequired = ProcessInfo.processInfo.arguments.contains("UITEST_GUEST_UPGRADE_INCOMPLETE")
+        authNotice = nil
+        authNoticeIsError = false
+    }
+
     func configureIncompleteProfileForUITesting() {
         guard NativeAudioEngine.testFixturesEnabled,
               ProcessInfo.processInfo.arguments.contains("UITEST_PROFILE_INCOMPLETE") else { return }
@@ -844,6 +1130,10 @@ final class AppModel: ObservableObject {
     }
 
     func signOut() async {
+        guard !authOperationInProgress else { return }
+        authOperationInProgress = true
+        authSessionGeneration &+= 1
+        defer { authOperationInProgress = false }
         var signOutError: Error?
         let accountDigest = activeStorageNamespace.accountDigest
         if let accountDigest { pendingCredentialRemovalStore.enqueue(accountDigest) }
@@ -1600,7 +1890,7 @@ final class AppModel: ObservableObject {
             .uppercased()
             .replacingOccurrences(of: " ", with: "")
         guard (4...16).contains(normalizedCode.count) else {
-            lastError = .apiRequestFailed(statusCode: 422, message: NativeLocalization.string("Enter the 4-16 character class code from your teacher."))
+            lastError = .apiRequestFailed(statusCode: 422, message: NativeLocalization.string("Enter the code your teacher shared."))
             return false
         }
         guard let operation = beginNativeClassMutation() else { return false }
@@ -1946,7 +2236,7 @@ final class AppModel: ObservableObject {
                 persist: !shouldDeferCredentialPersistenceForGuestUpgrade
             )
             let profileResult = await refreshProfile(for: session)
-            guard profileResult != .identityMismatch else { return }
+            guard profileResult != .identityMismatch, profileResult != .superseded else { return }
             completeAuthenticatedSession(session, showTutorial: false, notice: "Signed in.")
             surfaceUnavailableProfileRefreshIfNeeded(profileResult)
         } catch {
@@ -1968,7 +2258,7 @@ final class AppModel: ObservableObject {
                 persist: !shouldDeferCredentialPersistenceForGuestUpgrade
             )
             let profileResult = await refreshProfile(for: session)
-            guard profileResult != .identityMismatch else { return }
+            guard profileResult != .identityMismatch, profileResult != .superseded else { return }
             if profileResult == .unavailable {
                 // The account is authenticated, but setup cannot be silently
                 // skipped when its server-authoritative profile was unavailable.
@@ -2069,7 +2359,7 @@ final class AppModel: ObservableObject {
                 shouldShowTutorial = true
             }
             let profileResult = await refreshProfile(for: result.session)
-            guard profileResult != .identityMismatch else { return }
+            guard profileResult != .identityMismatch, profileResult != .superseded else { return }
             // Only a positively identified new Apple account is forced into
             // setup during a profile-service outage. Unknown/returning users
             // keep their authenticated, retryable session instead of being
@@ -2079,6 +2369,8 @@ final class AppModel: ObservableObject {
             }
             completeAuthenticatedSession(result.session, showTutorial: shouldShowTutorial, notice: "Signed in with Apple.")
             surfaceUnavailableProfileRefreshIfNeeded(profileResult)
+        } catch is CancellationError {
+            // A cancelled provider request must leave sign-in retryable.
         } catch {
             setAuthFailure(error)
         }
@@ -2097,7 +2389,7 @@ final class AppModel: ObservableObject {
                 persist: !shouldDeferCredentialPersistenceForGuestUpgrade
             )
             let profileResult = await refreshProfile(for: session)
-            guard profileResult != .identityMismatch else { return }
+            guard profileResult != .identityMismatch, profileResult != .superseded else { return }
             // Google does not provide a reliable account-age signal here. On
             // an unavailable profile service, preserve the usable signed-in
             // session and retry notice rather than locking an unknown or
@@ -2115,6 +2407,11 @@ final class AppModel: ObservableObject {
             // View-lifecycle cancellation is not an authentication failure.
         } catch {
             setAuthFailure(error)
+            if let diagnostic = authService.consumeGoogleCallbackDiagnostic() {
+                lastError = .oauthCallbackInvalid
+                authNotice = diagnostic.userMessage
+                authNoticeIsError = true
+            }
         }
     }
 
@@ -2229,7 +2526,7 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func refreshCurrentProfile() async -> Bool {
-        guard !profileOperationInProgress,
+        guard !profileOperationInProgress, !authOperationInProgress,
               let session = try? authService.restoreSessionOrThrow() else { return false }
         profileOperationInProgress = true
         defer { profileOperationInProgress = false }
@@ -2244,6 +2541,7 @@ final class AppModel: ObservableObject {
     private enum ProfileRefreshResult: Equatable {
         case verified
         case identityMismatch
+        case superseded
         case unavailable
     }
 
@@ -2253,6 +2551,7 @@ final class AppModel: ObservableObject {
     /// authenticated session usable, with stale profile state cleared.
     @discardableResult
     private func refreshProfile(for session: AuthSession) async -> ProfileRefreshResult {
+        let generation = authSessionGeneration
         // Never let profile state from a previous identity survive a new
         // credential refresh or a failed identity check.
         userProfile = nil
@@ -2261,7 +2560,9 @@ final class AppModel: ObservableObject {
         profileRefreshUnavailable = false
         do {
             let token = try await authService.validAccessToken(config: config) ?? session.accessToken
+            guard generation == authSessionGeneration, !Task.isCancelled else { return .superseded }
             let profile = try await apiClient.request(NativeUserProfile.self, path: "/api/users/me", config: config, bearerToken: token)
+            guard generation == authSessionGeneration, !Task.isCancelled else { return .superseded }
             guard profile.supabaseUserID == session.userID else {
                 expireStoredCredentialAndLock(UserVisibleError.apiRequestFailed(statusCode: 401, message: NativeLocalization.string("The account profile did not match this sign-in. Sign in again.")))
                 return .identityMismatch
@@ -2269,10 +2570,12 @@ final class AppModel: ObservableObject {
             userProfile = profile
             profileEditorRequired = !profile.profileComplete
             if profile.avatarAvailable { await loadProfileAvatar(token: token) } else { profileAvatarData = nil }
+            guard generation == authSessionGeneration, !Task.isCancelled else { return .superseded }
             return .verified
         } catch is CancellationError {
             return .unavailable
         } catch {
+            guard generation == authSessionGeneration else { return .superseded }
             profileRefreshUnavailable = true
             lastError = (error as? UserVisibleError) ?? .networkUnavailable
             authNotice = NativeLocalization.string("Your sign-in session is still active, but your BrassTune profile is temporarily unavailable. Retry or sign out.")
@@ -2288,11 +2591,20 @@ final class AppModel: ObservableObject {
     }
 
     private func loadProfileAvatar(token: String) async {
+        let generation = authSessionGeneration
         do {
-            profileAvatarData = try await apiClient.data(path: "/api/users/me/avatar", config: config, bearerToken: token)
-        } catch let error as UserVisibleError {
-            if case .apiRequestFailed(let status, _) = error, status == 404 { profileAvatarData = nil } else { setAuthFailure(error) }
-        } catch { setAuthFailure(error) }
+            let avatar = try await apiClient.data(path: "/api/users/me/avatar", config: config, bearerToken: token)
+            guard generation == authSessionGeneration, !Task.isCancelled else { return }
+            profileAvatarData = avatar
+        } catch {
+            guard generation == authSessionGeneration, !Task.isCancelled else { return }
+            if let visible = error as? UserVisibleError,
+               case .apiRequestFailed(let status, _) = visible, status == 404 {
+                profileAvatarData = nil
+            } else {
+                setAuthFailure(error)
+            }
+        }
     }
 
     /// Authentication succeeds before an account namespace is selected. When
@@ -2322,6 +2634,7 @@ final class AppModel: ObservableObject {
         guard let session = pendingAuthenticatedSession else { return }
         switch choice {
         case .cancel:
+            clearPendingDestination()
             // Credential persistence was deferred until an explicit choice.
             // Discarding the in-memory token keeps the guest namespace active
             // without writing a restorable account session to Keychain. Best
@@ -2352,7 +2665,7 @@ final class AppModel: ObservableObject {
             }
             pendingAuthenticatedSession = nil
             guestAccountUpgradePrompt = nil
-            activateAuthenticatedNamespace(session, showTutorial: false, notice: "Signed in. Guest practice remains separate on this device.")
+            activateAuthenticatedNamespace(session, showTutorial: true, notice: "Signed in. Guest practice remains separate on this device.")
         case .merge:
             guard !guestDataContainsFiles else {
                 setAuthFailure(UserVisibleError.apiRequestFailed(
@@ -2381,6 +2694,7 @@ final class AppModel: ObservableObject {
             gatewayCompleted = true
             lastError = nil
             setAuthNotice(NativeLocalization.string("Signed in. Guest practice was merged without replacing existing account data."))
+            if !tutorialCompleted { requestTutorialPresentation() }
             retryPendingClassSessionSync()
         }
     }
@@ -2419,6 +2733,7 @@ final class AppModel: ObservableObject {
             || !practiceFeatures.customExercises.isEmpty
             || !practiceFeatures.customPacks.isEmpty
             || !practiceFeatures.metronomePresets.isEmpty
+            || !practiceFeatures.measurableGoals.isEmpty
             || !practiceFeatures.reflections.isEmpty
             || !practiceFeatures.favorites.isEmpty
             || !practiceFeatures.recents.isEmpty
@@ -2482,6 +2797,10 @@ final class AppModel: ObservableObject {
             activeScoreID = guestActive
         }
         practiceFeatures.reflections = uniqueGuestReflections + practiceFeatures.reflections
+        practiceFeatures.measurableGoals = PracticeGoal.mergingPreservingHistories(
+            existing: practiceFeatures.measurableGoals,
+            incoming: guestFeatures.measurableGoals
+        )
         practiceFeatures.customExercises = appendGuestItems(
             guestFeatures.customExercises,
             to: practiceFeatures.customExercises
@@ -2603,12 +2922,13 @@ final class AppModel: ObservableObject {
     }
 
     func exportDataText(exportedAt: Date = Date()) -> String {
-        let export = NativePracticeHistoryExport(
+        let export = NativePracticeHistoryExportV2(
             exportedAt: exportedAt,
             selectedInstrumentID: selectedInstrumentId,
             referencePitchHz: referencePitchHz,
             sessions: sessions,
-            scores: scores
+            scores: scores,
+            measurableGoals: practiceFeatures.measurableGoals
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -2810,6 +3130,7 @@ final class AppModel: ObservableObject {
     }
 
     func startRecording() async {
+        if metronomeTunerEnabled { stopMetronomeTuner() }
         guard !recordingStartInProgress, !audioEngine.recording else { return }
         recordingPlayer.stopAndUnload()
         if playAlongStartInProgress || playAlongPhase == .running {
@@ -2846,7 +3167,7 @@ final class AppModel: ObservableObject {
                     }
                     return
                 }
-                if !started {
+                if !started, audioEngine.permissionDenied {
                     lastError = .microphoneDenied
                 }
             } catch {
@@ -2879,19 +3200,21 @@ final class AppModel: ObservableObject {
             let started = try await audioEngine.startLiveRecording(
                 instrumentId: selectedInstrumentId,
                 referencePitchHz: referencePitchHz,
-                recordingURL: nil
+                recordingURL: nil,
+                audibleMetronome: metronomeTunerEnabled
             )
             guard recordingStartToken == token else {
                 if started { _ = audioEngine.discardLiveRecording() }
                 return
             }
-            if !started { lastError = .microphoneDenied }
+            if !started, audioEngine.permissionDenied { lastError = .microphoneDenied }
         } catch {
             lastError = .microphoneUnavailable
         }
     }
 
     func toggleTunerTake() {
+        if metronomeTunerEnabled { stopMetronomeTuner() }
         if audioEngine.takeRecording {
             guard let completion = audioEngine.finishLiveTake() else { return }
             tunerTakeSaveInProgress = true
@@ -2984,6 +3307,7 @@ final class AppModel: ObservableObject {
 
     /// Starts an explicitly supplied exercise without requiring it to be persisted in the library or custom exercises.
     func startPlayAlong(exercise: PlayAlongExercise) async {
+        if metronomeTunerEnabled { stopMetronomeTuner() }
         guard !playAlongStartInProgress, playAlongPhase != .running else { return }
         recordingPlayer.stopAndUnload()
         cancelRecordingStart()
@@ -3028,7 +3352,7 @@ final class AppModel: ObservableObject {
                 return
             }
             guard started else {
-                lastError = .microphoneDenied
+                if audioEngine.permissionDenied { lastError = .microphoneDenied }
                 return
             }
             playAlongSession = PlayAlongSession(exercise: exercise)
@@ -3091,27 +3415,118 @@ final class AppModel: ObservableObject {
         _ = clearPracticeHistoryPreservingScores()
     }
 
+    private var metronomeAllowsAudibleCapture: Bool {
+        metronomeTunerEnabled && audioEngine.listening && !audioEngine.takeRecording
+            && playAlongPhase != .running && !playAlongStartInProgress
+    }
+
+    func setMetronomeTunerEnabled(_ enabled: Bool) async {
+        guard enabled != metronomeTunerEnabled else { return }
+        // This tool may acquire passive capture; it never adopts a saved take
+        // or a microphone operation belonging to another practice feature.
+        if enabled {
+            guard !audioEngine.recording, !recordingStartInProgress,
+                  !playAlongStartInProgress, playAlongPhase != .running else { return }
+        }
+        let resumeBeat = metronomeRunning || metronomeTunerResumeBeat
+        metronomeTunerResumeBeat = enabled && resumeBeat
+        let generation = UUID()
+        metronomeTunerStartGeneration = generation
+        stopMetronome()
+        metronomeTunerEnabled = enabled
+        metronomeTunerFrame = nil
+        metronomeTunerCaptureDuration = nil
+        metronomeTunerReadoutGate = MetronomeTunerReadoutGate()
+        if enabled {
+            await startTunerListening()
+            guard metronomeTunerStartGeneration == generation, metronomeTunerEnabled else { return }
+            if !audioEngine.listening { metronomeTunerEnabled = false }
+        } else {
+            cancelRecordingStart()
+            stopTunerListening()
+        }
+        metronomeTunerResumeBeat = false
+        if resumeBeat { startMetronome() }
+    }
+
+    func stopMetronomeTuner() {
+        metronomeTunerStartGeneration = UUID()
+        metronomeTunerResumeBeat = false
+        stopMetronome()
+        guard metronomeTunerEnabled else { return }
+        metronomeTunerEnabled = false
+        metronomeTunerFrame = nil
+        metronomeTunerCaptureDuration = nil
+        metronomeTunerReadoutGate = MetronomeTunerReadoutGate()
+        cancelRecordingStart()
+        stopTunerListening()
+    }
+
+    private func metronomeTimelinePulseScheduled(_ hostTime: UInt64, pulseIndex: UInt64) {
+        guard metronomeAllowsAudibleCapture else { return }
+        let runtimeSettings = activeMetronomeSettings
+        let intervalHostTicks = max(1, AVAudioTime.hostTime(forSeconds: runtimeSettings.intervalSeconds))
+        let maximumRecentPulses = min(
+            128,
+            max(1, Int(ceil(1.25 / max(0.01, runtimeSettings.intervalSeconds))) + 2)
+        )
+        guard let indices = MetronomeAbsolutePulseTimeline.recentUnregisteredIndices(
+            after: metronomeLastTimelinePulseIndex,
+            through: pulseIndex,
+            maximumCount: maximumRecentPulses
+        ) else { return }
+        // The graph never stopped while the dispatch clock was coalesced. Add
+        // the recent audible PCM edges that actually occurred, but do not
+        // replay their haptics or visual transients.
+        let settling = 0.12
+        for index in indices {
+            let position = MetronomeAbsolutePulseTimeline.position(
+                settings: runtimeSettings,
+                countInGridTicks: metronomeRunCountInGridTicks,
+                pulseIndex: index
+            )
+            guard position.isAudible else { continue }
+            let intervalsBack = pulseIndex - index
+            let hostTicksBack = intervalHostTicks &* intervalsBack
+            guard hostTime >= hostTicksBack else { continue }
+            metronomeTunerReadoutGate.recordClick(
+                at: AVAudioTime.seconds(forHostTime: hostTime - hostTicksBack),
+                settlingDuration: settling
+            )
+        }
+        metronomeLastTimelinePulseIndex = pulseIndex
+    }
+
     func startMetronome() {
         guard !metronomeRunning else { return }
+        metronomeAudioHandoffState.reset()
         recordingPlayer.stopAndUnload()
         AppAudioOwnershipHandoff.prepareForMetronomePlayback(
             stopTone: { self.audioEngine.stopTone(deactivation: .immediate) }
         )
         metronomeRunning = true
         metronomeTick = 0
+        metronomeVisualPulseState.beginRun()
         metronomePulseSequence = 0
         metronomePulseScale = 1
         metronomeCountInRemaining = metronome.countInBeats
         metronomeCountInGridTick = 0
+        metronomeCountInBoundaryPending = false
+        metronomeMeasureBoundaryPending = false
         metronomeCountInGridTicksRemaining = metronome.countInBeats * max(
             1,
             (metronome.isCompoundMeter ? 3 : 1) * metronome.subdivision.ticksPerBeat
         )
         let generation = UUID()
         metronomeClockGeneration = generation
+        promoteMetronomeRuntimeSettings(
+            metronome,
+            countInGridTicks: metronomeCountInGridTicksRemaining,
+            generation: generation
+        )
         let initialAccent = metronomeCountInRemaining == 0 && metronome.accentFirstBeat
         metronomeOutput.playTick(
-            settings: effectiveMetronomeSettings,
+            settings: effectiveMetronomeRuntimeSettings,
             accent: initialAccent,
             onInitialPulseScheduled: { [weak self] anchorHostTime in
                 guard let self,
@@ -3128,18 +3543,40 @@ final class AppModel: ObservableObject {
                     pulseIndex: 0,
                     emitAudio: false
                 )
+            },
+            allowAudibleDuringCapture: metronomeAllowsAudibleCapture,
+            countInGridTicks: metronomeCountInGridTicksRemaining,
+            startingGridTick: metronomeTick,
+            gapPhaseIsSilent: metronomeGapPhase.isSilent,
+            onTimelinePulseScheduled: { [weak self] time in
+                guard let self,
+                      self.metronomeClockGeneration == generation,
+                      self.metronomeRuntimeGeneration == generation else { return }
+                self.metronomeTimelinePulseScheduled(time, pulseIndex: 0)
             }
         )
     }
 
     func stopMetronome() {
+        metronomeSettingsUpdateTask?.cancel()
+        metronomeSettingsUpdateTask = nil
         metronomeRunning = false
         metronomeClockGeneration = UUID()
+        metronomeVisualPulseState.invalidatePendingReleases()
         metronomeClock.stop()
         metronomeCountInRemaining = 0
         metronomeCountInGridTick = 0
         metronomeCountInGridTicksRemaining = 0
+        metronomeCountInBoundaryPending = false
+        metronomeMeasureBoundaryPending = false
+        metronomeRunCountInGridTicks = 0
+        metronomeLastTimelinePulseIndex = nil
+        metronomeRuntimeSettings = nil
+        metronomeRuntimeGeneration = UUID()
+        metronomeAudioHandoffState.reset()
         metronomeLastPulseWasAccented = false
+        metronomeGapSequence.reset()
+        metronomeGapPhase = metronomeGapSequence.phase
         metronomePulseScale = 1
         metronomeOutput.stop()
     }
@@ -3472,7 +3909,7 @@ final class AppModel: ObservableObject {
         guard metronomeRunning else { return }
         let generation = generation ?? UUID()
         metronomeClockGeneration = generation
-        let intervalSeconds = metronome.intervalSeconds
+        let intervalSeconds = activeMetronomeSettings.intervalSeconds
         metronomeClock.start(intervalSeconds: intervalSeconds, anchorHostTime: anchorHostTime) { [weak self] pulseIndex, hostTime in
             Task { @MainActor in
                 guard let self,
@@ -3491,25 +3928,57 @@ final class AppModel: ObservableObject {
     /// on the run loop. Count-in clicks never masquerade as measure accents.
     func advanceMetronomeClock(
         scheduledHostTime: UInt64 = mach_absolute_time(),
-        pulseIndex: UInt64 = 0,
+        pulseIndex: UInt64? = nil,
         emitAudio: Bool = true
     ) {
         guard metronomeRunning else { return }
+        if let pulseIndex {
+            advanceMetronomeClock(
+                atAbsolutePulseIndex: pulseIndex,
+                scheduledHostTime: scheduledHostTime,
+                emitAudio: emitAudio
+            )
+            return
+        }
+        // The state changes at the *next* grid edge after the final tick of a
+        // count-in or bar. Advancing at the prior tick's onset would label the
+        // final audible interval as silent one subdivision too early.
+        if metronomeCountInBoundaryPending {
+            metronomeCountInBoundaryPending = false
+            metronomeGapSequence.countInDidAdvance(settings: metronome, ticksRemaining: 0)
+            metronomeGapPhase = metronomeGapSequence.phase
+        }
+        if metronomeMeasureBoundaryPending {
+            metronomeMeasureBoundaryPending = false
+            metronomeGapSequence.measureDidComplete(settings: metronome)
+            metronomeGapPhase = metronomeGapSequence.phase
+        }
         if metronomeCountInGridTicksRemaining > 0 {
             if emitAudio {
+                let callbackGeneration = metronomeClockGeneration
                 metronomeOutput.playTick(
-                    settings: effectiveMetronomeSettings,
+                    settings: effectiveMetronomeRuntimeSettings,
                     accent: false,
                     hostTime: scheduledHostTime,
-                    pulseIndex: pulseIndex,
+                    pulseIndex: 0,
                     onPulseDue: { [weak self] targetHostTime in
-                        self?.advanceMetronomeClock(
+                        guard let self, self.metronomeRunning,
+                              self.metronomeClockGeneration == callbackGeneration else { return }
+                        self.advanceMetronomeClock(
                             scheduledHostTime: targetHostTime,
-                            pulseIndex: pulseIndex,
                             emitAudio: false
                         )
+                    },
+                    allowAudibleDuringCapture: metronomeAllowsAudibleCapture,
+                    countInGridTicks: metronomeCountInGridTicksRemaining,
+                    startingGridTick: metronomeTick,
+                    gapPhaseIsSilent: false,
+                    onTimelinePulseScheduled: { [weak self] time in
+                        guard let self,
+                              self.metronomeClockGeneration == callbackGeneration else { return }
+                        self.metronomeTimelinePulseScheduled(time, pulseIndex: 0)
                     }
-                )
+        )
                 return
             }
             let countInGrid = max(
@@ -3521,21 +3990,136 @@ final class AppModel: ObservableObject {
             }
             metronomeCountInGridTick &+= 1
             metronomeCountInGridTicksRemaining -= 1
+            metronomeCountInBoundaryPending = metronomeCountInGridTicksRemaining == 0
             metronomeLastPulseWasAccented = false
-            metronomePulseSequence &+= 1
-            animateMetronomePulse(accented: false)
+            recordMetronomeVisualPulse(accented: false)
             return
         }
+        let gapPhaseIsSilent = metronomeGapPhase.isSilent
         let writtenBeat = metronomeTick / max(1, metronome.subdivision.ticksPerBeat)
         let subdivisionIndex = metronomeTick % max(1, metronome.subdivision.ticksPerBeat)
-        let accent = metronomeCountInGridTicksRemaining == 0
+        let accent = !gapPhaseIsSilent
+            && metronomeCountInGridTicksRemaining == 0
             && metronome.accentFirstBeat
             && subdivisionIndex == 0
             && metronome.groupingStarts.contains(writtenBeat)
         if emitAudio {
             let callbackGeneration = metronomeClockGeneration
             metronomeOutput.playTick(
-                settings: effectiveMetronomeSettings,
+                settings: effectiveMetronomeRuntimeSettings,
+                accent: accent,
+                hostTime: scheduledHostTime,
+                pulseIndex: 0,
+                onPulseDue: { [weak self] targetHostTime in
+                    guard let self,
+                          self.metronomeRunning,
+                          self.metronomeClockGeneration == callbackGeneration else { return }
+                    self.advanceMetronomeClock(
+                        scheduledHostTime: targetHostTime,
+                        emitAudio: false
+                    )
+                },
+            allowAudibleDuringCapture: metronomeAllowsAudibleCapture,
+            countInGridTicks: metronomeCountInGridTicksRemaining,
+            startingGridTick: metronomeTick,
+            gapPhaseIsSilent: gapPhaseIsSilent,
+            onTimelinePulseScheduled: { [weak self] time in
+                guard let self,
+                      self.metronomeClockGeneration == callbackGeneration else { return }
+                self.metronomeTimelinePulseScheduled(time, pulseIndex: 0)
+            }
+        )
+            return
+        }
+        metronomeLastPulseWasAccented = accent
+        metronomeTick = (metronomeTick + 1) % max(1, metronome.beatsPerMeasure * metronome.subdivision.ticksPerBeat)
+        if metronomeTick == 0 {
+            metronomeMeasureBoundaryPending = true
+        }
+        if gapPhaseIsSilent {
+            metronomeVisualPulseState.invalidatePendingReleases()
+            metronomePulseScale = 1
+        } else {
+            recordMetronomeVisualPulse(accented: accent)
+        }
+    }
+
+    private func advanceMetronomeClock(
+        atAbsolutePulseIndex pulseIndex: UInt64,
+        scheduledHostTime: UInt64,
+        emitAudio: Bool
+    ) {
+        let runtimeSettings = activeMetronomeSettings
+        let position = MetronomeAbsolutePulseTimeline.position(
+            settings: runtimeSettings,
+            countInGridTicks: metronomeRunCountInGridTicks,
+            pulseIndex: pulseIndex
+        )
+        if position.isCountIn {
+            let countInGrid = max(
+                1,
+                (runtimeSettings.isCompoundMeter ? 3 : 1) * runtimeSettings.subdivision.ticksPerBeat
+            )
+            if emitAudio {
+                let callbackGeneration = metronomeClockGeneration
+                metronomeOutput.playTick(
+                    settings: effectiveMetronomeRuntimeSettings,
+                    accent: false,
+                    hostTime: scheduledHostTime,
+                    pulseIndex: pulseIndex,
+                    onPulseDue: { [weak self] targetHostTime in
+                        guard let self,
+                              self.metronomeRunning,
+                              self.metronomeClockGeneration == callbackGeneration else { return }
+                        self.advanceMetronomeClock(
+                            scheduledHostTime: targetHostTime,
+                            pulseIndex: pulseIndex,
+                            emitAudio: false
+                        )
+                    },
+                    allowAudibleDuringCapture: metronomeAllowsAudibleCapture,
+                    countInGridTicks: metronomeRunCountInGridTicks,
+                    startingGridTick: 0,
+                    gapPhaseIsSilent: false,
+                    onTimelinePulseScheduled: { [weak self] time in
+                        guard let self,
+                              self.metronomeClockGeneration == callbackGeneration,
+                              self.metronomeRuntimeGeneration == callbackGeneration else { return }
+                        self.metronomeTimelinePulseScheduled(time, pulseIndex: pulseIndex)
+                    }
+                )
+                return
+            }
+            if metronomeGapPhase != position.gapPhase {
+                metronomeGapPhase = position.gapPhase
+            }
+            metronomeCountInRemaining = max(
+                0,
+                runtimeSettings.countInBeats - Int(pulseIndex) / countInGrid - 1
+            )
+            metronomeCountInGridTick = min(metronomeRunCountInGridTicks, Int(pulseIndex) + 1)
+            metronomeCountInGridTicksRemaining = max(
+                0,
+                metronomeRunCountInGridTicks - Int(pulseIndex) - 1
+            )
+            metronomeCountInBoundaryPending = metronomeCountInGridTicksRemaining == 0
+            metronomeTick = 0
+            metronomeLastPulseWasAccented = false
+            recordMetronomeVisualPulse(accented: false)
+            return
+        }
+
+        let ticksPerBeat = max(1, runtimeSettings.subdivision.ticksPerBeat)
+        let writtenBeat = position.measureTick / ticksPerBeat
+        let subdivisionIndex = position.measureTick % ticksPerBeat
+        let accent = position.isAudible
+            && runtimeSettings.accentFirstBeat
+            && subdivisionIndex == 0
+            && runtimeSettings.groupingStarts.contains(writtenBeat)
+        if emitAudio {
+            let callbackGeneration = metronomeClockGeneration
+            metronomeOutput.playTick(
+                settings: effectiveMetronomeRuntimeSettings,
                 accent: accent,
                 hostTime: scheduledHostTime,
                 pulseIndex: pulseIndex,
@@ -3548,42 +4132,69 @@ final class AppModel: ObservableObject {
                         pulseIndex: pulseIndex,
                         emitAudio: false
                     )
+                },
+                allowAudibleDuringCapture: metronomeAllowsAudibleCapture,
+                countInGridTicks: metronomeRunCountInGridTicks,
+                startingGridTick: position.measureTick,
+                gapPhaseIsSilent: !position.isAudible,
+                onTimelinePulseScheduled: { [weak self] time in
+                    guard let self,
+                          self.metronomeClockGeneration == callbackGeneration,
+                          self.metronomeRuntimeGeneration == callbackGeneration else { return }
+                    self.metronomeTimelinePulseScheduled(time, pulseIndex: pulseIndex)
                 }
             )
             return
         }
+        if metronomeGapPhase != position.gapPhase {
+            metronomeGapPhase = position.gapPhase
+        }
+        metronomeCountInRemaining = 0
+        metronomeCountInGridTicksRemaining = 0
+        metronomeCountInBoundaryPending = false
         metronomeLastPulseWasAccented = accent
-        metronomeTick = (metronomeTick + 1) % max(1, metronome.beatsPerMeasure * metronome.subdivision.ticksPerBeat)
-        metronomePulseSequence &+= 1
-        animateMetronomePulse(accented: accent)
+        metronomeTick = (position.measureTick + 1)
+            % max(1, runtimeSettings.beatsPerMeasure * ticksPerBeat)
+        if position.isAudible {
+            recordMetronomeVisualPulse(accented: accent)
+        } else {
+            metronomeVisualPulseState.invalidatePendingReleases()
+            metronomePulseScale = 1
+        }
+    }
+
+    private func queueMetronomeSettingsUpdate() {
+        guard metronomeRunning else { return }
+        metronomeSettingsUpdateTask?.cancel()
+        metronomeSettingsUpdateTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(60)) } catch { return }
+            guard let self, !Task.isCancelled, self.metronomeRunning else { return }
+            self.restartMetronomeIfNeeded()
+            self.metronomeSettingsUpdateTask = nil
+        }
     }
 
     private func restartMetronomeIfNeeded() {
         guard metronomeRunning else { return }
-        // Preserve the next musical edge from the previous anchored timeline.
-        // Cancelling stale output generation prevents an old-rate click from
-        // landing beside the reconfigured timeline.
+        // Use the previous clock's next edge as a transition reference. The
+        // audio graph keeps that old measure playing until the new one starts.
         let nextEdge = metronomeClock.nextScheduledTargetHostTime()
             ?? (mach_absolute_time() &+ AVAudioTime.hostTime(forSeconds: 0.08))
+        let handoffToken = metronomeAudioHandoffState.begin()
         metronomeClock.stop()
-        // Keep the active output/session through a tempo change. Tearing it
-        // down forces a 100 ms reacquire margin and can cancel an imminent
-        // old-grid click before the new grid can replace it.
+        // Keep the accepted runtime snapshot and its visible phase intact while
+        // the old PCM player remains audible. The pending preferences promote
+        // atomically only after the replacement graph accepts its start edge.
+        let replacementSettings = metronome
         let generation = UUID()
         metronomeClockGeneration = generation
         let transitionTimeline = NativeMetronomeTimeline(
             anchorHostTime: nextEdge,
-            intervalSeconds: metronome.intervalSeconds
+            intervalSeconds: replacementSettings.intervalSeconds
         )
-        let writtenBeat = metronomeTick / max(1, metronome.subdivision.ticksPerBeat)
-        let subdivisionIndex = metronomeTick % max(1, metronome.subdivision.ticksPerBeat)
-        let accent = metronomeCountInGridTicksRemaining == 0
-            && metronome.accentFirstBeat
-            && subdivisionIndex == 0
-            && metronome.groupingStarts.contains(writtenBeat)
         metronomeOutput.playTick(
-            settings: effectiveMetronomeSettings,
-            accent: accent,
+            settings: effectiveMetronomeSettings(for: replacementSettings),
+            accent: replacementSettings.accentFirstBeat,
             hostTime: nextEdge,
             // Mark this as a fresh graph submission so NativeMetronomeOutput
             // defers a stale old-rate edge until the session is ready. The
@@ -3596,38 +4207,106 @@ final class AppModel: ObservableObject {
             onPulseDue: { [weak self] targetHostTime in
                 guard let self,
                       self.metronomeRunning,
-                      self.metronomeClockGeneration == generation else { return }
+                      self.metronomeClockGeneration == generation,
+                      self.metronomeAudioHandoffState.token == handoffToken else { return }
+                self.promoteMetronomeRuntimeSettings(
+                    replacementSettings,
+                    countInGridTicks: 0,
+                    generation: generation
+                )
+                self.metronomeTimelinePulseScheduled(targetHostTime, pulseIndex: 0)
+                guard self.metronomeAudioHandoffState.finish(token: handoffToken) else { return }
+                self.metronomeTick = 0
+                self.metronomeCountInRemaining = 0
+                self.metronomeCountInGridTick = 0
+                self.metronomeCountInGridTicksRemaining = 0
+                self.metronomeCountInBoundaryPending = false
+                self.metronomeMeasureBoundaryPending = false
+                self.metronomeLastPulseWasAccented = false
+                self.metronomeVisualPulseState.invalidatePendingReleases()
+                self.metronomePulseScale = 1
                 self.advanceMetronomeClock(
                     scheduledHostTime: targetHostTime,
                     pulseIndex: 0,
                     emitAudio: false
                 )
                 self.scheduleMetronomeClock(anchorHostTime: targetHostTime, generation: generation)
-            }
+            },
+            allowAudibleDuringCapture: metronomeAllowsAudibleCapture,
+            countInGridTicks: 0,
+            startingGridTick: 0,
+            gapPhaseIsSilent: false
         )
     }
 
-    private var effectiveMetronomeSettings: MetronomeSettings {
-        guard metronomeTemporarilyMutedForRecording else { return metronome }
-        var mutedSettings = metronome
+    @discardableResult
+    func promoteMetronomeRuntimeSettings(
+        _ settings: MetronomeSettings,
+        countInGridTicks: Int,
+        generation: UUID? = nil
+    ) -> Bool {
+        if let generation, generation != metronomeClockGeneration { return false }
+        var validated = settings
+        validated.validate()
+        let acceptedGeneration = generation ?? metronomeClockGeneration
+        if metronomeRuntimeGeneration == acceptedGeneration,
+           metronomeRuntimeSettings == validated,
+           metronomeRunCountInGridTicks == max(0, countInGridTicks) {
+            return true
+        }
+        metronomeRuntimeSettings = validated
+        metronomeRuntimeGeneration = acceptedGeneration
+        metronomeRunCountInGridTicks = max(0, countInGridTicks)
+        metronomeLastTimelinePulseIndex = nil
+        metronomeGapSequence.start(
+            settings: validated,
+            hasCountIn: metronomeRunCountInGridTicks > 0
+        )
+        metronomeGapPhase = metronomeGapSequence.phase
+        return true
+    }
+
+    private var activeMetronomeSettings: MetronomeSettings {
+        metronomeRuntimeSettings ?? metronome
+    }
+
+    private func effectiveMetronomeSettings(for settings: MetronomeSettings) -> MetronomeSettings {
+        guard metronomeTemporarilyMutedForRecording else { return settings }
+        var mutedSettings = settings
         mutedSettings.muted = true
         mutedSettings.visualOnly = true
         mutedSettings.volume = 0
         return mutedSettings
     }
 
-    private func animateMetronomePulse(accented: Bool) {
-        let sequence = metronomePulseSequence
-        // Alternate the nonaccent target slightly so an ultra-fast grid still
-        // has an observable change even before the previous spring settles.
-        metronomePulseScale = accented ? 1.18 : (sequence.isMultiple(of: 2) ? 1.07 : 1.11)
+    private var effectiveMetronomeSettings: MetronomeSettings {
+        effectiveMetronomeSettings(for: metronome)
+    }
+
+    private var effectiveMetronomeRuntimeSettings: MetronomeSettings {
+        effectiveMetronomeSettings(for: activeMetronomeSettings)
+    }
+
+    private func recordMetronomeVisualPulse(accented: Bool) {
+        let token = metronomeVisualPulseState.recordPulse()
+        metronomePulseSequence = token.sequence
+        animateMetronomePulse(accented: accented, token: token)
+    }
+
+    private func animateMetronomePulse(accented: Bool, token: MetronomeVisualPulseToken) {
+        // A single modest target avoids the alternating size changes that
+        // read as jitter at fast subdivision tempos. The release stays within
+        // half a grid interval, so the next pulse starts from the resting size.
+        metronomePulseScale = accented ? 1.14 : 1.07
         // At dense compound/subdivision grids a fixed 115 ms hold means the
         // next tick arrives before the previous transient can return home.
         // Release well within one grid interval so every pulse visibly moves.
         let releaseSeconds = min(0.115, max(0.001, metronome.intervalSeconds * 0.5))
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(releaseSeconds))
-            guard let self, self.metronomePulseSequence == sequence else { return }
+            guard let self,
+                  self.metronomeRunning,
+                  self.metronomeVisualPulseState.acceptsRelease(for: token) else { return }
             self.metronomePulseScale = 1
         }
     }
@@ -3650,19 +4329,44 @@ final class AppModel: ObservableObject {
     }
 
     private func observeAudioFrames() {
+        timedAudioFrameCancellable = audioEngine.$currentTimedFrame
+            .compactMap { $0 }
+            .sink { [weak self] timed in
+                Task { @MainActor [weak self] in
+                    guard let self, self.metronomeTunerEnabled, self.audioEngine.listening,
+                          !self.metronomeAudioHandoffState.blocksTunerFrames,
+                          self.audioEngine.currentTimedFrame == timed,
+                          timed.captureStartHostTime > 0,
+                          timed.captureEndHostTime > timed.captureStartHostTime else { return }
+                    self.metronomeTunerCaptureDuration = AVAudioTime.seconds(
+                        forHostTime: timed.captureEndHostTime - timed.captureStartHostTime
+                    )
+                    self.metronomeTunerFrame = self.metronomeTunerReadoutGate.consume(
+                        timed.frame,
+                        at: AVAudioTime.seconds(forHostTime: timed.captureEndHostTime),
+                        captureStart: AVAudioTime.seconds(forHostTime: timed.captureStartHostTime)
+                    )
+                }
+            }
         audioFrameCancellable = audioEngine.$currentFrame
             .compactMap { $0 }
             .sink { [weak self] frame in
                 Task { @MainActor [weak self] in
-                    self?.consumePlayAlongFrame(frame)
+                    guard let self else { return }
+                    self.consumePlayAlongFrame(frame)
+
                 }
             }
         audioRecordingCancellable = audioEngine.$recording
             .removeDuplicates()
             .sink { [weak self] isRecording in
                 Task { @MainActor [weak self] in
-                    guard let self,
-                          !isRecording,
+                    guard let self else { return }
+                    if !isRecording, !self.audioEngine.listening, self.metronomeTunerEnabled,
+                       !self.recordingStartInProgress {
+                        self.stopMetronomeTuner()
+                    }
+                    guard !isRecording,
                           self.playAlongPhase == .running,
                           !self.playAlongUsesFixture else { return }
                     self.playAlongStartToken = nil
@@ -3703,7 +4407,9 @@ final class AppModel: ObservableObject {
                         writtenOctave: 4,
                         isValidForRecording: true
                     )
-                    self?.consumePlayAlongFrame(frame)
+                    guard let self else { return }
+                    self.consumePlayAlongFrame(frame)
+
                     try? await Task.sleep(nanoseconds: 10_000_000)
                 }
             }
@@ -3998,6 +4704,7 @@ final class AppModel: ObservableObject {
         isRestoringLocalState = true
         sessions.removeAll()
         practiceFeatures.reflections.removeAll()
+        practiceFeatures.measurableGoals.removeAll()
         practiceFeatures.playAlongAttempts.removeAll()
         practiceFeatures.warmupCheckpoint = nil
         practiceFeatures.workspaceCheckpoint = nil
@@ -4567,6 +5274,42 @@ struct NativeLocalSnapshot: Codable, Equatable {
     var guestProgressSafetyPromptHandled: Bool? = nil
     var microphoneRationaleSeen: Bool? = nil
     var classSessionSyncState: NativeClassSessionSyncState? = nil
+}
+
+/// Versioned, user-visible export. Goal records are included because the goal
+/// UI tells people to export before deleting local history; account credentials
+/// and local recording paths remain absent.
+private struct NativePracticeHistoryExportV2: Codable {
+    static let schemaVersion = 2
+
+    let schemaVersion: Int
+    let exportedAt: Date
+    let selectedInstrumentID: String
+    let referencePitchHz: Double
+    let sessions: [PracticeSession]
+    let scores: [ImportedScore]
+    let measurableGoals: [PracticeGoal]
+
+    init(
+        exportedAt: Date,
+        selectedInstrumentID: String,
+        referencePitchHz: Double,
+        sessions: [PracticeSession],
+        scores: [ImportedScore],
+        measurableGoals: [PracticeGoal]
+    ) {
+        self.schemaVersion = Self.schemaVersion
+        self.exportedAt = exportedAt
+        self.selectedInstrumentID = selectedInstrumentID
+        self.referencePitchHz = referencePitchHz
+        self.sessions = sessions.sorted {
+            $0.startedAt == $1.startedAt ? $0.id.uuidString < $1.id.uuidString : $0.startedAt < $1.startedAt
+        }
+        self.scores = scores.sorted { $0.id.uuidString < $1.id.uuidString }
+        self.measurableGoals = measurableGoals.sorted {
+            $0.updatedAt == $1.updatedAt ? $0.id.uuidString < $1.id.uuidString : $0.updatedAt < $1.updatedAt
+        }
+    }
 }
 
 struct NativeScoreImportService {

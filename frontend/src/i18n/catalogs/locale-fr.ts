@@ -1,6 +1,12 @@
 import type { MessageCatalog } from '../messages.base';
 
 const messages = {
+  "auth.frontHeading": "Prenez votre instrument.",
+  "auth.frontBody": "Accordez une note, réglez une pulsation ou choisissez un passage à travailler.",
+  "auth.accountOptions": "Options du compte",
+  "auth.practiceGoals": "Objectifs de pratique",
+  "legal.photoCredit": "Crédit photo",
+  "legal.photoCrop": "Affiché avec un recadrage adaptatif.",
   "meta.title": "BrassTune — accordeur de cuivres et entraînement",
   "meta.description": "BrassTune écoute pendant que vous jouez, affiche les commentaires de pitch en temps réel et vous aide à créer une routine d'entraînement ciblée.",
   "loading.session": "Session de restauration",
@@ -517,7 +523,7 @@ const messages = {
   "class.joinYourClass": "Rejoignez votre classe",
   "class.forStudents": "Pour les étudiants",
   "class.enterCode": "Entrez le code de classe que votre professeur vous a donné.",
-  "class.codeExample": "par exemple BXK4QD",
+  "class.codeExample": "par exemple 012345",
   "class.code": "Code de classe",
   "class.joining": "Rejoindre la classe…",
   "class.join": "Rejoindre",

@@ -6,8 +6,11 @@ import UIKit
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openURL) private var openURL
+    @AppStorage(BTColorTheme.storageKey) private var colorTheme = BTColorTheme.defaultTheme.rawValue
     @Binding var onboardingPresented: Bool
     @State private var authMode: GatewayAuthMode?
+    @State private var guestUpgradePresentation: GuestUpgradePresentation?
     @State private var pendingDestructiveAction: DestructiveAction?
     @State private var advancedTunerExpanded = false
 
@@ -93,7 +96,7 @@ struct SettingsView: View {
                             Task { await model.refreshCurrentProfile() }
                         }
                         .buttonStyle(BTSecondaryButtonStyle())
-                        .disabled(model.profileOperationInProgress)
+                        .disabled(model.profileOperationInProgress || model.authOperationInProgress)
                         .accessibilityIdentifier("settings.profileRetry")
                     }
 
@@ -114,15 +117,34 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    .disabled(model.authOperationInProgress)
                     .accessibilityIdentifier("settings.signOut")
                 }
             }
 
             BTCard {
                 BTSectionHeader(title: "Tuner", subtitle: "Choose the instrument you play.")
-                Picker("Instrument", selection: $model.selectedInstrumentId) {
-                    instrumentPickerOptions()
+                Menu {
+                    Picker("Instrument", selection: $model.selectedInstrumentId) {
+                        instrumentPickerOptions()
+                    }
+                } label: {
+                    HStack(spacing: BTSpacing.sm) {
+                        Text("Instrument")
+                            .font(.headline)
+                        Spacer()
+                        Text(verbatim: instrumentDisplayName(model.selectedInstrumentId))
+                            .foregroundStyle(BTTheme.muted)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(BTTheme.muted)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .btMinimumInteractiveSize(alignment: .leading)
+                .accessibilityLabel("Instrument")
+                .accessibilityValue(instrumentDisplayName(model.selectedInstrumentId))
                 .accessibilityIdentifier("settings.instrumentPicker")
 
                 Button {
@@ -169,6 +191,32 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("settings.reopenOnboarding")
+            }
+
+            BTCard {
+                BTSectionHeader(title: "Appearance", subtitle: "Choose how BrassTune looks on this device.")
+                Picker("Color theme", selection: $colorTheme) {
+                    ForEach(BTColorTheme.allCases) { theme in
+                        Text(verbatim: theme.title).tag(theme.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("settings.colorTheme")
+            }
+
+            BTCard {
+                BTSectionHeader(
+                    title: "Enjoying BrassTune?",
+                    subtitle: "Share a rating in the App Store when you want to."
+                )
+                Button {
+                    openURL(brassTuneAppStoreReviewURL())
+                } label: {
+                    Label("Rate BrassTune", systemImage: "star")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("settings.rateApp")
             }
 
             BTCard {
@@ -263,8 +311,24 @@ struct SettingsView: View {
         .sheet(item: $authMode) { mode in
             GatewayAuthForm(mode: mode)
         }
+        .sheet(item: $guestUpgradePresentation) { presentation in
+            NavigationStack {
+                GuestAccountUpgradeDecisionView(prompt: presentation.prompt)
+            }
+            .interactiveDismissDisabled()
+        }
         .task {
+            if BTColorTheme(rawValue: colorTheme) == nil {
+                colorTheme = BTColorTheme.defaultTheme.rawValue
+            }
+            syncGuestUpgradePresentation()
             await model.loadAuthProviderConfiguration()
+        }
+        .onChange(of: authMode) { _, _ in
+            syncGuestUpgradePresentation()
+        }
+        .onChange(of: model.guestAccountUpgradePrompt) { _, _ in
+            syncGuestUpgradePresentation()
         }
         .alert(item: $pendingDestructiveAction) { action in
             Alert(
@@ -276,6 +340,14 @@ struct SettingsView: View {
                 secondaryButton: .cancel()
             )
         }
+    }
+
+    private func syncGuestUpgradePresentation() {
+        guard authMode == nil else {
+            guestUpgradePresentation = nil
+            return
+        }
+        guestUpgradePresentation = model.guestAccountUpgradePrompt.map(GuestUpgradePresentation.init)
     }
 
     private var accountStatusMessage: String {
@@ -341,6 +413,10 @@ struct SettingsView: View {
         }
     }
 
+}
+
+func brassTuneAppStoreReviewURL() -> URL {
+    URL(string: "https://apps.apple.com/app/id6795688588?action=write-review")!
 }
 
 struct NativeAppleSignInButton: View {
@@ -495,6 +571,7 @@ struct ClassesView: View {
     @State private var pendingMemberRemoval: EnsembleMember?
     @State private var pendingCodeRotation = false
     @State private var authMode: GatewayAuthMode?
+    @State private var guestUpgradePresentation: GuestUpgradePresentation?
     @State private var rosterSearch = ""
     @State private var rosterSort: RosterSort = .name
     @State private var rosterStatusFilter = ""
@@ -525,6 +602,7 @@ struct ClassesView: View {
                         subtitle: "Sign in before using classes."
                     )
                     Button {
+                        model.requestClassDestination()
                         authMode = .signIn
                     } label: {
                         Label("Sign in", systemImage: "person.crop.circle.badge.checkmark")
@@ -577,6 +655,21 @@ struct ClassesView: View {
         }
         .sheet(item: $authMode) { mode in
             GatewayAuthForm(mode: mode)
+        }
+        .sheet(item: $guestUpgradePresentation) { presentation in
+            NavigationStack {
+                GuestAccountUpgradeDecisionView(prompt: presentation.prompt)
+            }
+            .interactiveDismissDisabled()
+        }
+        .onAppear {
+            syncGuestUpgradePresentation()
+        }
+        .onChange(of: authMode) { _, _ in
+            syncGuestUpgradePresentation()
+        }
+        .onChange(of: model.guestAccountUpgradePrompt) { _, _ in
+            syncGuestUpgradePresentation()
         }
         .alert(item: $pendingLeave) { ensemble in
             Alert(
@@ -690,6 +783,14 @@ struct ClassesView: View {
         }
     }
 
+    private func syncGuestUpgradePresentation() {
+        guard authMode == nil else {
+            guestUpgradePresentation = nil
+            return
+        }
+        guestUpgradePresentation = model.guestAccountUpgradePrompt.map(GuestUpgradePresentation.init)
+    }
+
     private func invitationDecisionButton(
         _ invitation: EnsembleInvitation,
         accept: Bool
@@ -728,10 +829,12 @@ struct ClassesView: View {
                 .foregroundStyle(BTTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("classes.joinPrivacy")
-            TextField("Class code", text: $joinCode)
-                .textInputAutocapitalization(.characters)
+            TextField("6-digit class code", text: $joinCode)
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
+                .accessibilityHint("Enter the six-digit code from your teacher. Previously issued letter-and-number codes can still be pasted.")
                 .accessibilityIdentifier("classes.joinCode")
             Button {
                 Task {
@@ -1431,6 +1534,18 @@ struct ClassesView: View {
     }
 }
 
+private struct GuestUpgradePresentation: Identifiable {
+    let prompt: GuestAccountUpgradePrompt
+
+    init(prompt: GuestAccountUpgradePrompt) {
+        self.prompt = prompt
+    }
+
+    var id: String {
+        "\(prompt.email)-\(prompt.canMerge)-\(prompt.containsFileBackedData)"
+    }
+}
+
 private struct SettingsNavigationRow<Destination: View>: View {
     let title: String
     let systemImage: String
@@ -1485,8 +1600,26 @@ struct LegalDetailView: View {
     var body: some View {
         BTScreen {
             LegalCard(document: document, openURL: { safariURL = $0 })
+            if case .credits = kind {
+                BTCard {
+                    Text("Photo credit").font(.headline)
+                    Link(destination: URL(string: "https://commons.wikimedia.org/wiki/File:Trumpet_001.jpg")!) {
+                        Text(verbatim: "Trumpet 001 — mark.drummer")
+                    }
+                    .btMinimumInteractiveSize()
+                    Link(destination: URL(string: "https://creativecommons.org/licenses/by/2.0/")!) {
+                        Text(verbatim: "CC BY 2.0")
+                    }
+                    .btMinimumInteractiveSize()
+                    Text("Displayed with a responsive crop.")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                }
+                .accessibilityIdentifier("credits.welcomePhoto")
+            }
         }
         .navigationTitle(title)
+        .toolbar(.visible, for: .navigationBar)
         .accessibilityIdentifier("screen.legal.\(title)")
         .sheet(isPresented: Binding(
             get: { safariURL != nil },
@@ -1512,7 +1645,7 @@ struct LegalDetailView: View {
                 title: "Privacy Policy",
                 url: URL(string: "https://brasstune.vercel.app/privacy")!,
                 sections: [
-                    ("Data BrassTune uses", ["BrassTune uses your profile, settings, practice sessions, pitch results, reflections, and recordings to provide practice features. Supabase provides account authentication and storage for signed-in cloud practice; Vercel hosts the web app and Render hosts the backend service.", NativeLocalization.string("Your linked profile display name and optional profile photo are stored privately for profile functionality, are not used for tracking, and the photo is re-encoded before upload."), "Native microphone audio and imported score pages stay on this device unless you explicitly export or share them. Signed-in web recording behavior is described on the published policy page."]),
+                    ("Data BrassTune uses", ["BrassTune uses your profile, settings, practice sessions, pitch results, reflections, and recordings to provide practice features. Supabase provides account authentication and storage for signed-in cloud practice. Vercel hosts the informational website and Render hosts the backend service.", NativeLocalization.string("Your linked profile display name and optional profile photo are stored privately for profile functionality, are not used for tracking, and the photo is re-encoded before upload."), "Native microphone audio and imported score pages stay on this device unless you explicitly export or share them. Existing cloud practice and recordings remain associated with your account until you delete them or delete your account."]),
                     ("Class privacy", ["Class directors can see aggregate cloud practice totals from the date you join through class reports. They never receive your recordings, reflection text, or private session details. A limited set of authorized BrassTune service administrators may access account, session, and cloud-audio data only for security, support, abuse investigation, or service operation."]),
                     ("Your control", [NativeLocalization.string("Settings lets you export available practice data. Deleting your account requests deletion of your linked profile display name and optional photo; BrassTune reports any protected cloud cleanup still queued. Exported copies are yours to manage.")]),
                     ("Credits", ["BrassTune is created by Kelvin Guo, Arya Salem."])

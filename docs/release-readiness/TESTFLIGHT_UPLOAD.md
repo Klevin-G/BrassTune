@@ -15,12 +15,16 @@ Distribution team `8S79RLTSWV`, `get-task-allow=false`,
 app/dSYM UUID is `8378AB6E-EA6E-32B3-A26E-F781A481518D`.
 
 Archive/export evidence is under
-`/Users/aryasalem/Library/Application Support/BrassTune/ReleaseEvidence/AppStoreCandidate-2026-08-24-1.0.1-8`.
+`~/Library/Application Support/BrassTune/ReleaseEvidence/AppStoreCandidate-2026-08-24-1.0.1-8`.
 Upload succeeded; processing is Complete/Ready to Submit; build 8 is selected;
-metadata and review notes are updated. Submission
-`14b8ba6a-fe40-421f-ab61-790bbe51cb08` was submitted by Arya Salem on August
-24 and is **Waiting for Review** with manual release. This is not approval.
-Build 7 is historical removed/superseded.
+metadata and review notes are updated. The public description and copyright
+credit `Kelvin Guo, Arya Salem`. Current submission
+`308027b4-96ad-4171-bc83-faee57539cb6` was submitted by Arya Salem on August
+24, approved, and manually released on August 24. App Store Connect reports
+**Ready for Distribution**. It supersedes developer-rejected submission
+`14b8ba6a-fe40-421f-ab61-790bbe51cb08`. The first public lookup still returned
+version `1.0`, so public storefront propagation remained pending. Build 7 is
+historical removed/superseded.
 
 ## Candidate-version rule
 

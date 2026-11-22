@@ -153,9 +153,14 @@ def main() -> int:
         if marker not in source:
             failures.append(f"Missing centralized Liquid Glass marker: {marker}")
 
-    semantic_bpm_style = ".font(.system(.largeTitle, design: .rounded).weight(.bold).monospacedDigit())"
-    if semantic_bpm_style not in app_root_source:
-        failures.append("Metronome BPM must use the semantic large-title Dynamic Type style")
+    # The focused workspace puts tempo in the bottom dock and the large beat/
+    # pitch in the center. Both remain scalable, with distinct typographic roles.
+    metronome_source = app_root_source.split("struct MetronomeView: View", 1)[-1]
+    semantic_bpm_style = ".font(.headline.monospacedDigit())"
+    if semantic_bpm_style not in metronome_source:
+        failures.append("Metronome dock BPM must use a semantic Dynamic Type style")
+    if "@ScaledMetric(relativeTo: .largeTitle) private var sphereTextSize" not in metronome_source:
+        failures.append("Focused metronome sphere text must scale with Dynamic Type")
     if "bpmDisplaySize" in app_root_source:
         failures.append("Metronome BPM must not use a custom point-size Dynamic Type path")
 

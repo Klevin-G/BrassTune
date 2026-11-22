@@ -1,6 +1,8 @@
 # BrassTune Release Evidence
 Project attribution: Kelvin Guo, Arya Salem.
 
+> Latest execution (October 12, 2026): [1.0.7 (19), welcome/marketing/recovery and final QA](WELCOME_MARKETING_2026-10-12.md). Build 19 is Testing in the existing internal QA group. Public release remains 1.0.6 (17); public submission is held for the separate affected-phone Google gate. The historical material below is not current candidate proof.
+
 Updated: 2026-08-24. The historical report below retains its original evidence.
 
 ## Current release candidate — `5acfa2e`
@@ -36,16 +38,21 @@ docs-only follow-up; it does not change the candidate identity.
   IPA SHA-256: `cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`;
   app/dSYM UUID: `8378AB6E-EA6E-32B3-A26E-F781A481518D`.
 - The archive evidence root is
-  `/Users/aryasalem/Library/Application Support/BrassTune/ReleaseEvidence/AppStoreCandidate-2026-08-24-1.0.1-8`.
+  `~/Library/Application Support/BrassTune/ReleaseEvidence/AppStoreCandidate-2026-08-24-1.0.1-8`.
   Upload succeeded, processing is Complete/Ready to Submit, build 8 is
-  selected, and metadata/review notes are updated. Submission
-  `14b8ba6a-fe40-421f-ab61-790bbe51cb08` was submitted by Arya Salem on
-  August 24 and is **Waiting for Review** with manual release.
-- Nandy’s physical Classes fixture UI passed `1/1`; it remains fixture UI
+  selected, and metadata/review notes are updated. The product description and
+  copyright now credit `Kelvin Guo, Arya Salem`. Current submission
+  `308027b4-96ad-4171-bc83-faee57539cb6` was submitted by Arya Salem on
+  August 24, approved, and manually released on August 24. App Store Connect
+  reports **Ready for Distribution**. It supersedes developer-rejected
+  submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08`. The first public-storefront
+  check after release still served version `1.0` and its older copyright, so
+  storefront propagation remained pending at that point.
+- Physical Classes fixture UI passed `1/1`; it remains fixture UI
   evidence, not live hosted multi-account synchronization evidence.
 
-Build 7 is historical and removed/superseded. App Review acceptance remains
-external.
+Build 7 is historical and removed/superseded. Build 8 App Review and manual
+release are complete.
 
 ## Historical 2026-08-23 evidence
 
@@ -68,10 +75,10 @@ The individual developer-name result remains open: an individual cannot select `
 
 ## Decision
 
-The current candidate is `5acfa2e` / `1.0.1 (8)`, submitted and Waiting for
-Review with manual release. App Review acceptance is external; calibration,
-accessory-route, and complete assistive-technology coverage remain separate
-boundaries.
+The current candidate is `5acfa2e` / `1.0.1 (8)`. App Review approved it, the
+manual release completed, and App Store Connect reports Ready for Distribution.
+Public storefront propagation, calibration, accessory-route, and complete
+assistive-technology coverage remain separate boundaries.
 
 ## Verified evidence
 
@@ -127,9 +134,11 @@ Security advisors returned two warnings: the `pg_net` extension is installed in 
 
 ## Remaining external gates
 
-- App Review outcome for submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08`,
-  version `1.0.1` build 8; manual release remains selected.
+- Public storefront propagation of version `1.0.1` and its Kelvin-first
+  copyright; the first post-release public lookup still returned version `1.0`.
 - Attended calibrated brass/acoustic accuracy; AirPlay/HomePod, Bluetooth, and wired audio routes; Files/Photos preseeded fixtures; timer/media-reset operator prerequisites; and full assistive-technology/iPad coverage.
 - Human language review and developer-name action through Apple Support/entity/transfer path.
 
-No claim in this report establishes App Review acceptance, calibrated acoustic accuracy, unavailable accessory-route behavior, full assistive-technology coverage, or signed-in private-audio lifecycle acceptance.
+No claim in this report establishes completed storefront propagation,
+calibrated acoustic accuracy, unavailable accessory-route behavior, full
+assistive-technology coverage, or signed-in private-audio lifecycle acceptance.

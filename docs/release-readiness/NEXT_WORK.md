@@ -41,7 +41,11 @@ Project attribution: Kelvin Guo, Arya Salem.
 - [x] PR 32 / candidate `5acfa2e`: migration applied/read back, Vercel/Render
   exact-SHA Ready, `1.0.1 (8)` archive/export/upload/processing/build selection
   complete, metadata/review notes updated, and submission
-  `14b8ba6a-fe40-421f-ab61-790bbe51cb08` is Waiting for Review with manual release.
+  `308027b4-96ad-4171-bc83-faee57539cb6` approved and manually released. App
+  Store Connect reports Ready for Distribution. The first public lookup still
+  returned version `1.0`, so storefront propagation remained pending. The
+  earlier submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08` is developer-rejected
+  and superseded.
 
 ## Completed Classes / build-8 sequence
 
@@ -62,10 +66,11 @@ Project attribution: Kelvin Guo, Arya Salem.
 - [x] Produce and resubmit replacement build `1.0.1 (8)`
   - Owner type: release
   - Evidence: archive/export/upload/processing/build selection complete;
-    submitted and Waiting for Review with manual release. The fixture result
-    does not cover live hosted multi-account synchronization.
+    submitted, approved, manually released, and Ready for Distribution in App
+    Store Connect. The fixture result does not cover live hosted multi-account
+    synchronization.
 
-## Must Finish Before Public/App Store Release
+## Post-release external follow-up
 
 - [P0] Validate physical iPhone/iPad microphone behavior with real brass input
   - Owner type: hardware

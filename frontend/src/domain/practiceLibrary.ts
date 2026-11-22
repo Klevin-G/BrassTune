@@ -4,6 +4,8 @@ export const PRACTICE_LIBRARY_VERSION = 1 as const;
 export const PRACTICE_PACK_VERSION = 1 as const;
 export const PRACTICE_WORKSPACE_VERSION = 1 as const;
 export const PRACTICE_AUDIO_PAUSE_EVENT = 'brasstune:pause-practice-audio';
+/** Native activity foregrounding is separate from browser visibility events. */
+export const PRACTICE_AUDIO_RESUME_EVENT = 'brasstune:resume-practice-audio';
 export const PRACTICE_LIBRARY_PREFIX = 'brasstune.practiceLibrary.v1.';
 export const PRACTICE_WORKSPACE_PREFIX = 'brasstune.practiceWorkspace.v1.';
 export const PLAY_ALONG_BEST_PREFIX = 'brasstune.playalong.best.';
@@ -120,7 +122,7 @@ function boundedInteger(value: unknown, minimum: number, maximum: number, fallba
 export function reconcileWeeklyGoal(goal: Partial<WeeklyGoal> | undefined, now = new Date()): WeeklyGoal {
   const week = currentWeekKey(now);
   const targetMinutes = boundedInteger(goal?.targetMinutes, 5, 600, 60);
-  const targetSessions = boundedInteger(goal?.targetSessions, 1, 21, 3);
+  const targetSessions = boundedInteger(goal?.targetSessions, 1, 168, 3);
   if (goal?.week !== week) {
     return { week, targetMinutes, completedMinutes: 0, targetSessions, completedSessions: 0 };
   }

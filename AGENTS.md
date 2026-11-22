@@ -25,6 +25,18 @@ BrassTune is a brass-practice analytics product with a React/Vite web app, FastA
 - Native app schemes: `xcodebuild -list -project swift/BrassTuneApp/BrassTuneApp.xcodeproj`.
 - Native simulator build: use dynamically discovered simulators from `xcrun simctl list`; do not hard-code devices without checking availability.
 
+## Public marketing website (October 12, 2026)
+
+- The public site is being migrated to static product/legal/support pages only. Do not deploy the retained React practice/auth application as the public website.
+- Static source: `frontend/marketing`; generator and checks: `frontend/scripts/build-marketing.mjs`, `test-marketing.mjs`.
+- Build: `cd frontend && npm run build:marketing`; local checks: `cd frontend && npm run test:marketing`.
+- Separate account recovery: `backend/app/api/password_recovery.py`, `backend/app/static/recovery/`, and the forwarding-only `frontend/marketing/recovery-bridge.js`.
+- Recovery checks: `node backend/app/tests/password_recovery_js.test.mjs` and `cd backend && .venv/bin/python -m pytest app/tests/test_password_recovery.py`.
+- Production builds enforce the Render-first dependency through `frontend/scripts/check-recovery-service.mjs`; its frontend-local SHA-256 contract is checked against backend source in repository tests.
+- Hosted static smoke: `node frontend/scripts/smoke-marketing.mjs` with `BRASSTUNE_WEB_BASE_URL` set to the verified BrassTune Vercel deployment. Legacy hosted Playwright app journeys remain for retained app development, not marketing-site acceptance.
+- Both Vercel configs emit `marketing-dist`; generated output stays out of Git. Preserve Privacy, Terms, Support, Credits and the App Store link.
+- Publication is held until the released native `/auth/reset-password` dependency has a verified compatible recovery destination and the correct Vercel team is accessible. See `docs/release-readiness/WELCOME_MARKETING_2026-10-12.md`.
+
 ## Directory Map
 
 - `backend/app`: FastAPI API, schemas, services, auth, WebSocket, tests.

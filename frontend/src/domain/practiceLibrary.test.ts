@@ -33,6 +33,15 @@ import {
 } from './practiceLibrary';
 
 describe('practice library storage', () => {
+  it('retains intensive weekly session targets and safely bounds imported values', () => {
+    const now = new Date('2026-10-12T12:00:00');
+    for (const [targetSessions, expected] of [[21, 21], [42, 42], [168, 168], [500, 168], [-3, 1]]) {
+      const library = emptyPracticeLibrary(now);
+      library.weeklyGoal.targetSessions = targetSessions;
+      expect(parsePracticeLibrary(JSON.stringify(library), now).weeklyGoal.targetSessions).toBe(expected);
+    }
+  });
+
   it('isolates guest and account keys and keeps an unresolved account out of guest storage', () => {
     expect(ownerPracticeKey('guest')).not.toBe(ownerPracticeKey('account:42'));
     expect(resolvePracticeOwner({ loading: true, hasAuthSession: false, isSignedIn: false })).toBeNull();
