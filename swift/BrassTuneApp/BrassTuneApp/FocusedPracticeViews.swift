@@ -34,8 +34,10 @@ struct PlayAlongIdleView: View {
         .accessibilityIdentifier("playAlong.recommendation")
 
         if requiresNativeMicrophoneRecovery(model) {
-            MicrophoneRecoveryCard()
-            MicrophoneRecoveryActions {
+            MicrophoneRecoveryCard(audioState: model.audioEngine.audioState)
+            MicrophoneRecoveryActions(
+                needsSettings: microphoneAuthorizationIsDenied(model.audioEngine.audioState)
+            ) {
                 Task {
                     await model.startPlayAlong(exerciseID: model.selectedPlayAlongExerciseID)
                 }
@@ -210,11 +212,18 @@ private struct PlayAlongMoreWaysView: View {
 @MainActor
 func requiresNativeMicrophoneRecovery(_ model: AppModel) -> Bool {
     switch model.audioEngine.audioState {
-    case .permissionDenied, .permissionRestrictedOrUnavailable:
+    case .permissionDenied,
+         .permissionGranted(.inputUnavailable),
+         .permissionGranted(.recoverableError),
+         .permissionGranted(.fatalError):
         return true
     default:
         return model.lastError == .microphoneUnavailable
     }
+}
+
+func microphoneAuthorizationIsDenied(_ state: NativeAudioOperationalState) -> Bool {
+    state == .permissionDenied
 }
 
 private struct PracticeShortcutSection: View {
@@ -324,15 +333,41 @@ private struct PracticeShortcutRow: View {
 }
 
 struct MicrophoneRecoveryCard: View {
+    let audioState: NativeAudioOperationalState
+
+    private var authorizationDenied: Bool {
+        microphoneAuthorizationIsDenied(audioState)
+    }
+
+    private var diagnosticReference: String? {
+        switch audioState {
+        case .permissionGranted(.inputUnavailable): return "MIC-INPUT"
+        case .permissionGranted(.recoverableError), .permissionGranted(.fatalError): return "MIC-START"
+        default: return nil
+        }
+    }
+
     var body: some View {
         BTCard(tint: BTTheme.surfaceWarm) {
-            Label("Microphone access is off", systemImage: "mic.slash.fill")
+            Label {
+                Text(verbatim: NativeLocalization.string(authorizationDenied ? "Microphone access is off" : "Microphone unavailable"))
+            } icon: {
+                Image(systemName: authorizationDenied ? "mic.slash.fill" : "mic.badge.exclamationmark")
+            }
                 .font(.headline)
                 .foregroundStyle(BTTheme.warning)
-            Text("Allow microphone access in iOS Settings, then retry. You can still use guided practice without listening.")
+            Text(verbatim: NativeLocalization.string(authorizationDenied
+                 ? "Allow microphone access in iOS Settings, then retry. You can still use guided practice without listening."
+                 : "BrassTune has microphone access, but cannot hear an input right now. Check your audio input and retry."))
                 .font(.subheadline)
                 .foregroundStyle(BTTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
+            if let diagnosticReference {
+                Text(verbatim: diagnosticReference)
+                    .font(.caption.monospaced().weight(.semibold))
+                    .foregroundStyle(BTTheme.muted)
+                    .accessibilityIdentifier("microphone.recoveryDiagnostic")
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("microphone.recovery")
@@ -340,16 +375,19 @@ struct MicrophoneRecoveryCard: View {
 }
 
 struct MicrophoneRecoveryActions: View {
+    let needsSettings: Bool
     let retry: () -> Void
 
     var body: some View {
         VStack(spacing: BTSpacing.sm) {
-            Button(action: openSettings) {
-                Label("Open iOS Settings", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity)
+            if needsSettings {
+                Button(action: openSettings) {
+                    Label("Open iOS Settings", systemImage: "gearshape")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
+                .accessibilityIdentifier("microphone.openSettings")
             }
-            .buttonStyle(BrassGlassButtonStyle(prominent: true, tint: BTTheme.accent))
-            .accessibilityIdentifier("microphone.openSettings")
 
             Button(action: retry) {
                 Label("Retry microphone", systemImage: "arrow.clockwise")
@@ -384,21 +422,22 @@ struct ProgressTabView: View {
         let weeklySnapshot = AnalyticsSnapshot(sessions: progressWeeklySessions(model.sessions))
         VStack(spacing: 0) {
             BTScreen {
-                BTPageHeader(
-                    eyebrow: "Progress",
-                    title: "Practice momentum",
-                    subtitle: "See what you did today, how this week is going, and what to try next."
-                )
-
+                ProgressPracticeOutcomesSection()
+                NavigationLink {
+                    IntonationHistoryView()
+                } label: {
+                    Label("Intonation history", systemImage: "chart.bar.xaxis")
+                }
+                .accessibilityIdentifier("progress.intonationHistory")
+                BTSectionHeader(title: "Activity")
                 ProgressTodaySection()
 
                 if weeklySnapshot.hasSessions {
                     ProgressTrendsSection(snapshot: weeklySnapshot)
                 }
 
-                PracticeStreakCard(summary: PracticeStreakSummary.calculate(sessions: model.sessions))
-
                 ProgressNextStepSection(selectedTab: $selectedTab)
+                PracticeStreakCard(summary: PracticeStreakSummary.calculate(sessions: model.sessions))
                 WeeklyGoalCard()
                 ProgressGettingStartedSection()
 
@@ -408,6 +447,55 @@ struct ProgressTabView: View {
         }
         .background(BTTheme.background.ignoresSafeArea())
         .navigationTitle("Progress")
+    }
+}
+
+private struct ProgressPracticeOutcomesSection: View {
+    @EnvironmentObject private var model: AppModel
+
+    private var highlightedGoal: PracticeGoal? {
+        PracticeGoal.nextReviewGoal(in: model.practiceFeatures.measurableGoals)
+            ?? model.practiceFeatures.measurableGoals.max { $0.updatedAt < $1.updatedAt }
+    }
+
+    var body: some View {
+        BTCard(tint: BTTheme.surfaceWarm) {
+            BTSectionHeader(title: "Practice outcomes", subtitle: "Self-assessed results; activity totals do not prove mastery.")
+            if let goal = highlightedGoal {
+                Text(verbatim: goal.passage).font(.headline)
+                Text(verbatim: goal.criterion.summary).font(.subheadline)
+                if goal.isCompleted {
+                    Label("Completed manually", systemImage: "checkmark.circle.fill")
+                } else {
+                    Text(verbatim: goal.isDueForReview()
+                        ? NativeLocalization.string("Due for your self-assessment")
+                        : NativeLocalization.format("Next review %@", goal.nextReviewAt.formatted(date: .abbreviated, time: .omitted)))
+                        .font(.caption).foregroundStyle(BTTheme.muted)
+                }
+                if let attempt = goal.attempts.first {
+                    PracticeGoalAttemptSummary(attempt: attempt, isLatest: true)
+                } else {
+                    Text("No self-assessed attempts logged yet.")
+                        .font(.subheadline).foregroundStyle(BTTheme.muted)
+                }
+                NavigationLink {
+                    PracticeGoalListView(focusedGoalID: goal.id)
+                } label: {
+                    Label("Practice goals", systemImage: "target")
+                }
+                .accessibilityIdentifier("progress.practiceGoals")
+            } else {
+                Text("Choose a passage, skill, criterion, and strategy. Then note what happened and what you will change next time.")
+                    .font(.subheadline).foregroundStyle(BTTheme.muted)
+                NavigationLink {
+                    PracticeGoalListView()
+                } label: {
+                    Label("Create a practice goal", systemImage: "target")
+                }
+                .accessibilityIdentifier("progress.practiceGoals")
+            }
+        }
+        .accessibilityIdentifier("progress.outcomes")
     }
 }
 
@@ -472,18 +560,16 @@ private struct ProgressGettingStartedSection: View {
         let earnedCount = milestones.filter(\.earned).count
         if earnedCount < milestones.count {
             VStack(alignment: .leading, spacing: BTSpacing.sm) {
-                Text("Getting started")
-                    .font(.title2.weight(.bold))
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("progress.gettingStarted")
                 BTCard {
-                Text(verbatim: NativeLocalization.format(
-                    "%@ of %@ complete",
-                    String(earnedCount),
-                    String(milestones.count)
-                ))
-                    .font(.headline)
-                    .foregroundStyle(earnedCount == milestones.count ? BTTheme.success : BTTheme.text)
+                    BTSectionHeader(
+                        title: "Getting started",
+                        subtitle: .verbatim(NativeLocalization.format(
+                            "%@ of %@ complete",
+                            String(earnedCount),
+                            String(milestones.count)
+                        ))
+                    )
+                    .accessibilityIdentifier("progress.gettingStarted")
 
                     ForEach(milestones) { milestone in
                         Label {
@@ -651,7 +737,7 @@ private struct ProgressTrendsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: BTSpacing.sm) {
-            Text("Weekly trend")
+            Text("This week")
                 .font(.title2.weight(.bold))
                 .accessibilityAddTraits(.isHeader)
             LazyVGrid(
@@ -659,26 +745,26 @@ private struct ProgressTrendsSection: View {
                 spacing: BTSpacing.md
             ) {
                 BTMetricTile(
-                    title: "In tune",
+                    title: .verbatim(NativeLocalization.string("Centered notes")),
                     value: .verbatim(NativeLocalization.isolate("\(Int(snapshot.averageInTunePercentage.rounded()))%")),
-                    detail: "within 5 cents",
+                    detail: .verbatim(NativeLocalization.string("within 5 cents")),
                     tint: BTTheme.success
                 )
                 BTMetricTile(
-                    title: "Average distance",
+                    title: .verbatim(NativeLocalization.string("Average offset")),
                     value: .verbatim(String(format: "%.1f", snapshot.averageAbsCents)),
-                    detail: "cents from center",
+                    detail: .verbatim(NativeLocalization.string("cents from center")),
                     tint: BTTheme.secondaryAccent
                 )
                 BTMetricTile(
-                    title: "Practice time",
+                    title: .verbatim(NativeLocalization.string("Practice time")),
                     value: .verbatim(progressPracticeTimeLabel(snapshot.totalPracticeSeconds)),
-                    detail: "saved"
+                    detail: .verbatim(NativeLocalization.string("Saved"))
                 )
                 BTMetricTile(
-                    title: "Recordings",
+                    title: .verbatim(NativeLocalization.string("Saved takes")),
                     value: .verbatim(NativeLocalization.isolate(String(snapshot.recordingSessionCount))),
-                    detail: "meaningful captures"
+                    detail: .verbatim(NativeLocalization.string("meaningful captures"))
                 )
             }
             .accessibilityIdentifier("progress.metrics")

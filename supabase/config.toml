@@ -10,6 +10,9 @@ site_url = "https://brasstune.vercel.app"
 additional_redirect_urls = [
   "https://brasstune.vercel.app/auth/callback",
   "https://brasstune.vercel.app/auth/reset-password",
+  # Enable the direct service URL only after deploying/verifying its recovery page.
+  # Keep the Vercel URL above for installed apps and already-issued email links.
+  "https://brasstune-u8qj.onrender.com/auth/reset-password",
   # Vercel previews are restricted to the owner account suffix. Never use a
   # blanket *.vercel.app callback: other users can create matching hosts.
   "https://*-kelvis-prject.vercel.app/auth/callback",

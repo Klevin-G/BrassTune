@@ -4,6 +4,8 @@ Project attribution: Kelvin Guo, Arya Salem.
 > Local-only evidence registry. It contains no credentials or raw identity data,
 > but user-home paths must be normalized before external publication.
 
+> Latest execution (October 12, 2026): [1.0.7 (19), welcome/marketing/recovery and final QA](WELCOME_MARKETING_2026-10-12.md). Build 19 is Testing in the existing internal QA group. Public release remains 1.0.6 (17); public submission is held for the separate affected-phone Google gate. The historical material below is not current candidate proof.
+
 Updated: 2026-08-24. Historical rows below retain their original evidence and boundaries.
 
 ## Current local Classes MVP addendum
@@ -22,8 +24,8 @@ Updated: 2026-08-24. Historical rows below retain their original evidence and bo
 | Supabase migration | `20260824031433` applied/read back; five constraints, UUID default, RLS, and anon/auth direct `SELECT=false` validated | Applied configuration evidence; does not replace live lifecycle acceptance. |
 | Hosted release | Vercel production Ready and Render Ready at `5acfa2e`; hosted smoke `45` passed / `5` strict skips | Exact hosted candidate evidence. |
 | Build 8 archive/export | `1.0.1 (8)`, canonical Supabase `yznziwe`, bundle `com.aryasalem.BrassTune`, Apple Distribution team `8S79RLTSWV`, `get-task-allow=false`, `beta-reports-active=true`, privacy manifest | IPA SHA-256 `cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`; app/dSYM UUID `8378AB6E-EA6E-32B3-A26E-F781A481518D`. |
-| TestFlight / App Store Connect | Upload succeeded; processing Complete/Ready to Submit; build 8 selected; metadata/notes updated; submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08` submitted Aug 24 by Arya Salem | **Waiting for Review**, manual release; not App Review approval. Build 7 is historical removed/superseded. |
-| Physical Classes fixture UI | Nandy iPhone 15 Pro Max, iOS 26.6.1, device `00008130-001A2C8C0EF8001C`: `1/1` passed, zero failed/skipped, student/owner/assistant fixture workspaces | Passed for fixture UI scope. Evidence: `/Users/aryasalem/Library/Developer/Xcode/DerivedData/BrassTuneApp-czrdyjevxbkcxbalmvargubtalrl/Logs/Test/Test-BrassTuneAppUISmoke-2026.08.23_23-49-17--0500.xcresult`. Not live hosted multi-account sync, migration, archive, or release evidence. |
+| TestFlight / App Store Connect | Upload succeeded; processing Complete/Ready to Submit; build 8 selected; metadata/notes updated; product description and copyright credit `Kelvin Guo, Arya Salem`; submission `308027b4-96ad-4171-bc83-faee57539cb6` submitted, approved, and manually released Aug 24 by Arya Salem | **Ready for Distribution** in App Store Connect. The first public-storefront check still returned version `1.0`, so build-8 storefront propagation remained pending. This supersedes developer-rejected submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08`; build 7 is historical removed/superseded. |
+| Physical Classes fixture UI | iPhone 15 Pro Max, iOS 26.6.1: `1/1` passed, zero failed/skipped, student/owner/assistant fixture workspaces | Passed for fixture UI scope. Evidence: owner-local Xcode test results. Not live hosted multi-account sync, migration, archive, or release evidence. |
 
 The tested class contract is intentionally aggregate-only: authorized owners
 and assistants receive roster/role and aggregate participation signals;

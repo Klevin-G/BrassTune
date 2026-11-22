@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build && node scripts/assert-locale-chunks.mjs",
+    "build:marketing": "node scripts/build-marketing.mjs",
+    "test:marketing": "node scripts/build-marketing.mjs && node scripts/test-marketing.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "e2e": "npm run e2e:local",
@@ -17,9 +19,17 @@
     "e2e:hosted": "node scripts/run-hosted-smoke.mjs",
     "e2e:hosted:strict": "node scripts/run-hosted-smoke.mjs --strict",
     "smoke:hosted": "npm run e2e:hosted",
-    "simulate:devices": "node scripts/device-simulation.mjs"
+    "simulate:devices": "node scripts/device-simulation.mjs",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "android:build:debug": "npm run android:sync && cd android && ./gradlew assembleDebug",
+    "android:build:release": "npm run android:sync && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/browser": "8.0.5",
+    "@capacitor/core": "8.5.3",
     "@supabase/supabase-js": "^2.108.2",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "^6.2.108",
@@ -31,6 +41,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",
+    "@capacitor/cli": "8.5.3",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^6.0.2",

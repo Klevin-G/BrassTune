@@ -46,9 +46,13 @@ function isTheme(value: string | null): value is ThemePreference {
 }
 
 function readStoredTheme(): ThemePreference {
-  if (typeof window === 'undefined') return 'system';
-  const stored = window.localStorage.getItem(storageKey);
-  return isTheme(stored) ? stored : 'system';
+  if (typeof window === 'undefined') return 'brass-white';
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    return isTheme(stored) ? stored : 'brass-white';
+  } catch {
+    return 'brass-white';
+  }
 }
 
 function resolveTheme(theme: ThemePreference, prefersLight: boolean): Exclude<ThemePreference, 'system'> {
@@ -84,7 +88,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setTheme = (nextTheme: ThemePreference) => {
     setThemeState(nextTheme);
-    window.localStorage.setItem(storageKey, nextTheme);
+    try { window.localStorage.setItem(storageKey, nextTheme); } catch { /* Keep the current session usable. */ }
     applyTheme(nextTheme, resolveTheme(nextTheme, window.matchMedia('(prefers-color-scheme: light)').matches));
   };
 

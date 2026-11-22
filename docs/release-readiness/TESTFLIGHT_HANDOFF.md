@@ -1,13 +1,15 @@
 # TestFlight Handoff
 Project attribution: Kelvin Guo, Arya Salem.
 
-Updated: 2026-08-23 UTC. The dated build-2 material below is historical only.
+> Latest execution (October 12, 2026): [1.0.7 (19), welcome/marketing/recovery and final QA](WELCOME_MARKETING_2026-10-12.md). Build 19 is Testing in the existing internal QA group. Public release remains 1.0.6 (17); public submission is held for the separate affected-phone Google gate. The historical material below is not current candidate proof.
+
+Updated: 2026-08-24 UTC. The dated build-2 material below is historical only.
 
 ## Current submitted candidate
 
-- Deployed web/backend implementation is `98fd1d9e7b85add63537e2d386a3b2e2e3dfe6d0`; native archive source is distinct, `d371100` on `arya/final-physical-release-20260823`.
-- Build `1.0.1 (7)` archive/export/upload succeeded. Its IPA has a strict valid Apple Distribution signature for `Apple Distribution: Arya Salem`, team `8S79RLTSWV`, bundle `com.aryasalem.BrassTune`, production environment/API, matching app/dSYM UUID `77D84475-6D50-3D94-B842-290431F0D74D`, and SHA-256 `640511f5a15f579500f86710393a6f661ced4cff87a64f00b8ccbe689bea2782`.
-- TestFlight reports build 7 **Ready to Submit**. Version `1.0.1` has build 7 attached, stale review notes were replaced, and the version is submitted as **Waiting for Review** with manual release selected.
+- Implementation/archive/deployment candidate is `5acfa2ecc6b7403d1572d7382d41357c8ccc2fb4`.
+- Build `1.0.1 (8)` archive/export/upload succeeded. Its IPA has a strict valid Apple Distribution signature for team `8S79RLTSWV`, bundle `com.aryasalem.BrassTune`, production environment/API, matching app/dSYM UUID `8378AB6E-EA6E-32B3-A26E-F781A481518D`, and SHA-256 `cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`.
+- TestFlight reports build 8 **Ready to Submit**. Version `1.0.1` has build 8 attached, build-8 review notes and Kelvin-first public attribution are saved, and submission `308027b4-96ad-4171-bc83-faee57539cb6` was approved and manually released. App Store Connect reports **Ready for Distribution**; the first public lookup still returned version `1.0`, so storefront propagation remained pending.
 - Connected-iPhone evidence includes automation canary `1/1`, strict accessibility `1/1`, standard UI `26/26`, expanded audio stress `1/1`, and the earlier sustained 120-BPM check `1/1`; see `TEST_MATRIX.md` for exact durations and boundaries.
 
 ## Historical 2026-08-05 native state
@@ -64,8 +66,9 @@ Evidence:
 
 ## Current decision
 
-**Submitted; Waiting for Review.** Manual release remains selected. App Review
-acceptance is external. Remaining unavailable checks are calibrated brass/acoustic
+**Approved, manually released, and Ready for Distribution in App Store
+Connect.** Public storefront propagation was pending at the first check.
+Remaining unavailable checks are calibrated brass/acoustic
 accuracy, AirPlay/HomePod/Bluetooth/wired routes, Files/Photos preseeded
 fixtures, timer/media-reset operator prerequisites, and full assistive-tech/iPad
 coverage.

@@ -28,6 +28,7 @@ struct AuthGatewayView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var authPresentation: GatewayAuthPresentation?
+    @State private var showingCredits = false
     @AccessibilityFocusState private var gatewayErrorFocused: Bool
     @State private var focusedGatewayError: String?
 
@@ -36,7 +37,6 @@ struct AuthGatewayView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: BTSpacing.xl) {
                     GatewayWelcomeHeader()
-                    GatewayPracticePreview()
 
                     if case .emailConfirmationRequired(let email) = model.authState {
                         BTCard(tint: BTTheme.surfaceWarm) {
@@ -77,24 +77,31 @@ struct AuthGatewayView: View {
                         .accessibilityIdentifier("gateway.persistenceError")
                     }
 
-                    Text("Guest practice remains on this device. An optional account lets you sign in on this device.")
-                        .font(.footnote)
-                        .foregroundStyle(BTTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    GatewayActions(authPresentation: $authPresentation, openCredits: { showingCredits = true })
+                    GatewayInstrumentVisual()
+
                 }
                 .padding(BTSpacing.xl)
                 .frame(maxWidth: 620, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                GatewayActions(authPresentation: $authPresentation)
-            }
-            .background(BTTheme.background.ignoresSafeArea())
-            .navigationBarHidden(true)
+            .background(BTTheme.surface.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
         }
         .accessibilityIdentifier("screen.gateway")
         .sheet(item: $authPresentation) { presentation in
             GatewayAuthForm(mode: presentation.mode, context: presentation.context)
+        }
+        .sheet(isPresented: $showingCredits) {
+            NavigationStack {
+                LegalDetailView(kind: .credits)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingCredits = false }
+                                .accessibilityIdentifier("gateway.creditsDone")
+                        }
+                    }
+            }
         }
         .onAppear { focusGatewayErrorIfNeeded() }
         .onChange(of: model.authNotice) { _, _ in
@@ -117,15 +124,15 @@ struct AuthGatewayView: View {
 
 private struct GatewayWelcomeHeader: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: BTSpacing.md) {
-            Image(systemName: "tuningfork")
-                .font(.system(size: 48, weight: .semibold))
+        VStack(alignment: .leading, spacing: BTSpacing.lg) {
+            Text("BrassTune")
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(BTTheme.accent)
-                .accessibilityHidden(true)
-            Text("Welcome to BrassTune")
-                .font(.system(.largeTitle, design: .rounded).weight(.bold))
+
+            Text("Pick up your instrument.")
+                .font(.system(.largeTitle, design: .serif).weight(.bold))
                 .accessibilityAddTraits(.isHeader)
-            Text("Warm up, tune, practice scales, and see your progress in one calm place.")
+            Text("Tune a note, set a pulse, or choose a passage to work on.")
                 .font(.body)
                 .foregroundStyle(BTTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -134,55 +141,35 @@ private struct GatewayWelcomeHeader: View {
     }
 }
 
-private struct GatewayPracticePreview: View {
+private struct GatewayInstrumentVisual: View {
+    private let assetName = "welcome-brass-instrument"
+
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: BTSpacing.md) { previewCards }
-            VStack(alignment: .leading, spacing: BTSpacing.sm) { previewCards }
-        }
-        .accessibilityIdentifier("gateway.practicePreview")
-    }
-
-    private var previewCards: some View {
-        Group {
-            previewCard(
-                title: "Warm up",
-                detail: "A guided five-minute routine for steady air and relaxed attacks."
-            )
-            previewCard(
-                title: "Tune & scales",
-                detail: "Center a note, then practice visual or guided scale timing."
-            )
-            previewCard(
-                title: "See progress",
-                detail: "See what you did today, how this week is going, and what to try next."
-            )
-        }
-    }
-
-    private func previewCard(title: BTCopy, detail: BTCopy) -> some View {
-        VStack(alignment: .leading, spacing: BTSpacing.sm) {
-            Text(verbatim: title.resolved)
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-            Text(verbatim: detail.resolved)
-                .font(.subheadline)
-                .foregroundStyle(BTTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(BTSpacing.lg)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .btContentSurface(tint: BTTheme.surface)
+        Image(assetName)
+            .resizable()
+            .scaledToFill()
+            .frame(maxWidth: .infinity)
+            .frame(height: 104)
+            .clipShape(RoundedRectangle(cornerRadius: BTSpacing.sm, style: .continuous))
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
 private struct GatewayActions: View {
     @EnvironmentObject private var model: AppModel
     @Binding var authPresentation: GatewayAuthPresentation?
+    let openCredits: () -> Void
 
     var body: some View {
-        VStack(spacing: BTSpacing.sm) {
+        VStack(alignment: .leading, spacing: BTSpacing.sm) {
             if model.accountFeaturesEnabled {
+                Text("Create a free account to personalize your BrassTune practice profile.")
+                    .font(.subheadline)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("gateway.accountExplanation")
+
                 Button {
                     authPresentation = GatewayAuthPresentation(mode: .createAccount, context: .standard)
                 } label: {
@@ -190,25 +177,23 @@ private struct GatewayActions: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BTPrimaryButtonStyle())
-                .accessibilityHint("Save your profile and return to your practice on this device")
+                .accessibilityHint("Set up a profile for BrassTune account features")
                 .accessibilityIdentifier("gateway.createAccount")
 
-                Text("Create an account to choose a profile, keep your practice settings, and use account features when they are available.")
-                    .font(.footnote)
+                accountButton(mode: .signIn)
+                guestButton
+
+                Text("Your guest practice stays on this device.")
+                    .font(.caption)
                     .foregroundStyle(BTTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("gateway.accountBenefits")
+                    .accessibilityIdentifier("gateway.guestDisclosure")
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: BTSpacing.sm) {
-                        accountButton(mode: .signIn)
-                        guestButton
-                    }
-                    VStack(spacing: BTSpacing.sm) {
-                        accountButton(mode: .signIn)
-                        guestButton
-                    }
-                }
+                Text("BrassTune does not use account sign-in to back up this device's practice data in this release.")
+                    .font(.caption)
+                    .foregroundStyle(BTTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("gateway.backupDisclosure")
             } else {
                 guestButton
             }
@@ -225,22 +210,45 @@ private struct GatewayActions: View {
                 .accessibilityIdentifier("gateway.accountConfigurationUnavailable")
             }
 
-            if NativeReleaseFeatureFlags.classes {
-                Button(action: openClassSignIn) {
-                    Label("I have a class code", systemImage: "number.square")
-                        .frame(maxWidth: .infinity)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: BTSpacing.lg) {
+                    footerLinks
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                .btMinimumInteractiveSize()
-                .accessibilityIdentifier("gateway.classCode")
+                VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                    footerLinks
+                }
             }
         }
-        .padding(.horizontal, BTSpacing.lg)
-        .padding(.top, BTSpacing.sm)
-        .padding(.bottom, BTSpacing.lg)
-        .frame(maxWidth: 620)
-        .frame(maxWidth: .infinity)
-        .background(.bar)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var footerLinks: some View {
+        if NativeReleaseFeatureFlags.classes && model.accountFeaturesEnabled {
+            Text("Sign in before using classes.")
+                .font(.caption)
+                .foregroundStyle(BTTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(action: openClassSignIn) {
+                Text("I have a class code")
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .btMinimumInteractiveSize()
+            .accessibilityIdentifier("gateway.classCode")
+        }
+
+        Button(action: openCredits) {
+            Text("Credits")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .btMinimumInteractiveSize()
+        .accessibilityIdentifier("gateway.credits")
     }
 
     private func accountButton(mode: GatewayAuthMode) -> some View {
@@ -263,7 +271,10 @@ private struct GatewayActions: View {
     @ViewBuilder
     private var guestButton: some View {
         if model.accountFeaturesEnabled {
-            guestButtonBody.buttonStyle(BTSecondaryButtonStyle())
+            guestButtonBody
+                .font(.subheadline.weight(.medium))
+                .buttonStyle(.plain)
+                .btMinimumInteractiveSize()
         } else {
             guestButtonBody.buttonStyle(BTPrimaryButtonStyle())
         }
@@ -271,7 +282,7 @@ private struct GatewayActions: View {
 
     private var guestButtonBody: some View {
         Button(action: startAsGuest) {
-            Label("Start as guest", systemImage: "play.fill")
+            Label("Continue as guest", systemImage: "play.fill")
                 .frame(maxWidth: .infinity)
         }
         .accessibilityHint("Starts local practice without an online account")
@@ -321,17 +332,42 @@ struct GatewayAuthForm: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if let upgrade = model.guestAccountUpgradePrompt {
-                    GuestAccountUpgradeDecisionView(prompt: upgrade)
-                } else if context == .classCode {
-                    Section {
-                        Label("Sign in, then BrassTune will take you to Class without losing your place.", systemImage: "person.3")
-                            .font(.subheadline)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("gateway.classIntent")
-                    }
+            if let upgrade = model.guestAccountUpgradePrompt {
+                GuestAccountUpgradeDecisionView(prompt: upgrade)
+            } else {
+                accountForm
+            }
+        }
+        .presentationDetents([.large])
+        .interactiveDismissDisabled(model.guestAccountUpgradePrompt != nil)
+        .task {
+            guard model.guestAccountUpgradePrompt == nil else { return }
+            model.clearAuthNotice()
+            await model.loadAuthProviderConfiguration()
+            focusAuthNoticeIfNeeded()
+        }
+        .onChange(of: model.authNotice) { _, _ in focusAuthNoticeIfNeeded() }
+        // A guest upgrade deliberately remains in guest state until its
+        // explicit decision. Dismiss only after merge/keep-separate has
+        // committed an authenticated namespace; cancellation remains on the
+        // gateway with the guest session intact.
+        .onChange(of: model.authState) { _, state in
+            guard state.usesRemoteAccount,
+                  model.guestAccountUpgradePrompt == nil else { return }
+            dismiss()
+        }
+    }
+
+    private var accountForm: some View {
+        Form {
+            if context == .classCode {
+                Section {
+                    Label("Sign in, then BrassTune will take you to Class without losing your place.", systemImage: "person.3")
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("gateway.classIntent")
                 }
+            }
 
                 providerSignInSection
 
@@ -393,35 +429,17 @@ struct GatewayAuthForm: View {
                     }
                     .accessibilityIdentifier("gateway.authGuestEscape")
                 }
-
+        }
+        .navigationTitle(activeMode.title)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Not now") { dismiss() }
             }
-            .navigationTitle(activeMode.title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Not now") { dismiss() }
-                }
-                if model.accountFeaturesEnabled {
-                    ToolbarItem(placement: .confirmationAction) {
-                        submitButton
-                    }
+            if model.accountFeaturesEnabled {
+                ToolbarItem(placement: .confirmationAction) {
+                    submitButton
                 }
             }
-        }
-        .presentationDetents([.large])
-        .task {
-            model.clearAuthNotice()
-            await model.loadAuthProviderConfiguration()
-            focusAuthNoticeIfNeeded()
-        }
-        .onChange(of: model.authNotice) { _, _ in focusAuthNoticeIfNeeded() }
-        // A guest upgrade deliberately remains in guest state until its
-        // explicit decision. Dismiss only after merge/keep-separate has
-        // committed an authenticated namespace; cancellation remains on the
-        // gateway with the guest session intact.
-        .onChange(of: model.authState) { _, state in
-            guard state.usesRemoteAccount,
-                  model.guestAccountUpgradePrompt == nil else { return }
-            dismiss()
         }
     }
 
@@ -502,7 +520,9 @@ struct GatewayAuthForm: View {
             Section { ProgressView("Contacting BrassTune…").accessibilityIdentifier("gateway.authProgress") }
         }
 
-        if let notice = model.authNotice, (model.authNoticeIsError ? formIsValid : true) {
+        // Provider sign-in does not use the email/password fields. Its errors
+        // must remain visible even when those unrelated fields are empty.
+        if let notice = model.authNotice {
             Section {
                 Label {
                     Text(verbatim: notice)
@@ -601,50 +621,72 @@ struct GatewayAuthForm: View {
     }
 }
 
-private struct GuestAccountUpgradeDecisionView: View {
+struct GuestAccountUpgradeDecisionView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
     let prompt: GuestAccountUpgradePrompt
 
     var body: some View {
-        Section {
-            Label {
-                Text(verbatim: NativeLocalization.format("You signed in as %@.", NativeLocalization.preserve(prompt.email)))
-            } icon: {
-                Image(systemName: "person.crop.circle.badge.checkmark")
-            }
+        Form {
+            Section {
+                Label {
+                    Text(verbatim: NativeLocalization.format("You signed in as %@.", NativeLocalization.preserve(prompt.email)))
+                } icon: {
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                }
                 .fixedSize(horizontal: false, vertical: true)
 
-            if prompt.containsFileBackedData {
-                Text("This guest practice includes saved recordings or imported sheet music. BrassTune will not move those files automatically because a failed move could lose them. Keep the account and guest practice separate, or cancel and stay in guest practice.")
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("gateway.guestUpgradeFileWarning")
-            } else {
-                Text("Merge combines guest practice with this account without replacing any matching session or score IDs. Keep separate leaves both sets of data on this device.")
-                    .font(.footnote)
-                    .foregroundStyle(BTTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                if prompt.containsFileBackedData {
+                    Text("This guest practice includes saved recordings or imported sheet music. BrassTune will not move those files automatically because a failed move could lose them. Keep the account and guest practice separate, or cancel and stay in guest practice.")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("gateway.guestUpgradeFileWarning")
+                } else {
+                    Text("Choose how to handle this device's guest practice before continuing.")
+                        .font(.footnote)
+                        .foregroundStyle(BTTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                }
 
                 Button("Merge guest practice") {
                     model.resolveGuestAccountUpgrade(.merge)
                 }
+                .disabled(!prompt.canMerge)
                 .accessibilityIdentifier("gateway.guestUpgradeMerge")
+
+                Button("Keep practice separate") {
+                    model.resolveGuestAccountUpgrade(.keepSeparate)
+                }
+                .accessibilityIdentifier("gateway.guestUpgradeSeparate")
+
+                Button("Cancel sign-in", role: .cancel) {
+                    model.resolveGuestAccountUpgrade(.cancel)
+                    dismiss()
+                }
+                .accessibilityIdentifier("gateway.guestUpgradeCancel")
+            } footer: {
+                Text("BrassTune does not use account sign-in to back up this device's practice data in this release.")
             }
 
-            Button("Keep practice separate") {
-                model.resolveGuestAccountUpgrade(.keepSeparate)
+            if model.authNoticeIsError, let notice = model.authNotice {
+                Section {
+                    Label {
+                        Text(verbatim: notice)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
+                    .foregroundStyle(BTTheme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("guestUpgrade.error")
+                }
             }
-            .accessibilityIdentifier("gateway.guestUpgradeSeparate")
-
-            Button("Cancel sign-in", role: .cancel) {
-                model.resolveGuestAccountUpgrade(.cancel)
-            }
-            .accessibilityIdentifier("gateway.guestUpgradeCancel")
-        } header: {
-            Text("Keep or merge guest practice?")
-        } footer: {
-            Text("BrassTune does not use account sign-in to back up this device's practice data in this release.")
         }
+        .tint(BTTheme.accent)
+        .navigationTitle("Keep or merge guest practice?")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("guestUpgrade.decision")
     }
 }

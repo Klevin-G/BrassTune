@@ -14,6 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.auth import assert_auth_configured
 from app.api.errors import client_error_response
+from app.api.password_recovery import router as password_recovery_router
 from app.api.routes import router as api_router
 from app.api.websocket import router as websocket_router
 from app.core.security import LOCAL_ENVIRONMENTS, allowed_origins, app_environment, cors_allowed_origin_regex
@@ -393,5 +394,6 @@ async def request_abuse_limits(request: Request, call_next):
     return harden_response(response)
 
 
+app.include_router(password_recovery_router)
 app.include_router(api_router)
 app.include_router(websocket_router)

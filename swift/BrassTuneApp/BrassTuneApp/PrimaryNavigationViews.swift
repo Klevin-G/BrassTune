@@ -7,11 +7,21 @@ struct PracticeHomeView: View {
 
     var body: some View {
         BTScreen {
-            BTPageHeader(
-                eyebrow: "Today",
-                title: "Practice",
-                subtitle: "Choose a small next step and keep your momentum going."
-            )
+            NavigationLink {
+                ScorePracticeView()
+            } label: {
+                PracticeRoutineRow(title: "Score Practice", detail: "Import or open sheet music for your practice session.", systemImage: "music.note")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("practice.sheetMusic")
+
+            NavigationLink {
+                FirstPracticeGuideView()
+            } label: {
+                PracticeRoutineRow(title: "First practice", detail: "A short, offline guide", systemImage: "list.number")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("practice.firstGuide")
 
             if let checkpoint = model.currentWarmupCheckpoint, !checkpoint.completed {
                 NavigationLink {
@@ -29,41 +39,159 @@ struct PracticeHomeView: View {
                 .accessibilityIdentifier("practice.resumeWarmup")
             }
 
-            BTCard {
-                BTSectionHeader(title: "Practice routines", subtitle: "Start with a warm-up or a guided routine built for your instrument.")
-                NavigationLink {
-                    GuidedWarmupView()
-                } label: {
-                    Label {
-                        Text(verbatim: NativeLocalization.string(model.currentWarmupCheckpoint == nil ? "Warm-up" : "Resume warm-up"))
-                    } icon: {
-                        Image(systemName: "wind")
-                    }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(BTPrimaryButtonStyle())
-                .accessibilityIdentifier("practice.warmup")
+            BTSectionHeader(title: "Practice routines")
+            NavigationLink {
+                GuidedWarmupView()
+            } label: {
+                PracticeRoutineRow(
+                    title: NativeLocalization.string(model.currentWarmupCheckpoint == nil ? "Warm-up" : "Resume warm-up"),
+                    detail: "Build steady air",
+                    systemImage: "wind"
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("practice.warmup")
 
-                NavigationLink {
-                    PlayAlongView(libraryExpanded: true)
-                } label: {
-                    Label("Guided Practice", systemImage: "music.note.list")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(BTSecondaryButtonStyle())
-                .accessibilityIdentifier("practice.playAlong")
+            NavigationLink {
+                PlayAlongView(libraryExpanded: true)
+            } label: {
+                PracticeRoutineRow(
+                    title: "Guided practice",
+                    detail: "Follow the notes",
+                    systemImage: "music.note.list"
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("practice.playAlong")
 
+            NavigationLink {
+                PracticeGoalListView()
+            } label: {
+                PracticeRoutineRow(
+                    title: "Practice goals",
+                    detail: "Set a target and reflect on each attempt",
+                    systemImage: "target"
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("practice.goals")
+
+            if let goal = PracticeGoal.nextReviewGoal(in: model.practiceFeatures.measurableGoals) {
+                NavigationLink {
+                    PracticeGoalListView(focusedGoalID: goal.id)
+                } label: {
+                    PracticeGoalReviewRow(goal: goal)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("practice.reviewGoal")
             }
 
-            BTSectionHeader(title: "Practice tools", subtitle: "Open one focused tool in a single tap.")
+            BTSectionHeader(title: "Practice tools")
             PracticeToolCard(title: "Metronome", detail: "Keep a steady pulse. No microphone needed.", systemImage: "metronome", identifier: "practice.metronome") { MetronomeView() }
             PracticeToolCard(title: "Drone & intervals", detail: "Hear a reference pitch and train your ear. Audio output required.", systemImage: "waveform", identifier: "practice.drone") { DroneIntervalView() }
-            PracticeToolCard(title: "Scores", detail: "Import or open sheet music for your practice session.", systemImage: "music.note", identifier: "practice.sheetMusic") { ScorePracticeView() }
 
             PracticeHomeContextSection()
         }
         .navigationTitle("Practice")
         .accessibilityIdentifier("screen.practice")
+    }
+}
+
+private struct FirstPracticeGuideView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var step = 0
+
+    var body: some View {
+        BTScreen {
+            if step == 0 {
+                BTSectionHeader(title: "1. Find a comfortable note")
+                Text("Play a comfortable long note. Open the tuner if you want feedback; start listening only when you are ready.")
+                    .fixedSize(horizontal: false, vertical: true)
+                NavigationLink("Open tuner") { TunerView() }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("firstPractice.tuner")
+            } else if step == 1 {
+                BTSectionHeader(title: "2. Play with a steady pulse")
+                Text("Choose a comfortable tempo, start the metronome, and play a short passage. Stop it when you finish.")
+                    .fixedSize(horizontal: false, vertical: true)
+                NavigationLink("Open metronome") { MetronomeView() }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("firstPractice.metronome")
+            } else {
+                BTSectionHeader(title: "Practice complete")
+                Text("Notice one thing that went well and one thing to try next time.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if step < 2 {
+                Button("Next") { step += 1 }
+                    .buttonStyle(BTPrimaryButtonStyle())
+                    .accessibilityIdentifier("firstPractice.next")
+            } else {
+                Button("Finish") { dismiss() }
+                    .buttonStyle(BTPrimaryButtonStyle())
+                    .accessibilityIdentifier("firstPractice.finish")
+            }
+            if step > 0 {
+                Button("Back") { step -= 1 }
+                    .buttonStyle(BTSecondaryButtonStyle())
+                    .accessibilityIdentifier("firstPractice.back")
+            }
+            Button("Exit guide") { dismiss() }
+                .buttonStyle(BTSecondaryButtonStyle())
+                .accessibilityIdentifier("firstPractice.exit")
+        }
+        .navigationTitle("First practice")
+        .accessibilityIdentifier("screen.firstPractice")
+    }
+}
+
+private struct PracticeGoalReviewRow: View {
+    let goal: PracticeGoal
+
+    var body: some View {
+        PracticeRoutineRow(
+            title: NativeLocalization.format("Review: %@", goal.passage),
+            detail: goal.isDueForReview()
+                ? NativeLocalization.string("Due for your self-assessment")
+                : NativeLocalization.format("Next review %@", goal.nextReviewAt.formatted(date: .abbreviated, time: .omitted)),
+            systemImage: "checklist"
+        )
+        .accessibilityLabel(NativeLocalization.format("Review goal: %@", goal.passage))
+        .accessibilityHint("Open this goal to log your self-assessment or update it.")
+    }
+}
+
+private struct PracticeRoutineRow: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: BTSpacing.md) {
+            Image(systemName: systemImage)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(BTTheme.accent)
+                .frame(width: 28, height: 44)
+            VStack(alignment: .leading, spacing: BTSpacing.xs) {
+                Text(verbatim: NativeLocalization.string(title))
+                    .font(.headline)
+                    .foregroundStyle(BTTheme.text)
+                Text(verbatim: NativeLocalization.string(detail))
+                    .font(.subheadline)
+                    .foregroundStyle(BTTheme.muted)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, BTSpacing.sm)
+        }
+        .padding(BTSpacing.md)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(BTTheme.surface, in: RoundedRectangle(cornerRadius: BTTheme.radius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: BTTheme.radius, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -237,18 +365,20 @@ struct ScalesTabView: View {
         )
     }
 
-    private var threeOctavesAvailable: Bool {
-        PlayAlongExercise.isScaleAvailable(
-            root: root,
-            type: scaleType,
-            octaves: .three,
-            direction: direction,
-            instrumentID: model.selectedInstrumentId
-        )
+    private var availableOctaves: [ScaleOctaves] {
+        ScaleOctaves.allCases.filter {
+            PlayAlongExercise.isScaleAvailable(
+                root: root,
+                type: scaleType,
+                octaves: $0,
+                direction: direction,
+                instrumentID: model.selectedInstrumentId
+            )
+        }
     }
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
             if manualPracticeActive, let exercise {
                 ManualScalePracticeView(
                     exercise: exercise,
@@ -275,89 +405,85 @@ struct ScalesTabView: View {
             }
         }
         .navigationTitle("Scales")
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("screen.scales")
+        .onAppear(perform: normalizeSelectedOctaves)
+        .onChange(of: root) { _, _ in normalizeSelectedOctaves() }
+        .onChange(of: scaleType) { _, _ in normalizeSelectedOctaves() }
+        .onChange(of: direction) { _, _ in normalizeSelectedOctaves() }
+        .onChange(of: model.selectedInstrumentId) { _, _ in normalizeSelectedOctaves() }
     }
 
     private var scalePicker: some View {
         BTScreen {
-            BTPageHeader(
-                eyebrow: "Play-Along",
-                title: "Scales",
-                subtitle: "Choose a key, preview the notes, then play at your own pace."
-            )
-
             BTCard {
-                Picker("Scale type", selection: $scaleType) {
+                BTSectionHeader(title: "Build your scale")
+                Menu {
                     ForEach(ScaleType.allCases, id: \.self) { type in
-                        Text(verbatim: scaleTypeTitle(type)).tag(type)
+                        Button(scaleTypeTitle(type)) { scaleType = type }
                     }
+                } label: {
+                    ScaleMenuRow(label: "Scale type", value: scaleTypeTitle(scaleType))
                 }
-                .pickerStyle(.menu)
+                .accessibilityLabel("Scale type")
+                .accessibilityValue(scaleTypeTitle(scaleType))
                 .accessibilityIdentifier("scales.typePicker")
 
-                Picker("Key", selection: $root) {
+                Menu {
                     ForEach(ScaleRoot.allCases, id: \.self) { root in
-                        Text(verbatim: root.rawValue).tag(root)
+                        Button(root.rawValue) { self.root = root }
                     }
+                } label: {
+                    ScaleMenuRow(label: "Key", value: root.rawValue)
                 }
-                .pickerStyle(.menu)
+                .accessibilityLabel("Key")
+                .accessibilityValue(root.rawValue)
                 .accessibilityIdentifier("scales.keyPicker")
 
-                Picker("Octaves", selection: $octaves) {
-                    Text("One octave").tag(ScaleOctaves.one)
-                    Text("Two octaves").tag(ScaleOctaves.two)
-                    Text("Three octaves")
-                        .tag(ScaleOctaves.three)
-                        .disabled(!threeOctavesAvailable)
+                Menu {
+                    ForEach(availableOctaves, id: \.self) { octave in
+                        Button(octave.displayName) { octaves = octave }
+                    }
+                } label: {
+                    ScaleMenuRow(label: "Octaves", value: octaves.displayName)
                 }
-                // A menu avoids clipped segment labels at large Dynamic Type
-                // while keeping all three ranges easy to reach on compact phones.
-                .pickerStyle(.menu)
+                .disabled(availableOctaves.isEmpty)
+                .accessibilityLabel("Octaves")
+                .accessibilityValue(octaves.displayName)
                 .accessibilityIdentifier("scales.octavesPicker")
 
-                if !threeOctavesAvailable {
-                    Text("Three octaves is unavailable for this key and instrument range.")
+                if availableOctaves.isEmpty {
+                    Text("This scale does not fit the selected instrument range. Choose another key or scale type.")
                         .font(.footnote)
-                        .foregroundStyle(readable)
+                        .foregroundStyle(BTTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("scales.threeOctavesUnavailable")
+                        .accessibilityIdentifier("scales.rangeUnavailable")
                 }
 
-                Picker("Direction", selection: $direction) {
+                Menu {
                     ForEach(ScaleDirection.allCases, id: \.self) { direction in
-                        Text(verbatim: scaleDirectionTitle(direction)).tag(direction)
+                        Button(scaleDirectionTitle(direction)) { self.direction = direction }
                     }
+                } label: {
+                    ScaleMenuRow(label: "Direction", value: scaleDirectionTitle(direction))
                 }
-                .pickerStyle(.menu)
+                .accessibilityLabel("Direction")
+                .accessibilityValue(scaleDirectionTitle(direction))
                 .accessibilityIdentifier("scales.directionPicker")
-            }
-
-            BTCard {
-                BTSectionHeader(title: "Practice mode")
-                Picker("Practice mode", selection: $practiceMode) {
-                    ForEach(ScalePracticeMode.allCases) { mode in
-                        Text(verbatim: mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("scales.practiceMode")
-                Text(verbatim: practiceMode.detail)
-                    .font(.footnote)
-                    .foregroundStyle(readable)
-                    .fixedSize(horizontal: false, vertical: true)
-                startScaleButton
             }
 
             if let exercise {
                 BTCard(tint: BTTheme.surfaceWarm) {
-                    BTSectionHeader(title: .verbatim(exercise.displayTitle), subtitle: .verbatim(exercise.displayDetail))
+                    BTSectionHeader(title: "Written notes", subtitle: .verbatim(exercise.displayTitle))
                     Text(verbatim: NativeLocalization.isolate(exercise.writtenTargets.joined(separator: " · ")))
-                        .font(.title3.monospaced())
+                        .font(.title3.weight(.semibold))
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .environment(\.layoutDirection, .leftToRight)
                         .accessibilityIdentifier("scales.notePreview")
                     Text(verbatim: NativeLocalization.format("Written for %@.", instrumentDisplayName(model.selectedInstrumentId)))
                         .font(.footnote)
-                        .foregroundStyle(readable)
+                        .foregroundStyle(BTTheme.muted)
                 }
             } else {
                 BTEmptyState(
@@ -369,10 +495,23 @@ struct ScalesTabView: View {
                 )
             }
 
+            BTCard {
+                BTSectionHeader(title: "How to practice")
+                Picker("Practice mode", selection: $practiceMode) {
+                    ForEach(ScalePracticeMode.allCases) { mode in
+                        Text(verbatim: mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("scales.practiceMode")
+            }
+
             if practiceMode == .microphone {
                 if requiresNativeMicrophoneRecovery(model) {
-                    MicrophoneRecoveryCard()
-                    MicrophoneRecoveryActions {
+                    MicrophoneRecoveryCard(audioState: model.audioEngine.audioState)
+                    MicrophoneRecoveryActions(
+                        needsSettings: microphoneAuthorizationIsDenied(model.audioEngine.audioState)
+                    ) {
                         guard let exercise else { return }
                         Task {
                             await model.startPlayAlong(exercise: exercise)
@@ -397,11 +536,17 @@ struct ScalesTabView: View {
                 }
             } else {
                 Label("Visual timing advances through written note-and-octave targets without a microphone or grade; completed runs are saved as practice time.", systemImage: "eye")
-                    .font(.title3.monospaced())
+                    .font(.footnote)
                     .foregroundStyle(readable)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("scales.visualTimingGuidance")
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            startScaleButton
+                .padding(.horizontal, BTSpacing.lg)
+                .padding(.vertical, BTSpacing.sm)
+                .background(.bar)
         }
     }
 
@@ -424,6 +569,37 @@ struct ScalesTabView: View {
         .buttonStyle(BTPrimaryButtonStyle())
         .disabled(exercise == nil || model.playAlongStartInProgress)
         .accessibilityIdentifier("scales.start")
+    }
+
+    private func normalizeSelectedOctaves() {
+        guard !availableOctaves.contains(octaves) else { return }
+        if let fallback = availableOctaves.first {
+            octaves = fallback
+        }
+    }
+}
+
+private struct ScaleMenuRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: BTSpacing.md) {
+            Text(verbatim: NativeLocalization.string(label))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BTTheme.text)
+            Spacer()
+            Text(verbatim: value)
+                .font(.subheadline)
+                .foregroundStyle(BTTheme.muted)
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(BTTheme.accent)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .contentShape(Rectangle())
     }
 }
 
@@ -466,6 +642,7 @@ private struct ManualScalePracticeView: View {
     private var secondsPerNote: TimeInterval { 120.0 / Double(tempo) }
 
     var body: some View {
+        VStack(spacing: 0) {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
             let countInElapsed = max(0, context.date.timeIntervalSince(countInStartedAt ?? context.date))
             let countInBeats = min(4, Int(countInElapsed / (60.0 / Double(tempo))))
@@ -475,11 +652,9 @@ private struct ManualScalePracticeView: View {
             let hasFinishedCurrentNote = phase == .running && liveNoteElapsed >= secondsPerNote
 
             BTScreen {
-                BTPageHeader(
-                    eyebrow: "Visual timing",
-                    title: .verbatim(exercise.displayTitle),
-                    subtitle: "A timed visual cue only. It does not listen or grade; a completed run is saved as practice time."
-                )
+                Text(verbatim: exercise.displayTitle)
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
 
                 BTCard(tint: BTTheme.surfaceWarm) {
                     if phase == .countIn {
@@ -534,7 +709,7 @@ private struct ManualScalePracticeView: View {
                 }
 
                 BTCard {
-                    Stepper(value: $tempo, in: 40...180, step: 2) {
+                    Stepper(value: $tempo, in: 40...180, step: 1) {
                         Text(verbatim: NativeLocalization.format("Tempo: %@ BPM", String(tempo)))
                     }
                     .disabled(phase == .running || phase == .countIn)
@@ -568,6 +743,9 @@ private struct ManualScalePracticeView: View {
                 }
                 .environment(\.layoutDirection, .leftToRight)
 
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: BTSpacing.sm) {
                 HStack(spacing: BTSpacing.sm) {
                     Button {
                         primaryAction(at: context.date)
@@ -601,6 +779,10 @@ private struct ManualScalePracticeView: View {
                 }
                 .buttonStyle(BTSecondaryButtonStyle())
                 .accessibilityIdentifier("scales.visualTiming.finish")
+                }
+                .padding(.horizontal, BTSpacing.lg)
+                .padding(.vertical, BTSpacing.sm)
+                .background(.bar)
             }
             .onChange(of: hasFinishedCurrentNote) { _, finished in
                 guard finished else { return }
@@ -625,6 +807,8 @@ private struct ManualScalePracticeView: View {
                 phase = .running
             }
         }
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("screen.scales.visualTiming")
     }
 

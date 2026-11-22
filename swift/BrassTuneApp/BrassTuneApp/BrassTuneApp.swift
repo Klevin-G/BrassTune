@@ -3,9 +3,14 @@ import SwiftUI
 @main
 struct BrassTuneApp: App {
     @StateObject private var appModel = AppModel()
+    @AppStorage(BTColorTheme.storageKey) private var colorTheme = BTColorTheme.defaultTheme.rawValue
 
     private var effectiveLanguage: AppLanguage {
         AppLanguage.launchOverride ?? appModel.appLanguage
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        BTColorTheme.resolve(colorTheme).colorScheme
     }
 
     var body: some Scene {
@@ -18,6 +23,7 @@ struct BrassTuneApp: App {
                 .environmentObject(appModel.audioEngine)
                 .environment(\.locale, effectiveLanguage.locale)
                 .environment(\.layoutDirection, effectiveLanguage.isRightToLeft ? .rightToLeft : .leftToRight)
+                .preferredColorScheme(preferredColorScheme)
                 .task {
 #if PHYSICAL_INSTRUMENTATION
                     await NativePhysicalAudioSelfTest.runIfRequested(appModel: appModel)

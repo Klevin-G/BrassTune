@@ -1,6 +1,12 @@
 import type { MessageCatalog } from '../messages.base';
 
 const messages = {
+  "auth.frontHeading": "Hãy cầm nhạc cụ của bạn lên.",
+  "auth.frontBody": "Hãy chỉnh một nốt, đặt nhịp hoặc chọn một đoạn để luyện tập.",
+  "auth.accountOptions": "Tùy chọn tài khoản",
+  "auth.practiceGoals": "Mục tiêu luyện tập",
+  "legal.photoCredit": "Ghi công ảnh",
+  "legal.photoCrop": "Được hiển thị với khung cắt thích ứng.",
   "meta.title": "BrassTune — bộ chỉnh và luyện tập kèn đồng",
   "meta.description": "BrassTune lắng nghe khi bạn chơi, hiển thị phản hồi cao độ trong thời gian thực và giúp bạn xây dựng thói quen luyện tập tập trung.",
   "loading.session": "Đang khôi phục phiên",
@@ -517,7 +523,7 @@ const messages = {
   "class.joinYourClass": "Tham gia lớp học của bạn",
   "class.forStudents": "Dành cho sinh viên",
   "class.enterCode": "Nhập mã lớp mà giáo viên đã đưa cho bạn.",
-  "class.codeExample": "ví dụ BXK4QD",
+  "class.codeExample": "ví dụ 012345",
   "class.code": "Mã lớp",
   "class.joining": "Đang tham gia lớp học…",
   "class.join": "Tham gia",

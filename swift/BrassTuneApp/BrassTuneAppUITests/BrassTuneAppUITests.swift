@@ -44,7 +44,7 @@ final class BrassTuneAppUITests: XCTestCase {
     }
 
     @MainActor
-    func testOnboardingWalkthroughSupportsBackSkipReplayAndTunerFinish() throws {
+    func testOnboardingInstrumentSetupCanRouteToTunerAndBeReopened() throws {
         let app = XCUIApplication()
         app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"]
         app.launch()
@@ -52,16 +52,13 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
         app.descendants(matching: .any)["gateway.continueAsGuest"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.descendants(matching: .any)["onboarding.progress"].exists)
-
-        app.buttons["onboarding.next"].tap()
-        XCTAssertTrue(app.buttons["onboarding.back"].waitForExistence(timeout: 3))
-        app.buttons["onboarding.back"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["onboarding.instrumentPicker"].waitForExistence(timeout: 3))
-
-        for _ in 0..<3 { app.buttons["onboarding.next"].tap() }
-        XCTAssertTrue(app.buttons["onboarding.continueToTuner"].waitForExistence(timeout: 3))
-        app.buttons["onboarding.continueToTuner"].tap()
+        let instrumentPicker = app.descendants(matching: .any)["onboarding.instrumentPicker"]
+        XCTAssertTrue(instrumentPicker.waitForExistence(timeout: 3))
+        XCTAssertTrue(instrumentPicker.isHittable)
+        let continueToTuner = app.buttons["onboarding.continueToTuner"]
+        XCTAssertTrue(continueToTuner.waitForExistence(timeout: 3))
+        XCTAssertTrue(continueToTuner.isHittable)
+        continueToTuner.tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.tuner"].waitForExistence(timeout: 8))
 
         app.tabBars.buttons["More"].tap()
@@ -71,6 +68,110 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["screen.instrumentSetup"].waitForExistence(timeout: 5))
         app.buttons["onboarding.cancel"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.more"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testSettingsGuestUpgradeShowsOnlyDecisionAndCancelReturnsToSettings() throws {
+        let app = launchFixtureApp(extraArguments: ["UITEST_GUEST_UPGRADE", "UITEST_AUTH_NO_PERSIST"])
+        openTab("More", in: app)
+        app.descendants(matching: .any)["more.settings"].tap()
+        assertGuestDecisionOnly(in: app)
+        app.buttons["gateway.guestUpgradeCancel"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["guestUpgrade.decision"].exists)
+    }
+
+    @MainActor
+    func testGuestUpgradeAcceptanceReplacesDecisionWithRequiredProfile() throws {
+        let app = launchFixtureApp(extraArguments: ["UITEST_GUEST_UPGRADE", "UITEST_GUEST_UPGRADE_INCOMPLETE", "UITEST_AUTH_NO_PERSIST"])
+        openTab("More", in: app)
+        app.buttons["more.settings"].tap()
+        assertGuestDecisionOnly(in: app)
+        app.buttons["gateway.guestUpgradeSeparate"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.profileEditor"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.descendants(matching: .any)["guestUpgrade.decision"].exists)
+        XCTAssertFalse(app.buttons["gateway.authGoogleSignIn"].exists)
+    }
+
+    @MainActor
+    func testClassesGuestUpgradeShowsOnlyDecision() throws {
+        let app = launchFixtureApp(extraArguments: ["UITEST_GUEST_UPGRADE", "UITEST_AUTH_NO_PERSIST"])
+        openTab("More", in: app)
+        let classes = app.descendants(matching: .any)["more.classes"]
+        XCTAssertTrue(classes.waitForExistence(timeout: 5))
+        classes.tap()
+        assertGuestDecisionOnly(in: app)
+        app.buttons["gateway.guestUpgradeCancel"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["guestUpgrade.decision"].exists)
+    }
+
+    @MainActor
+    func testGatewayGuestUpgradeReplacesProviderFormAndCancelClosesIt() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["UITEST_FIXTURES", "UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_GUEST_UPGRADE", "UITEST_AUTH_NO_PERSIST"]
+        app.launch()
+        let signIn = app.buttons["gateway.signIn"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 8))
+        signIn.tap()
+        assertGuestDecisionOnly(in: app)
+        app.buttons["gateway.guestUpgradeCancel"].tap()
+        XCTAssertTrue(signIn.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["gateway.email"].exists)
+    }
+
+    @MainActor
+    private func assertGuestDecisionOnly(in app: XCUIApplication) {
+        let decision = app.descendants(matching: .any)["guestUpgrade.decision"]
+        XCTAssertTrue(decision.waitForExistence(timeout: 8))
+        for identifier in ["gateway.guestUpgradeMerge", "gateway.guestUpgradeSeparate", "gateway.guestUpgradeCancel"] {
+            XCTAssertTrue(app.buttons[identifier].isHittable, identifier)
+        }
+        for identifier in ["gateway.authAppleSignIn", "gateway.authGoogleSignIn", "gateway.email", "gateway.password", "gateway.submitAuth", "settings.appleSignIn", "settings.googleSignIn"] {
+            let element = app.descendants(matching: .any)[identifier]
+            XCTAssertFalse(element.exists && element.isHittable, identifier)
+        }
+    }
+
+    @MainActor
+    func testPolishedMetronomeAndDroneControlsAreReachable() throws {
+        let app = launchFixtureApp()
+        openTab("Tuner", in: app)
+        let drone = app.buttons["tuner.droneIntervalLink"]
+        bringIntoView(drone, in: app)
+        XCTAssertTrue(drone.isHittable)
+        let floatingBar = app.descendants(matching: .any)["tuner.floatingBar"]
+        XCTAssertLessThanOrEqual(drone.frame.maxY, floatingBar.frame.minY, "The drone link must be above the transport, not underneath it.")
+        let tunerShot = XCTAttachment(screenshot: app.screenshot())
+        tunerShot.name = "Polished drone entry control"
+        tunerShot.lifetime = .keepAlways
+        add(tunerShot)
+        openTab("Practice", in: app)
+        app.buttons["practice.metronome"].tap()
+        let settings = app.buttons["metronome.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        XCTAssertTrue(settings.isHittable)
+        XCTAssertEqual(settings.label, "Settings")
+        let pulse = app.descendants(matching: .any)["metronome.pulse"]
+        XCTAssertLessThanOrEqual(pulse.frame.maxY, app.buttons["metronome.toggle"].frame.minY, "The pulse must fit above the control dock.")
+        let metronomeShot = XCTAttachment(screenshot: app.screenshot())
+        metronomeShot.name = "Polished visible metronome settings"
+        metronomeShot.lifetime = .keepAlways
+        add(metronomeShot)
+        settings.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.meterPicker"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testFocusedMetronomeHasLargePulseAndReachableSettings() throws {
+        let app = launchFixtureApp()
+        app.buttons["practice.metronome"].tap()
+        let pulse = app.descendants(matching: .any)["metronome.pulse"]
+        if !pulse.waitForExistence(timeout: 8) { print("FOCUSED_METRONOME_AX\n" + app.debugDescription) }
+        XCTAssertTrue(pulse.exists)
+        XCTAssertGreaterThanOrEqual(pulse.frame.height, 200)
+        XCTAssertTrue(app.buttons["metronome.toggle"].isHittable)
+        app.buttons["metronome.settings"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.meterPicker"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -368,19 +469,13 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["scales.directionPicker"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["scales.notePreview"].exists)
 
-        // Default trumpet practice cannot fit three complete octaves. Keep
-        // that limitation explicit instead of silently substituting a shorter
-        // exercise.
-        let threeOctaveUnavailable = app.descendants(matching: .any)["scales.threeOctavesUnavailable"]
-        XCTAssertTrue(threeOctaveUnavailable.waitForExistence(timeout: 5))
-        XCTAssertTrue(threeOctaveUnavailable.label.contains("unavailable"))
-
         let octavesPicker = app.descendants(matching: .any)["scales.octavesPicker"]
         octavesPicker.tap()
         let threeOctaves = app.buttons["Three octaves"]
-        XCTAssertTrue(threeOctaves.waitForExistence(timeout: 5))
-        XCTAssertTrue(threeOctaveUnavailable.exists, "An unavailable range must remain explicitly explained while the picker is open.")
-        app.buttons["One octave"].tap()
+        XCTAssertFalse(threeOctaves.exists, "Impossible trumpet ranges must be hidden from the octave menu.")
+        let oneOctave = app.buttons["One octave"]
+        XCTAssertTrue(oneOctave.waitForExistence(timeout: 5))
+        oneOctave.tap()
 
         let typePicker = app.descendants(matching: .any)["scales.typePicker"]
         typePicker.tap()
@@ -442,7 +537,6 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(enabledThreeOctaves.waitForExistence(timeout: 5))
         XCTAssertTrue(enabledThreeOctaves.isEnabled, "Tuba D must offer its real three-octave exercise.")
         enabledThreeOctaves.tap()
-        XCTAssertFalse(app.descendants(matching: .any)["scales.threeOctavesUnavailable"].exists)
 
         let tubaMode = app.descendants(matching: .any)["scales.practiceMode"]
         bringIntoView(tubaMode, in: app)
@@ -498,16 +592,15 @@ final class BrassTuneAppUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.metronome"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["metronome.toggle"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["metronome.stepper"].exists)
-        // The identifier is applied to the DisclosureGroup label's child text,
-        // while the tappable accessibility element is its labelled button.
-        let advanced = app.buttons["Advanced rhythm"]
+        app.buttons["metronome.settings"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.stepper"].waitForExistence(timeout: 5))
+        let advanced = app.descendants(matching: .any)["metronome.beatUnitPicker"]
         bringIntoView(advanced, in: app)
-        advanced.tap()
         XCTAssertTrue(app.descendants(matching: .any)["metronome.beatUnitPicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.switches["metronome.accentFirstBeat"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["metronome.countIn"].exists)
 
+        app.buttons["Done"].tap()
         let toggle = app.descendants(matching: .any)["metronome.toggle"]
         for _ in 0..<20 {
             toggle.tap()
@@ -652,6 +745,75 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Delete local score"].waitForExistence(timeout: 5))
         app.buttons["Keep score"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["score.card"].exists)
+    }
+
+    @MainActor
+    func testLocalScoreSearchFiltersComposerAndRestoresSavedScore() throws {
+        let app = launchFixtureApp()
+        app.descendants(matching: .any)["practice.sheetMusic"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.scorePractice"].waitForExistence(timeout: 5))
+        app.descendants(matching: .any)["score.import.testFixture"].tap()
+
+        let card = app.descendants(matching: .any)["score.card"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let search = app.textFields["score.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("BRASSTUNE")
+        XCTAssertTrue(card.waitForExistence(timeout: 5), "A local composer match should retain the saved score.")
+
+        search.tap()
+        search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 24))
+        search.typeText("unlisted composer")
+        XCTAssertTrue(app.descendants(matching: .any)["score.search.empty"].waitForExistence(timeout: 5))
+        XCTAssertFalse(card.exists, "Search must filter the local list without deleting its score.")
+
+        let clear = app.buttons["score.search.clear"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        clear.tap()
+        XCTAssertTrue(card.waitForExistence(timeout: 5), "Clearing search should restore the same local score.")
+        XCTAssertFalse(app.descendants(matching: .any)["score.search.empty"].exists)
+    }
+
+    @MainActor
+    func testManualScoreSessionShowsHonestSparseNoteCoachingState() throws {
+        let app = launchFixtureApp()
+        app.descendants(matching: .any)["practice.sheetMusic"].tap()
+        app.descendants(matching: .any)["score.import.testFixture"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["score.card"].waitForExistence(timeout: 5))
+
+        let start = app.descendants(matching: .any)["score.startGuidedPractice"]
+        bringIntoView(start, in: app)
+        start.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["score.guided.begin"].waitForExistence(timeout: 5))
+        app.descendants(matching: .any)["score.guided.begin"].tap()
+        let finish = app.descendants(matching: .any)["score.guided.finish"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 5))
+        finish.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["score.guided.done"].waitForExistence(timeout: 5))
+        app.descendants(matching: .any)["score.guided.done"].tap()
+
+        openTab("Progress", in: app)
+        let history = app.descendants(matching: .any)["progress.allSessions"]
+        bringIntoView(history, in: app)
+        history.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.sessions"].waitForExistence(timeout: 5))
+        let row = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sessions.row."))
+            .firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen.sessionDetail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["session.noteCoaching"].waitForExistence(timeout: 5))
+        let unavailable = app.staticTexts["session.noteCoaching.unavailable"]
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 5))
+        XCTAssertTrue(unavailable.label.contains("did not collect live pitch"), unavailable.label)
+        XCTAssertFalse(
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "session.noteCoaching."))
+                .allElementsBoundByIndex.contains { $0.identifier != "session.noteCoaching.unavailable" },
+            "A manual score session must not show invented per-note measurements."
+        )
     }
 
     @MainActor
@@ -809,7 +971,7 @@ final class BrassTuneAppUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "UITEST_FIXTURES", "UITEST_RESET_STATE", "UITEST_RTL",
-            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
         ]
         app.launch()
 
@@ -839,12 +1001,18 @@ final class BrassTuneAppUITests: XCTestCase {
         ]
         app.launch()
 
-        let createAccount = app.descendants(matching: .any)["gateway.createAccount"]
-        XCTAssertTrue(createAccount.waitForExistence(timeout: 8))
-        createAccount.tap()
+        let signIn = app.descendants(matching: .any)["gateway.signIn"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 8))
+        signIn.tap()
+        let switchAuthMode = app.buttons["gateway.switchAuthMode"].firstMatch
+        bringIntoView(switchAuthMode, in: app)
+        XCTAssertTrue(switchAuthMode.isHittable)
+        switchAuthMode.tap()
         let email = app.descendants(matching: .any)["gateway.email"]
         let password = app.descendants(matching: .any)["gateway.password"]
         let privacy = app.descendants(matching: .any)["gateway.privacyLink"]
+        for _ in 0..<8 where !privacy.isHittable { app.swipeDown() }
+        if !privacy.isHittable { print("AUTH_FORM_LAYOUT_DIAGNOSTIC\n" + app.debugDescription) }
         XCTAssertTrue(privacy.waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["gateway.termsLink"].exists)
         bringIntoView(email, in: app)
@@ -875,9 +1043,9 @@ final class BrassTuneAppUITests: XCTestCase {
         ]
         app.launch()
 
-        let createAccount = app.descendants(matching: .any)["gateway.createAccount"]
-        XCTAssertTrue(createAccount.waitForExistence(timeout: 8))
-        createAccount.tap()
+        let signIn = app.descendants(matching: .any)["gateway.signIn"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 8))
+        signIn.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["gateway.authGoogleSignIn"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["gateway.authAppleSignIn"].exists)
@@ -901,32 +1069,83 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 8))
 
+        let localizedTabLabels = ["يمارس", "الموالف", "المقاييس", "التقدم", "أكثر"]
+        let destinationIdentifiers = ["screen.practice", "screen.tuner", "screen.scales", "screen.progress", "screen.more"]
         let tabBar = app.tabBars.firstMatch
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 8))
-        XCTAssertEqual(tabBar.buttons.count, 5)
-        XCTAssertTrue(tabBar.buttons["يمارس"].exists, "Arabic launch must localize the Practice tab, not only mirror its layout.")
-        XCTAssertTrue(tabBar.buttons["المقاييس"].exists, "Arabic launch must localize the Scales tab.")
-        XCTAssertTrue(tabBar.buttons["أكثر"].exists, "Arabic launch must localize the More tab.")
-        for index in 0..<tabBar.buttons.count {
-            let tab = tabBar.buttons.element(boundBy: index)
-            XCTAssertGreaterThanOrEqual(tab.frame.height, 44, "Primary tab \(index) must retain a 44-point target at maximum Dynamic Type in RTL.")
-            XCTAssertTrue(tab.isHittable)
+        let usesNativeTabBar = tabBar.waitForExistence(timeout: 8)
+        let primaryTabs: [XCUIElement]
+        if usesNativeTabBar {
+            XCTAssertEqual(tabBar.buttons.count, localizedTabLabels.count)
+            primaryTabs = (0..<tabBar.buttons.count).map { tabBar.buttons.element(boundBy: $0) }
+        } else {
+            // iPadOS 26 can expose the floating primary strip as ordinary
+            // buttons instead of an XCUIElementTypeTabBar. Resolve the same
+            // localized controls by label so this accessibility matrix covers
+            // both system presentations.
+            primaryTabs = localizedTabLabels.map { label in
+                let matches = app.descendants(matching: .button)
+                    .matching(NSPredicate(format: "label == %@", label))
+                XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 8), "Missing localized primary tab: \(label)")
+                let visibleMatches = matches.allElementsBoundByIndex.filter(\.isHittable)
+                XCTAssertFalse(visibleMatches.isEmpty, "Localized primary tab is not hittable: \(label)")
+                guard let tab = visibleMatches.first else { return matches.firstMatch }
+                XCTAssertTrue(
+                    visibleMatches.allSatisfy { $0.frame == tab.frame },
+                    "Expected one visual floating primary tab: \(label)"
+                )
+                return tab
+            }
+        }
+        XCTAssertEqual(primaryTabs.map(\.label).sorted(), localizedTabLabels.sorted())
+        if usesNativeTabBar {
+            for (index, tab) in primaryTabs.enumerated() {
+                XCTAssertGreaterThanOrEqual(tab.frame.height, 44, "Primary tab \(index) must retain a 44-point target at maximum Dynamic Type in RTL.")
+                XCTAssertTrue(tab.isHittable)
+            }
+        } else {
+            for (index, tab) in primaryTabs.enumerated() {
+                XCTAssertGreaterThanOrEqual(tab.frame.width, 44, "Floating primary tab \(index) must retain a 44-point-wide target at maximum Dynamic Type in RTL.")
+                XCTAssertTrue(tab.isHittable)
+
+                // The native iPadOS floating strip can report a 43-point child
+                // accessibility frame inside its taller system pill. A 44-point
+                // target extends 22 points from center; probe 21.75 points in
+                // each direction to stay just inside that boundary while still
+                // landing outside a 43-point child frame.
+                let alternateIndex = (index + 1) % primaryTabs.count
+                for verticalOffset in [-21.75, 21.75] {
+                    primaryTabs[alternateIndex].tap()
+                    XCTAssertTrue(
+                        app.descendants(matching: .any)[destinationIdentifiers[alternateIndex]]
+                            .waitForExistence(timeout: 5),
+                        "Could not select the alternate tab before probing \(localizedTabLabels[index])."
+                    )
+                    tab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                        .withOffset(CGVector(dx: 0, dy: verticalOffset))
+                        .tap()
+                    XCTAssertTrue(
+                        app.descendants(matching: .any)[destinationIdentifiers[index]]
+                            .waitForExistence(timeout: 5),
+                        "Floating primary tab \(localizedTabLabels[index]) did not activate at vertical offset \(verticalOffset)."
+                    )
+                }
+            }
         }
 
-        tabBar.buttons.element(boundBy: 2).tap()
+        primaryTabs[2].tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.scales"].waitForExistence(timeout: 5))
         let scaleStart = app.descendants(matching: .any)["scales.start"]
         bringIntoView(scaleStart, in: app)
         XCTAssertGreaterThanOrEqual(scaleStart.frame.height, 44)
 
-        tabBar.buttons.element(boundBy: 4).tap()
+        primaryTabs[4].tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.more"].waitForExistence(timeout: 5))
         let settings = app.descendants(matching: .any)["more.settings"]
         bringIntoView(settings, in: app)
         XCTAssertGreaterThanOrEqual(settings.frame.height, 44)
         XCTAssertTrue(settings.isHittable)
 
-        tabBar.buttons.element(boundBy: 0).tap()
+        primaryTabs[0].tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen.practice"].waitForExistence(timeout: 5))
         let scorePractice = app.descendants(matching: .any)["practice.sheetMusic"]
         bringIntoView(scorePractice, in: app)
@@ -948,15 +1167,17 @@ final class BrassTuneAppUITests: XCTestCase {
         // At maximum Dynamic Type, the multiline practice-notes field occupies
         // the usual swipe path. Drag the enclosing score-practice scroll view
         // through its right gutter so XCTest cannot focus or capture the field.
-        for _ in 0..<6 where !actions.isHittable {
+        for _ in 0..<12 where !actions.isHittable {
+            let above = actions.exists && actions.frame.midY < scorePracticeScroll.frame.midY
             let gutterStart = scorePracticeScroll.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.96, dy: 0.72)
+                withNormalizedOffset: CGVector(dx: 0.96, dy: above ? 0.4 : 0.65)
             )
             let gutterEnd = scorePracticeScroll.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.96, dy: 0.28)
+                withNormalizedOffset: CGVector(dx: 0.96, dy: above ? 0.65 : 0.4)
             )
             gutterStart.press(forDuration: 0.05, thenDragTo: gutterEnd)
         }
+        if !actions.isHittable { print("SCORE_ACTIONS_DIAGNOSTIC\n" + app.debugDescription) }
         XCTAssertTrue(actions.isHittable, "Score actions must remain reachable without interacting with the practice-notes field.")
         XCTAssertGreaterThanOrEqual(actions.frame.height, 44)
         actions.tap()
@@ -1818,36 +2039,20 @@ final class BrassTuneAppUITests: XCTestCase {
         XCTAssertTrue(bpm.waitForExistence(timeout: 5))
         XCTAssertTrue(bpm.label.contains("120"))
 
-        let advanced = app.buttons["Advanced rhythm"]
-        bringIntoView(advanced, in: app)
-        advanced.tap()
-        let accent = app.switches["metronome.accentFirstBeat"]
-        bringIntoView(accent, in: app)
-        XCTAssertTrue(accent.waitForExistence(timeout: 5))
-        XCTAssertFalse(accent.isSelected)
-
+        app.buttons["metronome.settings"].tap()
         let visualOnly = app.switches["metronome.visualOnly"]
         let haptics = app.switches["metronome.haptics"]
         bringIntoView(visualOnly, in: app)
-        XCTAssertTrue(visualOnly.waitForExistence(timeout: 5))
-        XCTAssertTrue(haptics.exists)
-        XCTAssertFalse(visualOnly.isSelected)
-        XCTAssertFalse(haptics.isSelected)
-
+        XCTAssertEqual(visualOnly.value as? String, "0")
+        XCTAssertEqual(haptics.value as? String, "0")
         XCTAssertTrue(app.descendants(matching: .any)["metronome.volume"].exists)
-
-        // Collapse the inspected disclosure before returning to the transport.
-        // The generic helper only scrolls deeper into a screen, while the
-        // metronome transport sits above these advanced controls.
-        advanced.tap()
-
+        let accent = app.switches["metronome.accentFirstBeat"]
+        bringIntoView(accent, in: app)
+        XCTAssertEqual(accent.value as? String, "0")
+        app.buttons["Done"].tap()
         let toggle = app.descendants(matching: .any)["metronome.toggle"]
-        for _ in 0..<8 {
-            if toggle.exists, toggle.isHittable { break }
-            app.swipeDown()
-        }
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-        XCTAssertTrue(toggle.isHittable, "The metronome transport must remain reachable after inspecting advanced rhythm controls.")
+        XCTAssertTrue(toggle.isHittable)
         NSLog("BRASSTUNE_METRONOME_ACOUSTIC_READY bpm=120 subdivision=quarter accent=off haptics=off visualOnly=off durationSeconds=180")
         toggle.tap()
         sleep(1)
@@ -2423,9 +2628,9 @@ final class BrassTuneAppUITests: XCTestCase {
         providerApp.launchArguments = ["UITEST_FORCE_AUTH_GATEWAY", "UITEST_AUTH_EMPTY", "UITEST_AUTH_NO_PERSIST"]
         providerApp.launch()
         XCTAssertTrue(providerApp.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
-        let createAccount = providerApp.descendants(matching: .any)["gateway.createAccount"]
-        XCTAssertTrue(createAccount.waitForExistence(timeout: 5))
-        createAccount.tap()
+        let signIn = providerApp.descendants(matching: .any)["gateway.signIn"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 5))
+        signIn.tap()
 
         XCTAssertTrue(
             providerApp.descendants(matching: .any)["gateway.authAppleSignIn"].waitForExistence(timeout: 12),
@@ -2452,6 +2657,206 @@ final class BrassTuneAppUITests: XCTestCase {
             "Google sign-in must present the system web-authentication consent alert."
         )
         app.terminate()
+    }
+
+    @MainActor
+    func testPhysicalGoogleCancellationRemainsVisibleAndRetryable() throws {
+        assertPhysicalDevProbeEnvironment()
+        let app = launchPhysicalLiveAuthGateway()
+        defer { app.terminate() }
+        for _ in 0..<2 {
+            let google = app.descendants(matching: .any)["gateway.authGoogleSignIn"]
+            for _ in 0..<4 where !google.isHittable { app.swipeDown() }
+            XCTAssertTrue(google.waitForExistence(timeout: 12))
+            google.tap()
+            XCTAssertTrue(waitForGoogleConsentSurface(in: app))
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let alert = app.alerts.firstMatch.exists ? app.alerts.firstMatch : springboard.alerts.firstMatch
+            XCTAssertTrue(alert.buttons["Cancel"].waitForExistence(timeout: 5))
+            alert.buttons["Cancel"].tap()
+            let notice = app.descendants(matching: .any)["gateway.authNotice"]
+            bringIntoView(notice, in: app)
+            XCTAssertTrue(notice.waitForExistence(timeout: 5), "Provider errors must show with empty email/password fields.")
+            XCTAssertTrue(notice.label.localizedCaseInsensitiveContains("cancel"))
+        }
+    }
+
+    @MainActor
+    func testPhysicalMetronomeDirectionVisuals() throws {
+        let app = launchPhysicalReleaseApp(extraArguments: ["UITEST_METRONOME_120_ACOUSTIC"])
+        app.buttons["practice.metronome"].tap()
+        XCTAssertTrue(app.buttons["metronome.settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["metronome.settings"].label.contains("Settings"))
+        let tuner = app.switches["metronome.tunerToggle"]
+        tuner.switches.firstMatch.tap()
+        app.buttons["metronome.toggle"].tap()
+        let direction = app.descendants(matching: .any)["metronome.tuner.direction"]
+        for phase in ["Flat", "In tune", "Sharp"] {
+            NSLog("POLISH_TONE_%@", phase)
+            let predicate = NSPredicate(format: "value CONTAINS %@", phase)
+            expectation(for: predicate, evaluatedWith: direction)
+            waitForExpectations(timeout: 20)
+            preservePhysicalScreenshot(named: "Metronome tuning cue - \(phase)")
+        }
+        app.buttons["metronome.toggle"].tap()
+        tuner.switches.firstMatch.tap()
+    }
+
+    @MainActor
+    func testPhysicalSixteenthDuplexAudibility() throws {
+        let app = launchPhysicalReleaseApp(extraArguments: ["UITEST_METRONOME_120_ACOUSTIC"])
+        app.buttons["practice.metronome"].tap()
+        app.buttons["metronome.settings"].tap()
+        app.descendants(matching: .any)["metronome.subdivisionPicker"].tap()
+        app.buttons["Sixteenth"].tap()
+        app.buttons["Done"].tap()
+        let tuner = app.switches["metronome.tunerToggle"]
+        tuner.switches.firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.tuner.note"].waitForExistence(timeout: 8))
+        let toggle = app.buttons["metronome.toggle"]
+        toggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop metronome", timeout: 5))
+        NSLog("PCM_ACOUSTIC_DUPLEX_SIXTEENTH")
+        sleep(16)
+        app.terminate()
+    }
+
+    @MainActor
+    func testPhysicalContinuousSubdivisionAudibility() throws {
+        let app = launchPhysicalReleaseApp(extraArguments: ["UITEST_METRONOME_120_ACOUSTIC"])
+        app.buttons["practice.metronome"].tap()
+        app.buttons["metronome.settings"].tap()
+        let subdivision = app.descendants(matching: .any)["metronome.subdivisionPicker"]
+        XCTAssertTrue(subdivision.waitForExistence(timeout: 5))
+        subdivision.tap()
+        app.buttons["Triplet"].tap()
+        app.buttons["Done"].tap()
+        let toggle = app.buttons["metronome.toggle"]
+        toggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop metronome", timeout: 5))
+        NSLog("PCM_ACOUSTIC_SOLO_TRIPLET")
+        sleep(16)
+        let tuner = app.switches["metronome.tunerToggle"]
+        tuner.switches.firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["metronome.tuner.note"].waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop metronome", timeout: 5))
+        NSLog("PCM_ACOUSTIC_DUPLEX_TRIPLET")
+        sleep(16)
+        toggle.tap()
+        app.buttons["metronome.settings"].tap()
+        subdivision.tap()
+        app.buttons["Sixteenth"].tap()
+        app.buttons["Done"].tap()
+        toggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop metronome", timeout: 5))
+        NSLog("PCM_ACOUSTIC_DUPLEX_SIXTEENTH")
+        sleep(16)
+        toggle.tap()
+        tuner.switches.firstMatch.tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Start metronome", timeout: 5))
+    }
+
+    @MainActor
+    func testPhysicalFocusedDuplexAndDronePitchChanges() throws {
+        let app = launchPhysicalReleaseApp(extraArguments: ["UITEST_METRONOME_120_ACOUSTIC"])
+        app.buttons["practice.metronome"].tap()
+        let tuner = app.switches["metronome.tunerToggle"]
+        XCTAssertTrue(tuner.waitForExistence(timeout: 8))
+        tuner.switches.firstMatch.tap()
+        allowMicrophonePermissionIfPresented()
+        let note = app.descendants(matching: .any)["metronome.tuner.note"]
+        if !note.waitForExistence(timeout: 8) { print("DUPLEX_START_DIAGNOSTIC\n" + app.debugDescription) }
+        XCTAssertTrue(note.exists)
+        let toggle = app.buttons["metronome.toggle"]
+        toggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop metronome", timeout: 5))
+        NSLog("BRASSTUNE_DUPLEX_REFERENCE_READY")
+        let referenceArrived = NSPredicate(format: "label CONTAINS %@", "B4")
+        expectation(for: referenceArrived, evaluatedWith: note)
+        waitForExpectations(timeout: 30)
+        preservePhysicalScreenshot(named: "Duplex metronome and A440 reference shown as written B4")
+        tuner.switches.firstMatch.tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop metronome", timeout: 5))
+        toggle.tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["practice.drone"].tap()
+        let droneToggle = app.buttons["drone.toggle"]
+        bringIntoView(droneToggle, in: app)
+        droneToggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(droneToggle, toHaveLabel: "Stop reference tone", timeout: 5))
+        let stepper = app.steppers["drone.noteStepper"]
+        bringIntoView(stepper, in: app)
+        for _ in 0..<6 {
+            stepper.buttons.element(boundBy: 1).tap()
+            XCTAssertTrue(waitForPhysicalElement(droneToggle, toHaveLabel: "Stop reference tone", timeout: 5))
+        }
+        preservePhysicalScreenshot(named: "Drone stayed running across six pitch changes")
+        droneToggle.tap()
+    }
+
+    @MainActor
+    func testPhysicalDroneTriadsRetuneAcrossTemperamentsWithoutStopping() throws {
+        let app = launchPhysicalReleaseApp(extraArguments: ["UITEST_AUTH_NO_PERSIST"])
+        let drone = app.buttons["practice.drone"]
+        bringIntoView(drone, in: app)
+        drone.tap()
+        let voicing = app.descendants(matching: .any)["drone.voicing"]
+        voicing.tap()
+        app.buttons["Major triad"].tap()
+        let toggle = app.buttons["drone.toggle"]
+        bringIntoView(toggle, in: app)
+        toggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop reference tone", timeout: 8))
+        for tuning in ["Just intonation", "Equal temperament"] {
+            let temperament = app.descendants(matching: .any)["drone.temperament"]
+            bringIntoView(temperament, in: app)
+            temperament.tap()
+            app.buttons[tuning].tap()
+            XCTAssertTrue((temperament.label + " " + String(describing: temperament.value)).contains(tuning))
+            XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop reference tone", timeout: 5))
+        }
+        bringIntoView(voicing, in: app)
+        voicing.tap()
+        app.buttons["Minor triad"].tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop reference tone", timeout: 5))
+        bringIntoView(toggle, in: app)
+        toggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Play reference tone", timeout: 5))
+    }
+
+    @MainActor
+    func testPhysicalAudioTempoAndDroneVolumeUpdatesStayRunning() throws {
+        let app = launchPhysicalReleaseApp(extraArguments: ["UITEST_AUTH_NO_PERSIST"])
+        app.descendants(matching: .any)["practice.metronome"].tap()
+        let toggle = app.buttons["metronome.toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8))
+        for _ in 0..<3 {
+            toggle.tap()
+            XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop metronome", timeout: 5))
+            let up = app.buttons["metronome.tempoUp"]
+            for _ in 0..<5 { up.tap() }
+            XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Stop metronome", timeout: 5))
+            RunLoop.current.run(until: Date().addingTimeInterval(2))
+            toggle.tap()
+            XCTAssertTrue(waitForPhysicalElement(toggle, toHaveLabel: "Start metronome", timeout: 5))
+        }
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let drone = app.descendants(matching: .any)["practice.drone"]
+        XCTAssertTrue(drone.waitForExistence(timeout: 5))
+        drone.tap()
+        let droneToggle = app.buttons["drone.toggle"]
+        bringIntoView(droneToggle, in: app)
+        droneToggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(droneToggle, toHaveLabel: "Stop reference tone", timeout: 5))
+        let volume = app.sliders["drone.volume"]
+        for value in [0.1, 0.9, 0.3, 0.7, 0.2, 1.0, 0.0, 0.5] {
+            bringIntoView(volume, in: app)
+            volume.adjust(toNormalizedSliderPosition: value)
+            XCTAssertTrue(waitForPhysicalElement(droneToggle, toHaveLabel: "Stop reference tone", timeout: 5))
+        }
+        preservePhysicalScreenshot(named: "Drone remained playing across volume changes")
+        droneToggle.tap()
+        XCTAssertTrue(waitForPhysicalElement(droneToggle, toHaveLabel: "Play reference tone", timeout: 5))
     }
 
     /// Opens the real native Apple authorization surface but deliberately
@@ -2519,20 +2924,27 @@ final class BrassTuneAppUITests: XCTestCase {
         }
         continueButton.tap()
 
-        guard let account = authorizedAccountElement(
+        if let account = authorizedAccountElement(
             applications: { self.googleAuthorizationApplications(in: app) },
             expectedDigest: accountDigest,
             allowFirstVisibleAccount: allowFirstVisibleAccount,
             timeout: 15
-        ) else {
-            throw XCTSkip("No authorized Google account was selected in this private physical run.")
+        ) {
+            guard account.waitForExistence(timeout: 3), account.isHittable else {
+                terminateSensitiveProviderSurfaces()
+                throw XCTSkip("Authorized Google account could not be selected in this private physical run.")
+            }
+            account.tap()
+            completeOptionalGoogleProviderConsent()
+        } else if !waitForGoogleCallbackOrGuestChoice(in: app) {
+            // A remembered Google session can redirect without an account picker.
+            // Retain only coarse surface diagnostics, never account labels/tokens.
+            let surfaces = googleAuthorizationApplications(in: app)
+            let needsEmail = surfaces.contains { $0.textFields.count > 0 }
+            let hasPassword = surfaces.contains { $0.secureTextFields.count > 0 }
+            XCTFail("Google needs owner login or unavailable account selection: email field=\(needsEmail), password field=\(hasPassword)")
+            return
         }
-        guard account.waitForExistence(timeout: 3), account.isHittable else {
-            terminateSensitiveProviderSurfaces()
-            throw XCTSkip("Authorized Google account could not be selected in this private physical run.")
-        }
-        account.tap()
-        completeOptionalGoogleProviderConsent()
         guard waitForGoogleCallbackOrGuestChoice(in: app) else {
             if googleSystemAuthorizationApplications().contains(where: { $0.state == .runningForeground }) {
                 terminateSensitiveProviderSurfaces()
@@ -2549,6 +2961,43 @@ final class BrassTuneAppUITests: XCTestCase {
         coldRelaunch(app)
         assertLiveSignedInState(in: app)
         signOutAndAssertColdRelaunchIsSignedOut(in: app)
+    }
+
+    /// Inspects an already-present `.dev` session without signing it out. This
+    /// distinguishes a completed automatic provider callback from a merely
+    /// visible account chooser while keeping an owner session intact until the
+    /// attended flow explicitly authorizes cleanup.
+    @MainActor
+    func testPhysicalLiveGoogleExistingSessionIdentityProbe() throws {
+        let accountDigest = try requiredLiveAuthAccountDigest(for: .google)
+        assertPhysicalDevProbeEnvironment()
+
+        let app = launchNormalPhysicalDevApp()
+        defer { app.terminate() }
+        reachSettingsFromNormalDevLaunch(in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["settings.signOut"].waitForExistence(timeout: 8))
+
+        let settingsScroll = app.scrollViews["screen.settings"]
+        if settingsScroll.exists {
+            settingsScroll.swipeDown()
+            settingsScroll.swipeDown()
+        }
+        let labels = app.descendants(matching: .any).allElementsBoundByIndex.map(\.label)
+        let emailLikeCount = labels.reduce(into: 0) { count, label in
+            if !emailLikeSubstrings(in: label).isEmpty { count += 1 }
+        }
+        let accountStatusPresent = app.descendants(matching: .any)["settings.accountStatus"].exists
+        let profileEditorPresent = app.descendants(matching: .any)["screen.profileEditor"].exists
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "Private physical existing-session Settings diagnostic"
+        evidence.lifetime = .deleteOnSuccess
+        add(evidence)
+        print("PHYSICAL_LIVE_GOOGLE_EXISTING_SESSION_DIAGNOSTIC emailLikeCount=\(emailLikeCount) accountStatusPresent=\(accountStatusPresent) profileEditorPresent=\(profileEditorPresent)")
+        guard labels.contains(where: { accountLabelDigestMatches($0, expectedDigest: accountDigest) }) else {
+            XCTFail("The signed-in `.dev` account did not match the explicitly authorized digest.")
+            return
+        }
+        print("PHYSICAL_LIVE_GOOGLE_EXISTING_SESSION_IDENTITY_MATCHED")
     }
 
     /// An attended physical run may present Apple's passcode handoff, but
@@ -2608,9 +3057,9 @@ final class BrassTuneAppUITests: XCTestCase {
         app.launchArguments = ["UITEST_FORCE_AUTH_GATEWAY", "UITEST_AUTH_EMPTY", "UITEST_AUTH_NO_PERSIST"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
-        let createAccount = app.descendants(matching: .any)["gateway.createAccount"]
-        XCTAssertTrue(createAccount.waitForExistence(timeout: 5))
-        createAccount.tap()
+        let signIn = app.descendants(matching: .any)["gateway.signIn"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 5))
+        signIn.tap()
         return app
     }
 
@@ -2664,9 +3113,9 @@ final class BrassTuneAppUITests: XCTestCase {
     private func openLiveAuthForm(in app: XCUIApplication, provider: LiveAuthProvider) throws -> XCUIElement {
         let gateway = app.descendants(matching: .any)["screen.gateway"]
         if gateway.waitForExistence(timeout: 8) {
-            let createAccount = app.descendants(matching: .any)["gateway.createAccount"]
-            XCTAssertTrue(createAccount.waitForExistence(timeout: 5))
-            createAccount.tap()
+            let signIn = app.descendants(matching: .any)["gateway.signIn"]
+            XCTAssertTrue(signIn.waitForExistence(timeout: 5))
+            signIn.tap()
         } else {
             reachSettingsFromNormalDevLaunch(in: app)
 
@@ -3006,8 +3455,7 @@ final class BrassTuneAppUITests: XCTestCase {
     private func liveSignedOutStateIsAvailable(in app: XCUIApplication) -> Bool {
         let gateway = app.descendants(matching: .any)["screen.gateway"]
         if gateway.waitForExistence(timeout: 8) {
-            return app.descendants(matching: .any)["gateway.createAccount"].exists
-                || app.descendants(matching: .any)["gateway.signIn"].exists
+            return app.descendants(matching: .any)["gateway.signIn"].exists
         }
         if app.descendants(matching: .any)["screen.settings"].exists {
             return app.descendants(matching: .any)["settings.createAccount"].waitForExistence(timeout: 8)
@@ -3032,9 +3480,8 @@ final class BrassTuneAppUITests: XCTestCase {
     private func assertSignedOutState(in app: XCUIApplication) {
         let gateway = app.descendants(matching: .any)["screen.gateway"]
         if gateway.waitForExistence(timeout: 8) {
-            let createAccount = app.descendants(matching: .any)["gateway.createAccount"]
             let signIn = app.descendants(matching: .any)["gateway.signIn"]
-            XCTAssertTrue(createAccount.exists || signIn.exists)
+            XCTAssertTrue(signIn.exists)
             return
         }
 
@@ -3145,7 +3592,7 @@ final class BrassTuneAppUITests: XCTestCase {
     @MainActor
     private func launchPhysicalReleaseApp(extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY"] + extraArguments
+        app.launchArguments = ["UITEST_RESET_STATE", "UITEST_ENTRY_FLOW", "UITEST_AUTH_EMPTY", "UITEST_AUTH_NO_PERSIST"] + extraArguments
         app.launch()
 
         XCTAssertTrue(app.descendants(matching: .any)["screen.gateway"].waitForExistence(timeout: 8))
@@ -3228,10 +3675,17 @@ final class BrassTuneAppUITests: XCTestCase {
 
     @MainActor
     private func bringIntoView(_ element: XCUIElement, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-        for _ in 0..<8 {
+        let viewport = app.scrollViews.firstMatch.exists ? app.scrollViews.firstMatch : app
+        for _ in 0..<16 {
             if element.exists, element.isHittable { return }
-            app.swipeUp()
+            // Small, directional drags avoid jumping past a 44-point row and
+            // can recover when a preserved scroll position starts below it.
+            let above = element.exists && element.frame.midY < viewport.frame.midY
+            let start = viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: above ? 0.4 : 0.65))
+            let end = viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: above ? 0.65 : 0.4))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
+        if !element.isHittable { print("UNREACHABLE_CONTROL_DIAGNOSTIC\n" + app.debugDescription) }
         XCTAssertTrue(element.waitForExistence(timeout: 2), "Expected reachable control", file: file, line: line)
         XCTAssertTrue(element.isHittable, "Control should be reachable", file: file, line: line)
     }

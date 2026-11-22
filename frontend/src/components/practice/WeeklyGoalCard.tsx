@@ -24,7 +24,7 @@ export function WeeklyGoalCard() {
         <progress max={goal.targetMinutes} value={Math.min(goal.completedMinutes, goal.targetMinutes)} aria-label={t('weekly.progress', { completed: formatNumber(goal.completedMinutes), target: formatNumber(goal.targetMinutes) })} />
         <form className="practice-inline-form" onSubmit={(event) => { event.preventDefault(); setWeeklyGoal(minutesDraft, sessionsDraft); }}>
           <label className="field"><span>{t('weekly.minutes')}</span><input type="number" min={5} max={600} value={minutesDraft} onChange={(event) => setMinutesDraft(Number(event.target.value))} /></label>
-          <label className="field"><span>{t('weekly.sessions')}</span><input type="number" min={1} max={21} value={sessionsDraft} onChange={(event) => setSessionsDraft(Number(event.target.value))} /></label>
+          <label className="field"><span>{t('weekly.sessions')}</span><input type="number" min={1} max={168} value={sessionsDraft} onChange={(event) => setSessionsDraft(Number(event.target.value))} /></label>
           <button className="ghost-button" type="submit">{t('weekly.save')}</button>
         </form>
       </div>

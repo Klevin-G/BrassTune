@@ -296,6 +296,18 @@ enum MetronomeSubdivision: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum MetronomeGapPhase: Equatable, Sendable {
+    case inactive
+    case countIn
+    case audible(bar: Int, total: Int)
+    case silent(bar: Int, total: Int)
+
+    var isSilent: Bool {
+        if case .silent = self { return true }
+        return false
+    }
+}
+
 struct MetronomeSettings: Codable, Equatable {
     var bpm: Int = 92
     var beatsPerMeasure: Int = 4
@@ -308,9 +320,17 @@ struct MetronomeSettings: Codable, Equatable {
     /// The downbeat is emphasized when enabled. Kept in the preset so a
     /// saved compound-meter setup returns exactly as it was practiced.
     var accentFirstBeat: Bool = true
+    /// Use the higher click for every sounding grid tick, including count-in.
+    var highClickEveryBeat: Bool = false
     /// Number of audible preparation beats before a started metronome enters
     /// its regular measure. Zero intentionally means no count-in.
     var countInBeats: Int = 0
+    /// Gap training alternates complete bars of PCM clicks and literal PCM
+    /// silence. It is opt-in so existing and legacy presets keep their normal
+    /// continuous-click behavior.
+    var gapModeEnabled: Bool = false
+    var gapAudibleBars: Int = 2
+    var gapSilentBars: Int = 1
 
     var meterLabel: String {
         "\(beatsPerMeasure)/\(beatUnit)"
@@ -342,17 +362,30 @@ struct MetronomeSettings: Codable, Equatable {
         return writtenBeatSeconds / Double(subdivision.ticksPerBeat)
     }
 
+    var gapCycleBars: Int {
+        gapModeEnabled ? gapAudibleBars + gapSilentBars : 1
+    }
+
+    func isGapBarSilent(_ zeroBasedBar: Int) -> Bool {
+        guard gapModeEnabled else { return false }
+        let cycleBar = ((zeroBasedBar % gapCycleBars) + gapCycleBars) % gapCycleBars
+        return cycleBar >= gapAudibleBars
+    }
+
     mutating func validate() {
         bpm = min(300, max(20, bpm))
         beatsPerMeasure = min(12, max(1, beatsPerMeasure))
         beatUnit = [2, 4, 8, 16].contains(beatUnit) ? beatUnit : 4
         countInBeats = min(16, max(0, countInBeats))
+        gapAudibleBars = min(4, max(1, gapAudibleBars))
+        gapSilentBars = min(4, max(1, gapSilentBars))
         volume = min(1, max(0, volume))
         if visualOnly || volume == 0 { muted = true }
     }
 
     private enum CodingKeys: String, CodingKey {
         case bpm, beatsPerMeasure, beatUnit, subdivision, muted, visualOnly, hapticsEnabled, volume, accentFirstBeat, countInBeats
+        case highClickEveryBeat, gapModeEnabled, gapAudibleBars, gapSilentBars
     }
 
     init(
@@ -365,7 +398,11 @@ struct MetronomeSettings: Codable, Equatable {
         hapticsEnabled: Bool = false,
         volume: Double = 0.6,
         accentFirstBeat: Bool = true,
-        countInBeats: Int = 0
+        countInBeats: Int = 0,
+        highClickEveryBeat: Bool = false,
+        gapModeEnabled: Bool = false,
+        gapAudibleBars: Int = 2,
+        gapSilentBars: Int = 1
     ) {
         self.bpm = bpm
         self.beatsPerMeasure = beatsPerMeasure
@@ -377,6 +414,10 @@ struct MetronomeSettings: Codable, Equatable {
         self.volume = volume
         self.accentFirstBeat = accentFirstBeat
         self.countInBeats = countInBeats
+        self.highClickEveryBeat = highClickEveryBeat
+        self.gapModeEnabled = gapModeEnabled
+        self.gapAudibleBars = gapAudibleBars
+        self.gapSilentBars = gapSilentBars
         validate()
     }
 
@@ -392,7 +433,11 @@ struct MetronomeSettings: Codable, Equatable {
             hapticsEnabled: try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? false,
             volume: try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0.6,
             accentFirstBeat: try container.decodeIfPresent(Bool.self, forKey: .accentFirstBeat) ?? true,
-            countInBeats: try container.decodeIfPresent(Int.self, forKey: .countInBeats) ?? 0
+            countInBeats: try container.decodeIfPresent(Int.self, forKey: .countInBeats) ?? 0,
+            highClickEveryBeat: try container.decodeIfPresent(Bool.self, forKey: .highClickEveryBeat) ?? false,
+            gapModeEnabled: try container.decodeIfPresent(Bool.self, forKey: .gapModeEnabled) ?? false,
+            gapAudibleBars: try container.decodeIfPresent(Int.self, forKey: .gapAudibleBars) ?? 2,
+            gapSilentBars: try container.decodeIfPresent(Int.self, forKey: .gapSilentBars) ?? 1
         )
     }
 }
@@ -940,6 +985,7 @@ struct PlayAlongGrader: Equatable {
     let writtenMIDIs: [Int]?
     private(set) var currentNoteIndex = 0
     private(set) var detectedNoteName: String?
+    private(set) var detectedWrittenOctave: Int?
     private(set) var detectedCents: Double?
     private(set) var noteGrades: [PlayAlongNoteGrade] = []
 
@@ -988,6 +1034,12 @@ struct PlayAlongGrader: Equatable {
         return writtenMIDIs?[currentNoteIndex]
     }
 
+    var detectedMatchesTarget: Bool {
+        guard PracticePitchMath.matchesPitchClass(detectedNoteName, currentNoteName),
+              detectedCents != nil else { return false }
+        return currentWrittenMIDI.map { detectedWrittenOctave == ($0 / 12) - 1 } ?? true
+    }
+
     var heldFraction: Double {
         guard firstMatchTimestampMs != nil else { return 0 }
         return min(1, max(0, Double(confirmedHoldDurationMs) / Double(holdDurationMs)))
@@ -1001,6 +1053,7 @@ struct PlayAlongGrader: Equatable {
             && frame.isValidForRecording
             && [.flat, .inTune, .sharp].contains(frame.tuningStatus)
         detectedNoteName = confident ? frame.writtenNoteName : nil
+        detectedWrittenOctave = confident ? frame.writtenOctave : nil
         detectedCents = confident ? frame.centsDeviation : nil
         let matchesPitchClass = PracticePitchMath.matchesPitchClass(frame.writtenNoteName, target)
         let matchesOctave = currentWrittenMIDI.map { expectedMIDI in
@@ -1079,6 +1132,7 @@ struct PlayAlongGrader: Equatable {
         resetCurrentHold()
         if isComplete {
             detectedNoteName = nil
+            detectedWrittenOctave = nil
             detectedCents = nil
         }
     }
@@ -1155,6 +1209,8 @@ struct PlayAlongSession: Equatable {
     var currentNoteName: String? { grader.currentNoteName }
     var heldFraction: Double { grader.heldFraction }
     var detectedNoteName: String? { grader.detectedNoteName }
+    var detectedWrittenOctave: Int? { grader.detectedWrittenOctave }
+    var detectedMatchesTarget: Bool { grader.detectedMatchesTarget }
     var detectedCents: Double? { grader.detectedCents }
     var noteGrades: [PlayAlongNoteGrade] { grader.noteGrades }
     var isComplete: Bool { grader.isComplete }
@@ -2683,6 +2739,41 @@ struct GuestAccountUpgradePrompt: Equatable {
     let email: String
     let canMerge: Bool
     let containsFileBackedData: Bool
+}
+
+/// A value-free category for a rejected Google OAuth callback. The category is
+/// safe to show to a person or log because it never contains URL components,
+/// OAuth fields, codes, states, tokens, or provider messages.
+enum GoogleOAuthCallbackFailureReason: String, Equatable, Sendable {
+    case transactionCallbackScheme = "CONFIG"
+    case sessionCallbackMissing = "NO-CALLBACK"
+    case callbackScheme = "SCHEME"
+    case callbackHost = "HOST"
+    case callbackPath = "PATH"
+    case callbackAuthority = "AUTHORITY"
+    case callbackMalformed = "MALFORMED"
+    case callbackQueryNames = "QUERY-NAMES"
+    case callbackStateCount = "STATE-COUNT"
+    case callbackStateMismatch = "STATE-MISMATCH"
+    case callbackProviderErrorShape = "PROVIDER-SHAPE"
+    case callbackFragment = "FRAGMENT"
+    case callbackSuccessShape = "SUCCESS-SHAPE"
+    case callbackCode = "CODE"
+
+    var reference: String { "GCB-\(rawValue)" }
+}
+
+struct GoogleOAuthCallbackDiagnostic: Equatable, Sendable {
+    let reason: GoogleOAuthCallbackFailureReason
+
+    var reference: String { reason.reference }
+
+    /// Keep the normal recovery direction while adding an opaque, support-safe
+    /// correlation reference. `reference` is deliberately the only dynamic
+    /// text; it is derived from a fixed enum, never callback data.
+    var userMessage: String {
+        "\(NativeLocalization.string("The sign-in callback could not be verified. Start sign-in again.")) \(NativeLocalization.string("Reference")): \(reference)."
+    }
 }
 
 enum UserVisibleError: LocalizedError, Equatable {

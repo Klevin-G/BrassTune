@@ -22,6 +22,7 @@ import './PracticePage.css';
 import { gatewayPathWithReturn } from '../domain/authNavigation';
 import { useI18n } from '../i18n/LocaleContext';
 import { isReliableTunerFrame } from '../domain/pitchFrameStatus';
+import { PRACTICE_AUDIO_PAUSE_EVENT, PRACTICE_AUDIO_RESUME_EVENT } from '../domain/practiceLibrary';
 import type { PracticeSession } from '../domain/types';
 
 // How many consecutive centered frames count as a full "held in tune" reward.
@@ -79,6 +80,7 @@ export function PracticePage() {
   const navigationIntentRef = useRef(false);
   const blockedNavigationRef = useRef(false);
   const passiveMicPausedForBackgroundRef = useRef(false);
+  const nativeForegroundRef = useRef(false);
   const practiceToolRef = useRef(practiceTool);
 
   const stream = usePitchStream({
@@ -275,12 +277,16 @@ export function PracticePage() {
   );
 
   useEffect(() => {
-    const resumeForForeground = () => {
-      if (document.hidden || !passiveMicPausedForBackgroundRef.current) return;
+    const resumeForForeground = (fromNativeLifecycle = false, finalizedTake = false) => {
+      if ((!fromNativeLifecycle && document.hidden) || !passiveMicPausedForBackgroundRef.current) return;
       // A foreground event may arrive while the recorder/upload finalization is
       // still running. Keep the intent until that one serialized transition
       // has released the shared stream.
-      if (hasTakeLifecycleToFinalize()) return;
+      // `useSessionRecorder.stop()` updates React state just before its promise
+      // resolves. Its ref exposed through the latest render can therefore be
+      // stale for this one microtask. Only this completed stop path may bypass
+      // that stale snapshot; a fresh active session still blocks restart.
+      if ((!finalizedTake && hasTakeLifecycleToFinalize()) || activeSessionIdRef.current !== null) return;
       passiveMicPausedForBackgroundRef.current = false;
       if (practiceToolRef.current === 'tuner' && !demoModeRef.current) {
         micRequestedRef.current = false;
@@ -292,7 +298,10 @@ export function PracticePage() {
       if (hasTakeLifecycleToFinalize()) {
         void stopRef.current().finally(() => {
           streamRef.current?.stopMicrophone();
-          resumeForForeground();
+          // Android can keep document.hidden stale during Activity resume. A
+          // native foreground event permits passive tuner restart only after
+          // this stop finalized; it never restarts the saved take itself.
+          resumeForForeground(nativeForegroundRef.current, true);
         });
         return;
       }
@@ -305,11 +314,27 @@ export function PracticePage() {
       }
       resumeForForeground();
     };
+    const onNativeResume = () => resumeForForeground(true);
+    const onNativePause = () => {
+      nativeForegroundRef.current = false;
+      finalizeForBackground();
+    };
+    const onNativeForeground = () => {
+      nativeForegroundRef.current = true;
+      onNativeResume();
+    };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', finalizeForBackground);
+    // Capacitor can background an Android Activity without browser lifecycle
+    // events. Keep the existing serialized finalizer so an active recording is
+    // stored/stopped before the shared microphone tracks are released.
+    window.addEventListener(PRACTICE_AUDIO_PAUSE_EVENT, onNativePause);
+    window.addEventListener(PRACTICE_AUDIO_RESUME_EVENT, onNativeForeground);
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', finalizeForBackground);
+      window.removeEventListener(PRACTICE_AUDIO_PAUSE_EVENT, onNativePause);
+      window.removeEventListener(PRACTICE_AUDIO_RESUME_EVENT, onNativeForeground);
     };
   });
 

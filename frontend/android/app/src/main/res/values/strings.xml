@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BrassTune</string>
+    <string name="title_activity_main">BrassTune</string>
+    <string name="package_name">com.aryasalem.brasstune</string>
+    <string name="custom_url_scheme">com.aryasalem.brasstune</string>
+</resources>

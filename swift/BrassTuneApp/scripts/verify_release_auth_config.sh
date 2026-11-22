@@ -7,12 +7,14 @@ fail() {
 }
 
 configuration=${CONFIGURATION:-}
+release_equivalent=no
 
 # Callback schemes are process identities, not interchangeable provider
 # settings. Enforce their exact bundle binding for Release and custom
 # Release-equivalent configurations before any guest-only early exit.
 case "$configuration" in
     *Release*)
+        release_equivalent=yes
         product_bundle_identifier=${PRODUCT_BUNDLE_IDENTIFIER:-}
         callback_scheme=${BRASSTUNE_AUTH_CALLBACK_SCHEME:-}
         case "$product_bundle_identifier" in
@@ -34,7 +36,7 @@ esac
 # A normal unsigned Release build is allowed to remain guest-only. Archive and
 # explicit preflight actions fail closed so an App Store candidate cannot imply
 # online account support without its public runtime values.
-if [ "$configuration" != "Release" ]; then
+if [ "$release_equivalent" != "yes" ]; then
     exit 0
 fi
 if [ "${ACTION:-}" != "install" ] && [ "${BRASSTUNE_REQUIRE_ONLINE_AUTH:-NO}" != "YES" ]; then

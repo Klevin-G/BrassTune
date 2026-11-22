@@ -530,6 +530,37 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(decoded.beatUnit, 8)
     }
 
+    func testMetronomeVisualReleaseIgnoresARepeatedSequenceFromPriorRun() {
+        var state = MetronomeVisualPulseState()
+        state.beginRun()
+        let staleRelease = state.recordPulse()
+
+        // A newly started run repeats pulse sequence one, which is why
+        // sequence-only release checks could reset the new visual transient.
+        state.beginRun()
+        let currentRelease = state.recordPulse()
+
+        XCTAssertEqual(staleRelease.sequence, currentRelease.sequence)
+        XCTAssertNotEqual(staleRelease.runGeneration, currentRelease.runGeneration)
+        XCTAssertFalse(state.acceptsRelease(for: staleRelease))
+        XCTAssertTrue(state.acceptsRelease(for: currentRelease))
+    }
+
+    func testMetronomeVisualReleaseIsInvalidatedByAnInPlaceTempoRestart() {
+        var state = MetronomeVisualPulseState()
+        state.beginRun()
+        let staleRelease = state.recordPulse()
+
+        // Tempo edits keep the pulse sequence monotonic, but still retire
+        // pending releases before the replacement clock takes over.
+        state.invalidatePendingReleases()
+        let currentRelease = state.recordPulse()
+
+        XCTAssertGreaterThan(currentRelease.sequence, staleRelease.sequence)
+        XCTAssertFalse(state.acceptsRelease(for: staleRelease))
+        XCTAssertTrue(state.acceptsRelease(for: currentRelease))
+    }
+
     @MainActor
     func testMetronomeUsesCountInAndRespectsAccentToggle() {
         let model = makeModel()
@@ -587,8 +618,8 @@ final class BrassTuneAppTests: XCTestCase {
     @MainActor
     func testFeatureContractsBoundShortcutsGoalsAndCascadeCustomExercise() throws {
         let model = makeModel()
-        model.updateWeeklyGoal(minutes: 9_999, sessions: 99)
-        XCTAssertEqual(model.practiceFeatures.weeklyGoal, WeeklyPracticeGoal(targetMinutes: 600, targetSessions: 21))
+        model.updateWeeklyGoal(minutes: 9_999, sessions: 999)
+        XCTAssertEqual(model.practiceFeatures.weeklyGoal, WeeklyPracticeGoal(targetMinutes: 600, targetSessions: 168))
 
         for index in 0..<20 {
             model.toggleFavorite(PracticeShortcut(kind: .drone, referenceID: "drone-\(index)", title: "Drone \(index)"))
@@ -606,6 +637,49 @@ final class BrassTuneAppTests: XCTestCase {
         model.deleteCustomExercise(id: saved.id)
         XCTAssertFalse(model.practiceFeatures.favorites.contains { $0.referenceID == saved.exercise.id })
         XCTAssertFalse(model.practiceFeatures.recents.contains { $0.referenceID == saved.exercise.id })
+    }
+
+    @MainActor
+    func testWeeklySessionGoalAcceptsHighIntentAndClampsPersistedOutOfRangeValues() async throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrassTune-goal-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: stateURL) }
+        let auth = AuthService(session: makeStubSession(), readSessionPayload: { nil })
+        let model = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: auth)
+        model.enterGuestDemo(presentTutorial: false)
+        model.updateWeeklyGoal(minutes: 35, sessions: 168)
+        XCTAssertEqual(model.practiceFeatures.weeklyGoal, WeeklyPracticeGoal(targetMinutes: 35, targetSessions: 168))
+        model.flushPendingPersistence()
+
+        let relaunched = AppModel(persistenceStore: .ephemeral(fileURL: stateURL), authService: auth)
+        await relaunched.restoreSession()
+        relaunched.enterGuestDemo(presentTutorial: false)
+        XCTAssertEqual(
+            relaunched.practiceFeatures.weeklyGoal,
+            WeeklyPracticeGoal(targetMinutes: 35, targetSessions: 168),
+            "The high target must survive a real local guest-state reload."
+        )
+
+        let encoded = try JSONEncoder().encode(model.practiceFeatures)
+        let restored = try JSONDecoder().decode(PracticeFeatureState.self, from: encoded)
+        XCTAssertEqual(restored.weeklyGoal, WeeklyPracticeGoal(targetMinutes: 35, targetSessions: 168))
+
+        let olderGoalJSON = Data(#"{"weeklyGoal":{"targetMinutes":45,"targetSessions":21}}"#.utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode(PracticeFeatureState.self, from: olderGoalJSON).weeklyGoal,
+            WeeklyPracticeGoal(targetMinutes: 45, targetSessions: 21),
+            "A previously saved 21-session goal should keep its exact value."
+        )
+        let excessiveGoalJSON = Data(#"{"weeklyGoal":{"targetMinutes":9999,"targetSessions":999}}"#.utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode(PracticeFeatureState.self, from: excessiveGoalJSON).weeklyGoal,
+            WeeklyPracticeGoal(targetMinutes: 600, targetSessions: 168)
+        )
+        let lowGoalJSON = Data(#"{"weeklyGoal":{"targetMinutes":0,"targetSessions":0}}"#.utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode(PracticeFeatureState.self, from: lowGoalJSON).weeklyGoal,
+            WeeklyPracticeGoal(targetMinutes: 5, targetSessions: 1)
+        )
     }
 
     func testPracticeHomeShortcutsHideDisabledPacksAndDeduplicateFavoritesAndRecents() {
@@ -731,10 +805,12 @@ final class BrassTuneAppTests: XCTestCase {
         let payload = try decoder.decode(NativePracticeHistoryExport.self, from: try XCTUnwrap(export.data(using: .utf8)))
 
         XCTAssertEqual(export, repeated)
-        XCTAssertEqual(payload.schemaVersion, 1)
+        XCTAssertEqual(payload.schemaVersion, 2)
         XCTAssertEqual(payload.exportedAt, date)
         XCTAssertEqual(payload.sessions.map(\.name), ["Exportable recording"])
         XCTAssertEqual(payload.scores.map(\.title), ["Warm-up score"])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(export.utf8)) as? [String: Any])
+        XCTAssertNotNil(json["measurableGoals"], "Version 2 exports must include local goal history")
     }
 
     @MainActor
@@ -1548,6 +1624,63 @@ final class BrassTuneAppTests: XCTestCase {
         XCTAssertEqual(tokenRequestCount, 0)
         XCTAssertNil(credentialStore.payload)
         XCTAssertNil(try authService.restoreSessionOrThrow())
+    }
+
+    /// Provider-error and malformed callbacks shaped like live Supabase
+    /// redirects must stop before PKCE exchange: no request, no credential.
+    @MainActor
+    func testGoogleServiceProviderErrorAndMalformedCallbacksMakeZeroRequestsAndWriteNoCredential() async throws {
+        // `<STATE>` is replaced with the service's own generated state so the
+        // state guard passes and each case exercises the error branch itself.
+        let cases: [(String, UserVisibleError)] = [
+            ("error=access_denied&error_description=&state=<STATE>#error=access_denied&sb=", .googleSignInCancelled),
+            ("error=access_denied&error_description=The+user+denied&state=<STATE>#error=access_denied&error_description=The+user+denied&sb=", .googleSignInCancelled),
+            ("error=server_error&error_code=unexpected_failure&error_description=Unable+to+exchange+external+code%3A+4%2Fbo&state=<STATE>#error=server_error&error_code=unexpected_failure&error_description=Unable+to+exchange+external+code%253A+4%252Fbo&sb=", .oauthProviderUnavailable),
+            ("error=server_error&state=<STATE>#error=access_denied&sb=", .oauthCallbackInvalid),
+            ("error=access_denied&state=<STATE>#error=access_denied&sb=&access_token=leaked", .oauthCallbackInvalid),
+            ("error=access_denied&state=<STATE>#error=access_denied", .oauthCallbackInvalid),
+            ("error=access_denied&code=must-not-exchange&state=<STATE>#error=access_denied&sb=", .oauthCallbackInvalid),
+            ("code=must-not-exchange&error_code=unexpected_failure&state=<STATE>", .oauthCallbackInvalid),
+            ("code=must-not-exchange&state=<STATE>#sb=", .oauthCallbackInvalid),
+        ]
+        for (callbackQuery, expected) in cases {
+            let credentialStore = InMemoryAuthSessionStore()
+            nonisolated(unsafe) var requestCount = 0
+            let authService = AuthService(
+                session: makeStubSession(),
+                readSessionPayload: { credentialStore.payload },
+                saveSessionPayload: { credentialStore.payload = $0 },
+                deleteSessionPayload: { credentialStore.payload = nil },
+                webAuthentication: { authorizationURL, callbackScheme in
+                    let redirect = try XCTUnwrap(
+                        URLComponents(url: authorizationURL, resolvingAgainstBaseURL: false)?
+                            .queryItems?.first(where: { $0.name == "redirect_to" })?.value
+                    )
+                    let state = try XCTUnwrap(
+                        URLComponents(string: redirect)?.queryItems?.first(where: { $0.name == "state" })?.value
+                    )
+                    let query = callbackQuery.replacingOccurrences(of: "<STATE>", with: state)
+                    return try XCTUnwrap(URL(string: "\(callbackScheme)://oauth/google?\(query)"))
+                }
+            )
+            StubURLProtocol.handler = { request in
+                requestCount += 1
+                return .init(
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: Data(#"{"access_token":"must-not-store","refresh_token":"r","expires_in":3600,"user":{"id":"u"}}"#.utf8)
+                )
+            }
+            do {
+                _ = try await authService.signInWithGoogle(config: makeAuthConfig())
+                XCTFail("Expected \(callbackQuery) to fail before token exchange")
+            } catch let error as UserVisibleError {
+                XCTAssertEqual(error, expected, callbackQuery)
+            }
+            StubURLProtocol.handler = nil
+            XCTAssertEqual(requestCount, 0, callbackQuery)
+            XCTAssertNil(credentialStore.payload, callbackQuery)
+            XCTAssertNil(try authService.restoreSessionOrThrow(), callbackQuery)
+        }
     }
 
     @MainActor
@@ -3490,6 +3623,75 @@ final class BrassTuneAppTests: XCTestCase {
         let restored = AppModel(persistenceStore: store, scoreStorageDirectory: scoreDirectory)
         restored.enterGuestDemo(presentTutorial: false)
         XCTAssertEqual(restored.scores.first?.title, "Concert étude")
+    }
+
+    func testLocalScoreSearchMatchesTrimmedCaseAndDiacriticInsensitiveTitleOrComposer() {
+        var etude = makeSampleScore()
+        etude.title = "  Étude du matin  "
+        etude.composer = "Camille Saint-Saëns"
+        var march = makeSampleScore()
+        march.title = "Festival March"
+        march.composer = "Jordan Lee"
+
+        XCTAssertTrue(scoreMatchesLocalScoreSearch(etude, query: "etude"))
+        XCTAssertTrue(scoreMatchesLocalScoreSearch(etude, query: "  SAINT saens "))
+        XCTAssertTrue(scoreMatchesLocalScoreSearch(march, query: "festival"))
+        XCTAssertTrue(scoreMatchesLocalScoreSearch(march, query: "jordan"))
+        XCTAssertFalse(scoreMatchesLocalScoreSearch(march, query: "saens"))
+        XCTAssertTrue(scoreMatchesLocalScoreSearch(march, query: "   "))
+    }
+
+    func testSessionNoteCoachingKeepsWrittenLabelAndRejectsSparseSamples() {
+        let sparse = NativeNoteStatistics(
+            writtenNote: "C",
+            writtenOctave: 5,
+            noteLabel: "C5",
+            averageSignedCents: -9,
+            averageAbsoluteCents: 9,
+            medianCents: -9,
+            standardDeviationCents: 2,
+            inTunePercentage: 60,
+            durationMs: 2_999,
+            sampleCount: 7,
+            eventCount: 1,
+            stabilityScore: 82,
+            trend: "Mostly flat",
+            severity: "moderate issue",
+            problemSeverity: 25
+        )
+        XCTAssertFalse(sessionNoteCoachingEligible(sparse))
+        XCTAssertNil(sessionNoteCoachingSuggestion(for: sparse))
+
+        let writtenTrumpetNote = NativeNoteStatistics(
+            writtenNote: "C",
+            writtenOctave: 5,
+            noteLabel: "C5",
+            averageSignedCents: -9,
+            averageAbsoluteCents: 9,
+            medianCents: -9,
+            standardDeviationCents: 2,
+            inTunePercentage: 60,
+            durationMs: 3_000,
+            sampleCount: 8,
+            eventCount: 1,
+            stabilityScore: 82,
+            trend: "Mostly flat",
+            severity: "moderate issue",
+            problemSeverity: 25
+        )
+        XCTAssertTrue(sessionNoteCoachingEligible(writtenTrumpetNote))
+        XCTAssertEqual(writtenTrumpetNote.noteLabel, "C5", "The session already stores a written note; coaching must not transpose it again.")
+        XCTAssertEqual(
+            sessionNoteCoachingSuggestion(for: writtenTrumpetNote),
+            NativeLocalization.string("Repeat a comfortable long tone against a drone, then lift up.")
+        )
+    }
+
+    func testRateBrassTuneURLTargetsTheVerifiedAppStoreReviewSheet() {
+        XCTAssertEqual(
+            brassTuneAppStoreReviewURL().absoluteString,
+            "https://apps.apple.com/app/id6795688588?action=write-review"
+        )
     }
 
     @MainActor
@@ -8613,6 +8815,171 @@ final class BrassTuneAppTests: XCTestCase {
             saveSessionPayload: { store.payload = $0 },
             deleteSessionPayload: { store.payload = nil }
         )
+    }
+
+    @MainActor
+    func testLateProfileRetryCannotRestoreRequiredSheetAfterSignOut() async throws {
+        let auth = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? auth.signOut(); StubURLProtocol.handler = nil }
+        let model = AppModel(
+            persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("profile-signout-race-\(UUID().uuidString).json")),
+            apiClient: APIClient(session: makeStubSession()), authService: auth
+        )
+        model.config = makeAuthConfig()
+        let profileStarted = expectation(description: "late profile request started")
+        let releaseProfile = DispatchSemaphore(value: 0)
+        defer { releaseProfile.signal() }
+        let responseData = profileResponseData(userID: "race-user", email: "race@example.com", profileComplete: false)
+        nonisolated(unsafe) var profileRequestCount = 0
+        StubURLProtocol.handler = { request in
+            let path = request.url!.path
+            if path == "/api/users/me" {
+                profileRequestCount += 1
+                if profileRequestCount == 1 { throw URLError(.notConnectedToInternet) }
+                profileStarted.fulfill()
+                _ = releaseProfile.wait(timeout: .now() + 5)
+                return .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: responseData)
+            }
+            let isLogout = path == "/auth/v1/logout"
+            return .init(response: HTTPURLResponse(url: request.url!, statusCode: isLogout ? 204 : 200, httpVersion: nil, headerFields: nil)!, data: isLogout ? Data() : Data(#"{"access_token":"race-access","refresh_token":"race-refresh","expires_in":3600,"user":{"id":"race-user","email":"race@example.com"}}"#.utf8))
+        }
+        await model.signIn(email: "race@example.com", password: "password")
+        XCTAssertTrue(model.profileRefreshUnavailable)
+        let retry = Task { await model.refreshCurrentProfile() }
+        await fulfillment(of: [profileStarted], timeout: 3)
+        let logout = Task { await model.signOut() }
+        // Local credential removal happens before the remote logout wait.
+        for _ in 0..<100 where auth.restoreSession() != nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNil(auth.restoreSession())
+        releaseProfile.signal()
+        await logout.value
+        _ = await retry.value
+        XCTAssertEqual(model.authState, .signedOut)
+        XCTAssertNil(model.userProfile)
+        XCTAssertFalse(model.profileEditorRequired)
+        XCTAssertNil(auth.restoreSession())
+    }
+
+    @MainActor
+    func testLateTokenRefreshCannotRecreateSignedOutCredential() async throws {
+        let auth = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? auth.signOut(); StubURLProtocol.handler = nil }
+        let config = makeAuthConfig()
+        let old = AuthSession(userID: "old", accessToken: "old-access", refreshToken: "old-refresh", email: "old@example.com", expiresAt: Date().addingTimeInterval(-100))
+        try auth.persistSession(old)
+        let started = expectation(description: "refresh started")
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        StubURLProtocol.handler = { request in
+            started.fulfill()
+            _ = gate.wait(timeout: .now() + 5)
+            return .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data: Data(#"{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"user":{"id":"old","email":"old@example.com"}}"#.utf8))
+        }
+        let refresh = Task { try await auth.refreshStoredSession(config: config) }
+        await fulfillment(of: [started], timeout: 3)
+        try auth.signOut()
+        gate.signal()
+        _ = try? await refresh.value
+        XCTAssertNil(try auth.restoreSessionOrThrow())
+    }
+
+    @MainActor
+    func testLateLogoutCannotDeleteReplacementCredential() async throws {
+        let auth = makeIsolatedAuthService(session: makeStubSession())
+        defer { try? auth.signOut(); StubURLProtocol.handler = nil }
+        let config = makeAuthConfig()
+        let old = AuthSession(userID: "old", accessToken: "old-access", refreshToken: "old-refresh", email: "old@example.com", expiresAt: Date().addingTimeInterval(3600))
+        let replacement = AuthSession(userID: "new", accessToken: "new-access", refreshToken: "new-refresh", email: "new@example.com", expiresAt: Date().addingTimeInterval(3600))
+        try auth.persistSession(old)
+        let started = expectation(description: "logout started")
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        StubURLProtocol.handler = { request in
+            started.fulfill()
+            _ = gate.wait(timeout: .now() + 5)
+            return .init(response: HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!, data: Data())
+        }
+        let logout = Task { try await auth.signOut(config: config) }
+        await fulfillment(of: [started], timeout: 3)
+        XCTAssertNil(try auth.restoreSessionOrThrow())
+        try auth.persistSession(replacement)
+        gate.signal()
+        _ = try? await logout.value
+        XCTAssertEqual(try auth.restoreSessionOrThrow()?.userID, "new")
+    }
+
+    @MainActor
+    func testCombinedTunerCaptureStartupDoesNotCancelItsOwnMode() async {
+        let coordinator = NativeAudioSessionCoordinator(hooks: NativeAudioControlPlaneHooks { _ in }, deactivationDelay: .zero)
+        let engine = NativeAudioEngine(audioSessionCoordinator: coordinator, microphonePermissionRequester: { true })
+        let model = makeModel(audioEngine: engine, audioSessionCoordinator: coordinator)
+        await model.setMetronomeTunerEnabled(true)
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertTrue(engine.listening)
+        XCTAssertTrue(model.metronomeTunerEnabled)
+        XCTAssertFalse(engine.takeRecording)
+        model.stopMetronomeTuner()
+        await coordinator.flush()
+        XCTAssertFalse(engine.listening)
+        XCTAssertFalse(model.metronomeTunerEnabled)
+    }
+
+    @MainActor
+    func testCombinedTunerCancelDuringPermissionRestoresExistingBeat() async {
+        let permission = DeferredMicrophonePermission()
+        let coordinator = NativeAudioSessionCoordinator(activateSession: {}, deactivateSession: {})
+        let engine = NativeAudioEngine(audioSessionCoordinator: coordinator, microphonePermissionRequester: permission.request)
+        let model = makeModel(audioEngine: engine, audioSessionCoordinator: coordinator)
+        model.setMetronomeVisualOnly(true)
+        model.startMetronome()
+        let start = Task { await model.setMetronomeTunerEnabled(true) }
+        await permission.waitUntilRequested()
+        await model.setMetronomeTunerEnabled(false)
+        XCTAssertTrue(model.metronomeRunning)
+        permission.resolve(granted: true)
+        await start.value
+        XCTAssertTrue(model.metronomeRunning)
+        XCTAssertFalse(model.metronomeTunerEnabled)
+        XCTAssertFalse(engine.listening)
+        model.stopMetronome()
+    }
+
+    @MainActor
+    func testGuestClassChoiceClearsCancelIntentAndResumesFreshAccountSetup() async throws {
+        defer { StubURLProtocol.handler = nil }
+        for choice in [GuestAccountUpgradeChoice.merge, .keepSeparate, .cancel] {
+            let auth = makeIsolatedAuthService(session: makeStubSession())
+            let model = AppModel(
+                persistenceStore: .ephemeral(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("class-choice-\(UUID().uuidString).json")),
+                apiClient: APIClient(session: makeStubSession()), authService: auth
+            )
+            model.config = makeAuthConfig()
+            model.enterGuestDemo(presentTutorial: false)
+            model.completeTutorial()
+            model.sessions = [makeSession(name: "Guest practice", cents: [1])]
+            model.requestClassDestination()
+            let profile = profileResponseData(userID: "choice-user", email: "choice@example.com")
+            StubURLProtocol.handler = { request in
+                .init(response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                      data: request.url?.path == "/api/users/me" ? profile : Data(#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"user":{"id":"choice-user","email":"choice@example.com"}}"#.utf8))
+            }
+            await model.signIn(email: "choice@example.com", password: "password")
+            XCTAssertNotNil(model.guestAccountUpgradePrompt)
+            model.resolveGuestAccountUpgrade(choice)
+            XCTAssertNil(model.guestAccountUpgradePrompt)
+            if choice == .cancel {
+                XCTAssertNil(model.pendingDestination)
+                XCTAssertEqual(model.authState, .guest)
+            } else {
+                XCTAssertTrue(model.authState.usesRemoteAccount)
+                XCTAssertGreaterThan(model.tutorialPresentationRequest, 0)
+                model.completeTutorial()
+                XCTAssertEqual(model.consumePendingDestination(), .classes)
+            }
+            try auth.signOut()
+        }
     }
 
     private func makeAuthConfig() -> AppConfig {

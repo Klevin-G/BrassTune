@@ -1,6 +1,12 @@
 import type { MessageCatalog } from '../messages.base';
 
 const messages = {
+  "auth.frontHeading": "أمسك بآلتك الموسيقية.",
+  "auth.frontBody": "اضبط نغمة، أو حدّد نبضًا إيقاعيًا، أو اختر مقطعًا للتدرّب عليه.",
+  "auth.accountOptions": "خيارات الحساب",
+  "auth.practiceGoals": "أهداف التدريب",
+  "legal.photoCredit": "نَسب الصورة",
+  "legal.photoCrop": "يُعرض باقتصاص متجاوب.",
   "meta.title": "BrassTune — موالف وتدريب للآلات النحاسية",
   "meta.description": "يستمع BrassTune إلى عزفك ويعرض ملاحظات الضبط لحظيًا ويساعدك على بناء تدريب مركز.",
   "loading.session": "استعادة الجلسة",
@@ -517,7 +523,7 @@ const messages = {
   "class.joinYourClass": "انضم إلى صفك",
   "class.forStudents": "للطلاب",
   "class.enterCode": "أدخل رمز الفصل الذي أعطاه لك معلمك.",
-  "class.codeExample": "على سبيل المثال BXK4QD",
+  "class.codeExample": "على سبيل المثال 012345",
   "class.code": "رمز الفصل",
   "class.joining": "الانضمام إلى الصف…",
   "class.join": "ينضم",

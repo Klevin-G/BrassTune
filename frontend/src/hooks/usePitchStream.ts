@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { nextDemoPitchFrame } from '../domain/demoPitch';
 import { pitchFrameFromPcm } from '../domain/localPitchDetection';
 import { setWebAudioSessionType } from '../domain/webAudioSession';
+import { PRACTICE_AUDIO_PAUSE_EVENT } from '../domain/practiceLibrary';
 import type { PitchFrame } from '../domain/types';
 import { recordPitchFramesInBatches } from '../api/client';
 import { useI18n } from '../i18n/LocaleContext';
@@ -721,9 +722,11 @@ export function usePitchStream({ enabled, demoMode, instrumentId, referencePitch
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', stopForBackground);
+    window.addEventListener(PRACTICE_AUDIO_PAUSE_EVENT, stopForBackground);
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pagehide', stopForBackground);
+      window.removeEventListener(PRACTICE_AUDIO_PAUSE_EVENT, stopForBackground);
     };
   }, [managePageLifecycle, startMicrophone, stopMicrophone]);
 

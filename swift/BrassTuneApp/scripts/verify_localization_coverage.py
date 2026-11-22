@@ -21,6 +21,7 @@ PRODUCTION_LOCALES = {
 # These keys are intentionally invariant technical tokens, product names,
 # autonyms, standard loanwords, or placeholder-only metric layouts.
 ALLOWED_SOURCE_ECHOES = {
+    "%@ BPM", "System",  # Invariant tempo unit and the German system-appearance label.
     "%@ BPM · %@ · %@", "%@ cents", "A4 %@ Hz", "BPM", "BrassTune", "Classes",
     "5 minutes", "Apple", "Deutsch", "Email", "Español", "Euphonium", "Feedback", "Français", "Horn in F",
     "Instrument", "Local", "Meter", "Name", "Note %@", "Octave", "Original", "Page %@", "Photos",
@@ -106,6 +107,8 @@ def should_preserve_verbatim(value: str) -> bool:
         or re.fullmatch(r"[A-G](?:#|b|♯|♭)?", value)
         or re.fullmatch(r"[A-G](?:#|b|♯|♭)?-?[0-9]", value)
         or value.startswith(("/api/", "/auth/", "http://", "https://"))
+        # Support reference codes are invariant identifiers in every locale.
+        or value in {"MIC-INPUT", "MIC-START"}
         # Accessibility and UI-test identifiers are technical dot-separated
         # tokens, not reader-facing copy. Camel-case suffixes are intentional.
         or re.fullmatch(r"[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+", value)

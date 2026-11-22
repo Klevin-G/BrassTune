@@ -3,8 +3,12 @@ Project attribution: Kelvin Guo, Arya Salem.
 
 Updated: 2026-08-24. Candidate `1.0.1 (8)` from implementation/archive SHA
 `5acfa2ecc6b7403d1572d7382d41357c8ccc2fb4` is uploaded, processed, selected,
-and submitted as `14b8ba6a-fe40-421f-ab61-790bbe51cb08`. It is **Waiting for
-Review** with manual release. Build 7 is historical removed/superseded.
+and submitted as `308027b4-96ad-4171-bc83-faee57539cb6`. On August 24 it was
+approved and manually released; App Store Connect now reports **Ready for
+Distribution**. The public
+description and copyright credit `Kelvin Guo, Arya Salem`. Submission
+`14b8ba6a-fe40-421f-ab61-790bbe51cb08` is developer-rejected and superseded;
+build 7 is historical removed/superseded.
 
 ## Submitted build-8 Classes review path
 
@@ -20,7 +24,7 @@ Review** with manual release. Build 7 is historical removed/superseded.
 The supporting migration is applied and read back with its constraints/RLS
 boundaries verified. A physical Classes fixture UI run
 passed student/owner/assistant workspaces `1/1`, zero failed/skipped, on
-Nandy’s iPhone 15 Pro Max / iOS 26.6.1. It does not establish live hosted
+iPhone 15 Pro Max / iOS 26.6.1. It does not establish live hosted
 multi-account sync or release-candidate behavior.
 
 ## Reviewer access
@@ -69,8 +73,10 @@ multi-account sync or release-candidate behavior.
   Submit. Its IPA SHA-256 is
   `cade0c9842e99f2e77e1f1b27e408460a331b880beb59f59d7f11f8f579ffe8c`; matching
   app/dSYM UUID is `8378AB6E-EA6E-32B3-A26E-F781A481518D`.
-- Submission `14b8ba6a-fe40-421f-ab61-790bbe51cb08` is **Waiting for Review**
-  with manual release; this is not approval or release evidence.
+- Submission `308027b4-96ad-4171-bc83-faee57539cb6` is approved and manually
+  released; App Store Connect reports **Ready for Distribution**. The first
+  public lookup still returned version `1.0`, so storefront propagation was not
+  yet complete at the first post-release check.
 - Automated physical runs cover the listed UI/audio matrices, but calibrated
   acoustic accuracy, accessory routes, Files/Photos fixtures, timer/media-reset
   prerequisites, and full assistive-technology/iPad validation remain unavailable.

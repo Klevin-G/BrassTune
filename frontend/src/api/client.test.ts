@@ -173,12 +173,12 @@ describe('API client runtime URLs', () => {
     const { rotateEnsembleJoinCode, setAuthTokenProvider } = await loadClient('', 'https://api.example.test');
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ group_id: 42, join_code: 'ABCD2345' }),
+      json: async () => ({ group_id: 42, join_code: '012345' }),
     });
     vi.stubGlobal('fetch', fetchMock);
     setAuthTokenProvider(async () => 'signed-in-token');
 
-    await expect(rotateEnsembleJoinCode(42)).resolves.toEqual({ group_id: 42, join_code: 'ABCD2345' });
+    await expect(rotateEnsembleJoinCode(42)).resolves.toEqual({ group_id: 42, join_code: '012345' });
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.example.test/api/ensemble/groups/42/join-code/rotate',

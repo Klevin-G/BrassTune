@@ -49,7 +49,7 @@ listen-back. That audio is not uploaded automatically or retained as account
 data; it remains on-device until deletion, local-data clearing, or explicit
 export/share. Imported scores and local practice content remain on-device unless
 a person explicitly shares or exports them. App Store Connect privacy answers
-are published for submitted build 7 and must be reconciled against future signed
+are published for submitted build 8 and must be reconciled against future signed
 builds and live cloud paths.
 
 For the profile feature, the prepared App Privacy mapping is **Name** and
@@ -58,7 +58,7 @@ for **App Functionality**. The implementation does not use profile data for ads,
 marketing, ad measurement, or data-broker sharing. Apple defines these data
 types and its tracking boundary in [App Privacy
 Details](https://developer.apple.com/app-store/app-privacy-details/). This
-mapping is published in App Store Connect for the submitted build-7 version;
+mapping is published in App Store Connect for the submitted build-8 version;
 it is not a substitute for lifecycle acceptance evidence.
 
 Class directors and class-report surfaces see aggregate cloud practice totals from membership onward. They do not receive recordings, reflection text, or private session detail. A limited set of authorized BrassTune service administrators may access account/session/audio data only for security, support, abuse investigation, or service operation.

@@ -29,6 +29,7 @@ final class AuthService: NSObject {
     private let deleteSessionPayload: () throws -> Void
     private let webAuthenticationOverride: ((URL, String) async throws -> URL)?
     private var webAuthenticationSession: ASWebAuthenticationSession?
+    private var pendingGoogleCallbackDiagnostic: GoogleOAuthCallbackDiagnostic?
 
     init(
         session: URLSession = .shared,
@@ -198,6 +199,11 @@ final class AuthService: NSObject {
             body: ["refresh_token": refreshToken],
             expiredSessionFailure: true
         )
+        // `AuthService` is main-actor isolated, so the comparison and the
+        // following Keychain write cannot interleave with sign-out or a new
+        // sign-in. A response for an older refresh must never recreate a
+        // session that has been cleared or replaced while its request awaited.
+        guard try storedSessionMatches(existing) else { return nil }
         return try store(response: response, fallbackEmail: existing.email)
     }
 
@@ -207,7 +213,9 @@ final class AuthService: NSObject {
         config: AppConfig,
         persist: Bool = true
     ) async throws -> AppleSignInResult {
-        guard let token = String(data: identityToken, encoding: .utf8), !token.isEmpty else {
+        guard let token = String(data: identityToken, encoding: .utf8),
+              !token.isEmpty,
+              !rawNonce.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw UserVisibleError.authenticationFailed
         }
         let response = try await requestAuth(
@@ -244,6 +252,8 @@ final class AuthService: NSObject {
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch let error as URLError where error.code == .timedOut {
@@ -267,13 +277,20 @@ final class AuthService: NSObject {
     }
 
     func signInWithGoogle(config: AppConfig, persist: Bool = true) async throws -> AuthSession {
+        pendingGoogleCallbackDiagnostic = nil
         let verifier = Self.randomURLSafeToken(byteCount: 48)
         let state = Self.randomURLSafeToken(byteCount: 32)
-        let transaction = try Self.googleOAuthTransaction(
-            config: config,
-            state: state,
-            codeVerifier: verifier
-        )
+        let transaction: GoogleOAuthTransaction
+        do {
+            transaction = try Self.googleOAuthTransaction(
+                config: config,
+                state: state,
+                codeVerifier: verifier
+            )
+        } catch UserVisibleError.oauthCallbackInvalid {
+            recordGoogleCallbackDiagnostic(.transactionCallbackScheme)
+            throw UserVisibleError.oauthCallbackInvalid
+        }
         guard let callbackScheme = transaction.callbackURL.scheme else {
             throw UserVisibleError.malformedResponse
         }
@@ -295,16 +312,34 @@ final class AuthService: NSObject {
         } catch is CancellationError {
             throw CancellationError()
         } catch let visible as UserVisibleError {
+            if visible == .oauthCallbackInvalid, pendingGoogleCallbackDiagnostic == nil {
+                recordGoogleCallbackDiagnostic(.sessionCallbackMissing)
+            }
             throw visible
         } catch {
             throw UserVisibleError.authenticationFailed
         }
 
-        let code = try Self.validatedGoogleOAuthCode(
-            callback,
-            expectedState: transaction.state,
-            callbackScheme: callbackScheme
-        )
+        let code: String
+        do {
+            code = try Self.validatedGoogleOAuthCode(
+                callback,
+                expectedState: transaction.state,
+                callbackScheme: callbackScheme
+            )
+        } catch UserVisibleError.oauthCallbackInvalid {
+            recordGoogleCallbackDiagnostic(
+                Self.googleCallbackRejectionReason(
+                    callback,
+                    expectedState: transaction.state,
+                    callbackScheme: callbackScheme
+                ),
+                callbackURL: callback,
+                expectedState: transaction.state,
+                callbackScheme: callbackScheme
+            )
+            throw UserVisibleError.oauthCallbackInvalid
+        }
         let response = try await requestAuth(
             config: config,
             path: "/auth/v1/token",
@@ -322,6 +357,14 @@ final class AuthService: NSObject {
         )
     }
 
+    /// Returns the diagnostic for the most recent rejected Google callback.
+    /// It is consumed once so a later, unrelated auth failure cannot display a
+    /// stale reference.
+    func consumeGoogleCallbackDiagnostic() -> GoogleOAuthCallbackDiagnostic? {
+        defer { pendingGoogleCallbackDiagnostic = nil }
+        return pendingGoogleCallbackDiagnostic
+    }
+
     func signOut() throws {
         do {
             try deleteSessionPayload()
@@ -335,12 +378,14 @@ final class AuthService: NSObject {
     /// caller can preserve a bounded retry marker instead of claiming success.
     func signOut(config: AppConfig) async throws {
         let existing = try restoreSessionOrThrow()
+        // Revoke local ownership before awaiting the network. A concurrent
+        // refresh can no longer resurrect it, and a later login is untouched.
+        try signOut()
         var remoteError: Error?
         if let existing {
             guard config.hasUsableAccountConfiguration,
                   let supabaseURL = config.supabaseURL,
                   let publishableKey = config.supabasePublishableKey else {
-                try signOut()
                 throw UserVisibleError.missingAuthConfiguration
             }
             var components = URLComponents(url: supabaseURL.appending(path: "auth/v1/logout"), resolvingAgainstBaseURL: false)
@@ -366,7 +411,6 @@ final class AuthService: NSObject {
                 remoteError = UserVisibleError.networkUnavailable
             }
         }
-        try signOut()
         if let remoteError { throw remoteError }
     }
 
@@ -505,7 +549,6 @@ final class AuthService: NSObject {
               callbackURL.user == nil,
               callbackURL.password == nil,
               callbackURL.port == nil,
-              callbackURL.fragment == nil,
               let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
             throw UserVisibleError.oauthCallbackInvalid
         }
@@ -516,10 +559,36 @@ final class AuthService: NSObject {
               queryItems.first(where: { $0.name == "state" })?.value == expectedState else {
             throw UserVisibleError.oauthCallbackInvalid
         }
-        if queryItems.contains(where: { $0.name == "error" }) {
+        let providerErrors = queryItems.filter { $0.name == "error" }
+        if !providerErrors.isEmpty {
+            guard providerErrors.count == 1,
+                  queryItems.filter({ $0.name == "error_description" }).count <= 1,
+                  queryItems.filter({ $0.name == "error_code" }).count <= 1,
+                  queryItems.filter({ $0.name == "code" }).isEmpty else {
+                throw UserVisibleError.oauthCallbackInvalid
+            }
+            try validateProviderErrorFragment(
+                components.percentEncodedFragment,
+                queryItems: queryItems,
+                providerError: providerErrors[0]
+            )
+            guard providerErrors[0].value == "access_denied" else {
+                throw UserVisibleError.oauthProviderUnavailable
+            }
             throw UserVisibleError.googleSignInCancelled
         }
-        guard queryItems.filter({ $0.name == "code" }).count == 1,
+        // Supabase's PKCE success redirect preserves only our state and adds
+        // one code. Any other field beside a code is contradictory.
+        //
+        // The redirect itself never carries a fragment, but a browser must
+        // let a fragment-less Location inherit the fragment of the URL that
+        // was redirected (RFC 9110 section 10.2.2). A bare `#` upstream
+        // therefore arrives here as an empty fragment. It holds no data, so
+        // it is treated as absent; any non-empty fragment still fails closed.
+        guard (rawCallbackFragment(callbackURL) ?? "").isEmpty,
+              (components.percentEncodedFragment ?? "").isEmpty,
+              queryItems.count == 2,
+              queryItems.filter({ $0.name == "code" }).count == 1,
               let code = queryItems.first(where: { $0.name == "code" })?.value,
               (1...4_096).contains(code.count),
               code.unicodeScalars.allSatisfy({
@@ -529,6 +598,202 @@ final class AuthService: NSObject {
             throw UserVisibleError.oauthCallbackInvalid
         }
         return code
+    }
+
+    /// Maps the exact validator branch to a fixed diagnostic category. This is
+    /// intentionally evaluated only after the validator rejected the callback;
+    /// it does not loosen validation or expose callback data.
+    static func googleCallbackRejectionReason(
+        _ callbackURL: URL,
+        expectedState: String,
+        callbackScheme: String? = oauthCallbackScheme
+    ) -> GoogleOAuthCallbackFailureReason {
+        guard let callbackScheme,
+              let runtimeCallbackScheme = oauthCallbackScheme,
+              callbackScheme == runtimeCallbackScheme,
+              callbackURL.scheme?.lowercased() == callbackScheme else {
+            return .callbackScheme
+        }
+        guard callbackURL.host?.lowercased() == googleOAuthCallbackHost else {
+            return .callbackHost
+        }
+        guard callbackURL.path == googleOAuthCallbackPath else {
+            return .callbackPath
+        }
+        guard callbackURL.user == nil,
+              callbackURL.password == nil,
+              callbackURL.port == nil else {
+            return .callbackAuthority
+        }
+        guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
+            return .callbackMalformed
+        }
+        let queryItems = components.queryItems ?? []
+        let allowedNames = Set(["code", "state", "error", "error_code", "error_description"])
+        guard queryItems.allSatisfy({ allowedNames.contains($0.name) }) else {
+            return .callbackQueryNames
+        }
+        let states = queryItems.filter { $0.name == "state" }
+        guard states.count == 1 else { return .callbackStateCount }
+        guard states[0].value == expectedState else { return .callbackStateMismatch }
+
+        let providerErrors = queryItems.filter { $0.name == "error" }
+        if !providerErrors.isEmpty {
+            guard providerErrors.count == 1,
+                  queryItems.filter({ $0.name == "error_description" }).count <= 1,
+                  queryItems.filter({ $0.name == "error_code" }).count <= 1,
+                  queryItems.filter({ $0.name == "code" }).isEmpty else {
+                return .callbackProviderErrorShape
+            }
+            do {
+                try validateProviderErrorFragment(
+                    components.percentEncodedFragment,
+                    queryItems: queryItems,
+                    providerError: providerErrors[0]
+                )
+            } catch {
+                return .callbackProviderErrorShape
+            }
+            // A valid provider error is handled as cancellation or provider
+            // unavailability before this classifier is reached.
+            return .callbackMalformed
+        }
+
+        guard (rawCallbackFragment(callbackURL) ?? "").isEmpty,
+              (components.percentEncodedFragment ?? "").isEmpty else {
+            return .callbackFragment
+        }
+        guard queryItems.count == 2,
+              queryItems.filter({ $0.name == "code" }).count == 1 else {
+            return .callbackSuccessShape
+        }
+        guard let code = queryItems.first(where: { $0.name == "code" })?.value,
+              (1...4_096).contains(code.count),
+              code.unicodeScalars.allSatisfy({
+                  !CharacterSet.whitespacesAndNewlines.contains($0)
+                      && !CharacterSet.controlCharacters.contains($0)
+              }) else {
+            return .callbackCode
+        }
+        return .callbackMalformed
+    }
+
+    /// The callback's fragment exactly as written: nil when the URL has no
+    /// `#`, otherwise every character after the first `#` (empty for a bare
+    /// `#`). It is read from the URL text so parser normalization cannot make
+    /// content such as `#&` look empty.
+    static func rawCallbackFragment(_ callbackURL: URL) -> String? {
+        let text = callbackURL.absoluteString
+        guard let hash = text.firstIndex(of: "#") else { return nil }
+        return String(text[text.index(after: hash)...])
+    }
+
+    /// A value-free description of a Google callback for diagnostics. It
+    /// reports scheme/host/path agreement, whether the state matched, whether
+    /// a fragment is present and whether it is exactly empty, counts for a
+    /// fixed allowlist of OAuth field names, and a count of every other
+    /// field. Callback-supplied names and all values never reach the output.
+    static func googleCallbackShapeSummary(
+        _ callbackURL: URL,
+        expectedState: String,
+        callbackScheme: String?
+    ) -> String {
+        let knownNames = ["code", "state", "error", "error_code", "error_description", "sb"]
+        let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
+        func categoryCounts(_ prefix: String, _ items: [URLQueryItem]) -> [String] {
+            knownNames.map { name in "\(prefix)_\(name)=\(items.filter { $0.name == name }.count)" }
+                + ["\(prefix)_unknown=\(items.filter { !knownNames.contains($0.name) }.count)"]
+        }
+        let queryItems = components?.queryItems ?? []
+        let fragmentItems = components?.percentEncodedFragment.flatMap {
+            URLComponents(string: "https://oauth.invalid/?\($0)")?.queryItems
+        } ?? []
+        let states = queryItems.filter { $0.name == "state" }
+        let rawFragment = rawCallbackFragment(callbackURL)
+        let fields = [
+            "scheme_ok=\(callbackScheme != nil && callbackScheme == oauthCallbackScheme && callbackURL.scheme?.lowercased() == callbackScheme)",
+            "host_ok=\(callbackURL.host?.lowercased() == googleOAuthCallbackHost)",
+            "path_ok=\(callbackURL.path == googleOAuthCallbackPath)",
+            "authority_extra=\(callbackURL.user != nil || callbackURL.password != nil || callbackURL.port != nil)",
+            "state_match=\(states.count == 1 && states[0].value == expectedState)",
+            "fragment_present=\(rawFragment != nil)",
+            // Zero parsed fragment fields does not prove emptiness (`#&`
+            // parses to none), so emptiness is reported from the raw text.
+            "fragment_empty=\(rawFragment == "")",
+        ] + categoryCounts("query", queryItems) + categoryCounts("fragment", fragmentItems)
+        return fields.joined(separator: " ")
+    }
+
+    private static func validateProviderErrorFragment(
+        _ percentEncodedFragment: String?,
+        queryItems: [URLQueryItem],
+        providerError: URLQueryItem
+    ) throws {
+        // A fragment-less redirect can inherit a bare `#` through a redirect
+        // chain. It carries no provider data, so treat absent and exactly empty
+        // fragments identically. Any nonempty fragment still needs the strict
+        // mirrored Supabase shape below.
+        guard let percentEncodedFragment, !percentEncodedFragment.isEmpty else { return }
+        guard
+              !percentEncodedFragment.contains("#"),
+              let fragmentComponents = URLComponents(
+                  string: "https://oauth.invalid/?\(percentEncodedFragment)"
+              ) else {
+            throw UserVisibleError.oauthCallbackInvalid
+        }
+        let fragmentItems = fragmentComponents.queryItems ?? []
+        let allowedFragmentNames = Set(["error", "error_description", "error_code", "sb"])
+        guard fragmentItems.allSatisfy({ allowedFragmentNames.contains($0.name) }),
+              fragmentItems.filter({ $0.name == "sb" }).count == 1,
+              fragmentItems.first(where: { $0.name == "sb" })?.value == "",
+              fragmentItems.filter({ $0.name == "error" }).count == 1,
+              fragmentItems.first(where: { $0.name == "error" })?.value == providerError.value else {
+            throw UserVisibleError.oauthCallbackInvalid
+        }
+        for name in ["error_description", "error_code"] {
+            let fragmentValues = fragmentItems.filter { $0.name == name }
+            let queryValues = queryItems.filter { $0.name == name }
+            guard queryValues.count <= 1, fragmentValues.count <= 1 else {
+                throw UserVisibleError.oauthCallbackInvalid
+            }
+            let queryValue = queryValues.first?.value ?? ""
+            // Live Supabase (GoTrue v2.197.0) error redirects differ from the
+            // query in two captured ways: an empty value is omitted from the
+            // fragment, and a value containing `:` or `/` is percent-encoded
+            // twice there. Neither carries a credential; the query remains the
+            // authority and the state was already validated above.
+            guard let fragmentItem = fragmentValues.first else {
+                guard queryValue.isEmpty else { throw UserVisibleError.oauthCallbackInvalid }
+                continue
+            }
+            let fragmentValue = fragmentItem.value ?? ""
+            guard fragmentValue == queryValue
+                    || fragmentValue.removingPercentEncoding == queryValue else {
+                throw UserVisibleError.oauthCallbackInvalid
+            }
+        }
+    }
+
+    private func recordGoogleCallbackDiagnostic(
+        _ reason: GoogleOAuthCallbackFailureReason,
+        callbackURL: URL? = nil,
+        expectedState: String = "",
+        callbackScheme: String? = nil
+    ) {
+        let diagnostic = GoogleOAuthCallbackDiagnostic(reason: reason)
+        pendingGoogleCallbackDiagnostic = diagnostic
+        guard let callbackURL else {
+            NSLog("BrassTune OAuth callback rejected: reference=%@", diagnostic.reference)
+            return
+        }
+        // Physical-device diagnosis needs the rejected shape, never its
+        // values: the summary holds booleans and parameter names only.
+        NSLog("BrassTune OAuth callback rejected: reference=%@ %@", diagnostic.reference,
+              Self.googleCallbackShapeSummary(
+                callbackURL,
+                expectedState: expectedState,
+                callbackScheme: callbackScheme
+              ))
     }
 
     static func randomURLSafeToken(byteCount: Int) -> String {
@@ -607,11 +872,16 @@ final class AuthService: NSObject {
         return expiresAt.timeIntervalSinceNow > 0
     }
 
+    private func storedSessionMatches(_ expected: AuthSession) throws -> Bool {
+        try restoreSessionOrThrow() == expected
+    }
+
     private func store(
         response: SupabaseAuthResponse,
         fallbackEmail: String,
         persist: Bool = true
     ) throws -> AuthSession {
+        if Task.isCancelled { throw CancellationError() }
         guard let accessToken = response.accessToken, !accessToken.isEmpty,
               let userID = response.user?.id?.trimmingCharacters(in: .whitespacesAndNewlines),
               !userID.isEmpty else { throw UserVisibleError.authenticationFailed }
@@ -660,6 +930,8 @@ final class AuthService: NSObject {
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch let error as URLError where error.code == .timedOut {

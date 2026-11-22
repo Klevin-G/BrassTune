@@ -307,12 +307,14 @@ struct GuidedWarmupBreathingCycle: Equatable {
 // MARK: - Goals, reflections, and Play-Along evidence
 
 struct WeeklyPracticeGoal: Codable, Equatable {
+    static let maximumTargetSessions = 168
+
     var targetMinutes: Int = 60
     var targetSessions: Int = 3
 
     mutating func validate() {
         targetMinutes = min(600, max(5, targetMinutes))
-        targetSessions = min(21, max(1, targetSessions))
+        targetSessions = min(Self.maximumTargetSessions, max(1, targetSessions))
     }
 }
 
@@ -338,6 +340,342 @@ struct PracticeReflection: Codable, Equatable, Identifiable {
         self.mood = mood
         self.note = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(280))
         self.updatedAt = updatedAt
+    }
+}
+
+// MARK: - Measurable practice goals
+
+/// A deliberately self-reported goal. BrassTune records the musician's own
+/// assessment and never represents an attempt as microphone-verified.
+enum PracticeGoalSkill: String, Codable, CaseIterable, Identifiable {
+    case articulation
+    case tone
+    case flexibility
+    case accuracy
+    case rhythm
+    case endurance
+
+    var id: String { rawValue }
+
+    var title: String { NativeLocalization.string(rawValue.capitalized) }
+}
+
+enum PracticeGoalStrategy: String, Codable, CaseIterable, Identifiable {
+    case slowPractice = "slow_practice"
+    case chunking
+    case rhythmVariation = "rhythm_variation"
+    case listenFirst = "listen_first"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .slowPractice: return NativeLocalization.string("Slow practice")
+        case .chunking: return NativeLocalization.string("Chunk it")
+        case .rhythmVariation: return NativeLocalization.string("Rhythm variation")
+        case .listenFirst: return NativeLocalization.string("Listen first")
+        }
+    }
+}
+
+enum PracticeGoalCriterionKind: String, Codable, CaseIterable, Identifiable {
+    case cleanRepetitions = "clean_repetitions"
+    case sustainedTone = "sustained_tone"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .cleanRepetitions: return NativeLocalization.string("Clean repetitions at tempo")
+        case .sustainedTone: return NativeLocalization.string("Sustained target")
+        }
+    }
+}
+
+struct PracticeGoalCriterion: Codable, Equatable {
+    static let tempoRange = 30...240
+    static let repetitionRange = 1...50
+    static let sustainSecondsRange = 2...120
+
+    var kind: PracticeGoalCriterionKind
+    var targetTempoBPM: Int
+    var targetCleanRepetitions: Int
+    var targetSustainSeconds: Int
+
+    init(
+        kind: PracticeGoalCriterionKind = .cleanRepetitions,
+        targetTempoBPM: Int = 80,
+        targetCleanRepetitions: Int = 3,
+        targetSustainSeconds: Int = 8
+    ) {
+        self.kind = kind
+        self.targetTempoBPM = targetTempoBPM
+        self.targetCleanRepetitions = targetCleanRepetitions
+        self.targetSustainSeconds = targetSustainSeconds
+        validate()
+    }
+
+    mutating func validate() {
+        targetTempoBPM = min(Self.tempoRange.upperBound, max(Self.tempoRange.lowerBound, targetTempoBPM))
+        targetCleanRepetitions = min(Self.repetitionRange.upperBound, max(Self.repetitionRange.lowerBound, targetCleanRepetitions))
+        targetSustainSeconds = min(Self.sustainSecondsRange.upperBound, max(Self.sustainSecondsRange.lowerBound, targetSustainSeconds))
+    }
+
+    var summary: String {
+        switch kind {
+        case .cleanRepetitions:
+            return NativeLocalization.format(
+                "%@ clean repetitions at %@ BPM",
+                String(targetCleanRepetitions),
+                String(targetTempoBPM)
+            )
+        case .sustainedTone:
+            return NativeLocalization.format("Sustain for %@ seconds", String(targetSustainSeconds))
+        }
+    }
+}
+
+enum PracticeGoalAttemptOutcome: String, Codable, CaseIterable, Identifiable {
+    case notYet = "not_yet"
+    case improving
+    case met
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .notYet: return NativeLocalization.string("Not yet")
+        case .improving: return NativeLocalization.string("Improving")
+        case .met: return NativeLocalization.string("Met today")
+        }
+    }
+}
+
+struct PracticeGoalAttempt: Codable, Equatable, Identifiable {
+    // Failed attempts are useful evidence. Target minima must not turn a
+    // self-reported zero into a successful repetition or sustained tone.
+    static let repetitionRange = 0...PracticeGoalCriterion.repetitionRange.upperBound
+    static let sustainSecondsRange = 0...PracticeGoalCriterion.sustainSecondsRange.upperBound
+    let id: UUID
+    var outcome: PracticeGoalAttemptOutcome
+    var reflection: String
+    var nextAdjustment: String
+    /// Self-reported values, never a microphone-derived claim.
+    var achievedTempoBPM: Int?
+    var achievedCleanRepetitions: Int?
+    var achievedSustainSeconds: Int?
+    /// A record keeps the target and strategy that were active at the time,
+    /// so subsequent goal edits cannot rewrite practice history.
+    var criterionSnapshot: PracticeGoalCriterion?
+    var strategySnapshot: PracticeGoalStrategy?
+    var createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        outcome: PracticeGoalAttemptOutcome,
+        reflection: String,
+        nextAdjustment: String,
+        achievedTempoBPM: Int? = nil,
+        achievedCleanRepetitions: Int? = nil,
+        achievedSustainSeconds: Int? = nil,
+        criterionSnapshot: PracticeGoalCriterion? = nil,
+        strategySnapshot: PracticeGoalStrategy? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.outcome = outcome
+        self.reflection = Self.trim(reflection)
+        self.nextAdjustment = Self.trim(nextAdjustment)
+        self.achievedTempoBPM = achievedTempoBPM
+        self.achievedCleanRepetitions = achievedCleanRepetitions
+        self.achievedSustainSeconds = achievedSustainSeconds
+        self.criterionSnapshot = criterionSnapshot
+        self.strategySnapshot = strategySnapshot
+        self.createdAt = createdAt
+        validate()
+    }
+
+    mutating func validate() {
+        reflection = Self.trim(reflection)
+        nextAdjustment = Self.trim(nextAdjustment)
+        if let achievedTempoBPM {
+            self.achievedTempoBPM = min(PracticeGoalCriterion.tempoRange.upperBound, max(PracticeGoalCriterion.tempoRange.lowerBound, achievedTempoBPM))
+        }
+        if let achievedCleanRepetitions {
+            self.achievedCleanRepetitions = min(Self.repetitionRange.upperBound, max(Self.repetitionRange.lowerBound, achievedCleanRepetitions))
+        }
+        if let achievedSustainSeconds {
+            self.achievedSustainSeconds = min(Self.sustainSecondsRange.upperBound, max(Self.sustainSecondsRange.lowerBound, achievedSustainSeconds))
+        }
+        criterionSnapshot?.validate()
+    }
+
+    private static func trim(_ text: String) -> String {
+        String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(280))
+    }
+}
+
+/// Keeps a corrupt or forward-incompatible goal from discarding the rest of a
+/// user's local practice data during a schema upgrade.
+private struct LossyPracticeGoal: Decodable {
+    let goal: PracticeGoal?
+
+    init(from decoder: Decoder) {
+        goal = try? PracticeGoal(from: decoder)
+    }
+}
+
+/// A player-controlled sequence; advancing never records an outcome.
+struct PracticeTempoLadder: Equatable {
+    let targetBPM: Int
+    private(set) var startBPM: Int
+    private(set) var stepBPM: Int
+    private(set) var currentBPM: Int
+
+    init(startBPM: Int, targetBPM: Int, stepBPM: Int = 5) {
+        self.targetBPM = min(PracticeGoalCriterion.tempoRange.upperBound, max(PracticeGoalCriterion.tempoRange.lowerBound, targetBPM))
+        self.startBPM = min(self.targetBPM, max(PracticeGoalCriterion.tempoRange.lowerBound, startBPM))
+        self.stepBPM = min(20, max(1, stepBPM))
+        self.currentBPM = self.startBPM
+    }
+
+    static func suggestedStart(targetBPM: Int, recordedBPM: Int?) -> Int {
+        let target = min(PracticeGoalCriterion.tempoRange.upperBound, max(PracticeGoalCriterion.tempoRange.lowerBound, targetBPM))
+        if let recordedBPM, recordedBPM < target {
+            return max(PracticeGoalCriterion.tempoRange.lowerBound, recordedBPM)
+        }
+        return max(PracticeGoalCriterion.tempoRange.lowerBound, target - 15)
+    }
+
+    mutating func setStart(_ value: Int) {
+        startBPM = min(targetBPM, max(PracticeGoalCriterion.tempoRange.lowerBound, value))
+        currentBPM = startBPM
+    }
+
+    mutating func setStep(_ value: Int) {
+        stepBPM = min(20, max(1, value))
+        currentBPM = startBPM
+    }
+
+    mutating func advance() {
+        currentBPM = min(targetBPM, currentBPM + stepBPM)
+    }
+
+    mutating func stepBack() {
+        guard currentBPM > startBPM else { return }
+        // The last rung may be shorter than a full step to reach the exact target.
+        let previousIndex = (currentBPM - startBPM - 1) / stepBPM
+        currentBPM = startBPM + previousIndex * stepBPM
+    }
+}
+
+struct PracticeGoal: Codable, Equatable, Identifiable {
+    static let maximumGoals = 24
+    static let maximumAttempts = 50
+
+    let id: UUID
+    var passage: String
+    var skill: PracticeGoalSkill
+    var criterion: PracticeGoalCriterion
+    var strategy: PracticeGoalStrategy
+    var attempts: [PracticeGoalAttempt]
+    var completedAt: Date?
+    var nextReviewAt: Date
+    var updatedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case id, passage, skill, criterion, strategy, attempts, completedAt, nextReviewAt, updatedAt
+    }
+
+    init(
+        id: UUID = UUID(),
+        passage: String,
+        skill: PracticeGoalSkill,
+        criterion: PracticeGoalCriterion,
+        strategy: PracticeGoalStrategy,
+        attempts: [PracticeGoalAttempt] = [],
+        completedAt: Date? = nil,
+        nextReviewAt: Date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.passage = passage
+        self.skill = skill
+        self.criterion = criterion
+        self.strategy = strategy
+        self.attempts = attempts
+        self.completedAt = completedAt
+        self.nextReviewAt = nextReviewAt
+        self.updatedAt = updatedAt
+        validate()
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        passage = try container.decodeIfPresent(String.self, forKey: .passage) ?? "Untitled passage"
+        skill = try container.decodeIfPresent(PracticeGoalSkill.self, forKey: .skill) ?? .articulation
+        criterion = try container.decodeIfPresent(PracticeGoalCriterion.self, forKey: .criterion) ?? PracticeGoalCriterion()
+        strategy = try container.decodeIfPresent(PracticeGoalStrategy.self, forKey: .strategy) ?? .slowPractice
+        attempts = try container.decodeIfPresent([PracticeGoalAttempt].self, forKey: .attempts) ?? []
+        completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        nextReviewAt = try container.decodeIfPresent(Date.self, forKey: .nextReviewAt)
+            ?? Calendar.current.date(byAdding: .day, value: 1, to: updatedAt)
+            ?? updatedAt
+        validate()
+    }
+
+    var isCompleted: Bool { completedAt != nil }
+    var supportsMetronomePractice: Bool { criterion.kind == .cleanRepetitions }
+    var mostRecentRecordedTempoBPM: Int? {
+        attempts.compactMap(\.achievedTempoBPM).first
+    }
+    var recommendedMetronomeTempoBPM: Int {
+        mostRecentRecordedTempoBPM ?? criterion.targetTempoBPM
+    }
+
+    /// The goal editor presents a date-only control, so a goal is due for the
+    /// entire selected calendar day rather than at its hidden stored time.
+    func isDueForReview(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        !isCompleted && calendar.startOfDay(for: nextReviewAt) <= calendar.startOfDay(for: now)
+    }
+
+    /// Orders goals for review without changing their persisted order.
+    static func reviewPriority(
+        in goals: [PracticeGoal],
+        focusedGoalID: ID? = nil
+    ) -> [PracticeGoal] {
+        goals.sorted { left, right in
+            if left.id == right.id { return false }
+            if left.id == focusedGoalID { return true }
+            if right.id == focusedGoalID { return false }
+            if left.isCompleted != right.isCompleted { return !left.isCompleted }
+            if left.nextReviewAt != right.nextReviewAt { return left.nextReviewAt < right.nextReviewAt }
+            if left.updatedAt != right.updatedAt { return left.updatedAt > right.updatedAt }
+            return left.id.uuidString < right.id.uuidString
+        }
+    }
+
+    /// Chooses one active goal for a review prompt without inferring whether
+    /// the musician met it. The list and prompt share the same priority.
+    static func nextReviewGoal(
+        in goals: [PracticeGoal],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> PracticeGoal? {
+        reviewPriority(in: goals).first { !$0.isCompleted }
+    }
+
+    mutating func validate() {
+        passage = String(passage.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
+        if passage.isEmpty { passage = "Untitled passage" }
+        criterion.validate()
+        attempts = Array(attempts.map { attempt in
+            var normalized = attempt
+            normalized.validate()
+            return normalized
+        }.sorted { $0.createdAt > $1.createdAt }.prefix(Self.maximumAttempts))
     }
 }
 
@@ -556,6 +894,20 @@ enum TuningInterval: Int, Codable, CaseIterable, Identifiable {
     static let allCases: [TuningInterval] = [.unison, .majorSecond, .majorThird, .perfectFourth, .perfectFifth, .octave]
 
     var id: Int { rawValue }
+
+    /// Root-relative, five-limit ratios used when a drone is set to just
+    /// intonation. The root remains at the selected concert reference pitch;
+    /// instrument transposition is resolved before this ratio is applied.
+    var justIntonationRatio: Double {
+        switch self {
+        case .unison: return 1
+        case .majorSecond: return 9.0 / 8.0
+        case .majorThird: return 5.0 / 4.0
+        case .perfectFourth: return 4.0 / 3.0
+        case .perfectFifth: return 3.0 / 2.0
+        case .octave: return 2
+        }
+    }
     var title: String {
         switch self {
         case .unison: return NativeLocalization.string("Unison")
@@ -568,14 +920,87 @@ enum TuningInterval: Int, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Existing persisted settings decode as `.interval`, retaining their prior
+/// unison/dyad behavior.
+enum DroneVoicing: String, Codable, CaseIterable, Identifiable {
+    case interval
+    case majorTriad = "major_triad"
+    case minorTriad = "minor_triad"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .interval: return NativeLocalization.string("Interval")
+        case .majorTriad: return NativeLocalization.string("Major triad")
+        case .minorTriad: return NativeLocalization.string("Minor triad")
+        }
+    }
+
+    var writtenSemitoneOffsets: [Int] {
+        switch self {
+        case .interval: return []
+        case .majorTriad: return [0, 4, 7]
+        case .minorTriad: return [0, 3, 7]
+        }
+    }
+}
+
+/// Temperament applies root-relative ratios after written-to-concert
+/// transposition; it never changes the selected A reference pitch.
+enum DroneTemperament: String, Codable, CaseIterable, Identifiable {
+    case equalTemperament = "equal_temperament"
+    case justIntonation = "just_intonation"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .equalTemperament: return NativeLocalization.string("Equal temperament")
+        case .justIntonation: return NativeLocalization.string("Just intonation")
+        }
+    }
+}
+
 struct DroneSettings: Codable, Equatable {
     var writtenMIDINote: Int = 60
     var interval: TuningInterval = .unison
     var volume: Double = 0.22
+    var voicing: DroneVoicing = .interval
+    var temperament: DroneTemperament = .equalTemperament
+
+    init(
+        writtenMIDINote: Int = 60,
+        interval: TuningInterval = .unison,
+        volume: Double = 0.22,
+        voicing: DroneVoicing = .interval,
+        temperament: DroneTemperament = .equalTemperament
+    ) {
+        self.writtenMIDINote = writtenMIDINote
+        self.interval = interval
+        self.volume = volume
+        self.voicing = voicing
+        self.temperament = temperament
+        validate()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case writtenMIDINote, interval, volume, voicing, temperament
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        writtenMIDINote = try container.decodeIfPresent(Int.self, forKey: .writtenMIDINote) ?? 60
+        interval = try container.decodeIfPresent(TuningInterval.self, forKey: .interval) ?? .unison
+        volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0.22
+        voicing = try container.decodeIfPresent(DroneVoicing.self, forKey: .voicing) ?? .interval
+        temperament = try container.decodeIfPresent(DroneTemperament.self, forKey: .temperament) ?? .equalTemperament
+        validate()
+    }
 
     mutating func validate() {
         writtenMIDINote = min(84, max(36, writtenMIDINote))
-        volume = min(0.5, max(0.05, volume))
+        volume = NativeToneOutputPolicy.clampedUserVolume(volume)
     }
 }
 
@@ -593,11 +1018,15 @@ enum PracticePitchMath {
         writtenMIDI: Int,
         interval: TuningInterval = .unison,
         instrumentID: String,
-        referencePitchHz: Double
+        referencePitchHz: Double,
+        temperament: DroneTemperament = .equalTemperament
     ) -> Double? {
-        let targetWrittenMIDI = writtenMIDI + interval.rawValue
-        guard let concertMIDI = concertMIDI(forWrittenMIDI: targetWrittenMIDI, instrumentID: instrumentID) else { return nil }
-        return BrassTuneCore.midiToFrequency(Double(concertMIDI), referencePitchHz: referencePitchHz)
+        guard let rootConcertMIDI = concertMIDI(forWrittenMIDI: writtenMIDI, instrumentID: instrumentID) else { return nil }
+        let root = BrassTuneCore.midiToFrequency(Double(rootConcertMIDI), referencePitchHz: referencePitchHz)
+        let ratio = temperament == .equalTemperament
+            ? pow(2, Double(interval.rawValue) / 12)
+            : interval.justIntonationRatio
+        return root * ratio
     }
 
     static func frequencies(
@@ -606,20 +1035,67 @@ enum PracticePitchMath {
         instrumentID: String,
         referencePitchHz: Double
     ) -> [Double]? {
-        guard let base = frequency(
-            writtenMIDI: writtenMIDI,
-            interval: .unison,
-            instrumentID: instrumentID,
-            referencePitchHz: referencePitchHz
-        ) else { return nil }
-        guard interval != .unison else { return [base] }
-        guard let upper = frequency(
+        frequencies(
             writtenMIDI: writtenMIDI,
             interval: interval,
+            voicing: .interval,
+            temperament: .equalTemperament,
             instrumentID: instrumentID,
             referencePitchHz: referencePitchHz
-        ) else { return nil }
-        return [base, upper]
+        )
+    }
+
+    static func frequencies(
+        writtenMIDI: Int,
+        interval: TuningInterval,
+        voicing: DroneVoicing,
+        temperament: DroneTemperament,
+        instrumentID: String,
+        referencePitchHz: Double
+    ) -> [Double]? {
+        guard let rootConcertMIDI = concertMIDI(forWrittenMIDI: writtenMIDI, instrumentID: instrumentID) else { return nil }
+        let root = BrassTuneCore.midiToFrequency(Double(rootConcertMIDI), referencePitchHz: referencePitchHz)
+        let ratios: [Double]
+        switch voicing {
+        case .interval:
+            guard interval != .unison else { return [root] }
+            ratios = temperament == .equalTemperament
+                ? [1, pow(2, Double(interval.rawValue) / 12)]
+                : [1, interval.justIntonationRatio]
+        case .majorTriad:
+            ratios = temperament == .equalTemperament
+                ? [1, pow(2, 4.0 / 12.0), pow(2, 7.0 / 12.0)]
+                : [1, 5.0 / 4.0, 3.0 / 2.0]
+        case .minorTriad:
+            ratios = temperament == .equalTemperament
+                ? [1, pow(2, 3.0 / 12.0), pow(2, 7.0 / 12.0)]
+                : [1, 6.0 / 5.0, 3.0 / 2.0]
+        }
+        return ratios.map { root * $0 }
+    }
+
+    static func frequencies(
+        settings: DroneSettings,
+        instrumentID: String,
+        referencePitchHz: Double
+    ) -> [Double]? {
+        frequencies(
+            writtenMIDI: settings.writtenMIDINote,
+            interval: settings.interval,
+            voicing: settings.voicing,
+            temperament: settings.temperament,
+            instrumentID: instrumentID,
+            referencePitchHz: referencePitchHz
+        )
+    }
+
+    static func writtenMIDIs(writtenMIDI: Int, interval: TuningInterval, voicing: DroneVoicing) -> [Int] {
+        switch voicing {
+        case .interval:
+            return interval == .unison ? [writtenMIDI] : [writtenMIDI, writtenMIDI + interval.rawValue]
+        case .majorTriad, .minorTriad:
+            return voicing.writtenSemitoneOffsets.map { writtenMIDI + $0 }
+        }
     }
 
     static func noteLabel(writtenMIDI: Int) -> String {
@@ -835,6 +1311,7 @@ struct PracticeFeatureState: Codable, Equatable {
     var favorites: [PracticeShortcut] = []
     var recents: [PracticeShortcut] = []
     var weeklyGoal = WeeklyPracticeGoal()
+    var measurableGoals: [PracticeGoal] = []
     var reflections: [PracticeReflection] = []
     var playAlongAttempts: [PlayAlongAttemptSummary] = []
     var warmupCheckpoint: GuidedWarmupCheckpoint?
@@ -846,7 +1323,7 @@ struct PracticeFeatureState: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, customExercises, metronomePresets, favorites, recents
-        case weeklyGoal, reflections, playAlongAttempts, warmupCheckpoint
+        case weeklyGoal, measurableGoals, reflections, playAlongAttempts, warmupCheckpoint
         case customPacks, workspaceCheckpoint, droneSettings
     }
 
@@ -858,6 +1335,8 @@ struct PracticeFeatureState: Codable, Equatable {
         favorites = try container.decodeIfPresent([PracticeShortcut].self, forKey: .favorites) ?? []
         recents = try container.decodeIfPresent([PracticeShortcut].self, forKey: .recents) ?? []
         weeklyGoal = try container.decodeIfPresent(WeeklyPracticeGoal.self, forKey: .weeklyGoal) ?? WeeklyPracticeGoal()
+        measurableGoals = (try? container.decode([LossyPracticeGoal].self, forKey: .measurableGoals))?
+            .compactMap(\.goal) ?? []
         reflections = try container.decodeIfPresent([PracticeReflection].self, forKey: .reflections) ?? []
         playAlongAttempts = try container.decodeIfPresent([PlayAlongAttemptSummary].self, forKey: .playAlongAttempts) ?? []
         warmupCheckpoint = try container.decodeIfPresent(GuidedWarmupCheckpoint.self, forKey: .warmupCheckpoint)
@@ -865,6 +1344,11 @@ struct PracticeFeatureState: Codable, Equatable {
         workspaceCheckpoint = try container.decodeIfPresent(FocusedWorkspaceCheckpoint.self, forKey: .workspaceCheckpoint)
         droneSettings = try container.decodeIfPresent(DroneSettings.self, forKey: .droneSettings) ?? DroneSettings()
         weeklyGoal.validate()
+        measurableGoals = measurableGoals.map { goal in
+            var normalized = goal
+            normalized.validate()
+            return normalized
+        }.sorted { $0.updatedAt > $1.updatedAt }
         metronomePresets = metronomePresets.map { preset in
             var migrated = preset
             migrated.settings.validate()
@@ -1048,6 +1532,92 @@ extension AppModel {
         practiceFeatures.weeklyGoal = goal
     }
 
+    @discardableResult
+    func savePracticeGoal(
+        id: PracticeGoal.ID? = nil,
+        passage: String,
+        skill: PracticeGoalSkill,
+        criterion: PracticeGoalCriterion,
+        strategy: PracticeGoalStrategy,
+        nextReviewAt: Date,
+        now: Date = Date()
+    ) -> Bool {
+        var goal = PracticeGoal(
+            id: id ?? UUID(),
+            passage: passage,
+            skill: skill,
+            criterion: criterion,
+            strategy: strategy,
+            nextReviewAt: nextReviewAt,
+            updatedAt: now
+        )
+        if let id, let existing = practiceFeatures.measurableGoals.first(where: { $0.id == id }) {
+            goal.attempts = existing.attempts
+            goal.completedAt = existing.completedAt
+        }
+        if let index = practiceFeatures.measurableGoals.firstIndex(where: { $0.id == goal.id }) {
+            practiceFeatures.measurableGoals[index] = goal
+        } else if practiceFeatures.measurableGoals.count < PracticeGoal.maximumGoals {
+            practiceFeatures.measurableGoals.insert(goal, at: 0)
+        } else {
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    func logPracticeGoalAttempt(
+        goalID: PracticeGoal.ID,
+        outcome: PracticeGoalAttemptOutcome,
+        reflection: String,
+        nextAdjustment: String,
+        achievedTempoBPM: Int?,
+        achievedCleanRepetitions: Int?,
+        achievedSustainSeconds: Int?,
+        nextReviewAt: Date? = nil,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Bool {
+        guard let index = practiceFeatures.measurableGoals.firstIndex(where: { $0.id == goalID }) else { return false }
+        var goal = practiceFeatures.measurableGoals[index]
+        guard goal.attempts.count < PracticeGoal.maximumAttempts else { return false }
+        let attempt = PracticeGoalAttempt(
+            outcome: outcome,
+            reflection: reflection,
+            nextAdjustment: nextAdjustment,
+            achievedTempoBPM: achievedTempoBPM,
+            achievedCleanRepetitions: achievedCleanRepetitions,
+            achievedSustainSeconds: achievedSustainSeconds,
+            criterionSnapshot: goal.criterion,
+            strategySnapshot: goal.strategy,
+            createdAt: now
+        )
+        goal.attempts.insert(attempt, at: 0)
+        goal.nextReviewAt = nextReviewAt
+            ?? calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
+            ?? now
+        goal.updatedAt = now
+        goal.validate()
+        practiceFeatures.measurableGoals[index] = goal
+        return true
+    }
+
+    func completePracticeGoal(id: PracticeGoal.ID, now: Date = Date()) {
+        guard let index = practiceFeatures.measurableGoals.firstIndex(where: { $0.id == id }) else { return }
+        practiceFeatures.measurableGoals[index].completedAt = now
+        practiceFeatures.measurableGoals[index].updatedAt = now
+    }
+
+    func reopenPracticeGoal(id: PracticeGoal.ID, now: Date = Date()) {
+        guard let index = practiceFeatures.measurableGoals.firstIndex(where: { $0.id == id }) else { return }
+        practiceFeatures.measurableGoals[index].completedAt = nil
+        practiceFeatures.measurableGoals[index].updatedAt = now
+    }
+
+    func deletePracticeGoal(id: PracticeGoal.ID) {
+        practiceFeatures.measurableGoals.removeAll { $0.id == id }
+    }
+
     func reflection(for sessionID: PracticeSession.ID) -> PracticeReflection? {
         practiceFeatures.reflections.first { $0.sessionID == sessionID }
     }
@@ -1164,8 +1734,7 @@ extension AppModel {
         stopFeatureAudio(exceptTone: true)
         let settings = practiceFeatures.droneSettings
         guard let frequencies = PracticePitchMath.frequencies(
-            writtenMIDI: settings.writtenMIDINote,
-            interval: settings.interval,
+            settings: settings,
             instrumentID: selectedInstrumentId,
             referencePitchHz: referencePitchHz
         ) else {
@@ -1308,7 +1877,7 @@ extension AppModel {
         if playAlongPhase == .running || playAlongStartInProgress {
             stopPlayAlong()
         }
-        stopMetronome()
+        stopMetronomeTuner()
         if !exceptTone {
             stopDrone()
         }

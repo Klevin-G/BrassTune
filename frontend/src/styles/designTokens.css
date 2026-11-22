@@ -1,4 +1,5 @@
-:root {
+:root,
+[data-theme='brass-night'] {
   color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #070a0f;
@@ -92,6 +93,7 @@
   --chrome-bg: rgba(255, 250, 240, 0.84);
 }
 
+:root:not([data-theme]),
 [data-theme='brass-white'] {
   color-scheme: light;
   background: #ffffff;

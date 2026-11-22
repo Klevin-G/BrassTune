@@ -51,6 +51,16 @@ if env \
     exit 1
 fi
 
+if env \
+    CONFIGURATION=ReleaseCandidate \
+    ACTION=install \
+    PRODUCT_BUNDLE_IDENTIFIER=com.aryasalem.BrassTune.dev \
+    BRASSTUNE_AUTH_CALLBACK_SCHEME=com.brasstune.auth.dev \
+    /bin/sh "$preflight" >/dev/null 2>&1; then
+    echo "Expected a Release-equivalent install without public auth configuration to fail." >&2
+    exit 1
+fi
+
 if release_preflight >/dev/null 2>&1; then
     echo "Expected a Release archive without public auth configuration to fail." >&2
     exit 1

@@ -1,6 +1,12 @@
 import type { MessageCatalog } from '../messages.base';
 
 const messages = {
+  "auth.frontHeading": "楽器を手に取りましょう。",
+  "auth.frontBody": "音を合わせ、拍を設定するか、練習するフレーズを選びましょう。",
+  "auth.accountOptions": "アカウントのオプション",
+  "auth.practiceGoals": "練習目標",
+  "legal.photoCredit": "写真クレジット",
+  "legal.photoCrop": "画面に合わせてトリミングして表示されます。",
   "meta.title": "BrassTune — 金管チューナー & 練習",
   "meta.description": "BrassTune はあなたの演奏を聞き、リアルタイムでピッチフィードバックを表示し、集中した練習ルーチンの構築を支援します。",
   "loading.session": "セッションを復元中",
@@ -517,7 +523,7 @@ const messages = {
   "class.joinYourClass": "クラスに参加してください",
   "class.forStudents": "学生向け",
   "class.enterCode": "先生から教えてもらったクラスコードを入力してください。",
-  "class.codeExample": "たとえば、BXK4QD",
+  "class.codeExample": "たとえば、012345",
   "class.code": "クラスコード",
   "class.joining": "クラスに参加中…",
   "class.join": "参加する",

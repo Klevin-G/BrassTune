@@ -1,6 +1,12 @@
 import type { MessageCatalog } from '../messages.base';
 
 const messages = {
+  "auth.frontHeading": "Возьмите свой инструмент.",
+  "auth.frontBody": "Настройте ноту, задайте пульс или выберите фрагмент для работы.",
+  "auth.accountOptions": "Параметры учётной записи",
+  "auth.practiceGoals": "Цели занятий",
+  "legal.photoCredit": "Указание автора фото",
+  "legal.photoCrop": "Отображается с адаптивным кадрированием.",
   "meta.title": "BrassTune — настройщик медных духовых инструментов и практика",
   "meta.description": "BrassTune слушает вас во время игры, показывает обратную связь по высоте в реальном времени и помогает вам выстроить целенаправленную практику.",
   "loading.session": "Восстановление сеанса",
@@ -517,7 +523,7 @@ const messages = {
   "class.joinYourClass": "Присоединяйтесь к вашему классу",
   "class.forStudents": "Для студентов",
   "class.enterCode": "Введите код класса, который вам дал учитель.",
-  "class.codeExample": "например BXK4QD",
+  "class.codeExample": "например 012345",
   "class.code": "Код класса",
   "class.joining": "Присоединение к классу…",
   "class.join": "Присоединиться",
